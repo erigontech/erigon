@@ -19,9 +19,10 @@ const (
 type HeimdallGRPCClient struct {
 	conn   *grpc.ClientConn
 	client proto.HeimdallClient
+	logger log.Logger
 }
 
-func NewHeimdallGRPCClient(address string) *HeimdallGRPCClient {
+func NewHeimdallGRPCClient(address string, logger log.Logger) *HeimdallGRPCClient {
 	opts := []grpc_retry.CallOption{
 		grpc_retry.WithMax(10000),
 		grpc_retry.WithBackoff(grpc_retry.BackoffLinear(5 * time.Second)),
@@ -34,18 +35,19 @@ func NewHeimdallGRPCClient(address string) *HeimdallGRPCClient {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		log.Crit("Failed to connect to Heimdall gRPC", "error", err)
+		logger.Crit("Failed to connect to Heimdall gRPC", "error", err)
 	}
 
-	log.Info("Connected to Heimdall gRPC server", "address", address)
+	logger.Info("Connected to Heimdall gRPC server", "address", address)
 
 	return &HeimdallGRPCClient{
 		conn:   conn,
 		client: proto.NewHeimdallClient(conn),
+		logger: logger,
 	}
 }
 
 func (h *HeimdallGRPCClient) Close() {
-	log.Debug("Shutdown detected, Closing Heimdall gRPC client")
+	h.logger.Debug("Shutdown detected, Closing Heimdall gRPC client")
 	h.conn.Close()
 }

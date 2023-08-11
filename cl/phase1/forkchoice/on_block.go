@@ -38,18 +38,24 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	case fork_graph.Success:
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "code", status)
+		return nil
 	default:
 		return fmt.Errorf("replay block, code: %+v", status)
-	}
-	if newPayload && f.engine != nil {
-		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
-			log.Warn("newPayload failed", "err", err)
-			return err
-		}
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
+	var invalidBlock bool
+	if newPayload && f.engine != nil {
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
+	}
+	if invalidBlock {
+		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+	}
+
 	if block.Block.Slot > f.highestSeen {
 		f.highestSeen = block.Block.Slot
 	}

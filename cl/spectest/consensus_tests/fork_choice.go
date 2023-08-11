@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -136,7 +136,7 @@ type ForkChoicePayloadStatus struct {
 type ForkChoice struct {
 }
 
-func NewForkChoice(fn func(s *state.BeaconState) error) *ForkChoice {
+func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 	return &ForkChoice{}
 }
 
@@ -174,20 +174,9 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "on_merge_block":
-			// on_merge_block is for testing things related to the ethereum "The Merge" event
-			// this has already happened, so let's just pass these tests
 			return nil
-			//		blk := &cltypes.SignedBeaconBlock{}
-			//		err := spectest.ReadSsz(root, c.Version(), step.GetPowBlock()+".ssz_snappy", blk)
-			//		require.NoError(t, err, stepstr)
-			//		err = forkStore.OnBlock(blk, true, true)
-			//		if step.GetValid() {
-			//			require.NoError(t, err, stepstr)
-			//		} else {
-			//			require.Error(t, err, stepstr)
-			//		}
 		case "on_block":
-			blk := &cltypes.SignedBeaconBlock{}
+			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnBlock(blk, true, true)

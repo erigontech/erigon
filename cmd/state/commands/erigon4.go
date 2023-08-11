@@ -15,17 +15,15 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
-
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -40,9 +38,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -86,12 +86,7 @@ var erigon4Cmd = &cobra.Command{
 	Use:   "erigon4",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "erigon4"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return err
-		}
+		logger := debug.SetupCobra(cmd, "erigon4")
 		return Erigon4(genesis, chainConfig, logger)
 	},
 }
@@ -308,7 +303,7 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 		agg.SetTxNum(txNum)
 		agg.SetBlockNum(blockNum)
 
-		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
+		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig, logger); err != nil {
 			logger.Error("processing error", "block", blockNum, "err", err)
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
@@ -384,13 +379,15 @@ func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat
 
 func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateReaderV4, ww *StateWriterV4, chainConfig *chain2.Config,
 	engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
+	logger log.Logger,
 ) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
 	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
 	usedGas := new(uint64)
+	usedBlobGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
@@ -424,7 +421,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
+			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, usedBlobGas, vmConfig)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
@@ -481,7 +478,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, logger); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
@@ -617,6 +614,6 @@ func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots,
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
-		config.HeimdallURL, config.WithoutHeimdall, datadirCli, true /* readonly */, logger)
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
+		config.HeimdallURL, config.WithoutHeimdall, true /* readonly */, logger)
 }

@@ -45,19 +45,16 @@ func TestState(t *testing.T) {
 
 	st := new(testMatcher)
 
-	// EOF is not implemented yet
-	st.skipLoad(`^EIPTests/stEOF/`)
-
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
-		_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
+				_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx, err := db.BeginRw(context.Background())
 					if err != nil {

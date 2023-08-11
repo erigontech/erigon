@@ -191,7 +191,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			logger.Info(fmt.Sprintf("[%s] Pruning call trace table", logPrefix), "number", blockNum,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
-		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
+		if err = tx.Delete(kv.CallTraceSet, k); err != nil {
 			return fmt.Errorf("remove trace call set for block %d: %w", blockNum, err)
 		}
 		if blockNum < prunedMin {

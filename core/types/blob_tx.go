@@ -10,15 +10,15 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type BlobTx struct {
 	DynamicFeeTransaction
-	MaxFeePerDataGas    *uint256.Int
+	MaxFeePerBlobGas    *uint256.Int
 	BlobVersionedHashes []libcommon.Hash
 }
 
@@ -26,24 +26,24 @@ type BlobTx struct {
 func (stx BlobTx) copy() *BlobTx {
 	cpy := &BlobTx{
 		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
-		MaxFeePerDataGas:      new(uint256.Int),
+		MaxFeePerBlobGas:      new(uint256.Int),
 		BlobVersionedHashes:   make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
 	}
 	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
-	if stx.MaxFeePerDataGas != nil {
-		cpy.MaxFeePerDataGas.Set(stx.MaxFeePerDataGas)
+	if stx.MaxFeePerBlobGas != nil {
+		cpy.MaxFeePerBlobGas.Set(stx.MaxFeePerBlobGas)
 	}
 	return cpy
 }
 
 func (stx BlobTx) Type() byte { return BlobTxType }
 
-func (stx BlobTx) GetDataHashes() []libcommon.Hash {
+func (stx BlobTx) GetBlobHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
 
-func (stx BlobTx) GetDataGas() uint64 {
-	return params.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+func (stx BlobTx) GetBlobGas() uint64 {
+	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
 func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
@@ -51,7 +51,8 @@ func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Mes
 	if err != nil {
 		return Message{}, err
 	}
-	msg.dataHashes = stx.BlobVersionedHashes
+	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
+	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
 }
 
@@ -69,7 +70,7 @@ func (stx BlobTx) Hash() libcommon.Hash {
 		stx.Value,
 		stx.Data,
 		stx.AccessList,
-		stx.MaxFeePerDataGas,
+		stx.MaxFeePerBlobGas,
 		stx.BlobVersionedHashes,
 		stx.V, stx.R, stx.S,
 	})
@@ -90,16 +91,16 @@ func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 			stx.Value,
 			stx.Data,
 			stx.AccessList,
-			stx.MaxFeePerDataGas,
+			stx.MaxFeePerBlobGas,
 			stx.BlobVersionedHashes,
 		})
 }
 
 func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
-	// size of MaxFeePerDataGas
+	// size of MaxFeePerBlobGas
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerDataGas)
+	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
@@ -178,8 +179,8 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	if err := encodeAccessList(stx.AccessList, w, b); err != nil {
 		return err
 	}
-	// encode MaxFeePerDataGas
-	if err := stx.MaxFeePerDataGas.EncodeRLP(w); err != nil {
+	// encode MaxFeePerBlobGas
+	if err := stx.MaxFeePerBlobGas.EncodeRLP(w); err != nil {
 		return err
 	}
 	// prefix
@@ -297,11 +298,11 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode MaxFeePerDataGas
+	// decode MaxFeePerBlobGas
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	stx.MaxFeePerDataGas = new(uint256.Int).SetBytes(b)
+	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
 
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []libcommon.Hash{}

@@ -18,6 +18,7 @@ package core
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"embed"
 	"encoding/binary"
 	"encoding/json"
@@ -68,13 +69,13 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logge
 	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideCancunTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideCancunTime, tmpDir, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -85,7 +86,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
@@ -97,8 +98,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 	}
 
 	applyOverrides := func(config *chain.Config) {
-		if overrideShanghaiTime != nil {
-			config.ShanghaiTime = overrideShanghaiTime
+		if overrideCancunTime != nil {
+			config.CancunTime = overrideCancunTime
 		}
 	}
 
@@ -436,6 +437,13 @@ func ChiadoGenesisBlock() *types.Genesis {
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 var DevnetEtherbase = libcommon.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
+// DevnetSignKey is defined like this to allow the devnet process to pre-allocate keys
+// for nodes and then pass the address via --miner.etherbase - the function will be called
+// to retieve the mining key
+var DevnetSignKey = func(address libcommon.Address) *ecdsa.PrivateKey {
+	return DevnetSignPrivateKey
+}
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genesis {
 	// Override the default period to the user requested one
@@ -469,8 +477,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		MixDigest:     g.Mixhash,
 		Coinbase:      g.Coinbase,
 		BaseFee:       g.BaseFee,
-		DataGasUsed:   g.DataGasUsed,
-		ExcessDataGas: g.ExcessDataGas,
+		BlobGasUsed:   g.BlobGasUsed,
+		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
 	}
@@ -480,7 +488,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && (g.Config.IsLondon(0)) {
+	if g.Config != nil && g.Config.IsLondon(0) {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
@@ -489,8 +497,26 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	}
 
 	var withdrawals []*types.Withdrawal
-	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
 		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+		if g.BlobGasUsed != nil {
+			head.BlobGasUsed = g.BlobGasUsed
+		} else {
+			head.BlobGasUsed = new(uint64)
+		}
+		if g.ExcessBlobGas != nil {
+			head.ExcessBlobGas = g.ExcessBlobGas
+		} else {
+			head.ExcessBlobGas = new(uint64)
+		}
+		if g.ParentBeaconBlockRoot != nil {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		} else {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
 	}
 
 	var root libcommon.Hash

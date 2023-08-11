@@ -37,6 +37,10 @@ func (r readerMock) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
+func (r readerMock) FrozenBlocks() uint64 {
+	return 0
+}
+
 // The thing only that changes beetwen normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {

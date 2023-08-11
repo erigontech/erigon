@@ -27,19 +27,18 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
@@ -105,9 +104,13 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideShanghaiTime = flags.BigFlag{
-		Name:  "override.shanghaiTime",
-		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
+	OverrideCancunFlag = flags.BigFlag{
+		Name:  "override.cancun",
+		Usage: "Manually specify the Cancun fork time, overriding the bundled setting",
+	}
+	TrustedSetupFile = cli.StringFlag{
+		Name:  "trusted-setup-file",
+		Usage: "Absolute path to trusted_setup.json file",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -710,7 +713,7 @@ var (
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
 		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
-		Value: datasize.ByteSize(kv.DefaultPageSize()).String(),
+		Value: "8KB",
 	}
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
@@ -732,7 +735,17 @@ var (
 	// WithoutHeimdallFlag no heimdall (for testing purpose)
 	WithoutHeimdallFlag = cli.BoolFlag{
 		Name:  "bor.withoutheimdall",
-		Usage: "Run without Heimdall service (for testing purpose)",
+		Usage: "Run without Heimdall service (for testing purposes)",
+	}
+
+	BorBlockPeriodFlag = cli.BoolFlag{
+		Name:  "bor.period",
+		Usage: "Override the bor block period (for testing purposes)",
+	}
+
+	BorBlockSizeFlag = cli.BoolFlag{
+		Name:  "bor.minblocksize",
+		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
@@ -771,6 +784,12 @@ var (
 		Name:  "sentinel.port",
 		Usage: "Port for sentinel",
 		Value: 7777,
+	}
+
+	OtsSearchMaxCapFlag = cli.Uint64Flag{
+		Name:  "ots.search.max.pagesize",
+		Usage: "Max allowed page size for search methods",
+		Value: 25,
 	}
 )
 
@@ -1050,11 +1069,13 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if ctx.String(ChainFlag.Name) == networkname.DevChainName || ctx.String(ChainFlag.Name) == networkname.BorDevnetChainName {
+	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.DevChainName || chainName == networkname.BorDevnetChainName {
 		if etherbase == "" {
-			cfg.Miner.SigKey = core.DevnetSignPrivateKey
 			cfg.Miner.Etherbase = core.DevnetEtherbase
 		}
+
+		cfg.Miner.SigKey = core.DevnetSignKey(cfg.Miner.Etherbase)
+
 		setSigKey(ctx, cfg)
 	}
 
@@ -1563,18 +1584,21 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverrideShanghaiTime.Name) {
-		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTime.Name)
-		cfg.TxPool.OverrideShanghaiTime = cfg.OverrideShanghaiTime
+	if ctx.IsSet(OverrideCancunFlag.Name) {
+		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
+		cfg.TxPool.OverrideCancunTime = cfg.OverrideCancunTime
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
 		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
 	}
-	nodeConfig.Http.InternalCL = cfg.InternalCL
 
 	if ctx.IsSet(SentryDropUselessPeers.Name) {
 		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
+	}
+
+	if ctx.IsSet(TrustedSetupFile.Name) {
+		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
 	}
 }
 

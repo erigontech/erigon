@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/backup"
 	"os"
 	"text/tabwriter"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
@@ -28,12 +28,7 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -47,14 +42,14 @@ var cmdResetState = &cobra.Command{
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
 
 		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -63,10 +58,29 @@ var cmdResetState = &cobra.Command{
 		fmt.Printf("After reset: \n")
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
+	},
+}
+
+var cmdClearBadBlocks = &cobra.Command{
+	Use:   "clear_bad_blocks",
+	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := debug.SetupCobra(cmd, "integration")
+		ctx, _ := common.RootContext()
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return err
+		}
+		defer db.Close()
+
+		return db.Update(ctx, func(tx kv.RwTx) error {
+			return backup.ClearTable(ctx, db, tx, "BadHeaderNumber")
+		})
 	},
 }
 
@@ -76,6 +90,9 @@ func init() {
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
+
+	withDataDir(cmdClearBadBlocks)
+	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
 func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {

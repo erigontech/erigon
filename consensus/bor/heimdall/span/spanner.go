@@ -14,16 +14,18 @@ import (
 )
 
 type ChainSpanner struct {
-	validatorSet abi.ABI
-	chainConfig  *chain.Config
-	logger       log.Logger
+	validatorSet    abi.ABI
+	chainConfig     *chain.Config
+	logger          log.Logger
+	withoutHeimdall bool
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, logger log.Logger) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.Logger) *ChainSpanner {
 	return &ChainSpanner{
-		validatorSet: validatorSet,
-		chainConfig:  chainConfig,
-		logger:       logger,
+		validatorSet:    validatorSet,
+		chainConfig:     chainConfig,
+		logger:          logger,
+		withoutHeimdall: withoutHeimdall,
 	}
 }
 

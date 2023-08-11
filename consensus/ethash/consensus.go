@@ -235,11 +235,9 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if header.DataGasUsed != nil {
-		return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
-	}
-	if header.ExcessDataGas != nil {
-		return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
+
+	if err := misc.VerifyAbsenceOfCancunHeaderFields(header); err != nil {
+		return err
 	}
 
 	// Verify that the block number is parent's +1
@@ -559,7 +557,7 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 // setting the final state on the header
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
@@ -570,11 +568,11 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 // uncle rewards, setting the final state and assembling the block.
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 
 	// Finalize block
-	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall)
+	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}

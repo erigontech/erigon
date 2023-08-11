@@ -12,6 +12,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -56,12 +58,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Use:   "stage_snapshots",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -71,7 +68,7 @@ var cmdStageSnapshots = &cobra.Command{
 
 		if err := stageSnapshots(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -82,12 +79,7 @@ var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -97,7 +89,7 @@ var cmdStageHeaders = &cobra.Command{
 
 		if err := stageHeaders(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -108,12 +100,7 @@ var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -123,7 +110,7 @@ var cmdStageBodies = &cobra.Command{
 
 		if err := stageBodies(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -134,12 +121,7 @@ var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -149,7 +131,7 @@ var cmdStageSenders = &cobra.Command{
 
 		if err := stageSenders(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -160,12 +142,7 @@ var cmdStageExec = &cobra.Command{
 	Use:   "stage_exec",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -177,7 +154,7 @@ var cmdStageExec = &cobra.Command{
 
 		if err := stageExec(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -188,12 +165,7 @@ var cmdStageTrie = &cobra.Command{
 	Use:   "stage_trie",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -203,7 +175,7 @@ var cmdStageTrie = &cobra.Command{
 
 		if err := stageTrie(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -214,12 +186,7 @@ var cmdStageHashState = &cobra.Command{
 	Use:   "stage_hash_state",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -229,7 +196,7 @@ var cmdStageHashState = &cobra.Command{
 
 		if err := stageHashState(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -240,12 +207,7 @@ var cmdStageHistory = &cobra.Command{
 	Use:   "stage_history",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -255,7 +217,7 @@ var cmdStageHistory = &cobra.Command{
 
 		if err := stageHistory(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -266,12 +228,7 @@ var cmdLogIndex = &cobra.Command{
 	Use:   "stage_log_index",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -281,7 +238,7 @@ var cmdLogIndex = &cobra.Command{
 
 		if err := stageLogIndex(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -292,12 +249,7 @@ var cmdCallTraces = &cobra.Command{
 	Use:   "stage_call_traces",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -307,7 +259,7 @@ var cmdCallTraces = &cobra.Command{
 
 		if err := stageCallTraces(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -318,12 +270,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -333,7 +280,7 @@ var cmdStageTxLookup = &cobra.Command{
 
 		if err := stageTxLookup(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -343,12 +290,7 @@ var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata).Readonly(), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -358,7 +300,7 @@ var cmdPrintStages = &cobra.Command{
 
 		if err := printAllStages(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -369,12 +311,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -383,7 +320,7 @@ var cmdPrintMigrations = &cobra.Command{
 		defer db.Close()
 		if err := printAppliedMigrations(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -394,12 +331,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Use:   "remove_migration",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -408,7 +340,7 @@ var cmdRemoveMigration = &cobra.Command{
 		defer db.Close()
 		if err := removeMigration(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -419,12 +351,7 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -439,12 +366,7 @@ var cmdSetPrune = &cobra.Command{
 	Use:   "force_set_prune",
 	Short: "Override existing --prune flag value (if you know what you are doing)",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -453,7 +375,7 @@ var cmdSetPrune = &cobra.Command{
 		defer db.Close()
 		if err := overrideStorageMode(db, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -464,12 +386,7 @@ var cmdSetSnap = &cobra.Command{
 	Use:   "force_set_snapshot",
 	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -484,7 +401,7 @@ var cmdSetSnap = &cobra.Command{
 			return snap.ForceSetFlags(tx, sn.Cfg())
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -495,12 +412,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 	Use:   "force_set_history_v3",
 	Short: "Override existing --history.v3 flag value (if you know what you are doing)",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -511,7 +423,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 			return kvcfg.HistoryV3.ForceWrite(tx, _forceSetHistoryV3)
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -560,6 +472,7 @@ func init() {
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
+	withNoCommit(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
@@ -935,9 +848,20 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ false, historyV3, dirs, br, nil, genesis, syncCfg, agg)
+
+	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
+	if noCommit {
+		var err error
+		tx, err = db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, true, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
 		if err != nil {
 			return err
 		}
@@ -945,18 +869,18 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, nil, db)
+		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, db)
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, nil, cfg, ctx, true)
+		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx, true)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true /* initialCycle */, logger)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
 		return err
 	}
@@ -1487,6 +1411,8 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	return engine, cfg, allSn, agg
 }
 
+const blockBufferSize = 128
+
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, historyV3, pm := datadir.New(datadirCli), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
@@ -1530,6 +1456,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
+		blockBufferSize,
 		false,
 		nil,
 		ethconfig.Defaults.DropUselessPeers,
@@ -1551,13 +1478,14 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		<-ctx.Done()
 		close(miningCancel)
 	}()
+
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),
-			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
@@ -1603,7 +1531,7 @@ func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	})
 }
 
-func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1617,6 +1545,6 @@ func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB, logger l
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, db.ReadOnly(), logger)
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, db.ReadOnly(), logger)
 }

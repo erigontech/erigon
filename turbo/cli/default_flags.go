@@ -72,6 +72,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGasCapFlag,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
+	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
 	&HTTPReadTimeoutFlag,
@@ -142,8 +143,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
 	&utils.HeimdallgRPCAddressFlag,
+	&utils.BorBlockPeriodFlag,
+	&utils.BorBlockSizeFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideShanghaiTime,
+	&utils.OverrideCancunFlag,
 
 	&utils.ConfigFlag,
 
@@ -152,4 +155,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.LightClientDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+
+	&utils.OtsSearchMaxCapFlag,
+
+	&utils.TrustedSetupFile,
 }

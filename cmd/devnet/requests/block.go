@@ -1,13 +1,14 @@
 package requests
 
 import (
-	"bytes"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/common/math"
 )
 
 type EthBlockNumber struct {
@@ -15,17 +16,55 @@ type EthBlockNumber struct {
 	Number hexutil.Uint64 `json:"result"`
 }
 
-type EthBlockByNumber struct {
-	CommonResponse
-	Result *EthBlockByNumberResult `json:"result"`
+type BlockNumber string
+
+func (bn BlockNumber) Uint64() uint64 {
+	if b, ok := math.ParseBig256(string(bn)); ok {
+		return b.Uint64()
+	}
+
+	return 0
 }
 
-type EthBlockByNumberResult struct {
+func AsBlockNumber(n *big.Int) BlockNumber {
+	return BlockNumber(hexutil.EncodeBig(n))
+}
+
+var BlockNumbers = struct {
+	// Latest is the parameter for the latest block
+	Latest BlockNumber
+	// Earliest is the parameter for the earliest block
+	Earliest BlockNumber
+	// Pending is the parameter for the pending block
+	Pending BlockNumber
+}{
+	Latest:   "latest",
+	Earliest: "earliest",
+	Pending:  "pending",
+}
+
+type EthBlockByNumber struct {
+	CommonResponse
+	Result BlockResult `json:"result"`
+}
+
+type BlockResult struct {
+	BlockNumber  BlockNumber       `json:"number"`
 	Difficulty   hexutil.Big       `json:"difficulty"`
 	Miner        libcommon.Address `json:"miner"`
-	Transactions []EthTransaction  `json:"transactions"`
+	Transactions []Transaction     `json:"transactions"`
 	TxRoot       libcommon.Hash    `json:"transactionsRoot"`
 	Hash         libcommon.Hash    `json:"hash"`
+}
+
+type Transaction struct {
+	From     libcommon.Address  `json:"from"`
+	To       *libcommon.Address `json:"to"` // Pointer because it might be missing
+	Hash     string             `json:"hash"`
+	Gas      hexutil.Big        `json:"gas"`
+	GasPrice hexutil.Big        `json:"gasPrice"`
+	Input    hexutility.Bytes   `json:"input"`
+	Value    hexutil.Big        `json:"value"`
 }
 
 type EthGetTransactionCount struct {
@@ -57,20 +96,22 @@ func (req *requestGenerator) blockNumber() (RPCMethod, string) {
 	return Methods.ETHBlockNumber, fmt.Sprintf(template, Methods.ETHBlockNumber, req.reqID)
 }
 
-func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) (EthBlockByNumber, error) {
+func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) (*BlockResult, error) {
 	var b EthBlockByNumber
 
 	method, body := reqGen.getBlockByNumber(blockNum, withTxs)
 	res := reqGen.call(method, body, &b)
 	if res.Err != nil {
-		return b, fmt.Errorf("error getting block by number: %v", res.Err)
+		return nil, fmt.Errorf("error getting block by number: %v", res.Err)
 	}
 
 	if b.Error != nil {
-		return b, fmt.Errorf("error populating response object: %v", b.Error)
+		return nil, fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	return b, nil
+	b.Result.BlockNumber = BlockNumber(fmt.Sprint(blockNum))
+
+	return &b.Result, nil
 }
 
 func (req *requestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) (RPCMethod, string) {
@@ -83,7 +124,7 @@ func (req *requestGenerator) getBlockByNumberI(blockNum string, withTxs bool) (R
 	return Methods.ETHGetBlockByNumber, fmt.Sprintf(template, Methods.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
 }
 
-func (reqGen *requestGenerator) GetBlockByNumberDetails(blockNum string, withTxs bool) (map[string]interface{}, error) {
+func (reqGen *requestGenerator) GetBlockDetailsByNumber(blockNum string, withTxs bool) (map[string]interface{}, error) {
 	var b struct {
 		CommonResponse
 		Result interface{} `json:"result"`
@@ -105,58 +146,4 @@ func (reqGen *requestGenerator) GetBlockByNumberDetails(blockNum string, withTxs
 	}
 
 	return m, nil
-}
-
-func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (EthGetTransactionCount, error) {
-	var b EthGetTransactionCount
-
-	method, body := reqGen.getTransactionCount(address, blockNum)
-	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
-	}
-
-	if b.Error != nil {
-		return b, fmt.Errorf("error populating response object: %v", b.Error)
-	}
-
-	return b, nil
-}
-
-func (req *requestGenerator) getTransactionCount(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
-	return Methods.ETHGetTransactionCount, fmt.Sprintf(template, Methods.ETHGetTransactionCount, address, blockNum, req.reqID)
-}
-
-func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (*libcommon.Hash, error) {
-	var b EthSendRawTransaction
-
-	var buf bytes.Buffer
-	if err := signedTx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("failed to marshal binary: %v", err)
-	}
-
-	method, body := reqGen.sendRawTransaction(buf.Bytes())
-	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("could not make to request to eth_sendRawTransaction: %v", res.Err)
-	}
-
-	zeroHash := true
-
-	for _, hb := range b.TxnHash {
-		if hb != 0 {
-			zeroHash = false
-			break
-		}
-	}
-
-	if zeroHash {
-		return nil, fmt.Errorf("Request: %d, hash: %s, nonce  %d: returned a zero transaction hash", b.RequestId, signedTx.Hash().Hex(), signedTx.GetNonce())
-	}
-
-	return &b.TxnHash, nil
-}
-
-func (req *requestGenerator) sendRawTransaction(signedTx []byte) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
-	return Methods.ETHSendRawTransaction, fmt.Sprintf(template, Methods.ETHSendRawTransaction, signedTx, req.reqID)
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
@@ -50,6 +51,9 @@ type ChainHeaderReader interface {
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
 	GetTd(hash libcommon.Hash, number uint64) *big.Int
+
+	// Number of blocks frozen in the block snapshots
+	FrozenBlocks() uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -141,7 +145,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainHeaderReader, syscall SystemCall,
+		chain ChainHeaderReader, syscall SystemCall, logger log.Logger,
 	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -151,7 +155,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainHeaderReader, syscall SystemCall, call Call,
+		chain ChainHeaderReader, syscall SystemCall, call Call, logger log.Logger,
 	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes

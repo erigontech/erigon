@@ -1,12 +1,12 @@
 package machine
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
 // TransitionState will call impl..ProcessSlots, then impl.VerifyBlockSignature, then ProcessBlock, then impl.VerifyTransition
-func TransitionState(impl Interface, s *state.BeaconState, block *cltypes.SignedBeaconBlock) error {
+func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
 	if err := impl.ProcessSlots(s, currentBlock.Slot); err != nil {
 		return err

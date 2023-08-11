@@ -43,7 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -71,7 +71,7 @@ func TestCreate2Revive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -125,7 +125,7 @@ func TestCreate2Revive(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -330,7 +330,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -493,7 +493,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -516,7 +516,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate long blocks")
 	}
@@ -606,7 +606,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -635,7 +635,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	var err error
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -784,7 +784,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -887,7 +887,7 @@ func TestEip2200Gas(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -918,7 +918,7 @@ func TestEip2200Gas(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -978,7 +978,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -1006,7 +1006,7 @@ func TestWrongIncarnation(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1093,7 +1093,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	knownContractAddress := libcommon.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -1124,7 +1124,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1154,7 +1154,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
@@ -1345,7 +1345,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		}
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
@@ -1408,7 +1408,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err1 != nil {
 		t.Fatalf("generate blocks: %v", err1)
 	}
@@ -1466,7 +1466,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err1 != nil {
 		t.Fatalf("generate longer blocks: %v", err1)
 	}
@@ -1551,7 +1551,7 @@ func TestTxLookupUnwind(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 		var e error
@@ -1563,12 +1563,12 @@ func TestTxLookupUnwind(t *testing.T) {
 			}
 			block.AddTx(tx)
 		}
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -233,6 +233,7 @@ func (n *Node) openDataDir() error {
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
 	l := flock.New(filepath.Join(instdir, "LOCK"))
+
 	locked, err := l.TryLock()
 	if err != nil {
 		return convertFileLockError(err)
@@ -283,16 +284,20 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, label kv.Label, logger log.Logger) (kv.RwDB, error) {
-	var name string
+func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
+	case kv.ConsensusDB:
+		if len(name) == 0 {
+			return nil, fmt.Errorf("Expected a consensus name")
+		}
 	default:
 		name = "test"
 	}
+
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
 		db = memdb.New("")
@@ -300,9 +305,9 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, logger log.Logger) (kv
 	}
 
 	dbPath := filepath.Join(config.Dirs.DataDir, name)
-	var openFunc func(exclusive bool) (kv.RwDB, error)
+
 	logger.Info("Opening Database", "label", name, "path", dbPath)
-	openFunc = func(exclusive bool) (kv.RwDB, error) {
+	openFunc := func(exclusive bool) (kv.RwDB, error) {
 		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
@@ -311,19 +316,29 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, logger log.Logger) (kv
 		opts := mdbx.NewMDBX(log.Root()).
 			Path(dbPath).Label(label).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
+
+		if readonly {
+			opts = opts.Readonly()
+		}
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-		if label == kv.ChainDB {
+
+		switch label {
+		case kv.ChainDB, kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())
 			}
 			if config.MdbxDBSizeLimit > 0 {
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
 			}
-		} else {
+			if config.MdbxGrowthStep > 0 {
+				opts = opts.GrowthStep(config.MdbxGrowthStep)
+			}
+		default:
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
+
 		return opts.Open()
 	}
 	var err error
@@ -376,5 +391,5 @@ func StartNode(stack *Node) {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
 
-	go debug.ListenSignals(stack)
+	go debug.ListenSignals(stack, stack.logger)
 }
