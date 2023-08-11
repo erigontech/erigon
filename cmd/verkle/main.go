@@ -77,7 +77,7 @@ func IncrementVerkleTree(cfg optionsCfg, logger log.Logger) error {
 	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
 		return err
 	}
-	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
+	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
