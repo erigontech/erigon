@@ -598,9 +598,6 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySeg
 		return nil, buf, err
 	}
 
-	if b.BaseTxId < sn.idxBodyNumber.BaseDataID() {
-		return nil, buf, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.idxBodyNumber.BaseDataID(), sn.seg.FilePath())
-	}
 	return b, buf, nil
 }
 
