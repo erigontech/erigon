@@ -133,7 +133,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		domainLargeValues: true,
-		hist:              histCfg{withLocalityIndex: false, compressVals: true, historyLargeValues: true}}
+		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: true}}
 	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
@@ -683,6 +683,8 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 }
 
 func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
+	log.Warn("[dbg] MergeLoop start")
+	defer log.Warn("[dbg] MergeLoop done")
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {

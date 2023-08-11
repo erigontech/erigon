@@ -352,6 +352,9 @@ func newColdBloomWithSize(megabytes uint64) (*bloomfilter.Filter, error) {
 }
 
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+	if li == nil {
+		return nil, nil
+	}
 	if toStep < fromStep {
 		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
 	}

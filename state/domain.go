@@ -481,7 +481,7 @@ func (d *Domain) openFiles() (err error) {
 				return false
 			}
 
-			if item.index == nil {
+			if item.index == nil && !UseBpsTree {
 				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
@@ -985,15 +985,15 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				v, err = roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
 			default:
 				v, err = valsDup.SeekBothRange(keySuffix[:len(k)], keySuffix[len(k):len(k)+8])
-				fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
+				//fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
 				for {
-					k, v, _ := valsDup.Next()
+					k, _, _ := valsDup.Next()
 					if len(k) == 0 {
 						break
 					}
 
 					if bytes.HasPrefix(k, keySuffix[:len(k)]) {
-						fmt.Printf("next: %x -> %x\n", k, v)
+						//fmt.Printf("next: %x -> %x\n", k, v)
 					} else {
 						break
 					}
@@ -1107,8 +1107,10 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
 	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
-	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compressValues, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
-		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+	if !UseBpsTree {
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compressValues, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+		}
 	}
 
 	var bt *BtIndex
@@ -1184,6 +1186,10 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	for _, item := range d.missedKviIdxFiles() {
 		fitem := item
 		g.Go(func() error {
+			if UseBpsTree {
+				return nil
+			}
+
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
 			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compressValues, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
@@ -1669,11 +1675,31 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		if !isUseful {
 			continue
 		}
+		var offset uint64
+		var ok bool
+		if UseBpsTree || UseBtree {
+			bt := dc.statelessBtree(i)
+			if bt.Empty() {
+				continue
+			}
+			//fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
+			_, v, ok, err = bt.Get(filekey, dc.statelessGetter(i))
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				LatestStateReadGrindNotFound.UpdateDuration(t)
+				continue
+			}
+			LatestStateReadGrind.UpdateDuration(t)
+			return v, true, nil
+		}
+
 		reader := dc.statelessIdxReader(i)
 		if reader.Empty() {
 			continue
 		}
-		offset := reader.Lookup(filekey)
+		offset = reader.Lookup(filekey)
 		g := dc.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
