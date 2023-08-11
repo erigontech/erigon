@@ -550,7 +550,7 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom) {
 }
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
