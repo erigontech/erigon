@@ -1144,7 +1144,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 
 			p.Processed.Add(1)
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()

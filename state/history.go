@@ -464,7 +464,7 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 
 			p.Processed.Add(1)
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
@@ -940,7 +940,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 				valOffset, _ = g.Skip()
 			}
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()

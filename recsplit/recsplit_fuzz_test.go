@@ -18,6 +18,7 @@ limitations under the License.
 package recsplit
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -73,7 +74,7 @@ func FuzzRecSplit(f *testing.F) {
 		if err := rs.AddKey(in[i:], off); err != nil {
 			t.Fatal(err)
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		// Check that there is a bijection
