@@ -19,11 +19,11 @@ func NewLatestBlockBuiltStore() *LatestBlockBuiltStore {
 func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.block = block.Copy()
+	s.block = block
 }
 
 func (s *LatestBlockBuiltStore) BlockBuilt() *types.Block {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.block.Copy()
+	return s.block
 }
