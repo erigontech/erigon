@@ -1333,76 +1333,14 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	fetchStart := time.Now()
 	number := header.Number.Uint64()
 
-	var (
-		lastStateIDBig *big.Int
-		from           uint64
-		to             time.Time
-		err            error
-	)
-
-	// Explicit condition for Indore fork won't be needed for fetching this
-	// as erigon already performs this call on the IBS (Intra block state) of
-	// the incoming chain.
-	lastStateIDBig, err = c.GenesisContractsClient.LastStateId(syscall)
-	if err != nil {
-		return err
-	}
-
-	if c.config.IsIndore(number) {
-		stateSyncDelay := c.config.CalculateStateSyncDelay(number)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-	} else {
-		to = time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
-	}
-
-	lastStateID := lastStateIDBig.Uint64()
-	from = lastStateID + 1
-
-	c.logger.Info(
-		"Fetching state updates from Heimdall",
-		"fromID", from,
-		"to", to.Format(time.RFC3339),
-	)
-
-	eventRecords, err := c.HeimdallClient.StateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
-	if err != nil {
-		return err
-	}
-
-	if c.config.OverrideStateSyncRecords != nil {
-		if val, ok := c.config.OverrideStateSyncRecords[strconv.FormatUint(number, 10)]; ok {
-			eventRecords = eventRecords[0:val]
-		}
-	}
-
-	fetchTime := time.Since(fetchStart)
-	processStart := time.Now()
-	chainID := c.chainConfig.ChainID.String()
-
-	for _, eventRecord := range eventRecords {
-		if eventRecord.ID <= lastStateID {
-			continue
-		}
-
-		if err := validateEventRecord(eventRecord, number, to, lastStateID, chainID); err != nil {
-			c.logger.Error("while validating event record", "block", number, "to", to, "stateID", lastStateID+1, "error", err.Error())
-			break
-		}
-
+	events := chain.Chain.BorEventsByBlock(header.Hash(), number)
+	for _, eventRecord := range events {
 		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
 			return err
 		}
-
-		lastStateID++
 	}
-
-	processTime := time.Since(processStart)
-
-	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
-
 	return nil
 }
 

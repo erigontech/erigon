@@ -281,7 +281,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
-		Enums:      true,
+		Enums:      blockCount > 0,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
