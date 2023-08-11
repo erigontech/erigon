@@ -301,7 +301,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.lastSeenBlock.Store(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
 	if !p.started.Load() {
 		if err := p.fromDB(ctx, tx, coreTx); err != nil {
-			return fmt.Errorf("loading txs from DB: %w", err)
+			return fmt.Errorf("OnNewBlock: loading txs from DB: %w", err)
 		}
 	}
 
@@ -940,7 +940,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 
 	if !p.Started() {
 		if err := p.fromDB(ctx, tx, coreTx); err != nil {
-			return nil, fmt.Errorf("loading txs from DB: %w", err)
+			return nil, fmt.Errorf("AddLocalTxs: loading txs from DB: %w", err)
 		}
 		if p.started.CompareAndSwap(false, true) {
 			p.logger.Info("[txpool] Started")
