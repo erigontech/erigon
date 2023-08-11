@@ -48,6 +48,7 @@ var (
 	pkeys = []*ecdsa.PrivateKey{pkey1, pkey2}
 )
 
+// In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)

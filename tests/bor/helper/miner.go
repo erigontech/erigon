@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+// InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
 func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types.Genesis {
 
 	// sprint size = 8 in genesis
@@ -63,6 +64,7 @@ func NewNodeConfig() *nodecfg.Config {
 	return &nodeConfig
 }
 
+// InitNode initializes a node with the given genesis file and config
 func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 	ddir, _ := os.MkdirTemp("", "")

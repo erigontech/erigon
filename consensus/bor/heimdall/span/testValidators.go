@@ -6,8 +6,10 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
+// NetworkNameVals is a map of network name to validator set for tests/devnets
 var NetworkNameVals = make(map[string][]*valset.Validator)
 
+// Validator set for bor e2e test chain with 2 validator configuration
 var BorE2ETestChain2Valset = []*valset.Validator{
 	{
 		ID:               1,
@@ -23,6 +25,7 @@ var BorE2ETestChain2Valset = []*valset.Validator{
 	},
 }
 
+// Validator set for bor devnet-chain with 1 validator configuration
 var BorDevnetChainVals = []*valset.Validator{
 	{
 		ID:               1,

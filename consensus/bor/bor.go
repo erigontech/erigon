@@ -578,7 +578,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	// contract data and span data won't match for that. Skip validating
 	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
 	// once we start fetching validator data from contract.
-
 	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
 		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 
