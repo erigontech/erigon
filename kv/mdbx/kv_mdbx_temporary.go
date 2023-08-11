@@ -29,8 +29,8 @@ type TemporaryMdbx struct {
 	path string
 }
 
-func NewTemporaryMdbx() (kv.RwDB, error) {
-	path, err := os.MkdirTemp("", "mdbx-temp")
+func NewTemporaryMdbx(tempdir string) (kv.RwDB, error) {
+	path, err := os.MkdirTemp(tempdir, "mdbx-temp")
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
