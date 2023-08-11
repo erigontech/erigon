@@ -448,8 +448,9 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	require := require.New(t)
 	ctx := context.Background()
 	var err error
-	// Check the history
 	var roTx kv.Tx
+
+	// Check the history
 	dc := d.MakeContext()
 	defer dc.Close()
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -467,6 +468,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
+
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {

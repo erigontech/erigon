@@ -532,6 +532,10 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
+	sc := sd.Storage.MakeContext()
+	defer sc.Close()
+
+	return sc.IteratePrefix(roTx, prefix, it)
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -572,7 +576,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 	sctx := sd.aggCtx.storage
 	for _, item := range sctx.files {
-		cursor, err := item.src.bindex.Seek(prefix)
+		cursor, err := item.src.bindex.SeekWithGetter(prefix, item.getter)
 		if err != nil {
 			return err
 		}

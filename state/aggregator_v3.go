@@ -412,6 +412,9 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 func (a *AggregatorV3) GetTxNum() uint64 {
 	return a.txNum.Load()
 }
+
+// SetTxNum sets aggregator's txNum and txNum for all domains
+// Requires for a.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.txNum.Store(txNum)
 	if a.domains != nil {
@@ -497,6 +500,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	//log.Warn("[dbg] collate", "step", step)
 
 	closeCollations := true
+	collListMu := sync.Mutex{}
 	collations := make([]Collation, 0)
 	defer func() {
 		if !closeCollations {
@@ -526,7 +530,10 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			if err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 			}
+			collListMu.Lock()
 			collations = append(collations, collation)
+			collListMu.Unlock()
+
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 

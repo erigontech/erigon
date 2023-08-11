@@ -9,6 +9,17 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
+type indexSeeker interface {
+	WarmUp(g ArchiveGetter) error
+	SeekWithGetter(g ArchiveGetter, key []byte) (*BpsTreeIterator, error)
+}
+
+type indexSeekerIterator interface {
+	Next() bool
+	Offset() uint64
+	KV(g ArchiveGetter) ([]byte, []byte)
+}
+
 func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64) *BpsTree {
 	return &BpsTree{M: M, offt: offt, kv: kv}
 }

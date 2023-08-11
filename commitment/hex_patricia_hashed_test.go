@@ -59,7 +59,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Printf("1. Generated updates\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
 	hph.Reset()
@@ -76,7 +76,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("2. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
 	hph.Reset()
@@ -93,7 +93,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("3. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 }
 
 func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
@@ -120,7 +120,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Println("1. Updates applied")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// generate empty updates and do NOT reset tree
 	//hph.SetTrace(true)
@@ -170,7 +170,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		rh, branchNodeUpdates, err := trieOne.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 
 		ra = common.Copy(rh)
 	}
@@ -183,7 +183,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		rh, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 		ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
-		renderUpdates(branchNodeUpdatesTwo)
+		//renderUpdates(branchNodeUpdatesTwo)
 
 		rb = common.Copy(rh)
 	}
@@ -205,7 +205,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	require.NoError(t, err)
 	roots = append(roots, sequentialRoot)
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	plainKeys, updates = NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
@@ -222,7 +222,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	// batch update
 	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
-	renderUpdates(branchNodeUpdatesTwo)
+	//renderUpdates(branchNodeUpdatesTwo)
 
 	fmt.Printf("\n sequential roots:\n")
 	for i, rh := range roots {
@@ -279,7 +279,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		roots = append(roots, sequentialRoot)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 	}
 
 	err := ms2.applyPlainUpdates(plainKeys, updates)
@@ -289,7 +289,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	// batch update
 	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
-	renderUpdates(branchNodeUpdatesTwo)
+	//renderUpdates(branchNodeUpdatesTwo)
 
 	fmt.Printf("\n sequential roots:\n")
 	for i, rh := range roots {
@@ -536,7 +536,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	beforeRestore, branchNodeUpdatesOne, err := trieOne.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
-	renderUpdates(branchNodeUpdatesOne)
+	//renderUpdates(branchNodeUpdatesOne)
 	ms.applyBranchNodeUpdates(branchNodeUpdatesOne)
 
 	buf, err := trieOne.EncodeCurrentState(nil)
@@ -619,7 +619,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	beforeRestore, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
-	renderUpdates(branchNodeUpdatesTwo)
+	//renderUpdates(branchNodeUpdatesTwo)
 	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
 
 	buf, err := trieTwo.EncodeCurrentState(nil)
@@ -686,7 +686,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 		if i == (len(updates)/2 - 1) {

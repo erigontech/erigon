@@ -1332,9 +1332,9 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 			return true
 		}
 		offset := reader.Lookup(key)
-		g := hc.ic.statelessGetter(item.i)
+		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.compressHistoryVals)
 		g.Reset(offset)
-		k, _ := g.NextUncompressed()
+		k, _ := g.Next(nil)
 
 		if !bytes.Equal(k, key) {
 			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
@@ -1342,7 +1342,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 			//}
 			return true
 		}
-		eliasVal, _ := g.NextUncompressed()
+		eliasVal, _ := g.Next(nil)
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		n, ok := ef.Search(txNum)
 		if hc.trace {
@@ -1416,14 +1416,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		reader := hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(txKey[:], key)
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := hc.statelessGetter(historyItem.i)
+		g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compressHistoryVals)
 		g.Reset(offset)
 
-		if hc.h.compressHistoryVals {
-			v, _ := g.Next(nil)
-			return v, true, nil
-		}
-		v, _ := g.NextUncompressed()
+		v, _ := g.Next(nil)
 		return v, true, nil
 	}
 	return nil, false, nil
@@ -1745,13 +1741,10 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		g := hi.hc.statelessGetter(historyItem.i)
+
+		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.compressVals)
 		g.Reset(offset)
-		if hi.compressVals {
-			hi.nextVal, _ = g.Next(nil)
-		} else {
-			hi.nextVal, _ = g.NextUncompressed()
-		}
+		hi.nextVal, _ = g.Next(nil)
 		return nil
 	}
 	hi.nextKey = nil
@@ -2055,13 +2048,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		g := hi.hc.statelessGetter(historyItem.i)
+		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.compressVals)
 		g.Reset(offset)
-		if hi.compressVals {
-			hi.nextVal, _ = g.Next(nil)
-		} else {
-			hi.nextVal, _ = g.NextUncompressed()
-		}
+		hi.nextVal, _ = g.Next(nil)
 		return nil
 	}
 	hi.nextKey = nil

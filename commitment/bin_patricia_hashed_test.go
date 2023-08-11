@@ -49,7 +49,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
 		// WARN! provided sequential branch updates are incorrect - lead to deletion of prefixes (afterMap is zero)
 		//       while root hashes are equal
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 
 		fmt.Printf("h=%x\n", sh)
 		seqHash = sh
@@ -61,7 +61,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	require.NoError(t, err)
 	ms2.applyBranchNodeUpdates(branchBatchUpdates)
 
-	renderUpdates(branchBatchUpdates)
+	//renderUpdates(branchBatchUpdates)
 
 	require.EqualValues(t, seqHash, batchHash)
 	// require.EqualValues(t, seqHash, batchHash)
@@ -127,7 +127,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		roots = append(roots, sequentialRoot)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		renderUpdates(branchNodeUpdates)
+		//renderUpdates(branchNodeUpdates)
 	}
 
 	err := ms2.applyPlainUpdates(plainKeys, updates)
@@ -137,7 +137,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	// batch update
 	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
-	renderUpdates(branchNodeUpdatesTwo)
+	//renderUpdates(branchNodeUpdatesTwo)
 
 	fmt.Printf("\n sequential roots:\n")
 	for i, rh := range roots {
@@ -179,7 +179,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Printf("1. Generated updates\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
 	hph.Reset()
@@ -196,7 +196,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("2. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// More updates
 	hph.Reset()
@@ -213,7 +213,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("3. Generated single update\n")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 }
 
 func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
@@ -240,7 +240,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
 	fmt.Println("1. Updates applied")
-	renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// generate empty updates and do NOT reset tree
 	hph.SetTrace(true)

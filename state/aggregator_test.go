@@ -125,15 +125,43 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	t.Run("BPlus", func(t *testing.T) {
+		rc := runCfg{
+			aggStep:  50,
+			useBplus: true,
+		}
+		aggregatorV3_RestartOnDatadir(t, rc)
+	})
+	t.Run("B", func(t *testing.T) {
+		rc := runCfg{
+			aggStep: 50,
+		}
+		aggregatorV3_RestartOnDatadir(t, rc)
+	})
+
+}
+
+type runCfg struct {
+	aggStep      uint64
+	useBplus     bool
+	compressVals bool
+	largeVals    bool
+}
+
 // here we create a bunch of updates for further aggregation.
 // FinishTx should merge underlying files several times
 // Expected that:
 // - we could close first aggregator and open another with previous data still available
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
-func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
-	aggStep := uint64(50)
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg := testDbAndAggregatorv3(t, rc.aggStep)
+	if rc.useBplus {
+		UseBpsTree = true
+		defer func() { UseBpsTree = false }()
+	}
+	aggStep := rc.aggStep
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

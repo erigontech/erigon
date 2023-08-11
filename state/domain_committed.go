@@ -217,9 +217,7 @@ type DomainCommitted struct {
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
 	prevState    []byte
-
-	comTook time.Duration
-	discard bool
+	discard      bool
 }
 
 func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
@@ -350,10 +348,10 @@ func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, type
 	numBuf := [2]byte{}
 	var found bool
 	for _, item := range list {
-		//g := item.decompressor.MakeGetter()
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
 		//index := recsplit.NewIndexReader(item.index)
 
-		cur, err := item.bindex.Seek(fullKey)
+		cur, err := item.bindex.SeekWithGetter(fullKey, g)
 		if err != nil {
 			continue
 		}
@@ -474,9 +472,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		return rootHash, nil, err
 	}
 
-	if len(touchedKeys) > 1 {
-		d.patriciaTrie.Reset()
-	}
+	//if len(touchedKeys) > 1 {
+	//	d.patriciaTrie.Reset()
+	//}
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 
