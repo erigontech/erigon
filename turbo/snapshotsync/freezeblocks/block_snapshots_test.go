@@ -38,7 +38,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 	defer idx.Close()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
-	err = idx.Build()
+	err = idx.Build(context.Background())
 	require.NoError(t, err)
 	if name == snaptype.Transactions {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -51,7 +51,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 		require.NoError(t, err)
 		err = idx.AddKey([]byte{1}, 0)
 		require.NoError(t, err)
-		err = idx.Build()
+		err = idx.Build(context.Background())
 		require.NoError(t, err)
 		defer idx.Close()
 	}

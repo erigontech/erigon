@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -124,7 +125,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err != nil && !expectedError {
 		return err
 	}
-	block := &cltypes.BeaconBlock{}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig)
 	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
 		return err
 	}
@@ -244,7 +245,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	if err != nil && !expectedError {
 		return err
 	}
-	executionPayload := &cltypes.Eth1Block{}
+	executionPayload := cltypes.NewEth1Block(c.Version(), &clparams.MainnetBeaconConfig)
 	if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
 		return err
 	}
