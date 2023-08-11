@@ -553,6 +553,7 @@ Loop:
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
 			continue
 		}
+		var processed bool = true
 
 		switch f.T {
 		case snaptype.Headers:
@@ -669,14 +670,18 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
+		default:
+			processed = false
 		}
 
-		if f.To > 0 {
-			segmentsMax = f.To - 1
-		} else {
-			segmentsMax = 0
+		if processed {
+			if f.To > 0 {
+				segmentsMax = f.To - 1
+			} else {
+				segmentsMax = 0
+			}
+			segmentsMaxSet = true
 		}
-		segmentsMaxSet = true
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
