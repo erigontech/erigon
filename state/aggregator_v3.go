@@ -679,6 +679,8 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 }
 
 func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
+	log.Warn("[dbg] MergeLoop start")
+	defer log.Warn("[dbg] MergeLoop done")
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
