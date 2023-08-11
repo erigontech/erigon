@@ -272,8 +272,7 @@ func (rs *StateV3) ApplyLogsAndTraces(txTask *TxTask, agg *libstate.AggregatorV3
 	return nil
 }
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.AggregatorV3, accumulator *shards.Accumulator) error {
-	agg.SetTx(tx)
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac *libstate.AggregatorV3Context, accumulator *shards.Accumulator) error {
 	var currentInc uint64
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -349,11 +348,9 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	ac := agg.MakeContext()
 	if err := ac.Unwind(ctx, txUnwindTo); err != nil {
 		return err
 	}
-	ac.Close()
 
 	return nil
 }
