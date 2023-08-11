@@ -16,8 +16,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon/common/math"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -736,18 +734,18 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 
 	if !externalTx {
+		//if ms.HistoryV3 {
+		//	if err := ms.agg.BuildFiles(math.MaxUint64); err != nil {
+		//		return err
+		//	}
+		//	ms.agg.SetTx(tx)
+		//	ac := ms.agg.MakeContext()
+		//	defer ac.Close()
+		//	if err := ac.Prune(ms.Ctx, math.MaxUint64, math.MaxUint64, tx); err != nil {
+		//		return err
+		//	}
+		//}
 		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	if ms.HistoryV3 {
-		if err := ms.agg.BuildFiles(math.MaxUint64); err != nil {
-			return err
-		}
-		ms.agg.SetTx(tx)
-		ac := ms.agg.MakeContext()
-		defer ac.Close()
-		if err := ac.Prune(ms.Ctx, math.MaxUint64, math.MaxUint64, tx); err != nil {
 			return err
 		}
 	}
