@@ -98,7 +98,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 
 	return nil
 }
-func ResetBorHeimdall(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
+func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.BorEventNums); err != nil {
 		return err
 	}

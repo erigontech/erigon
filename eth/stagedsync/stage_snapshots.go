@@ -156,7 +156,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders, stages.BorHeimdall} {
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
@@ -267,6 +267,20 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
+		}
+	}
+	borBlocksAvailable := blockReader.FrozenBorBlocks()
+	for _, stage := range []stages.SyncStage{stages.BorHeimdall} {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
+		}
+		if progress >= borBlocksAvailable {
+			continue
+		}
+
+		if err = stages.SaveStageProgress(tx, stage, borBlocksAvailable); err != nil {
+			return fmt.Errorf("advancing %s stage: %w", stage, err)
 		}
 	}
 	return nil

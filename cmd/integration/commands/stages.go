@@ -711,7 +711,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBorHeimdall(ctx, db, tx); err != nil {
+			if err := reset2.ResetBorHeimdall(ctx, tx); err != nil {
 				return err
 			}
 			return nil
