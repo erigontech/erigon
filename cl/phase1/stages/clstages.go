@@ -227,7 +227,7 @@ func ConsensusClStages(ctx context.Context,
 						}
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
-							if err := processBlock(block, false, true); err != nil {
+							if err := processBlock(block, false, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
