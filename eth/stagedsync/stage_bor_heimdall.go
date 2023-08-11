@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -17,10 +20,11 @@ import (
 )
 
 type BorHeimdallCfg struct {
-	db             kv.RwDB
-	chainConfig    chain.Config
-	heimdallClient bor.IHeimdallClient
-	blockReader    services.FullBlockReader
+	db               kv.RwDB
+	chainConfig      chain.Config
+	heimdallClient   bor.IHeimdallClient
+	blockReader      services.FullBlockReader
+	stateReceiverABI abi.ABI
 }
 
 func StageBorHeimdallCfg(
@@ -30,10 +34,11 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
-		db:             db,
-		chainConfig:    chainConfig,
-		heimdallClient: heimdallClient,
-		blockReader:    blockReader,
+		db:               db,
+		chainConfig:      chainConfig,
+		heimdallClient:   heimdallClient,
+		blockReader:      blockReader,
+		stateReceiverABI: contract.StateReceiver(),
 	}
 }
 
@@ -84,7 +89,7 @@ func BorHeimdallForward(
 	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			//cx := statefull.ChainContext{Chain: chain, Bor: c}
-			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, logger); err != nil {
+			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, logger); err != nil {
 				return err
 			}
 		}
@@ -109,6 +114,7 @@ func fetchAndWriteBorEvents(
 	chainID string,
 	tx kv.RwTx,
 	heimdallClient bor.IHeimdallClient,
+	stateReceiverABI abi.ABI,
 	logger log.Logger,
 ) (uint64, error) {
 	fetchStart := time.Now()
@@ -160,6 +166,7 @@ func fetchAndWriteBorEvents(
 		binary.BigEndian.PutUint64(key[:], blockNum)
 		binary.BigEndian.PutUint64(val[:], lastEventId+1)
 	}
+	const method = "commitState"
 
 	wroteIndex := false
 	for _, eventRecord := range eventRecords {
@@ -176,9 +183,15 @@ func fetchAndWriteBorEvents(
 		if err != nil {
 			return lastEventId, err
 		}
+
+		data, err := stateReceiverABI.Pack(method, big.NewInt(eventRecord.Time.Unix()), recordBytes)
+		if err != nil {
+			logger.Error("Unable to pack tx for commitState", "err", err)
+			return lastEventId, err
+		}
 		var eventIdBuf [8]byte
 		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-		if err = tx.Put(kv.BorEvents, eventIdBuf[:], recordBytes); err != nil {
+		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
 			return lastEventId, err
 		}
 		if !wroteIndex {
