@@ -1580,28 +1580,14 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		return nil, false, err
 	}
 	_ = ok
-	//if !ok {
-	//	return nil, false, nil
-	//}
+	if !ok {
+		return nil, false, nil
+	}
 
 	t := time.Now()
 	exactTxNum := exactWarmStep * dc.d.aggregationStep
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		if UseBpsTree {
-			k, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
-			if err != nil {
-				log.Error("getLatestFromWarmFiles", "k", k, "ok", ok, "err", err)
-				continue
-			}
-			if !isUseful && !ok {
-				continue
-			}
-			//if bytes.Equal(k, filekey) && !isUseful && dc.d.valsTable != kv.TblCommitmentVals {
-			//	fmt.Printf("warm file [%d] (expected %d) found key %x in file which marked as notUseful\n", i, exactWarmStep, filekey)
-			//}
-			return v, ok, err
-		}
 		if !isUseful {
 			continue
 		}
@@ -1717,9 +1703,9 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if err != nil {
 		return nil, false, err
 	}
-	//if !ok {
-	//	return nil, false, nil
-	//}
+	if !ok {
+		return nil, false, nil
+	}
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
 	exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
@@ -1727,11 +1713,10 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
 		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		//if !isUseful {
-		//	continue
-		//}
+		if !isUseful {
+			continue
+		}
 
-		_ = isUseful
 		var offset uint64
 		if UseBtree || UseBpsTree {
 			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.statelessGetter(int(exactColdShard)))
