@@ -132,7 +132,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	var snapshotType Type
 	ft, ok := ParseFileType(parts[3])
 	if !ok {
-		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
+		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[3], ErrInvalidFileName)
 	}
 	switch ft {
 	case Headers:
@@ -142,7 +142,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	case Transactions:
 		snapshotType = Transactions
 	default:
-		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
+		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[3], ErrInvalidFileName)
 	}
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
