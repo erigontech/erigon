@@ -32,12 +32,12 @@ func (p *Peer) ID() peer.ID {
 	return p.pid
 }
 func (p *Peer) Penalize() {
-	log.Debug("[Sentinel Peers] peer penalized", "peer-id", p.pid)
+	log.Trace("[Sentinel Peers] peer penalized", "peer-id", p.pid)
 	p.Penalties++
 }
 
 func (p *Peer) Forgive() {
-	log.Debug("[Sentinel Peers] peer forgiven", "peer-id", p.pid)
+	log.Trace("[Sentinel Peers] peer forgiven", "peer-id", p.pid)
 	if p.Penalties > 0 {
 		p.Penalties--
 	}
@@ -51,7 +51,7 @@ func (p *Peer) MarkUsed() {
 
 func (p *Peer) MarkReplied() {
 	p.successCount++
-	log.Debug("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
+	log.Trace("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
 }
 
 func (p *Peer) IsAvailable() (available bool) {
@@ -96,14 +96,14 @@ func anySetInString(set []string, in string) bool {
 func (p *Peer) Disconnect(reason ...string) {
 	rzn := strings.Join(reason, " ")
 	if !anySetInString(skipReasons, rzn) {
-		log.Debug("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid, "reason", strings.Join(reason, " "))
+		log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid, "reason", strings.Join(reason, " "))
 	}
 	p.m.host.Peerstore().RemovePeer(p.pid)
 	p.m.host.Network().ClosePeer(p.pid)
 	p.Penalties = 0
 }
 func (p *Peer) Ban(reason ...string) {
-	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", p.pid, "reason", strings.Join(reason, " "))
+	log.Trace("[Sentinel Peers] bad peers has been banned", "peer-id", p.pid, "reason", strings.Join(reason, " "))
 	p.Banned = true
 	p.Disconnect(reason...)
 	return

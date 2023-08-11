@@ -62,10 +62,23 @@ type BeaconBody struct {
 	// With a max of 4 per block
 	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]
 	// The version of the beacon chain
-	Version clparams.StateVersion
+	Version   clparams.StateVersion
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 // Getters
+
+func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBeaconBlock {
+	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg)}
+}
+
+func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
+	return &BeaconBlock{Body: NewBeaconBody(beaconCfg)}
+}
+
+func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
+	return &BeaconBody{beaconCfg: beaconCfg}
+}
 
 // Version returns beacon block version.
 func (b *SignedBeaconBlock) Version() clparams.StateVersion {
@@ -90,7 +103,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		b.SyncAggregate = &SyncAggregate{}
 	}
 	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = &Eth1Block{}
+		b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
 	if b.ProposerSlashings == nil {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
@@ -108,7 +121,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	}
 	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = new(Eth1Block)
+		b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
 	if b.ExecutionChanges == nil {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
@@ -173,13 +186,12 @@ func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 func (b *BeaconBlock) EncodingSizeSSZ() int {
 	if b.Body == nil {
-		b.Body = new(BeaconBody)
+		return 80
 	}
 	return 80 + b.Body.EncodingSizeSSZ()
 }
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	b.Body = new(BeaconBody)
 	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
@@ -193,13 +205,12 @@ func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 	if b.Block == nil {
-		b.Block = new(BeaconBlock)
+		return 100
 	}
 	return 100 + b.Block.EncodingSizeSSZ()
 }
 
 func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	b.Block = new(BeaconBlock)
 	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 

@@ -245,7 +245,7 @@ type Config struct {
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	OverrideShanghaiTime *big.Int `toml:",omitempty"`
+	OverrideCancunTime *big.Int `toml:",omitempty"`
 
 	DropUselessPeers bool
 }

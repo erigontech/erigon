@@ -242,18 +242,12 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time) {
-		if header.DataGasUsed != nil {
-			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
-		}
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
-		}
-	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-		// Verify the header's EIP-4844 attributes.
-		return err
+	cancun := chain.Config().IsCancun(header.Time)
+	if cancun {
+		return misc.VerifyPresenceOfCancunHeaderFields(header)
+	} else {
+		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
-	return nil
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
@@ -273,6 +267,9 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
 	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
+	if chain.Config().IsCancun(header.Time) {
+		misc.ApplyBeaconRootEip4788(chain, header, state)
+	}
 }
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {

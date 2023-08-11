@@ -251,7 +251,6 @@ type MultiClient struct {
 	Hd                                *headerdownload.HeaderDownload
 	Bd                                *bodydownload.BodyDownload
 	IsMock                            bool
-	forkValidator                     *engine_helpers.ForkValidator
 	nodeName                          string
 	sentries                          []direct.SentryClient
 	headHeight                        uint64
@@ -317,7 +316,6 @@ func NewMultiClient(
 		Engine:                            engine,
 		blockReader:                       blockReader,
 		logPeerInfo:                       logPeerInfo,
-		forkValidator:                     forkValidator,
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
 		dropUselessPeers:                  dropUselessPeers,
@@ -520,9 +518,6 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 				propagate = *firstPosSeen >= segments[0].Number
 			}
 			if !cs.IsMock && propagate {
-				if cs.forkValidator != nil {
-					cs.forkValidator.TryAddingPoWBlock(request.Block)
-				}
 				cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: segments[0].Number,

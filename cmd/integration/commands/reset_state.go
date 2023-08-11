@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/backup"
 	"os"
 	"text/tabwriter"
 
@@ -64,12 +65,34 @@ var cmdResetState = &cobra.Command{
 	},
 }
 
+var cmdClearBadBlocks = &cobra.Command{
+	Use:   "clear_bad_blocks",
+	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := debug.SetupCobra(cmd, "integration")
+		ctx, _ := common.RootContext()
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return err
+		}
+		defer db.Close()
+
+		return db.Update(ctx, func(tx kv.RwTx) error {
+			return backup.ClearTable(ctx, db, tx, "BadHeaderNumber")
+		})
+	},
+}
+
 func init() {
 	withConfig(cmdResetState)
 	withDataDir(cmdResetState)
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
+
+	withDataDir(cmdClearBadBlocks)
+	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
 func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {

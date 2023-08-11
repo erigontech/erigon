@@ -71,7 +71,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		BaseFee:       &baseFee,
 		GasLimit:      header.GasLimit,
 		PrevRanDao:    prevRandDao,
-		ExcessDataGas: header.ExcessDataGas,
+		ExcessBlobGas: header.ExcessBlobGas,
 	}
 }
 
@@ -80,7 +80,7 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:     msg.From(),
 		GasPrice:   msg.GasPrice(),
-		DataHashes: msg.DataHashes(),
+		BlobHashes: msg.BlobHashes(),
 	}
 }
 

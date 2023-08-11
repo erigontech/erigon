@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -9,22 +10,101 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	//"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 )
 
 type Faucet struct {
 	sync.Mutex
 	chainName       string
-	source          libcommon.Address
+	source          *accounts.Account
 	transactOpts    *bind.TransactOpts
 	contractAddress libcommon.Address
 	contract        *contracts.Faucet
+	deployer        *deployer
 }
 
-func NewFaucet(chainName string, source libcommon.Address) *Faucet {
+type deployer struct {
+	sync.WaitGroup
+	faucet *Faucet
+}
+
+func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
+	logger := devnet.Logger(ctx)
+
+	// deploy the contract and get the contract handler
+	deployCtx := devnet.WithCurrentNode(ctx, node)
+
+	waiter, deployCancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
+	defer deployCancel()
+
+	address, transaction, contract, err := contracts.DeployWithOps(deployCtx, d.faucet.transactOpts, contracts.DeployFaucet)
+
+	if err != nil {
+		d.faucet.Lock()
+		defer d.faucet.Unlock()
+
+		d.faucet.deployer = nil
+		d.faucet.transactOpts = nil
+		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		return
+	}
+
+	block, err := waiter.Await(transaction.Hash())
+
+	if err != nil {
+		d.faucet.Lock()
+		defer d.faucet.Unlock()
+
+		d.faucet.deployer = nil
+		d.faucet.transactOpts = nil
+		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		return
+	}
+
+	logger.Info("Faucet deployed", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address)
+
+	d.faucet.contractAddress = address
+	d.faucet.contract = contract
+
+	// make the amount received a fraction of the source
+	//if sbal, err := node.GetBalance(f.source, requests.BlockNumbers.Latest); err == nil {
+	//	fmt.Println(f.source, sbal)
+	//}
+
+	waiter, receiveCancel := blocks.BlockWaiter(deployCtx, blocks.CompletionChecker)
+	defer receiveCancel()
+
+	received, receiveHash, err := d.faucet.Receive(deployCtx, d.faucet.source, 20000)
+
+	if err != nil {
+		logger.Error("Failed to receive faucet funds", "err", err)
+		return
+	}
+
+	block, err = waiter.Await(receiveHash)
+
+	if err != nil {
+		d.faucet.Lock()
+		defer d.faucet.Unlock()
+
+		d.faucet.deployer = nil
+		d.faucet.transactOpts = nil
+		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		return
+	}
+
+	logger.Info("Faucet funded", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address, "received", received)
+
+	d.faucet.Lock()
+	defer d.faucet.Unlock()
+	d.faucet.deployer = nil
+	d.Done()
+}
+
+func NewFaucet(chainName string, source *accounts.Account) *Faucet {
 	return &Faucet{
 		chainName: chainName,
 		source:    source,
@@ -41,15 +121,43 @@ func (f *Faucet) Address() libcommon.Address {
 	return f.contractAddress
 }
 
+func (f *Faucet) Contract() *contracts.Faucet {
+	return f.contract
+}
+
+func (f *Faucet) Source() *accounts.Account {
+	return f.source
+}
+
 func (f *Faucet) Balance(ctx context.Context) (*big.Int, error) {
+	f.Lock()
+	deployer := f.deployer
+	f.Unlock()
+
+	if deployer != nil {
+		f.deployer.Wait()
+	}
+
 	node := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, f.chainName))
 	return node.GetBalance(f.contractAddress, requests.BlockNumbers.Latest)
 }
 
-func (f *Faucet) Send(ctx context.Context, destination libcommon.Address, eth float64) (*big.Int, libcommon.Hash, error) {
+func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth float64) (*big.Int, libcommon.Hash, error) {
+	f.Lock()
+	deployer := f.deployer
+	f.Unlock()
+
+	if deployer != nil {
+		f.deployer.Wait()
+	}
+
+	if f.transactOpts == nil {
+		return nil, libcommon.Hash{}, fmt.Errorf("Faucet not initialized")
+	}
+
 	node := devnet.SelectNode(ctx)
 
-	count, err := node.GetTransactionCount(f.source, requests.BlockNumbers.Pending)
+	count, err := node.GetTransactionCount(f.source.Address, requests.BlockNumbers.Pending)
 
 	if err != nil {
 		return nil, libcommon.Hash{}, err
@@ -58,30 +166,33 @@ func (f *Faucet) Send(ctx context.Context, destination libcommon.Address, eth fl
 	f.transactOpts.Nonce = count
 
 	amount := accounts.EtherAmount(eth)
-	trn, err := f.contract.Send(f.transactOpts, destination, amount)
+	trn, err := f.contract.Send(f.transactOpts, destination.Address, amount)
+
+	if err != nil {
+		return nil, libcommon.Hash{}, err
+	}
+
 	return amount, trn.Hash(), err
 }
 
-func (f *Faucet) Receive(ctx context.Context, source libcommon.Address, eth float64) (*big.Int, libcommon.Hash, error) {
+func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth float64) (*big.Int, libcommon.Hash, error) {
 	node := devnet.SelectNode(ctx)
 
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(source), node.ChainID())
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(source.SigKey(), node.ChainID())
 
 	if err != nil {
 		return nil, libcommon.Hash{}, err
 	}
 
-	count, err := node.GetTransactionCount(f.source, requests.BlockNumbers.Latest)
+	count, err := node.GetTransactionCount(f.source.Address, requests.BlockNumbers.Pending)
 
 	if err != nil {
 		return nil, libcommon.Hash{}, err
 	}
 
-	f.transactOpts.Nonce = count
+	transactOpts.Nonce = count
 
 	transactOpts.Value = accounts.EtherAmount(eth)
-	transactOpts.GasLimit = uint64(200_000)
-	transactOpts.GasPrice = big.NewInt(880_000_000)
 
 	trn, err := (&contracts.FaucetRaw{Contract: f.contract}).Transfer(transactOpts)
 
@@ -108,49 +219,19 @@ func (f *Faucet) NodeStarted(ctx context.Context, node devnet.Node) {
 
 		var err error
 
-		f.transactOpts, err = bind.NewKeyedTransactorWithChainID(accounts.SigKey(f.source), node.ChainID())
+		f.transactOpts, err = bind.NewKeyedTransactorWithChainID(f.source.SigKey(), node.ChainID())
 
 		if err != nil {
 			logger.Error("failed to get transaction ops", "address", f.source, "err", err)
 			return
 		}
 
-		go func() {
-			// deploy the contract and get the contract handler
-			deployCtx := devnet.WithCurrentNode(ctx, node)
+		f.deployer = &deployer{
+			faucet: f,
+		}
 
-			address, contract, err := contracts.DeployWithOps(deployCtx, f.transactOpts, contracts.DeployFaucet)
+		f.deployer.Add(1)
 
-			if err != nil {
-				f.Lock()
-				defer f.Unlock()
-
-				f.transactOpts = nil
-				logger.Error("failed to deploy faucet", "err", err)
-				return
-			}
-
-			logger.Info("Faucet deployed", "addr", address)
-
-			f.contractAddress = address
-			f.contract = contract
-
-			// make the amount received a fraction of the source
-			//if sbal, err := node.GetBalance(f.source, requests.BlockNumbers.Latest); err == nil {
-			//	fmt.Println(f.source, sbal)
-			//}
-
-			_, _ /*hash*/, err = f.Receive(deployCtx, f.source, 20000)
-
-			if err != nil {
-				logger.Error("failed to deploy faucet", "err", err)
-				return
-			}
-
-			//TODO do we need this if so we need to resolve dependencies
-			//if _, err = transactions.AwaitTransactions(ctx, hash); err != nil {
-			//	logger.Error("failed to call contract tx", "err", err)
-			//}
-		}()
+		go f.deployer.deploy(ctx, node)
 	}
 }

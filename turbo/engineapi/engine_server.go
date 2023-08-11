@@ -4,95 +4,87 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-// Configure network related parameters for the config.
-type EngineServerConfig struct {
-	// Authentication
-	JwtSecret []byte
-	// Network related
-	Address string
-	Port    int
-}
-
 type EngineServer struct {
-	hd     *headerdownload.HeaderDownload
-	config *chain.Config
+	hd              *headerdownload.HeaderDownload
+	blockDownloader *engine_block_downloader.EngineBlockDownloader
+	config          *chain.Config
 	// Block proposing for proof-of-stake
-	payloadId      uint64
-	lastParameters *core.BlockBuilderParameters
-	builders       map[uint64]*builder.BlockBuilder
-	builderFunc    builder.BlockBuilderFunc
-	proposing      bool
+	proposing        bool
+	test             bool
+	executionService execution.ExecutionClient
 
-	ctx    context.Context
-	lock   sync.Mutex
-	logger log.Logger
-
-	db          kv.RoDB
-	blockReader services.FullBlockReader
+	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	ctx     context.Context
+	lock    sync.Mutex
+	logger  log.Logger
 }
 
-func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Config, builderFunc builder.BlockBuilderFunc,
-	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, proposing bool) *EngineServer {
+const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+
+func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
+	hd *headerdownload.HeaderDownload,
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServer {
+	chainRW := eth1_chain_reader.NewChainReaderEth1(ctx, config, executionService, fcuTimeout)
 	return &EngineServer{
-		ctx:         ctx,
-		logger:      logger,
-		config:      config,
-		builderFunc: builderFunc,
-		db:          db,
-		blockReader: blockReader,
-		proposing:   proposing,
-		hd:          hd,
-		builders:    make(map[uint64]*builder.BlockBuilder),
+		ctx:              ctx,
+		logger:           logger,
+		config:           config,
+		executionService: executionService,
+		blockDownloader:  blockDownloader,
+		chainRW:          chainRW,
+		proposing:        proposing,
+		hd:               hd,
 	}
 }
 
-func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg,
+func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg, db kv.RoDB, blockReader services.FullBlockReader,
 	filters *rpchelper.Filters, stateCache kvcache.Cache, agg *libstate.AggregatorV3, engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) {
-	base := jsonrpc.NewBaseApi(filters, stateCache, e.blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
-	ethImpl := jsonrpc.NewEthAPI(base, e.db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
+
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
-
+	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -111,21 +103,6 @@ func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg,
 	}
 }
 
-func (s *EngineServer) stageLoopIsBusy() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	wait, ok := s.hd.BeaconRequestList.WaitForWaiting(ctx)
-	if !ok {
-		select {
-		case <-wait:
-			return false
-		case <-ctx.Done():
-			return true
-		}
-	}
-	return false
-}
-
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !s.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
@@ -137,7 +114,9 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion,
+) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -179,16 +158,22 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		header.DataGasUsed = (*uint64)(req.DataGasUsed)
-		header.ExcessDataGas = (*uint64)(req.ExcessDataGas)
+		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
+		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
+		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
+	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
+	}
+
+	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
+		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
 	blockHash := req.BlockHash
@@ -218,7 +203,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	if version >= clparams.DenebVersion {
+		actualBlobHashes := []libcommon.Hash{}
+		for _, tx := range transactions {
+			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+			s.logger.Warn("[NewPayload] mismatch in blob hashes",
+				"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+			}, nil
+		}
+	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
@@ -232,16 +230,19 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	s.hd.BeaconRequestList.AddPayloadRequest(block)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
-	payloadStatus := <-s.hd.PayloadStatusCh
+	payloadStatus, err := s.HandleNewPayload("NewPayload", block)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
 
-	return &payloadStatus, nil
+	return payloadStatus, nil
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -262,38 +263,30 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		return nil, fmt.Errorf("headerdownload is nil")
 	}
 
-	tx, err := s.db.BeginRo(s.ctx)
+	headHash, finalizedHash, safeHash, err := s.chainRW.GetForkchoice()
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+
 	// Some Consensus layer clients sometimes sends us repeated FCUs and make Erigon print a gazillion logs.
 	// E.G teku sometimes will end up spamming fcu on the terminal block if it has not synced to that point.
 	if forkchoiceMessage != nil &&
-		forkchoiceMessage.FinalizedBlockHash == rawdb.ReadForkchoiceFinalized(tx) &&
-		forkchoiceMessage.HeadHash == rawdb.ReadForkchoiceHead(tx) &&
-		forkchoiceMessage.SafeBlockHash == rawdb.ReadForkchoiceSafe(tx) {
+		forkchoiceMessage.FinalizedBlockHash == finalizedHash &&
+		forkchoiceMessage.HeadHash == headHash &&
+		forkchoiceMessage.SafeBlockHash == safeHash {
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
+	header := s.chainRW.GetHeaderByHash(blockHash)
+
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
 	var td *big.Int
 	if newPayload {
-		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
-		if err != nil {
-			return nil, err
-		}
-		td, err = rawdb.ReadTdByHash(tx, parentHash)
+		parent = s.chainRW.GetHeaderByHash(parentHash)
+		td = s.chainRW.GetTd(parentHash, blockNumber-1)
 	} else {
-		td, err = rawdb.ReadTdByHash(tx, blockHash)
-	}
-	if err != nil {
-		return nil, err
+		td = s.chainRW.GetTd(blockHash, blockNumber)
 	}
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
@@ -301,14 +294,9 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}}, nil
 	}
 
-	if !s.hd.POSSync() {
-		s.logger.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-	}
-
-	var canonicalHash libcommon.Hash
+	var isCanonical bool
 	if header != nil {
-		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())
+		isCanonical, err = s.chainRW.IsCanonicalHash(blockHash)
 	}
 	if err != nil {
 		return nil, err
@@ -339,55 +327,39 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}, nil
 	}
 
+	currentHeader := s.chainRW.CurrentHeader()
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
-		if header != nil && canonicalHash == blockHash {
+		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
-		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if header == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-		}
-		// Following code ensures we skip the fork choice state update if if forkchoiceState.headBlockHash references an ancestor of the head of canonical chain
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		if err != nil {
-			return nil, err
 		}
 
 		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
 		// because otherwise (when FCU points to the head) we want go to stage headers
 		// so that it calls writeForkChoiceHashes.
-		if blockHash != headHash && canonicalHash == blockHash {
+		if currentHeader != nil && blockHash != currentHeader.Hash() && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		s.logger.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
+	executionReady, err := s.chainRW.Ready()
+	if err != nil {
+		return nil, err
+	}
+	if !executionReady {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 
 	return nil, nil
-}
-
-// The expected value to be received by the feeRecipient in wei
-func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
-	blockValue := uint256.NewInt(0)
-	txs := br.Block.Transactions()
-	for i := range txs {
-		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
-		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-		txValue := new(uint256.Int).Mul(gas, effectiveTip)
-		blockValue.Add(blockValue, txValue)
-	}
-	return blockValue
 }
 
 // EngineGetPayload retrieves previously assembled payload (Validators only)
@@ -404,116 +376,48 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-
-	builder, ok := s.builders[payloadId]
-	if !ok {
-		log.Warn("Payload not stored", "payloadId", payloadId)
+	resp, err := s.executionService.GetAssembledBlock(ctx, &execution.GetAssembledBlockRequest{
+		Id: payloadId,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Busy {
+		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
+	// If the service is busy or there is no data for the given id then respond accordingly.
+	if resp.Data == nil {
+		s.logger.Warn("Payload not stored", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
 
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		s.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
 	}
-	block := blockWithReceipts.Block
-	header := block.Header()
-
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
-
-	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
-	if err != nil {
-		return nil, err
-	}
-	txs := []hexutility.Bytes{}
-	for _, tx := range encodedTransactions {
-		txs = append(txs, tx)
-	}
-
-	payload := &engine_types.ExecutionPayload{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		Timestamp:     hexutil.Uint64(header.Time),
-		PrevRandao:    header.MixDigest,
-		StateRoot:     block.Root(),
-		ReceiptsRoot:  block.ReceiptHash(),
-		LogsBloom:     block.Bloom().Bytes(),
-		GasLimit:      hexutil.Uint64(block.GasLimit()),
-		GasUsed:       hexutil.Uint64(block.GasUsed()),
-		BlockNumber:   hexutil.Uint64(block.NumberU64()),
-		ExtraData:     block.Extra(),
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee),
-		BlockHash:     block.Hash(),
-		Transactions:  txs,
-	}
-	if block.Withdrawals() != nil {
-		payload.Withdrawals = block.Withdrawals()
-	}
-
-	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
-		payload.DataGasUsed = (*hexutil.Uint64)(header.DataGasUsed)
-		payload.ExcessDataGas = (*hexutil.Uint64)(header.ExcessDataGas)
-	}
-
-	blockValue := blockValue(blockWithReceipts, baseFee)
-
-	blobsBundle := &engine_types.BlobsBundleV1{}
-	for i, tx := range block.Transactions() {
-		if tx.Type() != types.BlobTxType {
-			continue
-		}
-		blobTx, ok := tx.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
-		}
-		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
-				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
-		}
-		for _, commitment := range commitments {
-			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment)
-		}
-		for _, proof := range proofs {
-			blobsBundle.Proofs = append(blobsBundle.Proofs, proof)
-		}
-		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob)
-		}
-	}
+	data := resp.Data
 
 	return &engine_types.GetPayloadResponse{
-		ExecutionPayload: payload,
-		BlockValue:       (*hexutil.Big)(blockValue.ToBig()),
-		BlobsBundle:      blobsBundle,
+		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
+		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 	}, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	forkChoice := &engine_types.ForkChoiceState{
-		HeadHash:           forkchoiceState.HeadHash,
-		SafeBlockHash:      forkchoiceState.SafeBlockHash,
-		FinalizedBlockHash: forkchoiceState.FinalizedBlockHash,
-	}
-
-	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadHash, 0, libcommon.Hash{}, forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
-
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadHash)
-		s.hd.BeaconRequestList.AddForkChoiceRequest(forkChoice)
+		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		statusDeref := <-s.hd.PayloadStatusCh
-		status = &statusDeref
+		status, err = s.HandlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
+		if err != nil {
+			return nil, err
+		}
 		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
@@ -530,17 +434,15 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	tx2, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if (!s.config.IsCancun(timestamp) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(timestamp) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	defer tx2.Rollback()
-	headHash := rawdb.ReadHeadBlockHash(tx2)
-	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
-	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
-	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoice.HeadHash {
+	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
+
+	if headHeader.Hash() != forkchoiceState.HeadHash {
 		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
 		// Client software MAY skip an update of the forkchoice state and
 		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
@@ -549,118 +451,56 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
 
 		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
-			"forkChoice.HeadBlockHash", forkChoice.HeadHash, "headHeader.Hash", headHeader.Hash())
+			"forkChoice.HeadBlockHash", forkchoiceState.HeadHash, "headHeader.Hash", headHeader.Hash())
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if headHeader.Time >= uint64(payloadAttributes.Timestamp) {
+	if headHeader.Time >= timestamp {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
-	param := core.BlockBuilderParameters{
-		ParentHash:            forkChoice.HeadHash,
-		Timestamp:             uint64(payloadAttributes.Timestamp),
-		PrevRandao:            payloadAttributes.PrevRandao,
-		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		PayloadId:             s.payloadId,
+	req := &execution.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+		Timestamp:             timestamp,
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
+
 	if version >= clparams.CapellaVersion {
-		param.Withdrawals = payloadAttributes.Withdrawals
-	}
-	if err := s.checkWithdrawalsPresence(uint64(payloadAttributes.Timestamp), param.Withdrawals); err != nil {
-		return nil, err
+		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	}
 
-	// First check if we're already building a block with the requested parameters
-	if reflect.DeepEqual(s.lastParameters, &param) {
-		s.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{
-				Status:          engine_types.ValidStatus,
-				LatestValidHash: &headHash,
-			},
-			PayloadId: convertPayloadId(s.payloadId),
-		}, nil
+	if version >= clparams.DenebVersion {
+		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	// Initiate payload building
-	s.evictOldBuilders()
-
-	s.payloadId++
-	param.PayloadId = s.payloadId
-	s.lastParameters = &param
-
-	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
-	s.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", s.payloadId)
-
-	return &engine_types.ForkChoiceUpdatedResponse{
-		PayloadStatus: &engine_types.PayloadStatus{
-			Status:          engine_types.ValidStatus,
-			LatestValidHash: &headHash,
-		},
-		PayloadId: convertPayloadId(s.payloadId),
-	}, nil
-}
-
-func convertPayloadId(payloadId uint64) *hexutility.Bytes {
-	encodedPayloadId := make([]byte, 8)
-	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
-	ret := hexutility.Bytes(encodedPayloadId)
-	return &ret
-}
-
-func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	tx, err := s.db.BeginRo(ctx)
+	resp, err := s.executionService.AssembleBlock(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	if resp.Busy {
+		return nil, errors.New("[ForkChoiceUpdated]: execution service is busy, cannot assemble blocks")
+	}
+	return &engine_types.ForkChoiceUpdatedResponse{
+		PayloadStatus: &engine_types.PayloadStatus{
+			Status:          engine_types.ValidStatus,
+			LatestValidHash: &forkchoiceState.HeadHash,
+		},
+		PayloadId: engine_types.ConvertPayloadId(resp.Id),
+	}, nil
+}
+
+func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
 
 	bodies := make([]*engine_types.ExecutionPayloadBodyV1, len(request))
 
 	for hashIdx, hash := range request {
-		block, err := s.blockReader.BlockByHash(ctx, tx, hash)
-		if err != nil {
-			return nil, err
-		}
+		block := s.chainRW.GetBlockByHash(hash)
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
 		}
 		bodies[hashIdx] = body
-	}
-
-	return bodies, nil
-}
-
-func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
-
-	for i := uint64(0); i < count; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, start+i)
-		if err != nil {
-			return nil, err
-		}
-		if hash == (libcommon.Hash{}) {
-			// break early if beyond the last known canonical header
-			break
-		}
-
-		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, hash, start+i)
-		if err != nil {
-			return nil, err
-		}
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		bodies = append(bodies, body)
 	}
 
 	return bodies, nil
@@ -685,51 +525,29 @@ func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPay
 	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: block.Withdrawals()}, nil
 }
 
-func (s *EngineServer) evictOldBuilders() {
-	ids := common.SortedKeys(s.builders)
+func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
+	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
 
-	// remove old builders so that at most MaxBuilders - 1 remain
-	for i := 0; i <= len(s.builders)-engine_helpers.MaxBuilders; i++ {
-		delete(s.builders, ids[i])
-	}
-}
+	for i := uint64(0); i < count; i++ {
+		block := s.chainRW.GetBlockByNumber(start + i)
 
-func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
-	if in == nil {
-		return nil
+		body, err := extractPayloadBodyFromBlock(block)
+		if err != nil {
+			return nil, err
+		}
+		if body == nil {
+			break
+		}
+		bodies = append(bodies, body)
 	}
-	out := make([]*types.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types.Withdrawal{
-			Index:     w.Index,
-			Validator: w.ValidatorIndex,
-			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    w.Amount,
-		})
-	}
-	return out
-}
 
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types2.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types2.Withdrawal{
-			Index:          w.Index,
-			ValidatorIndex: w.Validator,
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         w.Amount,
-		})
-	}
-	return out
+	return bodies, nil
 }
 
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
-	log.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
 	response, err := e.getPayload(ctx, decodedPayloadId)
 	if err != nil {
@@ -741,14 +559,14 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 
 	return e.getPayload(ctx, decodedPayloadId)
 }
@@ -761,34 +579,33 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
+func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+}
+
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, nil, clparams.BellatrixVersion)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, nil, clparams.CapellaVersion)
 }
 
-// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & excess data gas.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
-func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.DenebVersion)
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
+func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
 // Can also be used to ping the execution layer (heartbeats).
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error) {
-	tx, err := e.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	terminalTotalDifficulty := e.config.TerminalTotalDifficulty
 
 	if terminalTotalDifficulty == nil {
@@ -830,10 +647,10 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV2",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
-	// "engine_newPayloadV3",
+	"engine_newPayloadV3",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
-	// "engine_getPayloadV3",
+	"engine_getPayloadV3",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
@@ -844,7 +661,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	missingCl := compareCapabilities(ourCapabilities, fromCl)
 
 	if len(missingCl) > 0 || len(missingOurs) > 0 {
-		log.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
+		e.logger.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
 	}
 
 	return ourCapabilities
@@ -866,4 +683,144 @@ func compareCapabilities(from []string, to []string) []string {
 	}
 
 	return result
+}
+
+func (e *EngineServer) HandleNewPayload(
+	logPrefix string,
+	block *types.Block,
+) (*engine_types.PayloadStatus, error) {
+	header := block.Header()
+	headerNumber := header.Number.Uint64()
+	headerHash := block.Hash()
+
+	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
+
+	currentHeader := e.chainRW.CurrentHeader()
+	var currentHeadNumber *uint64
+	if currentHeader != nil {
+		currentHeadNumber = new(uint64)
+		*currentHeadNumber = currentHeader.Number.Uint64()
+	}
+	parent := e.chainRW.GetHeader(header.ParentHash, headerNumber-1)
+	if parent == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		if e.test {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash, block) {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+
+		if currentHeadNumber != nil {
+			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+			// so that we will perform full validation.
+			success := false
+			for i := 0; i < 100; i++ {
+				time.Sleep(10 * time.Millisecond)
+				if e.blockDownloader.Status() == headerdownload.Synced {
+					success = true
+					break
+				}
+			}
+			if !success {
+				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			}
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
+		} else {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+	}
+	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
+		return nil, err
+	}
+
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
+	}
+
+	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	status, latestValidHash, err := e.chainRW.ValidateChain(headerHash, headerNumber)
+	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
+	if err != nil {
+		return nil, err
+	}
+
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	}
+
+	return &engine_types.PayloadStatus{
+		Status:          convertGrpcStatusToEngineStatus(status),
+		LatestValidHash: &latestValidHash,
+	}, nil
+}
+
+func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
+	switch status {
+	case execution.ExecutionStatus_Success:
+		return engine_types.ValidStatus
+	case execution.ExecutionStatus_MissingSegment:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_TooFarAway:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_BadBlock:
+		return engine_types.InvalidStatus
+	case execution.ExecutionStatus_Busy:
+		return engine_types.SyncingStatus
+	}
+	panic("giulio u stupid.")
+}
+
+func (e *EngineServer) HandlesForkChoice(
+	logPrefix string,
+	forkChoice *engine_types.ForkChoiceState,
+	requestId int,
+) (*engine_types.PayloadStatus, error) {
+	headerHash := forkChoice.HeadHash
+
+	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
+	headerNumber, err := e.chainRW.HeaderNumber(headerHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// We do not have header, download.
+	if headerNumber == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
+		if !e.test {
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
+		}
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+
+	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
+	header := e.chainRW.GetHeader(headerHash, *headerNumber)
+	if header == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
+		if !e.test {
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
+		}
+
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+
+	// Call forkchoice here
+	status, latestValidHash, err := e.chainRW.UpdateForkChoice(forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
+	if err != nil {
+		return nil, err
+	}
+	if status == execution.ExecutionStatus_InvalidForkchoice {
+		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execution.ExecutionStatus_Busy {
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+	if status == execution.ExecutionStatus_BadBlock {
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus}, nil
+	}
+	return &engine_types.PayloadStatus{
+		Status:          convertGrpcStatusToEngineStatus(status),
+		LatestValidHash: &latestValidHash,
+	}, nil
 }

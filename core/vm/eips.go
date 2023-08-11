@@ -28,6 +28,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	6780: enable6780,
 	5656: enable5656,
 	4844: enable4844,
 	3860: enable3860,
@@ -243,22 +244,22 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
 
-// enable4844 applies mini-danksharding (DATAHASH Opcode)
-// - Adds an opcode that returns the versioned data hash of the tx at a index.
+// enable4844 applies mini-danksharding (BLOBHASH opcode)
+// - Adds an opcode that returns the versioned blob hash of the tx at a index.
 func enable4844(jt *JumpTable) {
-	jt[DATAHASH] = &operation{
-		execute:     opDataHash,
+	jt[BLOBHASH] = &operation{
+		execute:     opBlobHash,
 		constantGas: GasFastestStep,
 		numPop:      1,
 		numPush:     1,
 	}
 }
 
-// opDataHash implements DATAHASH opcode
-func opDataHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+// opBlobHash implements the BLOBHASH opcode
+func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := scope.Stack.Peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().DataHashes))) {
-		hash := interpreter.evm.TxContext().DataHashes[idx.Uint64()]
+	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().BlobHashes))) {
+		hash := interpreter.evm.TxContext().BlobHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()
@@ -290,4 +291,15 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	// (the memorySize function on the opcode).
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return nil, nil
+}
+
+// enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
+func enable6780(jt *JumpTable) {
+	jt[SELFDESTRUCT] = &operation{
+		execute:     opSelfdestruct6780,
+		dynamicGas:  gasSelfdestructEIP3529,
+		constantGas: params.SelfdestructGasEIP150,
+		numPop:      1,
+		numPush:     0,
+	}
 }

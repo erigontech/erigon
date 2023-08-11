@@ -273,9 +273,11 @@ func action(ctx *cli.Context) error {
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
-				{Text: "DeployChildChainReceiver", Args: []any{"faucet-source"}},
-				{Text: "DeployRootChainSender", Args: []any{"faucet-source"}},
-				{Text: "ProcessTransfers", Args: []any{"faucet-source", 10, 2, 2}},
+				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
+				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
+				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "BatchProcessTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
 			},
 		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
@@ -314,7 +316,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
 					Services: []devnet.Service{
-						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address),
+						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
 					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{
@@ -359,7 +361,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address)),
+					BorStateSyncDelay:  30 * time.Second,
+					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
@@ -397,7 +400,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8645,
-					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource.Address)),
+					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
@@ -406,13 +409,16 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
+								VMDebug:          true,
+								HttpCorsDomain:   "*",
 							},
+							DevPeriod:    5,
 							AccountSlots: 200,
 						},
 						args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
+								DirVerbosity:     "3",
 							},
 						},
 					},
@@ -432,7 +438,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 				},
 				Services: []devnet.Service{
-					account_services.NewFaucet(networkname.DevChainName, faucetSource.Address),
+					account_services.NewFaucet(networkname.DevChainName, faucetSource),
 				},
 				Nodes: []devnet.Node{
 					args.BlockProducer{

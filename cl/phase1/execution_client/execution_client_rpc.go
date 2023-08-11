@@ -52,7 +52,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -102,10 +102,10 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 	}
 	// Process Deneb
 	if payload.Version() >= clparams.DenebVersion {
-		request.DataGasUsed = new(hexutil.Uint64)
-		request.ExcessDataGas = new(hexutil.Uint64)
-		*request.DataGasUsed = hexutil.Uint64(payload.DataGasUsed)
-		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
+		request.BlobGasUsed = new(hexutil.Uint64)
+		request.ExcessBlobGas = new(hexutil.Uint64)
+		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
+		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
@@ -158,7 +158,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 		return validationError.Error()
 	}
 
-	if payloadStatus.Status != engine_types.ValidStatus && payloadStatus.Status != engine_types.AcceptedStatus {
+	if payloadStatus.Status == engine_types.InvalidStatus {
 		return fmt.Errorf("status: %s", payloadStatus.Status)
 	}
 	return nil
