@@ -99,7 +99,7 @@ func ExecuteBlockEphemerally(
 	)
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -311,8 +311,10 @@ func FinalizeBlockExecution(
 	return newBlock, newTxs, newReceipt, nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState) error {
-	engine.Initialize(cc, chain, header, ibs, txs, uncles, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
+	cc *chain.Config, ibs *state.IntraBlockState,
+) error {
+	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
 	})
 	noop := state.NewNoopWriter()
