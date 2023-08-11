@@ -178,6 +178,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
+		m3, _ := header.MarshalJSON()
+		fmt.Println(string(m3))
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -395,7 +397,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 	data := resp.Data
 
 	return &engine_types.GetPayloadResponse{
-		ExecutionPayload: engine_types.ConvertRpcBlockToExecutionPayload(data.ExecutionPayload),
+		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
 		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
 		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 	}, nil

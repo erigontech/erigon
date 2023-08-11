@@ -193,7 +193,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 
 	return &execution.GetAssembledBlockResponse{
 		Data: &execution.AssembledBlockData{
-			ExecutionPayload: eth1_utils.ConvertBlockToRPC(block),
+			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,
 		},
