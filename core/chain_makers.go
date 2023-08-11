@@ -465,8 +465,6 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 		h := common.NewHasher()
 		defer common.ReturnHasherToPool(h)
 
-		agg := tx.(*temporal.Tx).Agg()
-		agg.SetTx(tx)
 		it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err

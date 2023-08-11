@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -17,17 +18,13 @@ import (
 )
 
 func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg) ([]byte, error) {
-	defer cfg.agg.StartUnbufferedWrites().FinishWrites()
+	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
-	ac := cfg.agg.MakeContext()
-	defer ac.Close()
-
-	domains := cfg.agg.SharedDomains(ac)
+	domains := agg.SharedDomains(ac)
 	defer domains.Close()
 
 	acc := domains.Account.MakeContext()
 	stc := domains.Storage.MakeContext()
-	//ctc := domains.Code.MakeContext()
 
 	defer acc.Close()
 	defer stc.Close()

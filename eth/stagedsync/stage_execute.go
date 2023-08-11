@@ -317,24 +317,11 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 	return
 }
 
-func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	defer func() {
-		if tx != nil {
-			fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
-			//cfg.agg.MakeContext().(nil, func(k, v []byte) {
-			//	vv, err := accounts.ConvertV3toV2(v)
-			//	if err != nil {
-			//		panic(err)
-			//	}
-			//	fmt.Printf("acc: %x, %x\n", k, vv)
-			//}, tx)
-		}
-	}()
+func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+	agg := tx.(*temporal.Tx).Agg()
+	ac := tx.(*temporal.Tx).AggCtx()
 
-	agg := cfg.agg
-	agg.SetLogPrefix(s.LogPrefix())
-	rs := state.NewStateV3(agg.SharedDomains(tx.(*temporal.Tx).AggCtx()), logger)
-	//rs := state.NewStateV3(tx.(*temporal.Tx).Agg().SharedDomains())
+	rs := state.NewStateV3(agg.SharedDomains(ac), logger)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
@@ -344,7 +331,10 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	//if err := agg.Flush(ctx, tx); err != nil {
 	//	return fmt.Errorf("AggregatorV3.Flush: %w", err)
 	//}
-	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
+	if tx == nil {
+		panic(1)
+	}
+	if err := rs.Unwind(ctx, tx, txNum, ac, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -735,7 +725,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	if cfg.historyV3 {
-		return unwindExec3(u, s, tx, ctx, cfg, accumulator, logger)
+		return unwindExec3(u, s, tx, ctx, accumulator, logger)
 	}
 
 	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
@@ -876,7 +866,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		cfg.agg.SetTx(tx)
 		if initialCycle {
 			if err = tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 1*time.Second, tx); err != nil { // prune part of retired data, before commit
 				return err

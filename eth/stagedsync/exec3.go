@@ -221,12 +221,12 @@ func ExecV3(ctx context.Context,
 		//	block = _downloadedBlockNum - 1
 		//}
 	}
+
 	if applyTx != nil {
-		agg.SetTx(applyTx)
 		if dbg.DiscardHistory() {
-			defer agg.DiscardHistory().FinishWrites()
+			agg.DiscardHistory()
 		} else {
-			defer agg.StartWrites().FinishWrites()
+			agg.StartWrites()
 		}
 
 		var err error
@@ -379,9 +379,9 @@ func ExecV3(ctx context.Context,
 
 			agg.SetTx(tx)
 			if dbg.DiscardHistory() {
-				defer agg.DiscardHistory().FinishWrites()
+				agg.DiscardHistory()
 			} else {
-				defer agg.StartWrites().FinishWrites()
+				agg.StartWrites()
 			}
 
 			defer applyLoopWg.Wait()
@@ -582,6 +582,7 @@ func ExecV3(ctx context.Context,
 	//var err error
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
 			case readAhead <- blockNum:
