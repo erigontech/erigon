@@ -746,11 +746,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
 		}
 		ms.agg.SetTx(tx)
 		ac := ms.agg.MakeContext()
-
-		if err := ac.Prune(ms.Ctx, math.MaxUint64, math.MaxUint64, nil); err != nil {
+		defer ac.Close()
+		if err := ac.Prune(ms.Ctx, math.MaxUint64, math.MaxUint64, tx); err != nil {
 			return err
 		}
-		ac.Close()
 	}
 	return nil
 }
