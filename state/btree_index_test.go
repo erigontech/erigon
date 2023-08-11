@@ -82,14 +82,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count() + 1)
+		_, _, err := bt.dataLookup(bt.ef.Count()+1, bt.getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count())
+		_, _, err = bt.dataLookup(bt.ef.Count(), bt.getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count() - 1)
+		_, _, err = bt.dataLookup(bt.ef.Count()-1, bt.getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -183,14 +183,14 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count() + 1)
+		_, _, err := bt.dataLookup(bt.ef.Count()+1, bt.getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count())
+		_, _, err = bt.dataLookup(bt.ef.Count(), bt.getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count() - 1)
+		_, _, err = bt.dataLookup(bt.ef.Count()-1, bt.getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -259,10 +259,10 @@ func TestBpsTree_Seek(t *testing.T) {
 		i++
 	}
 
-	tr := newTrie()
+	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		tr.insert(Node{i: uint64(i), prefix: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), prefix: common.Copy(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()

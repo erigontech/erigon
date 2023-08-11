@@ -972,7 +972,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				return err
 			}
 			pos++
-			fmt.Printf("key: %x, step: %x\n", k, stepInDB)
+			//fmt.Printf("key: %x, step: %x\n", k, stepInDB)
 			if !bytes.Equal(stepBytes, stepInDB) {
 				continue
 			}
@@ -1579,14 +1579,29 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	if !ok {
-		return nil, false, nil
-	}
+	_ = ok
+	//if !ok {
+	//	return nil, false, nil
+	//}
 
 	t := time.Now()
 	exactTxNum := exactWarmStep * dc.d.aggregationStep
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
+		if UseBpsTree {
+			k, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
+			if err != nil {
+				log.Error("getLatestFromWarmFiles", "k", k, "ok", ok, "err", err)
+				continue
+			}
+			if !isUseful && !ok {
+				continue
+			}
+			//if bytes.Equal(k, filekey) && !isUseful && dc.d.valsTable != kv.TblCommitmentVals {
+			//	fmt.Printf("warm file [%d] (expected %d) found key %x in file which marked as notUseful\n", i, exactWarmStep, filekey)
+			//}
+			return v, ok, err
+		}
 		if !isUseful {
 			continue
 		}
@@ -1702,9 +1717,9 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if err != nil {
 		return nil, false, err
 	}
-	if !ok {
-		return nil, false, nil
-	}
+	//if !ok {
+	//	return nil, false, nil
+	//}
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
 	exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
@@ -1712,10 +1727,11 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
 		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		if !isUseful {
-			continue
-		}
+		//if !isUseful {
+		//	continue
+		//}
 
+		_ = isUseful
 		var offset uint64
 		if UseBtree || UseBpsTree {
 			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.statelessGetter(int(exactColdShard)))
@@ -1884,13 +1900,23 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	//dc.d.stats.TotalQueries.Add(1)
 
+	if roTx == nil {
+		v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
+		if err != nil {
+			return nil, false, err
+		}
+		return v, found, nil
+	}
+
 	invertedStep := dc.numBuf[:]
 	binary.BigEndian.PutUint64(invertedStep, ^(fromTxNum / dc.d.aggregationStep))
+
 	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return nil, false, err
 	}
 	defer keyCursor.Close()
+
 	foundInvStep, err := keyCursor.SeekBothRange(key, invertedStep)
 	if err != nil {
 		return nil, false, err
@@ -1993,13 +2019,14 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 
 	for i, item := range dc.files {
 		if UseBtree || UseBpsTree {
-			cursor, err := dc.statelessBtree(i).Seek(prefix)
+			cursor, err := dc.statelessBtree(i).SeekWithGetter(prefix, dc.statelessGetter(i))
 			if err != nil {
 				return err
 			}
 			if cursor == nil {
 				continue
 			}
+			cursor.getter = dc.statelessGetter(i)
 			dc.d.stats.FilesQueries.Add(1)
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
@@ -2168,14 +2195,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
-			k, v, err = keysCursor.PrevNoDup()
-			if len(v) != 8 {
-				continue
-			}
-			is = ^binary.BigEndian.Uint64(v)
-			if is > step {
-				continue
-			}
+			continue
 		}
 		if limit == 0 {
 			return nil
@@ -2286,7 +2306,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 	}
 
 	for i, item := range dc.files {
-		btCursor, err := dc.statelessBtree(i).Seek(hi.from)
+		btCursor, err := dc.statelessBtree(i).SeekWithGetter(hi.from, dc.statelessGetter(i))
 		if err != nil {
 			return err
 		}
