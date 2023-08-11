@@ -115,19 +115,19 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	var err error
 	cfg := domainCfg{
 		domainLargeValues: AccDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: false}}
+		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: false}}
 	if a.accounts, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
 		domainLargeValues: StorageDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: false}}
+		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: false}}
 	if a.storage, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
 		domainLargeValues: true,
-		hist:              histCfg{withLocalityIndex: false, compressVals: true, historyLargeValues: true}}
+		hist:              histCfg{withLocalityIndex: true, compressVals: true, historyLargeValues: true}}
 	if a.code, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
