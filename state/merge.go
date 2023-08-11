@@ -810,8 +810,10 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	idxPath := filepath.Join(d.dir, idxFileName)
-	if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compressValues, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
-		return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+	if !UseBpsTree {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compressValues, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
 	}
 
 	btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
