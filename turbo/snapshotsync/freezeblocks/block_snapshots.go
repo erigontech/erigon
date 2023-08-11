@@ -1251,24 +1251,18 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		defer br.working.Store(false)
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
-		if !ok {
-			return
-		}
-
-		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
-		if err != nil {
-			br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+		if ok {
+			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+				br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+			}
 		}
 
 		if includeBor {
 			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-			if !ok {
-				return
-			}
-
-			err = br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
-			if err != nil {
-				br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+			if ok {
+				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+				}
 			}
 		}
 	}()

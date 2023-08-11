@@ -89,7 +89,7 @@ func BorHeimdallForward(
 	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			//cx := statefull.ChainContext{Chain: chain, Bor: c}
-			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, logger); err != nil {
+			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
@@ -115,6 +115,7 @@ func fetchAndWriteBorEvents(
 	tx kv.RwTx,
 	heimdallClient bor.IHeimdallClient,
 	stateReceiverABI abi.ABI,
+	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
 	fetchStart := time.Now()
@@ -142,7 +143,7 @@ func fetchAndWriteBorEvents(
 	from = lastEventId + 1
 
 	logger.Info(
-		"Fetching state updates from Heimdall",
+		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
 		"fromID", from,
 		"to", to.Format(time.RFC3339),
 	)
@@ -186,7 +187,7 @@ func fetchAndWriteBorEvents(
 
 		data, err := stateReceiverABI.Pack(method, big.NewInt(eventRecord.Time.Unix()), recordBytes)
 		if err != nil {
-			logger.Error("Unable to pack tx for commitState", "err", err)
+			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
 			return lastEventId, err
 		}
 		var eventIdBuf [8]byte
@@ -209,7 +210,7 @@ func fetchAndWriteBorEvents(
 
 	processTime := time.Since(processStart)
 
-	logger.Info("StateSyncData", "number", blockNum, "lastEventID", lastEventId, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
+	logger.Info(fmt.Sprintf("[%s] StateSyncData", logPrefix), "number", blockNum, "lastEventID", lastEventId, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
 
 	return lastEventId, nil
 }
