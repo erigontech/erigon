@@ -60,7 +60,6 @@ type AggregatorV3 struct {
 	logTopics        *InvertedIndex
 	tracesFrom       *InvertedIndex
 	backgroundResult *BackgroundResult
-	logPrefix        string
 	dir              string
 	tmpdir           string
 	txNum            atomic.Uint64
@@ -393,8 +392,6 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	}
 	return nil
 }
-
-func (a *AggregatorV3) SetLogPrefix(v string) { a.logPrefix = v }
 
 func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.rwTx = tx
