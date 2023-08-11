@@ -314,7 +314,7 @@ RETRY:
 		}
 		offset = nextPos
 	}
-	if err = rs.Build(); err != nil {
+	if err = rs.Build(ctx); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 			rs.ResetNextSalt()
