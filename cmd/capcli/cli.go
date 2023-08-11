@@ -1,26 +1,32 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"strings"
+	"time"
 
+	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
 var CLI struct {
 	Migrate Migrate `cmd:"" help:"migrate from one state to another"`
 
-	Blocks Blocks `cmd:"" help:"download blocks from gossip network"`
+	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
+	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 }
 
 type chainCfg struct {
@@ -33,7 +39,7 @@ func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, genesisC
 }
 
 type outputFolder struct {
-	Output string `help:"where to output to, defaults to tmp directory" default:"/tmp" short:"o"`
+	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
 }
 
 type withSentinel struct {
@@ -41,15 +47,17 @@ type withSentinel struct {
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
-	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure())
+	ctx, cn := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cn()
+	gconn, err := grpc.DialContext(ctx, w.Sentinel, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
 	return sentinel.NewSentinelClient(gconn), nil
 }
 
-func openFs(fsName string) (afero.Fs, error) {
-	return afero.NewBasePathFs(afero.NewOsFs(), fsName), nil
+func openFs(fsName string, path string) (afero.Fs, error) {
+	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
 }
 
 type Blocks struct {
@@ -85,43 +93,113 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return fmt.Errorf("error get beacon blocks: %w", err)
 	}
-	d, err := openFs(b.Output)
+	d, err := openFs(b.Datadir, "caplin/beacon")
 	if err != nil {
 		return err
 	}
 	for _, vv := range resp {
-		v := vv
-		err := func() error {
-			fname := fmt.Sprintf("b%08d.ssz", v.Block.Slot)
-			info, err := d.Stat(fname)
-			if err == nil {
-				if info.Size() > 0 {
-					fmt.Fprintf(os.Stderr, "skipping %s since non 0 file\n", fname)
-				}
-			}
-			bts, err := v.EncodeSSZ(nil)
-			if err != nil {
-				return err
-			}
-			fp, err := d.Create(fname)
-			if err != nil {
-				return err
-			}
-			defer fp.Close()
-			err = fp.Truncate(0)
-			if err != nil {
-				return err
-			}
-			_, err = fp.Write(bts)
-			if err != nil {
-				return err
-			}
-			return nil
-		}()
+		err := clpersist.SaveBlockWithConfig(d, vv, beaconConfig)
 		if err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+type Epochs struct {
+	chainCfg
+	outputFolder
+	withSentinel
+
+	FromEpoch uint64 `arg:"" name:"from"`
+	ToEpoch   uint64 `arg:"" name:"to"`
+}
+
+func (b *Epochs) Run(cctx *Context) error {
+	ctx := cctx.Context
+	s, err := b.withSentinel.connectSentinel()
+	if err != nil {
+		return err
+	}
+	beaconConfig, genesisConfig, err := b.configs()
+	if err != nil {
+		return err
+	}
+
+	d, err := openFs(b.Datadir, "caplin/beacon")
+	if err != nil {
+		return err
+	}
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+	rpcSource := clpersist.NewBeaconRpcSource(beacon)
+
+	err = beacon.SetStatus(
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisEpoch,
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisSlot)
+	if err != nil {
+		return err
+	}
+
+	ctx, cn := context.WithCancel(ctx)
+	egg, ctx := errgroup.WithContext(ctx)
+
+	totalEpochs := (b.ToEpoch - b.FromEpoch + 1)
+	pw := progress.NewWriter()
+	pw.SetTrackerLength(50)
+	pw.SetMessageWidth(24)
+	pw.SetStyle(progress.StyleDefault)
+	pw.SetUpdateFrequency(time.Millisecond * 100)
+	pw.SetTrackerPosition(progress.PositionRight)
+	pw.Style().Visibility.Percentage = true
+	pw.Style().Visibility.Speed = true
+	pw.Style().Visibility.Value = true
+	pw.Style().Visibility.ETA = true
+	pw.Style().Visibility.ETAOverall = false
+	pw.Style().Visibility.Tracker = true
+	pw.Style().Visibility.TrackerOverall = false
+	pw.Style().Visibility.SpeedOverall = true
+	pw.Style().Options.Separator = ""
+
+	go pw.Render()
+
+	total := int64(totalEpochs * beaconConfig.SlotsPerEpoch)
+	tk := &progress.Tracker{
+		Message: fmt.Sprintf("downloading %d blocks", total),
+		Total:   total,
+		Units:   progress.UnitsDefault,
+	}
+	pw.AppendTracker(tk)
+	tk.UpdateTotal(total)
+
+	egg.SetLimit(16)
+	defer cn()
+	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
+		ii := i
+		egg.Go(func() error {
+		RETRY:
+			blocks, err := rpcSource.GetRange(ctx, ii*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+			if err != nil {
+				log.Error("dl error", "err", err, "epoch", ii)
+				goto RETRY
+			}
+			for _, v := range blocks {
+				tk.Increment(1)
+				_, _ = d, v
+				err := clpersist.SaveBlockWithConfig(d, v.Data, beaconConfig)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	err = egg.Wait()
+	if err != nil {
+		return err
+	}
+	tk.MarkAsDone()
 	return nil
 }
 
