@@ -32,7 +32,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		return libcommon.Hash{}, err
 	}
 	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir, logger)
-	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to); err != nil {
+	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
 		return libcommon.Hash{}, err
 	}
 	var newRoot libcommon.Hash
@@ -72,7 +72,7 @@ func UnwindVerkleTrie(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ct
 		return err
 	}
 	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir, logger)
-	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to); err != nil {
+	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
 		return err
 	}
 	if _, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to); err != nil {
