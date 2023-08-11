@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/log/v3"
@@ -178,11 +179,14 @@ func (b *Epochs) Run(cctx *Context) error {
 	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
 		ii := i
 		egg.Go(func() error {
-		RETRY:
-			blocks, err := rpcSource.GetRange(ctx, ii*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
-			if err != nil {
-				log.Error("dl error", "err", err, "epoch", ii)
-				goto RETRY
+			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
+			for {
+				blocks, err = rpcSource.GetRange(ctx, ii*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				if err != nil {
+					log.Error("dl error", "err", err, "epoch", ii)
+				} else {
+					break
+				}
 			}
 			for _, v := range blocks {
 				tk.Increment(1)
