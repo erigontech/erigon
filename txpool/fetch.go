@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -31,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -473,7 +473,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 						return err
-					}); err != nil {
+					}); err != nil && !errors.Is(err, context.Canceled) {
 						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
@@ -486,7 +486,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 						return err
-					}); err != nil {
+					}); err != nil && !errors.Is(err, context.Canceled) {
 						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
@@ -497,7 +497,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		// unwrapped version here (we would need to re-wrap the tx with its blobs & kzg commitments).
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
 			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
-		}); err != nil {
+		}); err != nil && !errors.Is(err, context.Canceled) {
 			f.logger.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {
