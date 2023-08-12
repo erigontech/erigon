@@ -105,7 +105,6 @@ erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
-COMMANDS += erigon-el-mock
 COMMANDS += downloader
 COMMANDS += hack
 COMMANDS += integration
@@ -166,7 +165,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.53.3
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.54.0
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -214,7 +213,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.5
+GOLANG_CROSS_VERSION  ?= v1.20.7
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) error {
+func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64, tmpdir string) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleAccount"
 
@@ -59,7 +59,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 			}
 		}
 	}()
-	marker := NewVerkleMarker()
+	marker := NewVerkleMarker(tmpdir)
 	defer marker.Rollback()
 
 	for k, v, err := accountCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {

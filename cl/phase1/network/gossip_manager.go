@@ -80,7 +80,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 	var object ssz.Unmarshaler
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
-		object = &cltypes.SignedBeaconBlock{}
+		object = cltypes.NewSignedBeaconBlock(g.beaconConfig)
 		if err := object.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			g.sentinel.BanPeer(g.ctx, data.Peer)
 			l["at"] = "decoding block"
