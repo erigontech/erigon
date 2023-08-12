@@ -79,8 +79,13 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+
+		// nolint : staticcheck
 		stacks = append(stacks, stack)
+
 		ethbackends = append(ethbackends, ethBackend)
+
+		// nolint : staticcheck
 		enodes = append(enodes, nodeInfo.NodesInfo[0].Enode)
 	}
 
