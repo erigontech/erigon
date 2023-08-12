@@ -48,9 +48,7 @@ type withSentinel struct {
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
-	ctx, cn := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cn()
-	gconn, err := grpc.DialContext(ctx, w.Sentinel, grpc.WithInsecure())
+	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
