@@ -2,6 +2,7 @@ package clpersist
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 
@@ -41,6 +42,10 @@ func SaveBlockWithConfig(
 	}
 	defer fp.Close()
 	err = fp.Truncate(0)
+	if err != nil {
+		return err
+	}
+	_, err = fp.Seek(0, io.SeekStart)
 	if err != nil {
 		return err
 	}
