@@ -42,12 +42,8 @@ func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execu
 }
 
 // Chain Putters.
-func (s *ExecutionClientDirect) InsertHeaders(ctx context.Context, in *execution.InsertHeadersRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
-	return s.server.InsertHeaders(ctx, in)
-}
-
-func (s *ExecutionClientDirect) InsertBodies(ctx context.Context, in *execution.InsertBodiesRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
-	return s.server.InsertBodies(ctx, in)
+func (s *ExecutionClientDirect) InsertBlocks(ctx context.Context, in *execution.InsertBlocksRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
+	return s.server.InsertBlocks(ctx, in)
 }
 
 // Chain Validation and ForkChoice.
