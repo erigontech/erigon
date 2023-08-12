@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230811220952-eddd3b41b165
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230812055551-be4297fae2a1
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230810173239-feb52fae58d9
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -89,7 +89,7 @@ require (
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.12.0
 	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22
-	golang.org/x/net v0.14.0
+	golang.org/x/net v0.12.0
 	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.11.0
 	golang.org/x/time v0.3.0
@@ -100,7 +100,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.25.0
+	modernc.org/sqlite v1.23.1
 	pgregory.net/rapid v1.0.0
 )
 
@@ -260,9 +260,9 @@ require (
 	lukechampine.com/uint128 v1.3.0 // indirect
 	modernc.org/cc/v3 v3.40.0 // indirect
 	modernc.org/ccgo/v3 v3.16.13 // indirect
-	modernc.org/libc v1.24.1 // indirect
+	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
-	modernc.org/memory v1.6.0 // indirect
+	modernc.org/memory v1.5.0 // indirect
 	modernc.org/opt v0.1.3 // indirect
 	modernc.org/strutil v1.1.3 // indirect
 	modernc.org/token v1.1.0 // indirect
