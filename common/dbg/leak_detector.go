@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const FileCloseLogLevel = log.LvlTrace
+
 // LeakDetector - use it to find which resource was created but not closed (leaked)
 // periodically does print in logs resources which living longer than 1min with their creation stack trace
 // For example db transactions can call Add/Del from Begin/Commit/Rollback methods

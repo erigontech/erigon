@@ -261,15 +261,11 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	})
 	for _, item := range toDelete {
 		if item.decompressor != nil {
-			if err := item.decompressor.Close(); err != nil {
-				h.logger.Trace("close", "err", err, "file", item.index.FileName())
-			}
+			item.decompressor.Close()
 			item.decompressor = nil
 		}
 		if item.index != nil {
-			if err := item.index.Close(); err != nil {
-				h.logger.Trace("close", "err", err, "file", item.index.FileName())
-			}
+			item.index.Close()
 			item.index = nil
 		}
 		h.files.Delete(item)

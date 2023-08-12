@@ -84,9 +84,7 @@ func filesItemLess(i, j *filesItem) bool {
 }
 func (i *filesItem) closeFilesAndRemove() {
 	if i.decompressor != nil {
-		if err := i.decompressor.Close(); err != nil {
-			log.Trace("close", "err", err, "file", i.decompressor.FileName())
-		}
+		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
@@ -96,9 +94,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.decompressor = nil
 	}
 	if i.index != nil {
-		if err := i.index.Close(); err != nil {
-			log.Trace("close", "err", err, "file", i.index.FileName())
-		}
+		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.index.FilePath()); err != nil {
@@ -380,15 +376,11 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	})
 	for _, item := range toDelete {
 		if item.decompressor != nil {
-			if err := item.decompressor.Close(); err != nil {
-				d.logger.Trace("close", "err", err, "file", item.decompressor.FileName())
-			}
+			item.decompressor.Close()
 			item.decompressor = nil
 		}
 		if item.index != nil {
-			if err := item.index.Close(); err != nil {
-				d.logger.Trace("close", "err", err, "file", item.index.FileName())
-			}
+			item.index.Close()
 			item.index = nil
 		}
 		if item.bindex != nil {

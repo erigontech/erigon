@@ -228,9 +228,7 @@ func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx, logger log.Logger) {
 		i.file.src = nil
 	}
 	if i.bm != nil {
-		if err := i.bm.Close(); err != nil {
-			logger.Trace("close", "err", err, "file", i.bm.FileName())
-		}
+		i.bm.Close()
 		if err := os.Remove(i.bm.FilePath()); err != nil {
 			logger.Trace("os.Remove", "err", err, "file", i.bm.FileName())
 		}
