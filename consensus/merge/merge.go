@@ -265,8 +265,10 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
-	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
+func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom,
+) {
+	s.eth1Engine.Initialize(config, chain, header, state, syscall)
 	if chain.Config().IsCancun(header.Time) {
 		misc.ApplyBeaconRootEip4788(chain, header, state)
 	}

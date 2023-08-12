@@ -136,7 +136,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SysCallCustom)
+		state *state.IntraBlockState, syscall SysCallCustom)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.

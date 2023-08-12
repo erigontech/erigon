@@ -44,7 +44,7 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		err := <-errch
 		dur := time.Since(start)
 		if err != nil {
-			lg.Error("error executing clstage", "err", err)
+			lg.Debug("error executing clstage", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -52,7 +52,7 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		default:
 			args = s.ArgsFunc(ctx, cfg)
 			nextStage := currentStage.TransitionFunc(cfg, args, err)
-			logger.Info("clstage finish", "stage", stageName, "in", dur, "next", nextStage)
+			logger.Debug("clstage finish", "stage", stageName, "in", dur, "next", nextStage)
 			stageName = nextStage
 		}
 	}
