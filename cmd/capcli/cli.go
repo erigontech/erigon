@@ -112,8 +112,8 @@ type Epochs struct {
 	outputFolder
 	withSentinel
 
-	FromEpoch uint64 `arg:"" name:"from"`
-	ToEpoch   uint64 `arg:"" name:"to"`
+	FromEpoch int `arg:"" name:"from"`
+	ToEpoch   int `arg:"" name:"to"`
 }
 
 func (b *Epochs) Run(cctx *Context) error {
@@ -165,7 +165,7 @@ func (b *Epochs) Run(cctx *Context) error {
 
 	go pw.Render()
 
-	total := int64(totalEpochs * beaconConfig.SlotsPerEpoch)
+	total := int64(uint64(totalEpochs) * beaconConfig.SlotsPerEpoch)
 	tk := &progress.Tracker{
 		Message: fmt.Sprintf("downloading %d blocks", total),
 		Total:   total,
@@ -181,7 +181,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		egg.Go(func() error {
 			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
 			for {
-				blocks, err = rpcSource.GetRange(ctx, ii*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				blocks, err = rpcSource.GetRange(ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
 					log.Error("dl error", "err", err, "epoch", ii)
 				} else {
