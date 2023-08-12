@@ -1382,7 +1382,16 @@ func (c *Bor) CommitStates(
 	processStart := time.Now()
 	chainID := c.chainConfig.ChainID.String()
 
-	for _, eventRecord := range eventRecords {
+	newEvents := chain.Chain.BorEventsByBlock(header.Hash(), number)
+	if len(eventRecords) != len(newEvents) {
+		c.logger.Warn("Mismatch", "len(eventRecords)", len(eventRecords), "len(newEvents)", len(newEvents))
+	}
+
+	for i, eventRecord := range eventRecords {
+		var newEvent rlp.RawValue
+		if i < len(newEvents) {
+			newEvent = newEvents[i]
+		}
 		if eventRecord.ID <= lastStateID {
 			continue
 		}
@@ -1392,7 +1401,7 @@ func (c *Bor) CommitStates(
 			break
 		}
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
+		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall, i, newEvent); err != nil {
 			return err
 		}
 

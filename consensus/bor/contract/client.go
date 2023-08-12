@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"bytes"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -56,7 +58,7 @@ func NewGenesisContractsClient(
 	}
 }
 
-func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
+func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall, i int, newEvent rlp.RawValue) error {
 	eventRecord := event.BuildEventRecord()
 
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
@@ -72,6 +74,9 @@ func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, 
 	if err != nil {
 		gc.logger.Error("Unable to pack tx for commitState", "err", err)
 		return err
+	}
+	if !bytes.Equal(data, newEvent) {
+		gc.logger.Warn("Mismatch", "data", fmt.Sprintf("%x", data), "newEvent", fmt.Sprintf("%x", newEvent))
 	}
 
 	gc.logger.Info("→ committing new state", "eventRecord", event.String())
