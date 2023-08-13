@@ -204,6 +204,15 @@ Loop:
 			continue
 		}
 
+		var header *types.Header
+		if header, err = cfg.blockReader.Header(ctx, tx, blockHash, blockNumber); err != nil {
+			return err
+		}
+		if header == nil {
+			logger.Warn(fmt.Sprintf("[%s] senders stage can't find header", logPrefix), "num", blockNumber, "hash", blockHash)
+			continue
+		}
+
 		var body *types.Body
 		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 			return err
@@ -222,7 +231,13 @@ Loop:
 				}
 				break Loop
 			}
-		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, blockHash: blockHash, index: int(blockNumber - s.BlockNumber - 1)}:
+		case jobs <- &senderRecoveryJob{
+			body:        body,
+			key:         k,
+			blockNumber: blockNumber,
+			blockTime:   header.Time,
+			blockHash:   blockHash,
+			index:       int(blockNumber - s.BlockNumber - 1)}:
 		}
 	}
 
@@ -284,6 +299,7 @@ type senderRecoveryJob struct {
 	senders     []byte
 	blockHash   libcommon.Hash
 	blockNumber uint64
+	blockTime   uint64
 	index       int
 	err         error
 }
@@ -307,8 +323,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		body := job.body
-		blockTime := uint64(0) // TODO(yperbasis) proper timestamp
-		signer := types.MakeSigner(config, job.blockNumber, blockTime)
+		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
