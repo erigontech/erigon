@@ -60,10 +60,6 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	// Commitments []types.KZGCommitment `json:"commitments" gencodec:"required"`
-	// Proofs      []types.KZGProof      `json:"proofs"      gencodec:"required"`
-	// Blobs       []types.Blob          `json:"blobs"       gencodec:"required"`
-
 	Commitments []hexutility.Bytes `json:"commitments" gencodec:"required"`
 	Proofs      []hexutility.Bytes `json:"proofs"      gencodec:"required"`
 	Blobs       []hexutility.Bytes
