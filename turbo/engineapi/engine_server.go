@@ -171,7 +171,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		m3, _ := header.MarshalJSON()
@@ -203,11 +202,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if version >= clparams.DenebVersion {
 		actualBlobHashes := []libcommon.Hash{}
-		
+
 		for _, tx := range transactions {
 			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
 		}
-		if(expectedBlobHashes == nil) {
+		if expectedBlobHashes == nil {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
