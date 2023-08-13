@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -998,16 +999,16 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		}
 		c1, err := tx.Cursor(kv.BorEvents)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer c1.Close()
 		binary.BigEndian.PutUint64(buf[:], startEventId)
-		for k, v, err = c1.Seek()
-			eventRlp, err := tx.GetOne(kv.BorEvents, v)
-			if err != nil {
-				return nil, err
+		for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
+			eventId := binary.BigEndian.Uint64(k)
+			if eventId >= endEventId {
+				break
 			}
-			result = append(result, rlp.RawValue(common.Copy(eventRlp)))
+			result = append(result, rlp.RawValue(common.Copy(v)))
 		}
 		if err != nil {
 			return nil, err
@@ -1019,12 +1020,12 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	defer view.Close()
 	segments := view.Events()
 	var buf []byte
+	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxBorTxnHash == nil {
 			continue
 		}
-
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(borTxHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
