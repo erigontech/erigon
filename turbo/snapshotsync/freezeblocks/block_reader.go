@@ -990,5 +990,30 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	if err != nil {
 		return nil, err
 	}
+	if len(result) > 0 {
+		return result, nil
+	}
+	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Events()
+	var buf []byte
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.IdxBorTxnHash == nil {
+			continue
+		}
+
+		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
+		blockEventId := reader.Lookup(borTxHash[:])
+		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		gg := sn.seg.MakeGetter()
+		gg.Reset(offset)
+		if !gg.MatchPrefix(borTxHash[:]) {
+			continue
+		}
+		buf, _ = gg.Next(buf[:0])
+		result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum:])))
+	}
 	return result, nil
 }
