@@ -159,6 +159,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
+		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "nil cancun header field in pre-cancun V3 call"}
+		}
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
@@ -166,9 +169,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
-		if header.BlobGasUsed == nil || header.ExcessBlobGas == nil || header.ParentBeaconBlockRoot == nil {
-			return nil, &rpc.InvalidParamsError{Message: "nil cancun header field in pre-cancun V3 call"}
-		}
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
