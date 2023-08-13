@@ -202,7 +202,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if version >= clparams.DenebVersion {
 		actualBlobHashes := []libcommon.Hash{}
-
 		for _, tx := range transactions {
 			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
 		}
