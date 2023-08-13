@@ -115,6 +115,8 @@ type Epochs struct {
 	outputFolder
 	withSentinel
 
+	Concurrency int `help:"number of epochs to ask concurrently for" name:"concurrency" short:"c" default:"4"`
+
 	FromEpoch int `arg:"" name:"from" default:"0"`
 	ToEpoch   int `arg:"" name:"to" default:"-1"`
 }
@@ -181,7 +183,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	pw.AppendTracker(tk)
 	tk.UpdateTotal(total)
 
-	egg.SetLimit(16)
+	egg.SetLimit(b.Concurrency)
 	defer cn()
 	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
 		ii := i
