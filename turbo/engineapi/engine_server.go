@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
@@ -158,6 +159,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
+		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
+		}
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
@@ -569,8 +573,21 @@ func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.By
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
+	payloadV3, err := e.getPayload(ctx, decodedPayloadId)
+	transactions := payloadV3.ExecutionPayload.Transactions
+	for i, transaction := range transactions {
+		if transaction[0] == 0x03 {
+			bWtx := types.BlobTxWrapper{}
+			rlpStream := rlp.NewStream(bytes.NewReader(transaction[1:]), 0)
+			bWtx.DecodeRLP(rlpStream)
 
-	return e.getPayload(ctx, decodedPayloadId)
+			encodedTx := bytes.Buffer{}
+			bWtx.Tx.EncodeRLP(&encodedTx)
+			transactions[i] = encodedTx.Bytes()
+		}
+	}
+	return payloadV3, err
+	// return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {

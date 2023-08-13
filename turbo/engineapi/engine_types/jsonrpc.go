@@ -83,9 +83,10 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue       *hexutil.Big      `json:"blockValue"`
-	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle"`
+	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }
