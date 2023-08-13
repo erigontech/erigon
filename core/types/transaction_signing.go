@@ -254,10 +254,9 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
 	case *BlobTx:
-		// TODO: Fix the commented out code below
-		// if !sg.blob {
-		// 	return libcommon.Address{}, fmt.Errorf("blob tx is not supported by signer %s", sg)
-		// }
+		if !sg.blob {
+			return libcommon.Address{}, fmt.Errorf("blob tx is not supported by signer %s", sg)
+		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
 				return libcommon.Address{}, ErrInvalidChainId
