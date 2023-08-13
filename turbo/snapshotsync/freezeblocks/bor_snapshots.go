@@ -198,33 +198,60 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 	return nil
 }
 
+func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common2.Hash, collect func([]byte) error) error {
+	var blockNumBuf [8]byte
+	var eventIdBuf [8]byte
+	txnHash := types.ComputeBorTxHash(blockNum, blockHash)
+	binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
+	for eventId := startEventId; eventId < endEventId; eventId++ {
+		binary.BigEndian.PutUint64(eventIdBuf[:], eventId)
+		event, err := tx.GetOne(kv.BorEvents, eventIdBuf[:])
+		if err != nil {
+			return err
+		}
+		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum)
+		copy(snapshotRecord, txnHash[:])
+		copy(snapshotRecord[length.Hash:], blockNumBuf[:])
+		copy(snapshotRecord[length.Hash+length.BlockNum:], event)
+		if err := collect(snapshotRecord); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DumpBorEvents - [from, to)
 func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	from := hexutility.EncodeTs(blockFrom)
+	var first bool = true
+	var prevBlockNum uint64
+	var startEventId uint64
+	var lastEventId uint64
 	if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(blockNumBytes)
+		if first {
+			startEventId = binary.BigEndian.Uint64(eventIdBytes)
+			first = false
+			prevBlockNum = blockNum
+		} else if blockNum != prevBlockNum {
+			endEventId := binary.BigEndian.Uint64(eventIdBytes)
+			blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
+			if e != nil {
+				return false, e
+			}
+			if e := dumpBorEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
+				return false, e
+			}
+			startEventId = endEventId
+			prevBlockNum = blockNum
+		}
 		if blockNum >= blockTo {
 			return false, nil
 		}
-		event, e := tx.GetOne(kv.BorEvents, eventIdBytes)
-		if e != nil {
-			return false, e
-		}
-		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum)
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return false, err
-		}
-		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
-		copy(snapshotRecord, txnHash[:])
-		copy(snapshotRecord[length.Hash:], blockNumBytes)
-		copy(snapshotRecord[length.Hash+length.BlockNum:], event)
-		if err := collect(snapshotRecord); err != nil {
-			return false, err
-		}
+		lastEventId = binary.BigEndian.Uint64(eventIdBytes)
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
@@ -241,6 +268,17 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 		return true, nil
 	}); err != nil {
 		return err
+	}
+	if lastEventId > startEventId {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
+			if e != nil {
+				return e
+			}
+			return dumpBorEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
