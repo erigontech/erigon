@@ -307,6 +307,9 @@ RETRY:
 			}
 			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
 		}
+		if first {
+			first = false
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
