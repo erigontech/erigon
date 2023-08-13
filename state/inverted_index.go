@@ -122,10 +122,10 @@ func NewInvertedIndex(
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
-	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
-	if err != nil {
-		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
-	}
+	//ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	//if err != nil {
+	//	return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
+	//}
 	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
