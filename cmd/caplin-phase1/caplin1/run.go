@@ -88,7 +88,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, dataDirFs)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
+	logger.Info("[caplin] starting clstages loop")
 	err = sync.StartWithStage(ctx, "WaitForPeers", logger, stageCfg)
+	logger.Info("[caplin] exiting clstages loop")
 	if err != nil {
 		return err
 	}
