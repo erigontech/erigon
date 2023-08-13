@@ -563,19 +563,6 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	return parsedTx, nil
 }
 
-func encodeDecodeWrappedBinary(tx *BlobTxWrapper) (*BlobTxWrapper, error) {
-	var buf bytes.Buffer
-	var err error
-	if err = tx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("rlp encoding failed: %w", err)
-	}
-	var parsedTx Transaction
-	if parsedTx, err = UnmarshalWrappedTransactionFromBinary(buf.Bytes()); err != nil {
-		return nil, fmt.Errorf("rlp decoding failed: %w", err)
-	}
-	return parsedTx.(*BlobTxWrapper), nil
-}
-
 func assertEqual(orig Transaction, cpy Transaction) error {
 	// compare nonce, price, gaslimit, recipient, amount, payload, V, R, S
 	if want, got := orig.Hash(), cpy.Hash(); want != got {
@@ -686,12 +673,9 @@ func newRandBlobTx() *BlobTx {
 			To:    randAddr(),
 			Value: uint256.NewInt(rand.Uint64()),
 			Data:  randData(),
-			// V:     *uint256.NewInt(rand.Uint64()),
-			// R:     *uint256.NewInt(rand.Uint64()),
-			// S:     *uint256.NewInt(rand.Uint64()),
-			V: *uint256.NewInt(0),
-			R: *uint256.NewInt(rand.Uint64()),
-			S: *uint256.NewInt(rand.Uint64()),
+			V:     *uint256.NewInt(0),
+			R:     *uint256.NewInt(rand.Uint64()),
+			S:     *uint256.NewInt(rand.Uint64()),
 		},
 		ChainID:    uint256.NewInt(rand.Uint64()),
 		Tip:        uint256.NewInt(rand.Uint64()),
@@ -699,7 +683,7 @@ func newRandBlobTx() *BlobTx {
 		AccessList: randAccessList(),
 	},
 		MaxFeePerBlobGas:    uint256.NewInt(rand.Uint64()),
-		BlobVersionedHashes: randHashes(randIntInRange(0, 6)),
+		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
 }
@@ -791,15 +775,8 @@ func populateBlobTxs() {
 }
 
 func populateBlobWrapperTxs() {
-	for i := 0; i < N-1; i++ {
+	for i := 0; i < N; i++ {
 		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
-	}
-
-	dummyBlobWrapperTxs[N-1] = &BlobTxWrapper{
-		Tx:          *newRandBlobTx(),
-		Commitments: nil,
-		Blobs:       nil,
-		Proofs:      nil,
 	}
 }
 
@@ -825,38 +802,5 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 		if err = assertEqual(dummyBlobTxs[i], tx); err != nil {
 			t.Fatal(err)
 		}
-
-	}
-}
-
-func TestBlobTxWrappedEncodeDecode(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-	populateBlobWrapperTxs()
-	for i := 0; i < N; i++ {
-		tx, err := encodeDecodeWrappedBinary(dummyBlobWrapperTxs[i])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := assertEqual(dummyBlobWrapperTxs[i], tx); err != nil {
-			t.Fatal(err)
-		}
-		if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], tx); err != nil {
-			t.Fatal(err)
-		}
-
-		// JSON
-		// fails in ValidateBlobTransactionWrapper()
-		// error during proof verification: invalid infinity point encoding
-
-		// jtx, err := encodeDecodeJSON(dummyBlobWrapperTxs[i])
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
-		// if err = assertEqual(dummyBlobWrapperTxs[i], jtx); err != nil {
-		// 	t.Fatal(err)
-		// }
-		// if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], jtx.(*BlobTxWrapper)); err != nil {
-		// 	t.Fatal(err)
-		// }
 	}
 }

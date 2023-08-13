@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
@@ -566,28 +565,13 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
-
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
-	payloadV3, err := e.getPayload(ctx, decodedPayloadId)
-	transactions := payloadV3.ExecutionPayload.Transactions
-	for i, transaction := range transactions {
-		if transaction[0] == 0x03 {
-			bWtx := types.BlobTxWrapper{}
-			rlpStream := rlp.NewStream(bytes.NewReader(transaction[1:]), 0)
-			bWtx.DecodeRLP(rlpStream)
-
-			encodedTx := bytes.Buffer{}
-			bWtx.Tx.EncodeRLP(&encodedTx)
-			transactions[i] = encodedTx.Bytes()
-		}
-	}
-	return payloadV3, err
-	// return e.getPayload(ctx, decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
