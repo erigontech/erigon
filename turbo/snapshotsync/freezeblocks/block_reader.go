@@ -953,7 +953,6 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		if sn.IdxBorTxnHash == nil {
 			continue
 		}
-
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
@@ -971,26 +970,48 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	c, err := tx.Cursor(kv.BorEventNums)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	var k, v []byte
-	var blockNumBytes [8]byte
-	binary.BigEndian.PutUint64(blockNumBytes[:], blockHeight)
-	result := []rlp.RawValue{}
-	for k, v, err = c.Seek(blockNumBytes[:]); err == nil && bytes.Equal(k, blockNumBytes[:]); k, v, err = c.Next() {
-		eventRlp, err := tx.GetOne(kv.BorEvents, v)
+	if blockHeight >= r.FrozenBorBlocks() {
+		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, rlp.RawValue(common.Copy(eventRlp)))
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(result) > 0 {
+		defer c.Close()
+		var k, v []byte
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], blockHeight)
+		result := []rlp.RawValue{}
+		if k, v, err = c.Seek(buf[:]); err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(k, buf[:]) {
+			return result, nil
+		}
+		startEventId := binary.BigEndian.Uint64(v)
+		var endEventId uint64
+		if k, v, err = c.Next(); err != nil {
+			return nil, err
+		}
+		if k == nil {
+			endEventId = math.MaxUint64
+		} else {
+			endEventId = binary.BigEndian.Uint64(v)
+		}
+		c1, err := tx.Cursor(kv.BorEvents)
+		if err != nil {
+			return err
+		}
+		defer c1.Close()
+		binary.BigEndian.PutUint64(buf[:], startEventId)
+		for k, v, err = c1.Seek()
+			eventRlp, err := tx.GetOne(kv.BorEvents, v)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, rlp.RawValue(common.Copy(eventRlp)))
+		}
+		if err != nil {
+			return nil, err
+		}
 		return result, nil
 	}
 	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
