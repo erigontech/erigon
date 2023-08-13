@@ -60,9 +60,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	Commitments []types.KZGCommitment `json:"commitments" gencodec:"required"`
-	Proofs      []types.KZGProof      `json:"proofs"      gencodec:"required"`
-	Blobs       []types.Blob          `json:"blobs"       gencodec:"required"`
+	Commitments []hexutility.Bytes `json:"commitments" gencodec:"required"`
+	Proofs      []hexutility.Bytes `json:"proofs"      gencodec:"required"`
+	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -83,9 +83,10 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue       *hexutil.Big      `json:"blockValue"      `
-	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle"`
+	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }
@@ -193,18 +194,18 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 		return nil
 	}
 	res := &BlobsBundleV1{
-		Commitments: make([]types.KZGCommitment, len(bundle.Commitments)),
-		Proofs:      make([]types.KZGProof, len(bundle.Proofs)),
-		Blobs:       make([]types.Blob, len(bundle.Blobs)),
+		Commitments: make([]hexutility.Bytes, len(bundle.Commitments)),
+		Proofs:      make([]hexutility.Bytes, len(bundle.Proofs)),
+		Blobs:       make([]hexutility.Bytes, len(bundle.Blobs)),
 	}
 	for i, commitment := range bundle.Commitments {
-		copy(res.Commitments[i][:], commitment)
+		res.Commitments[i] = hexutility.Bytes(commitment)
 	}
 	for i, proof := range bundle.Proofs {
-		copy(res.Proofs[i][:], proof)
+		res.Proofs[i] = hexutility.Bytes(proof)
 	}
 	for i, blob := range bundle.Blobs {
-		copy(res.Blobs[i][:], blob)
+		res.Blobs[i] = hexutility.Bytes(blob)
 	}
 	return res
 }

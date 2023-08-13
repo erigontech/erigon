@@ -1594,18 +1594,19 @@ func CopyTxs(in Transactions) Transactions {
 	if err != nil {
 		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
 	}
-	out := make([]Transaction, len(in))
+	out, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
 	for i, tx := range in {
-		if _, ok := tx.(*BlobTxWrapper); ok {
-			out[i], err = UnmarshalWrappedTransactionFromBinary(transactionsData[i])
-		} else {
-			out[i], err = UnmarshalTransactionFromBinary(transactionsData[i])
-		}
-		if err != nil {
-			panic(fmt.Errorf("DecodeTransactions failed: %w", err))
-		}
-		if s, ok := in[i].GetSender(); ok {
-			out[i].SetSender(s)
+		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
+			blobTx := out[i].(*BlobTx)
+			out[i] = &BlobTxWrapper{
+				Tx:          *blobTx,
+				Commitments: txWrapper.Commitments.copy(),
+				Blobs:       txWrapper.Blobs.copy(),
+				Proofs:      txWrapper.Proofs.copy(),
+			}
 		}
 	}
 	return out
