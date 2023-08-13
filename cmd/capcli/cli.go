@@ -220,7 +220,7 @@ type Migrate struct {
 	outputFolder
 	chainCfg
 
-	State  string   `arg:"" help:"state to start from (can be url to checkpoint or a  file)"`
+	State  string   `arg:"" help:"state to start from (file or later url to checkpoint)"`
 	Blocks []string `arg:"" name:"blocks" help:"blocks to migrate, in order" type:"path"`
 }
 
