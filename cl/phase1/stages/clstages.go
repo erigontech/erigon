@@ -329,7 +329,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					logger.Info("Imported chain segment", "hash", headRoot, "slot", headSlot)
+					logger.Debug("Imported chain segment", "hash", headRoot, "slot", headSlot)
 					return nil
 				},
 			},
