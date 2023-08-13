@@ -1009,11 +1009,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
-		if !gg.MatchPrefix(borTxHash[:]) {
-			continue
+		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
+			buf, _ = gg.Next(buf[:0])
+			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum:])))
 		}
-		buf, _ = gg.Next(buf[:0])
-		result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum:])))
 	}
 	return result, nil
 }
