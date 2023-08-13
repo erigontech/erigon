@@ -775,7 +775,8 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 				log.Error(err.Error())
 			}
 			fields["blobGasPrice"] = blobGasPrice
-			fields["blobGasUsed"] = misc.GetBlobGasUsed(numBlobs)
+			blobGasUsed := misc.GetBlobGasUsed(numBlobs)
+			fields["blobGasUsed"] = hexutil.Uint64(blobGasUsed)
 		}
 	}
 	return fields
