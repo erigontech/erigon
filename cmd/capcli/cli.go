@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
@@ -79,7 +80,6 @@ func (b *Blocks) Run(ctx *Context) error {
 	}
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
 		beaconConfig.GenesisEpoch,
@@ -88,6 +88,11 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+
+	if b.ToBlock < 0 {
+		b.ToBlock = int(utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot))
+	}
+
 	resp, _, err := beacon.SendBeaconBlocksByRangeReq(ctx, uint64(b.FromBlock), uint64(b.ToBlock))
 	if err != nil {
 		return fmt.Errorf("error get beacon blocks: %w", err)
@@ -110,8 +115,8 @@ type Epochs struct {
 	outputFolder
 	withSentinel
 
-	FromEpoch int `arg:"" name:"from"`
-	ToEpoch   int `arg:"" name:"to"`
+	FromEpoch int `arg:"" name:"from" default:"0"`
+	ToEpoch   int `arg:"" name:"to" default:"-1"`
 }
 
 func (b *Epochs) Run(cctx *Context) error {
@@ -139,6 +144,10 @@ func (b *Epochs) Run(cctx *Context) error {
 		beaconConfig.GenesisSlot)
 	if err != nil {
 		return err
+	}
+
+	if b.ToEpoch < 0 {
+		b.ToEpoch = int(utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch))
 	}
 
 	ctx, cn := context.WithCancel(ctx)
