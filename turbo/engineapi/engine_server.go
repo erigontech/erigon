@@ -178,6 +178,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
+		m3, _ := header.MarshalJSON()
+		fmt.Println(string(m3))
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -731,7 +733,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(block); err != nil {
 		return nil, err
 	}
 

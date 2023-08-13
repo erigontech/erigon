@@ -163,7 +163,11 @@ func (m *Migrate) getBlock(ctx *Context, block string) (*cltypes.SignedBeaconBlo
 	if err != nil {
 		return nil, err
 	}
-	blk := &cltypes.SignedBeaconBlock{}
+	b, _, err := m.chainCfg.configs()
+	if err != nil {
+		return nil, err
+	}
+	blk := cltypes.NewSignedBeaconBlock(b)
 	err = blk.DecodeSSZ(bts, 0)
 	if err != nil {
 		return nil, err

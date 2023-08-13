@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -106,6 +107,47 @@ func (e StringifiedError) MarshalJSON() ([]byte, error) {
 
 func (e StringifiedError) Error() error {
 	return e.err
+}
+
+func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPayload {
+	header := payload.Header
+	body := payload.Body
+
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+
+	// Convert slice of hexutility.Bytes to a slice of slice of bytes
+	transactions := make([]hexutility.Bytes, len(body.Transactions))
+	for i, transaction := range body.Transactions {
+		transactions[i] = transaction
+	}
+
+	res := &ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(header.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(header.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
+		LogsBloom:     bloom[:],
+		PrevRandao:    gointerfaces.ConvertH256ToHash(header.PrevRandao),
+		BlockNumber:   hexutil.Uint64(header.BlockNumber),
+		GasLimit:      hexutil.Uint64(header.GasLimit),
+		GasUsed:       hexutil.Uint64(header.GasUsed),
+		Timestamp:     hexutil.Uint64(header.Timestamp),
+		ExtraData:     header.ExtraData,
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
+		Transactions:  transactions,
+	}
+	if header.WithdrawalHash != nil {
+		res.Withdrawals = ConvertWithdrawalsFromRpc(body.Withdrawals)
+	}
+	if header.BlobGasUsed != nil {
+		blobGasUsed := *header.BlobGasUsed
+		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
+		excessBlobGas := *header.ExcessBlobGas
+		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	return res
 }
 
 func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {

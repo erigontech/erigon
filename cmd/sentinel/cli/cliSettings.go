@@ -115,7 +115,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
 
 	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
-	fmt.Println(cfg.LogLvl)
 	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}
@@ -125,7 +124,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
 	} else {
 		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
-		fmt.Println(cfg.CheckpointUri)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]

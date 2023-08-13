@@ -37,11 +37,11 @@ types such as uint64, []byte, and objects that implement the SizedObjectSSZ inte
 It handles both static (fixed size) and dynamic (variable size) objects based on their respective decoding methods and offsets.
 */
 func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
-	defer func() {
-		if err2 := recover(); err2 != nil {
-			err = fmt.Errorf("panic while decoding: %v", err2)
-		}
-	}()
+	// defer func() {
+	// 	if err2 := recover(); err2 != nil {
+	// 		err = fmt.Errorf("panic while decoding: %v", err2)
+	// 	}
+	// }()
 
 	position := 0
 	offsets := []int{}

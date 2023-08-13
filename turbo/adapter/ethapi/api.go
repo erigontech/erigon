@@ -292,6 +292,9 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ExcessBlobGas != nil {
 		result["excessBlobGas"] = (*hexutil.Uint64)(head.ExcessBlobGas)
 	}
+	if head.ParentBeaconBlockRoot != nil {
+		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
+	}
 
 	return result
 }
