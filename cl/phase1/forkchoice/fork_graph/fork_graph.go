@@ -134,7 +134,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, InvalidBlock, nil
 	}
 
-	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, false)
+	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, nil)
 	if err != nil {
 		return nil, InvalidBlock, err
 	}
@@ -209,7 +209,7 @@ func (f *ForkGraph) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlo
 	return obj, has
 }
 
-func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, bool, error) {
+func (f *ForkGraph) GetState(blockRoot libcommon.Hash, recipient *state.CachingBeaconState) (*state.CachingBeaconState, bool, error) {
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
@@ -235,25 +235,39 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		currentIteratorRoot = block.Block.ParentRoot
 	}
 
-	var copyReferencedState *state.CachingBeaconState
+	copyReferencedState := recipient
 	didLongRecconnection := currentIteratorRoot == reconnectionRootLong && reconnectionRootLong != reconnectionRootShort
 	if f.currentStateBlockRoot == blockRoot {
-		if alwaysCopy {
-			s, err := f.currentState.Copy()
-			return s, didLongRecconnection, err
+		if recipient != nil {
+			err := f.currentState.CopyInto(recipient)
+			return recipient, didLongRecconnection, err
 		}
 		return f.currentState, didLongRecconnection, nil
 	}
 	// Take a copy to the reference state.
 	if currentIteratorRoot == reconnectionRootLong {
-		copyReferencedState, err = f.currentReferenceState.Copy()
-		if err != nil {
-			return nil, true, err
+		if copyReferencedState != nil {
+			copyReferencedState, err = f.currentReferenceState.Copy()
+			if err != nil {
+				return nil, true, err
+			}
+		} else {
+			err = f.currentReferenceState.CopyInto(copyReferencedState)
+			if err != nil {
+				return nil, true, err
+			}
 		}
 	} else {
-		copyReferencedState, err = f.nextReferenceState.Copy()
-		if err != nil {
-			return nil, false, err
+		if copyReferencedState != nil {
+			copyReferencedState, err = f.nextReferenceState.Copy()
+			if err != nil {
+				return nil, false, err
+			}
+		} else {
+			err = f.nextReferenceState.CopyInto(copyReferencedState)
+			if err != nil {
+				return nil, true, err
+			}
 		}
 	}
 
