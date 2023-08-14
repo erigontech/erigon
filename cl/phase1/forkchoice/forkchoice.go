@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -41,6 +42,9 @@ type ForkChoiceStore struct {
 	engine execution_client.ExecutionEngine
 	// freezer
 	recorder freezer.Freezer
+
+	// zero alloc checkpoint states production
+	checkpointDummyState *state.CachingBeaconState
 }
 
 type LatestMessage struct {
@@ -66,6 +70,10 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	if err != nil {
 		return nil, err
 	}
+	checkpointDummyState, err := anchorState.Copy()
+	if err != nil {
+		return nil, err
+	}
 	return &ForkChoiceStore{
 		highestSeen:                   anchorState.Slot(),
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
@@ -80,6 +88,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		eth2Roots:                     eth2Roots,
 		engine:                        engine,
 		recorder:                      recorder,
+		checkpointDummyState:          checkpointDummyState,
 	}, nil
 }
 
