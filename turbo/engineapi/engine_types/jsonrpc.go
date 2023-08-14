@@ -199,13 +199,13 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 		Blobs:       make([]hexutility.Bytes, len(bundle.Blobs)),
 	}
 	for i, commitment := range bundle.Commitments {
-		res.Commitments[i] = hexutility.Bytes(commitment)
+		copy(res.Commitments[i][:], hexutility.Bytes(commitment))
 	}
 	for i, proof := range bundle.Proofs {
-		res.Proofs[i] = hexutility.Bytes(proof)
+		copy(res.Proofs[i][:], hexutility.Bytes(proof))
 	}
 	for i, blob := range bundle.Blobs {
-		res.Blobs[i] = hexutility.Bytes(blob)
+		copy(res.Blobs[i][:], hexutility.Bytes(blob))
 	}
 	return res
 }
