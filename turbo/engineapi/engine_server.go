@@ -171,14 +171,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
-	}
-
-	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
-		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
-	}
-
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		m3, _ := header.MarshalJSON()
@@ -212,6 +204,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		actualBlobHashes := []libcommon.Hash{}
 		for _, tx := range transactions {
 			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if expectedBlobHashes == nil {
+			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
 			s.logger.Warn("[NewPayload] mismatch in blob hashes",
