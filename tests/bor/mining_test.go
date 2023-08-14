@@ -86,7 +86,7 @@ func TestMiningBenchmark(t *testing.T) {
 		ethbackends = append(ethbackends, ethBackend)
 
 		// nolint : staticcheck
-		enodes = append(enodes, nodeInfo.NodesInfo[0].Enode)
+		enodes = append(enodes, nodeInfo.NodesInfo[i].Enode)
 	}
 
 	// nonce starts from 0 because have no txs yet

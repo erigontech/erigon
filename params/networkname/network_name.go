@@ -17,11 +17,9 @@ var All = []string{
 	MainnetChainName,
 	SepoliaChainName,
 	GoerliChainName,
-	DevChainName,
 	MumbaiChainName,
 	BorMainnetChainName,
 	BorDevnetChainName,
-	BorE2ETestChain2ValName,
 	GnosisChainName,
 	ChiadoChainName,
 }

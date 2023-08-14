@@ -69,7 +69,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
-	if NetworkNameVals[c.chainConfig.ChainName] != nil {
+	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
@@ -83,7 +83,7 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 
 func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
-	if NetworkNameVals[c.chainConfig.ChainName] != nil {
+	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
