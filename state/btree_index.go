@@ -367,8 +367,6 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64, g ArchiveGetter) (k []byte, di ui
 		cmp, k, err = a.keyCmp(x, di, g)
 		a.naccess++
 
-		//i++
-		//cmp := bytes.Compare(k, x)
 		switch {
 		case err != nil:
 			if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -951,7 +949,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	}
 
 	var res []byte
-	res, _ = b.getter.Next(res[:0])
+	res, _ = g.Next(res[:0])
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
