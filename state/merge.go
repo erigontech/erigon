@@ -665,7 +665,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
-	if valuesIn.bindex, err = OpenBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, true); err != nil {
+	if valuesIn.bindex, err = OpenBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compressValues); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s btindex2 [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 

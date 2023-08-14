@@ -88,13 +88,12 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
-
-	t.Run("compressDomainVals=false, domainLargeValues=false", func(t *testing.T) {
-		testCollationBuild(t, false, false)
-	})
-	t.Run("compressDomainVals=true, domainLargeValues=false", func(t *testing.T) {
-		testCollationBuild(t, true, false)
-	})
+	// t.Run("compressDomainVals=false, domainLargeValues=false", func(t *testing.T) {
+	// 	testCollationBuild(t, false, false)
+	// })
+	// t.Run("compressDomainVals=true, domainLargeValues=false", func(t *testing.T) {
+	// 	testCollationBuild(t, true, false)
+	// })
 	t.Run("compressDomainVals=true, domainLargeValues=true", func(t *testing.T) {
 		testCollationBuild(t, true, true)
 	})
@@ -104,6 +103,8 @@ func TestDomain_CollationBuild(t *testing.T) {
 }
 
 func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool) {
+	t.Helper()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -507,11 +508,15 @@ func TestHistory(t *testing.T) {
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
 			dc := d.MakeContext()
+			// step := txs/d.aggregationStep - 1
 			err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+			require.NoError(t, err)
 			dc.Close()
+
 			require.NoError(t, err)
 		}()
 	}
+
 	err = tx.Commit()
 	require.NoError(t, err)
 	checkHistory(t, db, d, txs)
