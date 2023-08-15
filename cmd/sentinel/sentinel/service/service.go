@@ -160,13 +160,16 @@ func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.Requ
 		peer.MarkUsed()
 		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
 		if err != nil {
+			if strings.Contains(err.Error(), "protocols not supported") {
+				peer.Ban("peer does not support protocol")
+			}
 			return
 		}
 		if isError > 3 {
 			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
-			peer.Penalize()
 		}
 		if isError != 0 {
+			peer.Penalize()
 			return
 		}
 		ans := &sentinelrpc.ResponseData{
