@@ -42,7 +42,7 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				continue
 			}
 			if r.Bor {
-				for _, t := range []snaptype.Type{snaptype.BorEvents} {
+				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
@@ -180,11 +180,13 @@ Loop:
 			if stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				if !blockReader.FreezingCfg().Verify { // will verify after loop
-					if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-						return err
+				/*
+					if !blockReader.FreezingCfg().Verify { // will verify after loop
+						if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+							return err
+						}
 					}
-				}
+				*/
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {

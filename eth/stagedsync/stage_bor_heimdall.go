@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -17,6 +18,11 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+)
+
+const (
+	spanLength    = 6400 // Number of blocks in a span
+	zerothSpanEnd = 255  // End block of 0th span
 )
 
 type BorHeimdallCfg struct {
@@ -88,8 +94,12 @@ func BorHeimdallForward(
 	}
 	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
-			//cx := statefull.ChainContext{Chain: chain, Bor: c}
 			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
+				return err
+			}
+		}
+		if blockNum == 0 || (blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd-1)%spanLength) == 0) {
+			if err = fetchAndWriteSpans(ctx, blockNum, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
@@ -215,6 +225,35 @@ func fetchAndWriteBorEvents(
 	return lastEventId, nil
 }
 
+func fetchAndWriteSpans(
+	ctx context.Context,
+	blockNum uint64,
+	tx kv.RwTx,
+	heimdallClient bor.IHeimdallClient,
+	logPrefix string,
+	logger log.Logger,
+) error {
+	var spanID uint64
+	if blockNum > zerothSpanEnd {
+		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
+	}
+	logger.Info(fmt.Sprintf("[%s] Fetching span", logPrefix), "id", spanID)
+	response, err := heimdallClient.Span(ctx, spanID)
+	if err != nil {
+		return err
+	}
+	spanBytes, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	var spanIDBytes [8]byte
+	binary.BigEndian.PutUint64(spanIDBytes[:], spanID)
+	if err = tx.Put(kv.BorSpans, spanIDBytes[:], spanBytes); err != nil {
+		return err
+	}
+	return nil
+}
+
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
 	if cfg.chainConfig.Bor == nil {
 		return
@@ -261,6 +300,23 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 	}
 	if err != nil {
 		return err
+	}
+	// Removing spans
+	spanCursor, err := tx.RwCursor(kv.BorSpans)
+	if err != nil {
+		return err
+	}
+	defer spanCursor.Close()
+	var lastSpanToKeep uint64
+	if u.UnwindPoint > zerothSpanEnd {
+		lastSpanToKeep = 1 + (u.UnwindPoint-zerothSpanEnd-1)/spanLength
+	}
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
+	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
+		if err = spanCursor.DeleteCurrent(); err != nil {
+			return err
+		}
 	}
 
 	if err = u.Done(tx); err != nil {

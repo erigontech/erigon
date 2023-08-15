@@ -861,6 +861,11 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		if err := BorEventsIdx(ctx, sn.Path, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
+	case snaptype.BorSpans:
+		dir, _ := filepath.Split(sn.Path)
+		if err := BorSpansIdx(ctx, sn.Path, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+			return err
+		}
 	}
 	//log.Info("[snapshots] finish build idx", "file", fName)
 	return nil
@@ -932,7 +937,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
-	for _, t := range []snaptype.Type{snaptype.BorEvents} {
+	for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 		for _, segment := range segments {
 			if segment.T != t {
 				continue
@@ -1010,7 +1015,7 @@ MainLoop:
 		if f.From == f.To {
 			continue
 		}
-		for _, t := range []snaptype.Type{snaptype.BorEvents} {
+		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.From, f.To, t))
 			if !dir2.FileExist(p) {
 				continue MainLoop

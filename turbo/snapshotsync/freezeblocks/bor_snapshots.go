@@ -36,6 +36,11 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const (
+	spanLength    = 6400 // Number of blocks in a span
+	zerothSpanEnd = 255  // End block of 0th span
+)
+
 type BorEventSegment struct {
 	seg           *compress.Decompressor // value: event_rlp
 	IdxBorTxnHash *recsplit.Index        // bor_transaction_hash  -> bor_event_segment_offset
@@ -106,6 +111,74 @@ func (sn *BorEventSegment) reopenIdxIfNeed(dir string, optimistic bool) (err err
 type borEventSegments struct {
 	lock     sync.RWMutex
 	segments []*BorEventSegment
+}
+
+type BorSpanSegment struct {
+	seg    *compress.Decompressor // value: span_json
+	idx    *recsplit.Index        // span_id -> offset
+	ranges Range
+}
+
+func (sn *BorSpanSegment) closeIdx() {
+	if sn.idx != nil {
+		sn.idx.Close()
+		sn.idx = nil
+	}
+}
+func (sn *BorSpanSegment) closeSeg() {
+	if sn.seg != nil {
+		sn.seg.Close()
+		sn.seg = nil
+	}
+}
+func (sn *BorSpanSegment) close() {
+	sn.closeSeg()
+	sn.closeIdx()
+}
+func (sn *BorSpanSegment) reopenSeg(dir string) (err error) {
+	sn.closeSeg()
+	fileName := snaptype.SegmentFileName(sn.ranges.from, sn.ranges.to, snaptype.BorEvents)
+	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	return nil
+}
+func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
+	sn.closeIdx()
+	if sn.seg == nil {
+		return nil
+	}
+	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.BorSpans.String())
+	sn.idx, err = recsplit.OpenIndex(path.Join(dir, fileName))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.idx.ModTime().Before(sn.seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.idx.Close()
+		sn.idx = nil
+	}
+	return nil
+}
+
+func (sn *BorSpanSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
+	err = sn.reopenIdx(dir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			if optimistic {
+				log.Warn("[snapshots] open index", "err", err)
+			} else {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type borSpanSegments struct {
+	lock     sync.RWMutex
+	segments []*BorSpanSegment
 }
 
 func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
@@ -185,6 +258,29 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 			return sn.AddWord(v)
 		}); err != nil {
 			return fmt.Errorf("DumpBorEvents: %w", err)
+		}
+		if err := sn.Compress(); err != nil {
+			return fmt.Errorf("compress: %w", err)
+		}
+
+		p := &background.Progress{}
+		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
+			return err
+		}
+	}
+	{
+		segName := snaptype.SegmentFileName(blockFrom, blockTo, snaptype.BorSpans)
+		f, _ := snaptype.ParseFileName(snapDir, segName)
+
+		sn, err := compress.NewCompressor(ctx, "Snapshot BorSpans", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
+		if err != nil {
+			return err
+		}
+		defer sn.Close()
+		if err := DumpBorSpans(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
+			return sn.AddWord(v)
+		}); err != nil {
+			return fmt.Errorf("DumpBorSpans: %w", err)
 		}
 		if err := sn.Compress(); err != nil {
 			return fmt.Errorf("compress: %w", err)
@@ -283,6 +379,46 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 	return nil
 }
 
+// DumpBorEvents - [from, to)
+func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	var spanFrom, spanTo uint64
+	if blockFrom > zerothSpanEnd {
+		spanFrom = 1 + (blockFrom-zerothSpanEnd-1)/spanLength
+	}
+	if blockTo > zerothSpanEnd {
+		spanTo = 1 + (blockTo-zerothSpanEnd-1)/spanLength
+	}
+	from := hexutility.EncodeTs(spanFrom)
+	if err := kv.BigChunks(db, kv.BorSpans, from, func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
+		spanId := binary.BigEndian.Uint64(spanIdBytes)
+		if spanId >= spanTo {
+			return false, nil
+		}
+		if e := collect(spanBytes); e != nil {
+			return false, e
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			if lvl >= log.LvlInfo {
+				dbg.ReadMemStats(&m)
+			}
+			logger.Log(lvl, "[bor snapshots] Dumping bor spans", "spanId", spanId,
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+			)
+		default:
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -367,11 +503,75 @@ RETRY:
 	return nil
 }
 
+func BorSpansIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
+		}
+	}()
+	// Calculate how many records there will be in the index
+	d, err := compress.NewDecompressor(segmentFilePath)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	g := d.MakeGetter()
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorSpans.String()))
+
+	var baseSpanId uint64
+	if blockFrom > zerothSpanEnd {
+		baseSpanId = 1 + (blockFrom-zerothSpanEnd-1)/spanLength
+	}
+
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   d.Count(),
+		Enums:      d.Count() > 0,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  idxFilePath,
+		BaseDataID: baseSpanId,
+	}, logger)
+	if err != nil {
+		return err
+	}
+	rs.LogLvl(log.LvlDebug)
+
+	defer d.EnableMadvNormal().DisableReadAhead()
+RETRY:
+	g.Reset(0)
+	var i, offset, nextPos uint64
+	for g.HasNext() {
+		nextPos, _ = g.Skip()
+		i++
+		if err = rs.AddOffset(offset); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		offset = nextPos
+	}
+	if err = rs.Build(ctx); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+			rs.ResetNextSalt()
+			goto RETRY
+		}
+		return err
+	}
+
+	return nil
+}
+
 type BorRoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
 	Events *borEventSegments
+	Spans  *borSpanSegments
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
@@ -386,7 +586,7 @@ type BorRoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{dir: snapDir, cfg: cfg, Events: &borEventSegments{}, logger: logger}
+	return &BorRoSnapshots{dir: snapDir, cfg: cfg, Events: &borEventSegments{}, Spans: &borSpanSegments{}, logger: logger}
 }
 
 func (s *BorRoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
@@ -416,7 +616,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.T != snaptype.BorEvents {
+			if f.T != snaptype.BorEvents && f.T != snaptype.BorSpans {
 				continue
 			}
 			l = append(l, f)
@@ -457,14 +657,24 @@ func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) erro
 func (s *BorRoSnapshots) DisableReadAhead() {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Spans.segments {
 		sn.seg.DisableReadAhead()
 	}
 }
 func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Spans.segments {
 		sn.seg.EnableReadAhead()
 	}
 	return s
@@ -472,7 +682,12 @@ func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
 func (s *BorRoSnapshots) EnableMadvWillNeed() *BorRoSnapshots {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Spans.segments {
 		sn.seg.EnableWillNeed()
 	}
 	return s
@@ -480,21 +695,32 @@ func (s *BorRoSnapshots) EnableMadvWillNeed() *BorRoSnapshots {
 func (s *BorRoSnapshots) EnableMadvNormal() *BorRoSnapshots {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Spans.segments {
 		sn.seg.EnableMadvNormal()
 	}
 	return s
 }
 
 func (s *BorRoSnapshots) idxAvailability() uint64 {
-	var events uint64
+	var events, spans uint64
 	for _, seg := range s.Events.segments {
 		if seg.IdxBorTxnHash == nil {
 			break
 		}
 		events = seg.ranges.to - 1
 	}
-	return events
+	for _, seg := range s.Spans.segments {
+		if seg.idx == nil {
+			break
+		}
+		spans = seg.ranges.to - 1
+	}
+	return cmp.Min(events, spans)
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
@@ -513,8 +739,20 @@ func (s *BorRoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 func (s *BorRoSnapshots) Files() (list []string) {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	max := s.BlocksAvailable()
 	for _, seg := range s.Events.segments {
+		if seg.seg == nil {
+			continue
+		}
+		if seg.ranges.from > max {
+			continue
+		}
+		_, fName := filepath.Split(seg.seg.FilePath())
+		list = append(list, fName)
+	}
+	for _, seg := range s.Spans.segments {
 		if seg.seg == nil {
 			continue
 		}
@@ -532,6 +770,8 @@ func (s *BorRoSnapshots) Files() (list []string) {
 func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	s.Events.lock.Lock()
 	defer s.Events.lock.Unlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
@@ -582,6 +822,46 @@ Loop:
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment availabe even if index open may fail
 				s.Events.segments = append(s.Events.segments, sn)
+			}
+			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+				return err
+			}
+		case snaptype.BorSpans:
+			var sn *BorSpanSegment
+			var exists bool
+			for _, sn2 := range s.Spans.segments {
+				if sn2.seg == nil { // it's ok if some segment was not able to open
+					continue
+				}
+				if fName == sn2.seg.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				sn = &BorSpanSegment{ranges: Range{f.From, f.To}}
+			}
+			if err := sn.reopenSeg(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					if optimistic {
+						continue Loop
+					} else {
+						break Loop
+					}
+				}
+				if optimistic {
+					s.logger.Warn("[bor snapshots] open segment", "err", err)
+					continue Loop
+				} else {
+					return err
+				}
+			}
+
+			if !exists {
+				// it's possible to iterate over .seg file even if you don't have index
+				// then make segment availabe even if index open may fail
+				s.Spans.segments = append(s.Spans.segments, sn)
 			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
@@ -667,6 +947,20 @@ Loop1:
 		sn.close()
 		s.Events.segments[i] = nil
 	}
+Loop2:
+	for i, sn := range s.Spans.segments {
+		if sn.seg == nil {
+			continue Loop2
+		}
+		_, name := filepath.Split(sn.seg.FilePath())
+		for _, fName := range l {
+			if fName == name {
+				continue Loop2
+			}
+		}
+		sn.close()
+		s.Spans.segments[i] = nil
+	}
 	var i int
 	for i = 0; i < len(s.Events.segments) && s.Events.segments[i] != nil && s.Events.segments[i].seg != nil; i++ {
 	}
@@ -678,14 +972,30 @@ Loop1:
 			tail[i] = nil
 		}
 	}
+	for i = 0; i < len(s.Spans.segments) && s.Spans.segments[i] != nil && s.Spans.segments[i].seg != nil; i++ {
+	}
+	tailS := s.Spans.segments[i:]
+	s.Spans.segments = s.Spans.segments[:i]
+	for i = 0; i < len(tailS); i++ {
+		if tailS[i] != nil {
+			tailS[i].close()
+			tailS[i] = nil
+		}
+	}
 }
 
 func (s *BorRoSnapshots) PrintDebug() {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
+	s.Spans.lock.RLock()
+	defer s.Spans.lock.RUnlock()
 	fmt.Println("    == BorSnapshots, Event")
 	for _, sn := range s.Events.segments {
 		fmt.Printf("%d,  %t\n", sn.ranges.from, sn.IdxBorTxnHash == nil)
+	}
+	fmt.Println("    == BorSnapshots, Span")
+	for _, sn := range s.Spans.segments {
+		fmt.Printf("%d,  %t\n", sn.ranges.from, sn.idx == nil)
 	}
 }
 
@@ -697,6 +1007,7 @@ type BorView struct {
 func (s *BorRoSnapshots) View() *BorView {
 	v := &BorView{s: s}
 	v.s.Events.lock.RLock()
+	v.s.Spans.lock.RLock()
 	return v
 }
 
@@ -706,10 +1017,21 @@ func (v *BorView) Close() {
 	}
 	v.closed = true
 	v.s.Events.lock.RUnlock()
+	v.s.Spans.lock.RUnlock()
 }
 func (v *BorView) Events() []*BorEventSegment { return v.s.Events.segments }
+func (v *BorView) Spans() []*BorSpanSegment   { return v.s.Spans.segments }
 func (v *BorView) EventsSegment(blockNum uint64) (*BorEventSegment, bool) {
 	for _, seg := range v.Events() {
+		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
+			continue
+		}
+		return seg, true
+	}
+	return nil, false
+}
+func (v *BorView) SpansSegment(blockNum uint64) (*BorSpanSegment, bool) {
+	for _, seg := range v.Spans() {
 		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
 			continue
 		}
@@ -764,6 +1086,7 @@ func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (ma
 	defer view.Close()
 
 	eSegments := view.Events()
+	sSegments := view.Spans()
 
 	for i, sn := range eSegments {
 		if sn.ranges.from < from {
@@ -773,6 +1096,7 @@ func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (ma
 			break
 		}
 		toMerge[snaptype.BorEvents] = append(toMerge[snaptype.BorEvents], eSegments[i].seg.FilePath())
+		toMerge[snaptype.BorSpans] = append(toMerge[snaptype.BorSpans], sSegments[i].seg.FilePath())
 	}
 
 	return toMerge, nil
@@ -791,7 +1115,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			return err
 		}
 
-		for _, t := range []snaptype.Type{snaptype.BorEvents} {
+		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, _ := snaptype.ParseFileName(snapDir, segName)
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {

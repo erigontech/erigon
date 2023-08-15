@@ -105,6 +105,9 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.BorEvents); err != nil {
 		return err
 	}
+	if err := tx.ClearBucket(kv.BorSpans); err != nil {
+		return err
+	}
 	return clearStageProgress(tx, stages.BorHeimdall)
 }
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
