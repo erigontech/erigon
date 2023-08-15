@@ -89,18 +89,19 @@ func OpenFixedSizeBitmaps(filePath string) (*FixedSizeBitmaps, error) {
 
 func (bm *FixedSizeBitmaps) FileName() string { return bm.fileName }
 func (bm *FixedSizeBitmaps) FilePath() string { return bm.filePath }
-func (bm *FixedSizeBitmaps) Close() error {
+func (bm *FixedSizeBitmaps) Close() {
 	if bm.m != nil {
 		if err := bm.m.Unmap(); err != nil {
 			log.Trace("unmap", "err", err, "file", bm.FileName())
 		}
+		bm.m = nil
 	}
 	if bm.f != nil {
 		if err := bm.f.Close(); err != nil {
-			return err
+			log.Trace("close", "err", err, "file", bm.FileName())
 		}
+		bm.f = nil
 	}
-	return nil
 }
 
 func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
@@ -264,8 +265,18 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, 
 	return idx, nil
 }
 func (w *FixedSizeBitmapsWriter) Close() {
-	_ = w.m.Unmap()
-	_ = w.f.Close()
+	if w.m != nil {
+		if err := w.m.Unmap(); err != nil {
+			log.Trace("unmap", "err", err, "file", w.f.Name())
+		}
+		w.m = nil
+	}
+	if w.f != nil {
+		if err := w.f.Close(); err != nil {
+			log.Trace("close", "err", err, "file", w.f.Name())
+		}
+		w.f = nil
+	}
 }
 func growFileToSize(f *os.File, size int) error {
 	pageSize := os.Getpagesize()
