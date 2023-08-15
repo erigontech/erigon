@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -39,7 +38,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	}
 	defer tx.Rollback()
 
-	tmpDb, err := mdbx.NewTemporaryMdbx()
+	tmpDb, err := mdbx.NewTemporaryMdbx(e.tmpdir)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -71,18 +70,20 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		return
 	}
 	tx.Rollback() // Discard the original db tx
-	if err := e.insertHeadersAndBodies(tmpTx, startBlock, startHash); err != nil {
+	if err := e.insertHeadersAndBodies(tmpTx, startBlock, startHash, endBlock); err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-	if block != nil {
-		// Can fail, not an issue in this case.
-		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
-	}
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
+	if block == nil {
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+	// Can fail, not an issue in this case.
+	e.chainRW.InsertBlockAndWait(block)
 	// Lastly attempt verification
-	status, latestValidHash, err := eth1_utils.ValidateChain(e.ctx, e.executionModule, block.Hash(), block.NumberU64())
+	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)

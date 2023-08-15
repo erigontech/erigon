@@ -107,7 +107,7 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 }
 
 func (s *Sync) UnwindTo(unwindPoint uint64, badBlock libcommon.Hash) {
-	s.logger.Info("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
+	s.logger.Debug("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
 	s.unwindPoint = &unwindPoint
 	s.badBlock = badBlock
 }

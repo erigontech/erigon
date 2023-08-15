@@ -6,9 +6,12 @@ import (
 	"reflect"
 
 	"github.com/holiman/uint256"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -49,13 +52,18 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param := core.BlockBuilderParameters{
 		ParentHash:            gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Timestamp:             req.Timestamp,
-		PrevRandao:            gointerfaces.ConvertH256ToHash(req.MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipent),
+		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
 		return nil, err
+	}
+
+	if req.ParentBeaconBlockRoot != nil {
+		pbbr := libcommon.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
+		param.ParentBeaconBlockRoot = &pbbr
 	}
 
 	// First check if we're already building a block with the requested parameters
@@ -173,13 +181,19 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}
 		for _, commitment := range commitments {
-			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment[:])
+			c := types.KZGCommitment{}
+			copy(c[:], commitment[:])
+			blobsBundle.Commitments = append(blobsBundle.Commitments, c[:])
 		}
 		for _, proof := range proofs {
-			blobsBundle.Proofs = append(blobsBundle.Proofs, proof[:])
+			p := types.KZGProof{}
+			copy(p[:], proof[:])
+			blobsBundle.Proofs = append(blobsBundle.Proofs, p[:])
 		}
 		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+			b := types.Blob{}
+			copy(b[:], blob[:])
+			blobsBundle.Blobs = append(blobsBundle.Blobs, b[:])
 		}
 	}
 

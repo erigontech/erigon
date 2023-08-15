@@ -174,20 +174,9 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "on_merge_block":
-			// on_merge_block is for testing things related to the ethereum "The Merge" event
-			// this has already happened, so let's just pass these tests
 			return nil
-			//		blk := &cltypes.SignedBeaconBlock{}
-			//		err := spectest.ReadSsz(root, c.Version(), step.GetPowBlock()+".ssz_snappy", blk)
-			//		require.NoError(t, err, stepstr)
-			//		err = forkStore.OnBlock(blk, true, true)
-			//		if step.GetValid() {
-			//			require.NoError(t, err, stepstr)
-			//		} else {
-			//			require.Error(t, err, stepstr)
-			//		}
 		case "on_block":
-			blk := &cltypes.SignedBeaconBlock{}
+			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnBlock(blk, true, true)

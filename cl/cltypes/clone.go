@@ -4,20 +4,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 )
 
-func (*SignedBeaconBlock) Clone() clonable.Clonable {
-	return &SignedBeaconBlock{}
+func (s *SignedBeaconBlock) Clone() clonable.Clonable {
+	return NewSignedBeaconBlock(s.Block.Body.beaconCfg)
 }
 
 func (*IndexedAttestation) Clone() clonable.Clonable {
 	return &IndexedAttestation{}
 }
 
-func (*BeaconBody) Clone() clonable.Clonable {
-	return &BeaconBody{}
+func (b *BeaconBody) Clone() clonable.Clonable {
+	return NewBeaconBody(b.beaconCfg)
 }
 
-func (*Eth1Block) Clone() clonable.Clonable {
-	return &Eth1Block{}
+func (e *Eth1Block) Clone() clonable.Clonable {
+	return NewEth1Block(e.version, e.beaconCfg)
 }
 
 func (*Eth1Data) Clone() clonable.Clonable {
@@ -72,8 +72,8 @@ func (*Deposit) Clone() clonable.Clonable {
 	return &Deposit{}
 }
 
-func (*BeaconBlock) Clone() clonable.Clonable {
-	return &BeaconBlock{}
+func (b *BeaconBlock) Clone() clonable.Clonable {
+	return NewBeaconBlock(b.Body.beaconCfg)
 }
 
 func (*AggregateAndProof) Clone() clonable.Clonable {

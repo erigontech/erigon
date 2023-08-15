@@ -51,6 +51,7 @@ func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Mes
 	if err != nil {
 		return Message{}, err
 	}
+	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
 }

@@ -23,11 +23,8 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		baseFee.SetFromBig(header.BaseFee)
 		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
 	}
-	var withdrawalHashReply *types2.H256
-	if header.WithdrawalsHash != nil {
-		withdrawalHashReply = gointerfaces.ConvertHashToH256(*header.WithdrawalsHash)
-	}
-	return &execution.Header{
+
+	h := &execution.Header{
 		ParentHash:      gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase),
 		StateRoot:       gointerfaces.ConvertHashToH256(header.Root),
@@ -45,10 +42,26 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		BlockHash:       gointerfaces.ConvertHashToH256(header.Hash()),
 		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
 		BaseFeePerGas:   baseFeeReply,
-		WithdrawalHash:  withdrawalHashReply,
-		ExcessBlobGas:   header.ExcessBlobGas,
-		BlobGasUsed:     header.BlobGasUsed,
 	}
+
+	if header.ExcessBlobGas != nil {
+		h.ExcessBlobGas = header.ExcessBlobGas
+		h.BlobGasUsed = header.BlobGasUsed
+	}
+
+	if header.WithdrawalsHash != nil {
+		h.WithdrawalHash = gointerfaces.ConvertHashToH256(*header.WithdrawalsHash)
+	}
+
+	if header.ParentBeaconBlockRoot != nil {
+		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
+	}
+
+	if len(header.AuRaSeal) > 0 {
+		h.AuraSeal = header.AuRaSeal
+		h.AuraStep = &header.AuRaStep
+	}
+	return h
 }
 
 func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
@@ -57,6 +70,25 @@ func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
 		ret = append(ret, HeaderToHeaderRPC(header))
 	}
 	return ret
+}
+
+func ConvertBlocksToRPC(blocks []*types.Block) []*execution.Block {
+	ret := []*execution.Block{}
+	for _, block := range blocks {
+		ret = append(ret, ConvertBlockToRPC(block))
+	}
+	return ret
+}
+
+func ConvertBlockToRPC(block *types.Block) *execution.Block {
+	h := HeaderToHeaderRPC(block.Header())
+	blockHash := block.Hash()
+	h.BlockHash = gointerfaces.ConvertHashToH256(blockHash)
+
+	return &execution.Block{
+		Header: h,
+		Body:   ConvertRawBlockBodyToRpc(block.RawBody(), h.BlockNumber, blockHash),
+	}
 }
 
 func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
@@ -81,6 +113,10 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
 	}
+	if header.AuraStep != nil {
+		h.AuRaSeal = header.AuraSeal
+		h.AuRaStep = *header.AuraStep
+	}
 	if header.BaseFeePerGas != nil {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 	}
@@ -88,10 +124,15 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.WithdrawalsHash = new(libcommon.Hash)
 		*h.WithdrawalsHash = gointerfaces.ConvertH256ToHash(header.WithdrawalHash)
 	}
+	if header.ParentBeaconBlockRoot != nil {
+		h.ParentBeaconBlockRoot = new(libcommon.Hash)
+		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
+	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
+
 	return h, nil
 }
 
@@ -131,6 +172,7 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 	if in == nil {
 		return nil
 	}
+
 	return &execution.BlockBody{
 		BlockNumber:  blockNumber,
 		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),

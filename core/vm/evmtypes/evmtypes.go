@@ -84,6 +84,7 @@ type IntraBlockState interface {
 
 	Selfdestruct(common.Address) bool
 	HasSelfdestructed(common.Address) bool
+	Selfdestruct6780(common.Address)
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.

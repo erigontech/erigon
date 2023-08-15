@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 type testBackend struct {
@@ -103,7 +103,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {

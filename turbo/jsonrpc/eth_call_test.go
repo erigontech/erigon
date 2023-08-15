@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -39,7 +39,7 @@ func TestEstimateGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
@@ -485,7 +485,7 @@ func contractInvocationData(val byte) []byte {
 	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
 }
 
-func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Address, libcommon.Address) {
+func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Address, libcommon.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -497,7 +497,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, bankKey, false)
+	m := mock.MockWithGenesis(t, gspec, bankKey, false)
 	db := m.DB
 
 	var contractAddr libcommon.Address

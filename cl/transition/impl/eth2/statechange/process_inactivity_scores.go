@@ -7,18 +7,18 @@ import (
 )
 
 // ProcessInactivityScores will updates the inactivity registry of each validator.
-func ProcessInactivityScores(s abstract.BeaconState) error {
+func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies []uint64, unslashedIndicies [][]bool) error {
 	if state.Epoch(s) == s.BeaconConfig().GenesisEpoch {
 		return nil
 	}
-	previousEpoch := state.PreviousEpoch(s)
-	for _, validatorIndex := range state.EligibleValidatorsIndicies(s) {
+
+	for _, validatorIndex := range eligibleValidatorsIndicies {
 		// retrieve validator inactivity score index.
 		score, err := s.ValidatorInactivityScore(int(validatorIndex))
 		if err != nil {
 			return err
 		}
-		if state.IsUnslashedParticipatingIndex(s, previousEpoch, validatorIndex, int(s.BeaconConfig().TimelyTargetFlagIndex)) {
+		if unslashedIndicies[s.BeaconConfig().TimelyTargetFlagIndex][validatorIndex] {
 			score -= utils.Min64(1, score)
 		} else {
 			score += s.BeaconConfig().InactivityScoreBias
