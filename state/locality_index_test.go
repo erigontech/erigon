@@ -145,6 +145,7 @@ func TestLocality(t *testing.T) {
 }
 
 func TestLocalityDomain(t *testing.T) {
+	UseBpsTree = true
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
 	aggStep := 2
