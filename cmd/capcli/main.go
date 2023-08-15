@@ -14,9 +14,8 @@
 package main
 
 import (
-	"context"
-
 	"github.com/alecthomas/kong"
+	"context"
 )
 
 type Context struct {
