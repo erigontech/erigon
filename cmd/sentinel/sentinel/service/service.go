@@ -156,6 +156,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 	uniquePeers := map[peer.ID]struct{}{}
 	requestPeer := func(peer *peers.Peer) {
 		peer.MarkUsed()
+		defer peer.MarkUnused()
 		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
 		if err != nil {
 			if strings.Contains(err.Error(), "protocols not supported") {

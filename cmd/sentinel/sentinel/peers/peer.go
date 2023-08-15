@@ -15,6 +15,7 @@ type Peer struct {
 	InRequest bool
 
 	// request info
+	busy         bool
 	lastRequest  time.Time
 	successCount int
 	useCount     int
@@ -47,6 +48,11 @@ func (p *Peer) MarkUsed() {
 	p.useCount++
 	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.lastRequest = time.Now()
+	p.busy = true
+}
+
+func (p *Peer) MarkUnused() {
+	p.busy = false
 }
 
 func (p *Peer) MarkReplied() {
@@ -61,7 +67,7 @@ func (p *Peer) IsAvailable() (available bool) {
 	if p.Penalties > MaxBadResponses {
 		return false
 	}
-	if time.Now().Sub(p.lastRequest) > 0*time.Second {
+	if time.Now().Sub(p.lastRequest) > 0*time.Second && !p.busy {
 		return true
 	}
 	return false

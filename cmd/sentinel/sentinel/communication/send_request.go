@@ -24,7 +24,6 @@ type response struct {
 }
 
 func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, byte, error) {
-
 	nctx, cn := context.WithTimeout(ctx, 5*time.Second)
 	defer cn()
 	stream, err := writeRequestRaw(host, nctx, data, peerId, topic)
