@@ -1521,8 +1521,8 @@ func (d *Domain) Rotate() flusher {
 }
 
 var (
-	CompareRecsplitBtreeIndexes = true  // if true, will compare values from Btree and InvertedIndex
-	UseBtree                    = false // if true, will use btree for all files
+	CompareRecsplitBtreeIndexes = true // if true, will compare values from Btree and InvertedIndex
+	UseBtree                    = true // if true, will use btree for all files
 )
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {

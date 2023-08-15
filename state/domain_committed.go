@@ -472,9 +472,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		return rootHash, nil, err
 	}
 
-	//if len(touchedKeys) > 1 {
-	//	d.patriciaTrie.Reset()
-	//}
+	if len(touchedKeys) > 1 {
+		d.patriciaTrie.Reset()
+	}
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 

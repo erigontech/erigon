@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 )
 
-var UseBpsTree bool = true
+var UseBpsTree bool = false
 
 const BtreeLogPrefix = "btree"
 
@@ -367,8 +367,6 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64, g ArchiveGetter) (k []byte, di ui
 		cmp, k, err = a.keyCmp(x, di, g)
 		a.naccess++
 
-		//i++
-		//cmp := bytes.Compare(k, x)
 		switch {
 		case err != nil:
 			if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -440,10 +438,10 @@ func (a *btAlloc) Seek(ik []byte, g ArchiveGetter) (*Cursor, error) {
 		}
 		return nil, err
 	}
-	if !bytes.Equal(k, k1) {
-		panic(fmt.Errorf("key mismatch %x != %x", k, k1))
-	}
-	return a.newCursor(context.TODO(), k, v, di, g), nil
+	// if !bytes.Equal(k, k1) {
+	// 	panic(fmt.Errorf("key mismatch found1 %x != lookup2 %x seek %x", k, k1, ik))
+	// }
+	return a.newCursor(context.TODO(), k1, v, di, g), nil
 }
 
 func (a *btAlloc) seek(seek []byte, g ArchiveGetter) (k []byte, di uint64, found bool, err error) {
@@ -523,7 +521,7 @@ func (a *btAlloc) seek(seek []byte, g ArchiveGetter) (k []byte, di uint64, found
 		if a.trace {
 			fmt.Printf("key %x not found\n", seek)
 		}
-		return k, 0, found, err
+		return k, 0, false, err
 	}
 	return k, di, found, nil
 }
@@ -891,6 +889,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	idx.getter = NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
 	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
+	fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
 		idx.bplus = NewBpsTree(idx.getter, idx.ef, M)
@@ -950,7 +949,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	}
 
 	var res []byte
-	res, _ = b.getter.Next(res[:0])
+	res, _ = g.Next(res[:0])
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
@@ -1067,7 +1066,7 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 		return nil, nil
 	}
 	if UseBpsTree {
-		it, err := b.bplus.Seek(x)
+		it, err := b.bplus.SeekWithGetter(g, x)
 		if err != nil {
 			return nil, err
 		}

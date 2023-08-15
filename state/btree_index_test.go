@@ -232,7 +232,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 }
 
 func TestBpsTree_Seek(t *testing.T) {
-	keyCount, M := 10, 4
+	keyCount, M := 12, 4
 	tmp := t.TempDir()
 
 	logger := log.New()
@@ -268,12 +268,11 @@ func TestBpsTree_Seek(t *testing.T) {
 	ef.Build()
 
 	efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
-	fmt.Printf("efi=%v\n", efi.Count())
 
 	bp := NewBpsTree(kv.MakeGetter(), efi, uint64(M))
 	bp.initialize()
 
-	it, err := bp.Seek(keys[len(keys)/2])
+	it, err := bp.SeekWithGetter(kv.MakeGetter(), keys[len(keys)/2])
 	require.NoError(t, err)
 	require.NotNil(t, it)
 	k, _ := it.KV()
