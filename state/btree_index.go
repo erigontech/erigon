@@ -888,7 +888,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	idx.getter = NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
 	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
-	fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
+	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
 		idx.bplus = NewBpsTree(idx.getter, idx.ef, M)
@@ -1007,6 +1007,9 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 	}
 	var index uint64
 	if UseBpsTree {
+		if b.bplus == nil {
+			panic(fmt.Errorf("SeekWithGetter: `b.bplus` is nil: %s", gr.FileName()))
+		}
 		it, err := b.bplus.SeekWithGetter(gr, lookup)
 		if err != nil {
 			return k, v, false, err

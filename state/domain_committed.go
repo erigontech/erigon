@@ -502,6 +502,9 @@ var keyCommitmentState = []byte("state")
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
+	if dbg.DiscardCommitment() {
+		return 0, 0, nil
+	}
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
