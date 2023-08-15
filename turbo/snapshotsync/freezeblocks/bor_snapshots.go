@@ -541,10 +541,12 @@ func BorSpansIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo
 RETRY:
 	g.Reset(0)
 	var i, offset, nextPos uint64
+	var key [8]byte
 	for g.HasNext() {
 		nextPos, _ = g.Skip()
+		binary.BigEndian.PutUint64(key[:], uint64(i))
 		i++
-		if err = rs.AddOffset(offset); err != nil {
+		if err = rs.AddKey(key[:], offset); err != nil {
 			return err
 		}
 		select {
@@ -616,7 +618,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.T != snaptype.BorEvents && f.T != snaptype.BorSpans {
+			if f.T != snaptype.BorEvents {
 				continue
 			}
 			l = append(l, f)
@@ -624,6 +626,17 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
+	}
+	{
+		var l []snaptype.FileInfo
+		for _, f := range list {
+			if f.T != snaptype.BorSpans {
+				continue
+			}
+			l = append(l, f)
+		}
+		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
+		res = append(res, l...)
 	}
 
 	return res, missingSnapshots, nil

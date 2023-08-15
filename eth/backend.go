@@ -1148,13 +1148,16 @@ func (s *Ethereum) Start() error {
 	var currentTD *big.Int
 	if err := s.chainDB.View(s.sentryCtx, func(tx kv.Tx) error {
 		h := rawdb.ReadCurrentHeader(tx)
+		if h == nil {
+			return nil
+		}
 		var err error
 		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.Number.Uint64())
 		return err
 	}); err != nil {
 		return err
 	}
-	if isChainPoS(s.chainConfig, currentTD) {
+	if currentTD != nil && isChainPoS(s.chainConfig, currentTD) {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
