@@ -158,6 +158,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
+		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
+		}
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
@@ -166,14 +169,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-
-	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
-	}
-
-	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
-		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
 	blockHash := req.BlockHash
@@ -209,6 +204,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		actualBlobHashes := []libcommon.Hash{}
 		for _, tx := range transactions {
 			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if expectedBlobHashes == nil {
+			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
 			s.logger.Warn("[NewPayload] mismatch in blob hashes",
@@ -562,14 +560,12 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
-
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
-
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
