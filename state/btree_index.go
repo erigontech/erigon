@@ -18,13 +18,12 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 var UseBpsTree bool = false
@@ -983,6 +982,7 @@ func (b *BtIndex) Close() {
 				log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 			}
 		}
+		b.m = nil
 		if err := b.file.Close(); err != nil {
 			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
