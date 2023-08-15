@@ -21,6 +21,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+const doDownload = false
+
 type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
 	genesisCfg      *clparams.GenesisConfig
@@ -37,6 +39,8 @@ type Args struct {
 
 	targetEpoch, seenEpoch uint64
 	targetSlot, seenSlot   uint64
+
+	downloadedHistory bool
 }
 
 func ClStagesCfg(
@@ -64,22 +68,26 @@ func ClStagesCfg(
 type StageName = string
 
 const (
-	WaitForPeers      StageName = "WaitForPeers"
-	CatchUpEpochs     StageName = "CatchUpEpochs"
-	CatchUpBlocks     StageName = "CatchUpBlocks"
-	ForkChoice        StageName = "ForkChoice"
-	ListenForForks    StageName = "ListenForForks"
-	CleanupAndPruning StageName = "CleanupAndPruning"
-	SleepForSlot      StageName = "SleepForSlot"
+	WaitForPeers             StageName = "WaitForPeers"
+	CatchUpEpochs            StageName = "CatchUpEpochs"
+	CatchUpBlocks            StageName = "CatchUpBlocks"
+	ForkChoice               StageName = "ForkChoice"
+	ListenForForks           StageName = "ListenForForks"
+	CleanupAndPruning        StageName = "CleanupAndPruning"
+	SleepForSlot             StageName = "SleepForSlot"
+	DownloadHistoricalBlocks StageName = "DownloadHistoricalBlocks"
 )
 
 const (
 	minPeersForDownload = uint64(4)
 )
 
-func MetaCatchingUp(args Args) string {
+func MetaCatchingUp(args Args) StageName {
 	if args.peers < minPeersForDownload {
 		return WaitForPeers
+	}
+	if !args.downloadedHistory && doDownload {
+		return DownloadHistoricalBlocks
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return CatchUpEpochs
@@ -87,6 +95,7 @@ func MetaCatchingUp(args Args) string {
 	if args.seenSlot < args.targetSlot {
 		return CatchUpBlocks
 	}
+
 	return ""
 }
 
@@ -205,6 +214,24 @@ func ConsensusClStages(ctx context.Context,
 						}
 					}
 					return nil
+				},
+			},
+			DownloadHistoricalBlocks: {
+				Description: "Download historical blocks",
+				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return CatchUpBlocks
+				},
+				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					startingRoot, err := cfg.state.BlockRoot()
+					if err != nil {
+						return err
+					}
+					startingSlot := cfg.state.LatestBlockHeader().Slot
+					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.dataDirFs, cfg.genesisCfg, cfg.beaconCfg, 500_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
