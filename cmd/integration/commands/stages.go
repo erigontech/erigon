@@ -912,7 +912,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		return nil
 	}
-	libstate.UseBpsTree = useBtreePlus
 
 	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
@@ -989,8 +988,6 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	if !ethconfig.EnableHistoryV4InTest {
 		panic("this method for v3 only")
 	}
-
-	libstate.UseBpsTree = useBtreePlus
 
 	if warmup {
 		return reset2.Warmup(ctx, db, log.LvlInfo, stages.PatriciaTrie)
@@ -1386,6 +1383,8 @@ var _aggSingleton *libstate.AggregatorV3
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
+		libstate.UseBpsTree = useBtreePlus
+
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			useSnapshots, _ = snap.Enabled(tx)
