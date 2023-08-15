@@ -43,14 +43,13 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				if !inactivityLeaking {
-					rewardNumerator := baseReward * rewardMultipliers[flagIdx]
-					delta += int64(rewardNumerator / rewardDenominator)
+					delta += int64((baseReward * rewardMultipliers[flagIdx]) / rewardDenominator)
 				}
 			} else if flagIdx != int(beaconConfig.TimelyHeadFlagIndex) {
 				delta -= int64(baseReward * weights[flagIdx] / beaconConfig.WeightDenominator)
 			}
 		}
-		if flagsUnslashedIndiciesSet[beaconConfig.TimelyTargetFlagIndex][index] {
+		if !flagsUnslashedIndiciesSet[beaconConfig.TimelyTargetFlagIndex][index] {
 			inactivityScore, err := s.ValidatorInactivityScore(int(index))
 			if err != nil {
 				return err

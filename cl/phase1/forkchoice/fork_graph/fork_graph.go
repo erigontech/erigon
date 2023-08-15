@@ -1,6 +1,8 @@
 package fork_graph
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -246,19 +248,20 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, recipient *state.CachingB
 	}
 	// Take a copy to the reference state.
 	if currentIteratorRoot == reconnectionRootLong {
-		if copyReferencedState != nil {
+		if copyReferencedState == nil || f.currentReferenceState == nil {
 			copyReferencedState, err = f.currentReferenceState.Copy()
 			if err != nil {
 				return nil, true, err
 			}
 		} else {
+			fmt.Println(copyReferencedState)
 			err = f.currentReferenceState.CopyInto(copyReferencedState)
 			if err != nil {
 				return nil, true, err
 			}
 		}
 	} else {
-		if copyReferencedState != nil {
+		if copyReferencedState == nil || f.nextReferenceState == nil {
 			copyReferencedState, err = f.nextReferenceState.Copy()
 			if err != nil {
 				return nil, false, err

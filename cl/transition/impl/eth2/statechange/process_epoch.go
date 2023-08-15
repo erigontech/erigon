@@ -8,6 +8,9 @@ import (
 )
 
 func GetUnslashedIndiciesSet(s abstract.BeaconState) [][]bool {
+	if s.Version() == clparams.Phase0Version {
+		return nil
+	}
 	weights := s.BeaconConfig().ParticipationWeights()
 	flagsUnslashedIndiciesSet := make([][]bool, len(weights))
 	for i := range weights {

@@ -12,7 +12,6 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
-	isNotLeaking := !state.InactivityLeaking(s)
 	for _, validatorIndex := range eligibleValidatorsIndicies {
 		// retrieve validator inactivity score index.
 		score, err := s.ValidatorInactivityScore(int(validatorIndex))
@@ -24,7 +23,7 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		} else {
 			score += s.BeaconConfig().InactivityScoreBias
 		}
-		if isNotLeaking {
+		if !state.InactivityLeaking(s) {
 			score -= utils.Min64(s.BeaconConfig().InactivityScoreRecoveryRate, score)
 		}
 		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
