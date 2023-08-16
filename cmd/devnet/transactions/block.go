@@ -19,7 +19,7 @@ import (
 // MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
 var MaxNumberOfEmptyBlockChecks = 25
 
-func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libcommon.Hash]string, error) {
+func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libcommon.Hash]uint64, error) {
 	devnet.Logger(ctx).Info("Awaiting transactions in confirmed blocks...")
 
 	hashmap := map[libcommon.Hash]bool{}
@@ -36,14 +36,14 @@ func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libco
 	return m, nil
 }
 
-func searchBlockForHashes(ctx context.Context, hashmap map[libcommon.Hash]bool) (map[libcommon.Hash]string, error) {
+func searchBlockForHashes(ctx context.Context, hashmap map[libcommon.Hash]bool) (map[libcommon.Hash]uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	if len(hashmap) == 0 {
 		return nil, fmt.Errorf("no hashes to search for")
 	}
 
-	txToBlock := make(map[libcommon.Hash]string, len(hashmap))
+	txToBlock := make(map[libcommon.Hash]uint64, len(hashmap))
 
 	headsSub := services.GetSubscription(devnet.CurrentChainName(ctx), requests.Methods.ETHNewHeads)
 
@@ -90,7 +90,7 @@ type Block struct {
 }
 
 // txHashInBlock checks if the block with block number has the transaction hash in its list of transactions
-func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNumber string, txToBlockMap map[libcommon.Hash]string, logger log.Logger) (uint64, int, error) {
+func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNumber string, txToBlockMap map[libcommon.Hash]uint64, logger log.Logger) (uint64, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // releases the resources held by the context
 
@@ -109,7 +109,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 			numFound++
 			logger.Info("SUCCESS => Tx included into block", "txHash", txnHash, "blockNum", blockNumber)
 			// add the block number as an entry to the map
-			txToBlockMap[txnHash] = blockNumber
+			txToBlockMap[txnHash] = devnetutils.HexToInt(blockNumber)
 			delete(hashmap, txnHash)
 			if len(hashmap) == 0 {
 				return devnetutils.HexToInt(blockNumber), numFound, nil

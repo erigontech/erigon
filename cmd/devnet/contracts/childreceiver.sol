@@ -7,15 +7,19 @@ interface IStateReceiver {
 }
 
 contract ChildReceiver is IStateReceiver {
-   mapping(address => uint) public received;
+   mapping(address => uint) public senders;
   
   constructor() {
   }
 
+	event received(address _source, uint256 _amount);
+
   function onStateReceive(uint, bytes calldata data) external override {
     require(msg.sender == address(0x0000000000000000000000000000000000001001), "Invalid sender");
     (address from, uint amount) = abi.decode(data, (address, uint));
-    uint total = received[from];
-    received[from] = total + amount;
+    uint total = senders[from];
+    senders[from] = total + amount;
+
+    emit received(from, amount);
   }
 }

@@ -56,13 +56,15 @@ type OtterscanAPI interface {
 
 type OtterscanAPIImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	db          kv.RoDB
+	maxPageSize uint64
 }
 
-func NewOtterscanAPI(base *BaseAPI, db kv.RoDB) *OtterscanAPIImpl {
+func NewOtterscanAPI(base *BaseAPI, db kv.RoDB, maxPageSize uint64) *OtterscanAPIImpl {
 	return &OtterscanAPIImpl{
-		BaseAPI: base,
-		db:      db,
+		BaseAPI:     base,
+		db:          db,
+		maxPageSize: maxPageSize,
 	}
 }
 
@@ -140,7 +142,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas()), true, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
@@ -172,6 +174,10 @@ func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash com
 // than the necessary to fill pageSize in the last found block, i.e., let's say you want pageSize == 25,
 // you already found 24 txs, the next block contains 4 matches, then this function will return 28 txs.
 func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+	if uint64(pageSize) > api.maxPageSize {
+		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
+	}
+
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -347,6 +353,10 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 // than the necessary to fill pageSize in the last found block, i.e., let's say you want pageSize == 25,
 // you already found 24 txs, the next block contains 4 matches, then this function will return 28 txs.
 func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+	if uint64(pageSize) > api.maxPageSize {
+		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
+	}
+
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

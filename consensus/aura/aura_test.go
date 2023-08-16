@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -33,7 +33,8 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -71,7 +72,8 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
 
 	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
 	//Populate a sample valid header for a Pre-merge block
@@ -103,18 +105,18 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		return fakeVal, err
 	}
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, nil, nil, syscallCustom)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom)
 	})
 
 	invalidPreMergeHeader := validPreMergeHeader
 	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
 	require.Panics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, nil, nil, syscallCustom)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom)
 	})
 
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, nil, nil, syscallCustom)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom)
 	})
 }

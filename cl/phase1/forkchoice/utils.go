@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/transition"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -73,7 +74,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
-	baseState, _, err := f.forkGraph.GetState(checkpoint.BlockRoot(), true)
+	baseState, _, err := f.forkGraph.GetState(checkpoint.BlockRoot(), f.checkpointDummyState)
 	if err != nil {
 		return nil, err
 	}

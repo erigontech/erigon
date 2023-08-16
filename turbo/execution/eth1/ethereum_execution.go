@@ -2,23 +2,31 @@ package eth1
 
 import (
 	"context"
+	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
+
+const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
@@ -32,18 +40,39 @@ type EthereumExecutionModule struct {
 	forkValidator     *engine_helpers.ForkValidator
 
 	logger log.Logger
+	// Block building
+	nextPayloadId  uint64
+	lastParameters *core.BlockBuilderParameters
+	builderFunc    builder.BlockBuilderFunc
+	builders       map[uint64]*builder.BlockBuilder
+
+	// Changes accumulator
+	hook                *stages.Hook
+	accumulator         *shards.Accumulator
+	stateChangeConsumer shards.StateChangeConsumer
+
+	// configuration
+	config    *chain.Config
+	historyV3 bool
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, logger log.Logger) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
-		blockReader:       blockReader,
-		db:                db,
-		executionPipeline: executionPipeline,
-		logger:            logger,
-		forkValidator:     forkValidator,
-		semaphore:         semaphore.NewWeighted(1),
+		blockReader:         blockReader,
+		db:                  db,
+		executionPipeline:   executionPipeline,
+		logger:              logger,
+		forkValidator:       forkValidator,
+		builders:            make(map[uint64]*builder.BlockBuilder),
+		builderFunc:         builderFunc,
+		config:              config,
+		semaphore:           semaphore.NewWeighted(1),
+		hook:                hook,
+		accumulator:         accumulator,
+		stateChangeConsumer: stateChangeConsumer,
 	}
 }
 
@@ -52,6 +81,11 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
+}
+
+func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+	return rawdb.ReadTd(tx, blockHash, blockNumber)
+
 }
 
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
@@ -69,122 +103,11 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 }
 
-// Remaining
-
-func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *types2.H256) (*execution.ForkChoiceReceipt, error) {
-	type canonicalEntry struct {
-		hash   libcommon.Hash
-		number uint64
-	}
-	if !e.semaphore.TryAcquire(1) {
-		return &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			Status:          execution.ValidationStatus_Busy,
-		}, nil
-	}
-	defer e.semaphore.Release(1)
-
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockHash := gointerfaces.ConvertH256ToHash(req)
-	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	// If we dont have it, too bad
-	if fcuHeader == nil {
-		return &execution.ForkChoiceReceipt{
-			Status:          execution.ValidationStatus_MissingSegment,
-			LatestValidHash: &types2.H256{},
-		}, nil
-	}
-	currentParentHash := fcuHeader.ParentHash
-	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
-	if err != nil {
-		return nil, err
-	}
-	// Find such point, and collect all hashes
-	newCanonicals := make([]*canonicalEntry, 0, 2048)
-	newCanonicals = append(newCanonicals, &canonicalEntry{
-		hash:   fcuHeader.Hash(),
-		number: fcuHeader.Number.Uint64(),
-	})
-	for !isCanonicalHash {
-		newCanonicals = append(newCanonicals, &canonicalEntry{
-			hash:   currentParentHash,
-			number: currentParentNumber,
-		})
-		currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
-		if err != nil {
-			return nil, err
-		}
-		if currentHeader == nil {
-			return &execution.ForkChoiceReceipt{
-				Status:          execution.ValidationStatus_MissingSegment,
-				LatestValidHash: &types2.H256{},
-			}, nil
-		}
-		currentParentHash = currentHeader.ParentHash
-		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
-		e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
-	}
-	// Run the unwind
-	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
-		return nil, err
-	}
-	// Mark all new canonicals as canonicals
-	for _, canonicalSegment := range newCanonicals {
-		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
-			return nil, err
-		}
-	}
-	// Set Progress for headers and bodies accordingly.
-	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
-		return nil, err
-	}
-	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
-		return nil, err
-	}
-	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
-		return nil, err
-	}
-	// if head hash was set then success otherwise no
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	if headNumber != nil && e.logger != nil {
-		e.logger.Info("Current forkchoice", "hash", headHash, "number", *headNumber)
-	}
-	status := execution.ValidationStatus_Success
-	if headHash != blockHash {
-		status = execution.ValidationStatus_BadBlock
-	}
-	return &execution.ForkChoiceReceipt{
-		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-		Status:          status,
-	}, tx.Commit()
-}
-
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			ValidationStatus: execution.ValidationStatus_Busy,
+			ValidationStatus: execution.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
@@ -193,6 +116,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
+	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
 	if err != nil {
@@ -203,30 +127,93 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
+
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      req.Hash,
-			ValidationStatus: execution.ValidationStatus_MissingSegment,
+			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
+	currentBlockNumber := rawdb.ReadCurrentBlockNumber(tx)
+
+	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
+		return &execution.ValidationReceipt{
+			ValidationStatus: execution.ExecutionStatus_TooFarAway,
+			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+		}, tx.Commit()
+	}
+
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+
+	extendingHash := e.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, criticalError
 	}
-	validationStatus := execution.ValidationStatus_Success
+
+	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
+	validationStatus := execution.ExecutionStatus_Success
 	if status == engine_types.AcceptedStatus {
-		validationStatus = execution.ValidationStatus_MissingSegment
+		validationStatus = execution.ExecutionStatus_MissingSegment
 	}
-	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain %x is invalid. reason %s", blockHash, err)
-		validationStatus = execution.ValidationStatus_BadBlock
+	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if isInvalidChain && (lvh != libcommon.Hash{}) && lvh != blockHash {
+		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
+			return nil, err
+		}
+	}
+	if isInvalidChain {
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
+		validationStatus = execution.ExecutionStatus_BadBlock
 	}
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
-	}, nil
+	}, tx.Commit()
 }
 
-// Missing: NewPayload, AssembleBlock
+func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
+	tip := rawdb.ReadHeaderNumber(tx, headHash)
+
+	currentHash := headHash
+	currentNumber := *tip
+	for currentHash != latestValidHash {
+		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
+		if err != nil {
+			return err
+		}
+		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		currentHash = currentHeader.ParentHash
+		currentNumber--
+	}
+	return nil
+}
+
+func (e *EthereumExecutionModule) Start(ctx context.Context) {
+	e.semaphore.Acquire(ctx, 1)
+	defer e.semaphore.Release(1)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	defer tx.Rollback()
+	// Run the forkchoice
+	if err := e.executionPipeline.Run(e.db, tx, true); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+	}
+}
+
+func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.ReadyResponse{Ready: false}, nil
+	}
+	defer e.semaphore.Release(1)
+	return &execution.ReadyResponse{Ready: true}, nil
+}

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -738,9 +738,9 @@ type txn struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*stages.MockSentry, *core.ChainPack, error) {
+func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 

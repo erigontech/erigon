@@ -631,7 +631,9 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
-func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscallCustom consensus.SysCallCustom) {
+func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom,
+) {
 	blockNum := header.Number.Uint64()
 
 	//Check block gas limit from smart contract, if applicable

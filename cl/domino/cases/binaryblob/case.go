@@ -75,7 +75,7 @@ func (c *Case) Domino(ctx context.Context, slot uint64) (*cltypes.SignedBeaconBl
 		return nil, err
 	}
 	_, version := c.EpochAndVersion()
-	blk := &cltypes.SignedBeaconBlock{}
+	blk := cltypes.NewSignedBeaconBlock(c.BeaconConfig)
 	err = blk.DecodeSSZ(bts, version)
 	if err != nil {
 		return nil, err

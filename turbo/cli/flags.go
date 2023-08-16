@@ -201,12 +201,6 @@ var (
 		Usage: "How often transactions should be committed to the storage",
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
-
-	ExperimentalConsensusSeparationFlag = cli.BoolFlag{
-		Name:  "experimental.modular",
-		Usage: "Enable consensus separation (experimental feauture)",
-		Value: false,
-	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
@@ -251,8 +245,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
 		}
 	}
-
-	cfg.ExperimentalConsensusSeparation = ctx.Bool(ExperimentalConsensusSeparationFlag.Name)
 
 	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
 		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
@@ -404,6 +396,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		TraceCompatibility:   ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
+
+		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 

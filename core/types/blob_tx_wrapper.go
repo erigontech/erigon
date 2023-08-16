@@ -12,6 +12,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -24,7 +25,7 @@ const (
 
 type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
 type KZGProof [LEN_48]byte
-type Blob [chain.BlobSize]byte
+type Blob [fixedgas.BlobSize]byte
 
 type BlobKzgs []KZGCommitment
 type KZGProofs []KZGProof
@@ -40,9 +41,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                                   // 0xb7..0xbf
-	size += libcommon.BitLenToByteLen(bits.Len(chain.BlobSize)) // length encoding size
-	size += chain.BlobSize                                      // byte_array it self
+	size := 1                                                      // 0xb7..0xbf
+	size += libcommon.BitLenToByteLen(bits.Len(fixedgas.BlobSize)) // length encoding size
+	size += fixedgas.BlobSize                                      // byte_array it self
 	return size
 }
 
@@ -186,7 +187,7 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	blob := Blob{}
 
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == chain.BlobSize {
+		if len(b) == fixedgas.BlobSize {
 			copy((blob)[:], b)
 			*blobs = append(*blobs, blob)
 		} else {
@@ -267,10 +268,10 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 != l2 || l1 != l3 || l1 != l4 {
 		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
 	}
-	// the following check isn't strictly necessary as it would be caught by data gas processing
+	// the following check isn't strictly necessary as it would be caught by blob gas processing
 	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
 	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > chain.MaxBlobsPerBlock {
+	if uint64(l1) > fixedgas.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	kzgCtx := libkzg.Ctx()
@@ -299,10 +300,10 @@ func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
 func (txw *BlobTxWrapper) Cost() *uint256.Int { return txw.Tx.GetFeeCap() }
 
-func (txw *BlobTxWrapper) GetDataHashes() []libcommon.Hash { return txw.Tx.GetDataHashes() }
+func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
 
 func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
-func (txw *BlobTxWrapper) GetDataGas() uint64        { return txw.Tx.GetDataGas() }
+func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
 func (txw *BlobTxWrapper) Time() time.Time           { return txw.Tx.Time() }
 func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
@@ -344,111 +345,6 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
-func (txw BlobTxWrapper) EncodingSize() int {
-	total, _, _, _, _ := txw.payloadSize()
-	envelopeSize := total
-	// Add envelope size and type size
-	if total >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(total)))
-	}
-	envelopeSize += 2
-	return envelopeSize
-}
-
-func (txw BlobTxWrapper) payloadSize() (int, int, int, int, int) {
-	total := 1
-	txSize, _, _, _, _ := txw.Tx.payloadSize()
-	if txSize >= 56 {
-		total += libcommon.BitLenToByteLen(bits.Len(uint(txSize)))
-	}
-	total += txSize
-
-	total++
-	commitmentsSize := txw.Commitments.payloadSize()
-	if commitmentsSize >= 56 {
-		total += libcommon.BitLenToByteLen(bits.Len(uint(commitmentsSize)))
-	}
-	total += commitmentsSize
-
-	total++
-	blobsSize := txw.Blobs.payloadSize()
-	if blobsSize >= 56 {
-		total += libcommon.BitLenToByteLen(bits.Len(uint(blobsSize)))
-	}
-	total += blobsSize
-
-	total++
-	proofsSize := txw.Proofs.payloadSize()
-	if proofsSize >= 56 {
-		total += libcommon.BitLenToByteLen(bits.Len(uint(proofsSize)))
-	}
-	total += proofsSize
-	return total, txSize, commitmentsSize, blobsSize, proofsSize
-}
-
-func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, total, txSize, commitmentsSize, blobsSize, proofsSize int) error {
-	// prefix, encode txw payload size
-	if err := EncodeStructSizePrefix(total, w, b); err != nil {
-		return err
-	}
-
-	txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := txw.Tx.payloadSize()
-
-	if err := txw.Tx.encodePayload(w, b, txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
-		return err
-	}
-
-	// TODO: encode in order (see EIP-4844 updates)
-	if err := txw.Commitments.encodePayload(w, b, commitmentsSize); err != nil {
-		return err
-	}
-	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
-		return err
-	}
-	if err := txw.Proofs.encodePayload(w, b, proofsSize); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
-	total, txSize, commitmentsSize, blobsSize, proofsSize := txw.payloadSize()
-	var b [33]byte
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := txw.encodePayload(w, b[:], total, txSize, commitmentsSize, blobsSize, proofsSize); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
-	total, txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
-	envelopeSize := total
-	if total >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(total)))
-	}
-	// size of struct prefix and TxType
-	envelopeSize += 2
-	var b [33]byte
-	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := txw.encodePayload(w, b[:], total, txSize, commitmentsSize, proofsSize, blobsSize); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
@@ -459,11 +355,11 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err := txw.Commitments.DecodeRLP(s); err != nil {
+	if err := txw.Blobs.DecodeRLP(s); err != nil {
 		return err
 	}
 
-	if err := txw.Blobs.DecodeRLP(s); err != nil {
+	if err := txw.Commitments.DecodeRLP(s); err != nil {
 		return err
 	}
 
@@ -472,4 +368,16 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
+}
+
+// We deliberately encode only the transaction payload because the only case we need to serialize
+// blobs/commitments/proofs is when we reply to GetPooledTransactions (and that's handled by the txpool).
+func (txw BlobTxWrapper) EncodingSize() int {
+	return txw.Tx.EncodingSize()
+}
+func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+	return txw.Tx.MarshalBinary(w)
+}
+func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+	return txw.Tx.EncodeRLP(w)
 }

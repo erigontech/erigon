@@ -77,6 +77,7 @@ type ExecuteBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            headerDownloader
+	// last valid number of the stage
 
 	dirs      datadir.Dirs
 	historyV3 bool
@@ -105,6 +106,9 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {
+	if genesis == nil {
+		panic("assert: nil genesis")
+	}
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,

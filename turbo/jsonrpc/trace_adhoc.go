@@ -52,7 +52,7 @@ type TraceCallParam struct {
 	GasPrice             *hexutil.Big       `json:"gasPrice"`
 	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
-	MaxFeePerDataGas     *hexutil.Big       `json:"maxFeePerDataGas"`
+	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
 	Data                 hexutility.Bytes   `json:"data"`
 	AccessList           *types2.AccessList `json:"accessList"`
@@ -154,7 +154,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		gasPrice         *uint256.Int
 		gasFeeCap        *uint256.Int
 		gasTipCap        *uint256.Int
-		maxFeePerDataGas *uint256.Int
+		maxFeePerBlobGas *uint256.Int
 	)
 	if baseFee == nil {
 		// If there's no basefee, then it must be a non-1559 execution
@@ -202,8 +202,8 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
-		if args.MaxFeePerDataGas != nil {
-			maxFeePerDataGas.SetFromBig(args.MaxFeePerDataGas.ToInt())
+		if args.MaxFeePerBlobGas != nil {
+			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
 		}
 	}
 	value := new(uint256.Int)
@@ -221,7 +221,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerDataGas)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
 }
 
@@ -453,7 +453,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			// Set the "push" of the last operation
 			var showStack int
 			switch {
-			case ot.lastOp >= vm.PUSH1 && ot.lastOp <= vm.PUSH32:
+			case ot.lastOp >= vm.PUSH0 && ot.lastOp <= vm.PUSH32:
 				showStack = 1
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
@@ -973,7 +973,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *core.ExecutionResult
 	ibs.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
@@ -1191,7 +1191,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		var execResult *core.ExecutionResult
 		// Clone the state cache before applying the changes, clone is discarded
 		var cloneReader state.StateReader

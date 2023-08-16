@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +49,7 @@ func TestLookupStorage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := stages.Mock(t)
+			m := mock.Mock(t)
 			br := m.BlockReader
 			tx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
