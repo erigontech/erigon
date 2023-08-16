@@ -26,6 +26,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 )
@@ -487,6 +489,34 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	}
 }
 
+func collateDomainAndPrune(t testing.TB, tx kv.RwTx, d *Domain, txs, stepsToLeaveInDb uint64) {
+	t.Helper()
+	ctx := context.Background()
+	maxStep := txs / d.aggregationStep
+	if maxStep > stepsToLeaveInDb {
+		maxStep -= stepsToLeaveInDb
+	}
+
+	for step := uint64(0); step <= maxStep; step++ {
+		func() {
+			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
+			require.NoError(t, err)
+			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+			require.NoError(t, err)
+			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+
+			require.NoError(t, err)
+		}()
+	}
+
+	// logEvery := time.NewTicker(30 * time.Second)
+	// dc := d.MakeContext()
+	// maxStep--
+	// err := dc.Prune(ctx, tx, maxStep, maxStep*d.aggregationStep, (maxStep+1)*d.aggregationStep, math.MaxUint64, logEvery)
+	// require.NoError(t, err)
+	// dc.Close()
+}
+
 func TestHistory(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -497,6 +527,8 @@ func TestHistory(t *testing.T) {
 	require.NoError(t, err)
 	d.SetTx(tx)
 	defer tx.Rollback()
+
+	// collateDomainAndPrune(t, tx, d, txs, 2)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
@@ -1439,4 +1471,135 @@ func TestDomain_Unwind(t *testing.T) {
 		fmt.Printf("%s: %s\n", k, v)
 	})
 	return
+}
+
+type upd struct {
+	txNum uint64
+	value []byte
+}
+
+func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
+	data := make(map[string][]upd)
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	if keyLimit == 1 {
+		key1 := generateRandomKey(r, keySize1)
+		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
+		return data
+	}
+
+	for i := uint64(0); i < keyLimit/2; i++ {
+		key1 := generateRandomKey(r, keySize1)
+		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
+		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
+		data[key2] = generateUpdates(r, totalTx, keyTxsLimit)
+	}
+
+	return data
+}
+
+func generateRandomKey(r *rand.Rand, size uint64) string {
+	key := make([]byte, size)
+	r.Read(key)
+	return fmt.Sprintf("%x", key)
+}
+
+func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+		value := make([]byte, 10)
+		r.Read(value)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
+}
+
+func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+	txNum := uint64(r.Intn(int(maxTxNum)))
+	for usedTxNums[txNum] {
+		txNum = uint64(r.Intn(int(maxTxNum)))
+	}
+
+	return txNum
+}
+
+func TestDomain_GetAfterAggregation(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.compressHistoryVals = false
+	d.domainLargeValues = true // false requires dupsort value table for domain
+	d.compressValues = false
+	d.withLocalityIndex = true
+
+	// UseBpsTree = true
+
+	d.SetTx(tx)
+	// d.StartWrites()
+	d.StartUnbufferedWrites()
+	defer d.FinishWrites()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(100)
+	keyTxsLimit := uint64(10)
+	keyLimit := uint64(2)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		kk, _ := hex.DecodeString(key)
+		for i := 0; i < len(updates); i++ {
+			d.SetTxNum(updates[i].txNum)
+			d.PutWithPrev(kk, nil, updates[i].value, p)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	d.SetTxNum(totalTx)
+	// err = d.wal.flush(context.Background(), tx)
+	// require.NoError(t, err)
+
+	// aggregate
+	collateDomainAndPrune(t, tx, d, totalTx, 1)
+	tx.Commit()
+	tx = nil
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	d.SetTx(tx)
+
+	dc := d.MakeContext()
+	defer dc.Close()
+
+	kc := 0
+	for key, updates := range data {
+		kc++
+		kk, _ := hex.DecodeString(key)
+		for i := 1; i < len(updates); i++ {
+			v, err := dc.GetBeforeTxNum(kk, updates[i].txNum, tx)
+			require.NoError(t, err)
+			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %s, tx %d", kc, len(data), key, updates[i-1].txNum)
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		v, ok, err := dc.GetLatest(kk, nil, tx)
+		require.NoError(t, err)
+		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %s latest", key)
+		require.True(t, ok)
+	}
 }

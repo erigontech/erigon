@@ -703,6 +703,9 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.d.txNum / d.d.aggregationStep))
+	defer func() {
+		fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
+	}()
 
 	if d.largeValues {
 		if d.buffered {
@@ -900,19 +903,6 @@ type kvpair struct {
 	k, v []byte
 }
 
-func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan kvpair) (err error) {
-	for kv := range pairs {
-		if err = valuesComp.AddUncompressedWord(kv.k); err != nil {
-			return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
-		}
-		mxCollationSize.Inc()
-		if err = valuesComp.AddUncompressedWord(kv.v); err != nil {
-			return fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
-		}
-	}
-	return nil
-}
-
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
@@ -1001,12 +991,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err != nil {
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 			}
+			fmt.Printf("collate k=[%x -> %x]\n", k, v)
 
 			if err = comp.AddWord(k); err != nil {
-				return fmt.Errorf("add %s compressed values key [%x]: %w", d.filenameBase, k, err)
+				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
 			if err = comp.AddWord(v); err != nil {
-				return fmt.Errorf("add %s compressed values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 			mxCollationSize.Inc()
 

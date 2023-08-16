@@ -206,13 +206,10 @@ func (b *BpsTree) SeekWithGetter(g ArchiveGetter, key []byte) (*BpsTreeIterator,
 		}
 	}
 	if l == r {
-		// lastKey, _ := b.lookupKeyWGetter(g, l)
-		// fmt.Printf("l==r %d; lastKey %x key %x \n", l, lastKey, key)
+		if r == b.offt.Count() {
+			return nil, nil
+		}
 		return &BpsTreeIterator{t: b, i: l}, nil
 	}
-
-	// if bytes.Compare(lastKey, key) < 0 {
-	// 	return nil, nil
-	// }
 	return &BpsTreeIterator{t: b, i: m}, nil
 }

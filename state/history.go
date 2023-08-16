@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -549,7 +550,12 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
+	defer func() {
+		fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
+	}()
+
 	ii := h.h.InvertedIndex
+
 	if h.largeValues {
 		lk := len(key1) + len(key2)
 		historyKey := h.historyKey[:lk+8]
@@ -637,9 +643,12 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger); err != nil {
+	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
+	historyComp = NewArchiveWriter(comp, h.compressHistoryVals)
+
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -656,9 +665,10 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 		var bitmap *roaring64.Bitmap
 		var ok bool
-		if bitmap, ok = indexBitmaps[string(v)]; !ok {
+
+		if bitmap, ok = indexBitmaps[hex.EncodeToString(v)]; !ok {
 			bitmap = bitmapdb.NewBitmap64()
-			indexBitmaps[string(v)] = bitmap
+			indexBitmaps[hex.EncodeToString(v)] = bitmap
 		}
 		bitmap.Add(txNum)
 	}
@@ -691,29 +701,33 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 	for _, key := range keys {
 		bitmap := indexBitmaps[key]
 		it := bitmap.Iterator()
-		copy(keyBuf, key)
-		keyBuf = keyBuf[:len(key)+8]
+		hk, _ := hex.DecodeString(key)
+		lk := len(hk)
+		copy(keyBuf, hk)
+
 		for it.HasNext() {
 			txNum := it.Next()
-			binary.BigEndian.PutUint64(keyBuf[len(key):], txNum)
+			binary.BigEndian.PutUint64(keyBuf[lk:], txNum)
 			//TODO: use cursor range
 			if h.historyLargeValues {
-				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
+				val, err := roTx.GetOne(h.historyValsTable, keyBuf[:lk])
 				if err != nil {
 					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, k, err)
 				}
 				if len(val) == 0 {
 					val = nil
 				}
+				fmt.Printf("HCollat [%x]=>[%x]\n", hk, val)
 				if err = historyComp.AddWord(val); err != nil {
 					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
 				}
 			} else {
-				val, err := cd.SeekBothRange(keyBuf[:len(key)], keyBuf[len(key):])
+				val, err := cd.SeekBothRange(keyBuf[:lk], keyBuf[lk:lk+8])
 				if err != nil {
 					return HistoryCollation{}, err
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == txNum {
+					fmt.Printf("HCollat [%x]=>[%x]\n", hk, val)
 					val = val[8:]
 				} else {
 					val = nil
@@ -1502,6 +1516,21 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		seek := make([]byte, len(key)+8)
 		copy(seek, key)
 		binary.BigEndian.PutUint64(seek[len(key):], txNum)
+		for {
+			k, v, err := c.First()
+			if err != nil {
+				panic(err)
+			}
+			if k == nil {
+				break
+			}
+			fmt.Printf("nostate k=%x, v=%x\n", k, v)
+			k, v, err = c.Next()
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		kAndTxNum, val, err := c.Seek(seek)
 		if err != nil {
 			return nil, false, err
@@ -1520,6 +1549,22 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	seek := make([]byte, len(key)+8)
 	copy(seek, key)
 	binary.BigEndian.PutUint64(seek[len(key):], txNum)
+
+	for {
+		k, v, err := c.First()
+		if err != nil {
+			panic(err)
+		}
+		if k == nil {
+			break
+		}
+		fmt.Printf("nostate k=%x, v=%x\n", k, v)
+		k, v, err = c.Next()
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	val, err := c.SeekBothRange(key, seek[len(key):])
 	if err != nil {
 		return nil, false, err
