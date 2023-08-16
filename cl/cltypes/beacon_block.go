@@ -99,7 +99,8 @@ func (b *SignedBeaconBlock) DecodeForStorage(buf []byte, s int) error {
 
 // Version returns beacon block version.
 func (b *SignedBeaconBlock) getSchemaForStorage() []interface{} {
-	return []interface{}{b.Signature[:], &b.Block.Slot, &b.Block.ProposerIndex, b.Block.StateRoot[:], b.Block.ParentRoot[:], b.Block.Body.getSchema(true)}
+	return append([]interface{}{b.Signature[:], &b.Block.Slot, &b.Block.ProposerIndex, b.Block.StateRoot[:], b.Block.ParentRoot[:]},
+		b.Block.Body.getSchema(true)...)
 }
 
 // Version returns beacon block version.
