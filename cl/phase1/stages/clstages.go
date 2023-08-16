@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/afero"
 )
 
 const doDownload = false
@@ -31,7 +30,7 @@ type Cfg struct {
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
-	dataDirFs       afero.Fs
+	beaconDB        persistence.BeaconChainDatabase
 }
 
 type Args struct {
@@ -39,8 +38,6 @@ type Args struct {
 
 	targetEpoch, seenEpoch uint64
 	targetSlot, seenSlot   uint64
-
-	downloadedHistory bool
 }
 
 func ClStagesCfg(
@@ -51,7 +48,7 @@ func ClStagesCfg(
 	executionClient *execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
-	dataDirFs afero.Fs,
+	beaconDB persistence.BeaconChainDatabase,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -61,7 +58,7 @@ func ClStagesCfg(
 		executionClient: executionClient,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
-		dataDirFs:       dataDirFs,
+		beaconDB:        beaconDB,
 	}
 }
 
@@ -82,12 +79,11 @@ const (
 	minPeersForDownload = uint64(4)
 )
 
-func MetaCatchingUp(args Args) StageName {
+func MetaCatchingUp(args Args, hasDownloaded bool) StageName {
 	if args.peers < minPeersForDownload {
 		return WaitForPeers
 	}
-	if !args.downloadedHistory && doDownload {
-		args.downloadedHistory = true
+	if !hasDownloaded && doDownload {
 		return DownloadHistoricalBlocks
 	}
 	if args.seenEpoch < args.targetEpoch {
@@ -150,8 +146,8 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
-	rpcSource := clpersist.NewBeaconRpcSource(cfg.rpc)
-	gossipSource := clpersist.NewGossipSource(ctx, cfg.gossipManager)
+	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
+	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
 	processBlock := func(block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
@@ -159,7 +155,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 		// NOTE: this error is ignored and logged only!
-		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon"), block.Data, cfg.beaconCfg)
+		err := cfg.beaconDB.WriteBlock(block.Data)
 		if err != nil {
 			log.Error("failed to persist block to store", "slot", block.Data.Block.Slot, "err", err)
 		}
@@ -170,6 +166,7 @@ func ConsensusClStages(ctx context.Context,
 	// Probably the correct long term solution is to create a third generic parameter that defines shared state
 	// but for now, all it would have are the two gossip sources and the forkChoicesSinceReorg, so i don't think its worth it (yet).
 	shouldForkChoiceSinceReorg := false
+	downloaded := false
 
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
@@ -192,7 +189,7 @@ func ConsensusClStages(ctx context.Context,
 			WaitForPeers: {
 				Description: `wait for enough peers. This is also a safe stage to go to when unsure of what stage to use`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return CatchUpBlocks
@@ -225,12 +222,13 @@ func ConsensusClStages(ctx context.Context,
 			DownloadHistoricalBlocks: {
 				Description: "Download historical blocks",
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					downloaded = true
 					startingRoot, err := cfg.state.BlockRoot()
 					if err != nil {
 						return err
@@ -238,13 +236,13 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.dataDirFs, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return CatchUpBlocks
@@ -275,7 +273,7 @@ func ConsensusClStages(ctx context.Context,
 			CatchUpBlocks: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return ForkChoice
@@ -289,7 +287,7 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
-					sources := []clpersist.BlockSource{gossipSource, rpcSource}
+					sources := []persistence.BlockSource{gossipSource, rpcSource}
 					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()
@@ -326,7 +324,7 @@ func ConsensusClStages(ctx context.Context,
 				Description: `fork choice stage. We will send all fork choise things here
 			also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return ListenForForks
@@ -372,7 +370,7 @@ func ConsensusClStages(ctx context.Context,
 					defer func() {
 						shouldForkChoiceSinceReorg = false
 					}()
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					if shouldForkChoiceSinceReorg {
@@ -414,7 +412,7 @@ func ConsensusClStages(ctx context.Context,
 			CleanupAndPruning: {
 				Description: `cleanup and pruning is done here`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := MetaCatchingUp(args, downloaded); x != "" {
 						return x
 					}
 					return SleepForSlot

@@ -4,25 +4,24 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clpersist"
-	"github.com/spf13/afero"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 )
 
 type Downloader struct {
-	fs     afero.Fs
-	source clpersist.BlockSource
-	config *clparams.BeaconChainConfig
+	source    persistence.BlockSource
+	config    *clparams.BeaconChainConfig
+	beacondDB persistence.BeaconChainDatabase
 }
 
 func NewDownloader(
-	fs afero.Fs,
-	source clpersist.BlockSource,
+	beacondDB persistence.BeaconChainDatabase,
+	source persistence.BlockSource,
 	config *clparams.BeaconChainConfig,
 ) *Downloader {
 	return &Downloader{
-		fs:     fs,
-		source: source,
-		config: config,
+		beacondDB: beacondDB,
+		source:    source,
+		config:    config,
 	}
 }
 
@@ -36,7 +35,7 @@ func (d *Downloader) DownloadEpoch(ctx context.Context, epoch uint64) error {
 	// NOTE: the downloader does not perform any real verification on these blocks
 	// validation must be done separately
 	for _, v := range blocks {
-		err := clpersist.SaveBlockWithConfig(d.fs, v.Data, d.config)
+		err := d.beacondDB.WriteBlock(v.Data)
 		if err != nil {
 			return err
 		}
