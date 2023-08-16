@@ -991,7 +991,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err != nil {
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 			}
-			fmt.Printf("collate k=[%x -> %x]\n", k, v)
 
 			if err = comp.AddWord(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
