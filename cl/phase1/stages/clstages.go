@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const doDownload = true
+const doDownload = false
 
 type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
