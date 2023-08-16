@@ -408,7 +408,6 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("delete account %x code: %x\n", addr, pc)
 	if len(pc) > 0 {
 		sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchCode)
 		sd.put(kv.CodeDomain, addr, nil)
@@ -416,6 +415,11 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 			return err
 		}
 	}
+
+	// bb, _ := hex.DecodeString("d96d1b15d6bec8e7d37038237b1e913ad99f7dee")
+	// if bytes.Equal(bb, addr) {
+	// 	fmt.Printf("delete account %x \n", addr)
+	// }
 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
@@ -535,7 +539,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()
 
-	return sc.IteratePrefix(roTx, prefix, it)
+	// return sc.IteratePrefix(roTx, prefix, it)
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -576,13 +580,15 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 	sctx := sd.aggCtx.storage
 	for _, item := range sctx.files {
-		cursor, err := item.src.bindex.SeekWithGetter(prefix, item.getter)
+		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), item.src.bindex.compressed)
+		cursor, err := item.src.bindex.SeekWithGetter(prefix, gg)
 		if err != nil {
 			return err
 		}
 		if cursor == nil {
 			continue
 		}
+		cursor.getter = gg
 
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {

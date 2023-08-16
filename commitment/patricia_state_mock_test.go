@@ -154,6 +154,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 				if update.Flags&StorageUpdate != 0 {
 					ex.Flags |= StorageUpdate
 					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
+					ex.ValLength = update.ValLength
 				}
 				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {

@@ -892,7 +892,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	switch UseBpsTree {
 	case true:
 		idx.bplus = NewBpsTree(idx.getter, idx.ef, M)
-		idx.bplus.initialize()
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false)
 		if idx.alloc != nil {
@@ -910,7 +909,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 // di starts from 0 so di is never >= keyCount
 func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
 	if UseBpsTree {
-		return b.dataLookupBplus(di)
+		return b.dataLookupBplus(di, g)
 	}
 
 	if di >= b.ef.Count() {
@@ -931,8 +930,8 @@ func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 	return k, v, nil
 }
 
-func (b *BtIndex) dataLookupBplus(di uint64) ([]byte, []byte, error) {
-	return b.bplus.lookup(di)
+func (b *BtIndex) dataLookupBplus(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
+	return b.bplus.lookupWithGetter(g, di)
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
@@ -1076,7 +1075,10 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 		if it == nil {
 			return nil, nil
 		}
-		k, v := it.KV()
+		k, v, err := it.KVFromGetter(g)
+		if err != nil {
+			return nil, err
+		}
 		cur := b.alloc.newCursor(context.Background(), k, v, it.i, g)
 		cur.bt = it
 		return cur, nil
@@ -1102,6 +1104,16 @@ func (b *BtIndex) Lookup(key []byte) uint64 {
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
+	if UseBpsTree {
+		g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
+		k, v, err := b.dataLookupBplus(i, g)
+		if err != nil {
+			return nil
+		}
+		cur := b.alloc.newCursor(context.Background(), k, v, i, b.getter)
+		cur.bt = &BpsTreeIterator{i: i, t: b.bplus}
+		return cur
+	}
 	if b.alloc == nil {
 		return nil
 	}

@@ -1341,10 +1341,10 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Updat
 	})
 
 	for i, update := range updates {
-		if hph.trace {
-			fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
-				i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
+		// if hph.trace {
+		fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
+			i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
+		// }
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(update.hashedKey) {
 			if branchData, updateKey, err := hph.fold(); err != nil {

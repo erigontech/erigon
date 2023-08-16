@@ -972,7 +972,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				return err
 			}
 			pos++
-			//fmt.Printf("key: %x, step: %x\n", k, stepInDB)
 			if !bytes.Equal(stepBytes, stepInDB) {
 				continue
 			}
@@ -1586,17 +1585,18 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		return nil, false, err
 	}
 	_ = ok
-	if !ok {
-		return nil, false, nil
-	}
+	// if !ok {
+	// 	return nil, false, nil
+	// }
 
 	t := time.Now()
 	exactTxNum := exactWarmStep * dc.d.aggregationStep
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		if !isUseful {
+		if !isUseful && ok {
 			continue
 		}
+		_ = isUseful
 
 		var offset uint64
 		if UseBpsTree || UseBtree {
@@ -1604,7 +1604,6 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			if bt.Empty() {
 				continue
 			}
-			//fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
 			_, v, ok, err := bt.Get(filekey, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
@@ -1613,6 +1612,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 				LatestStateReadWarmNotFound.UpdateDuration(t)
 				continue
 			}
+			// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
 			LatestStateReadWarm.UpdateDuration(t)
 			return v, true, nil
 		}
@@ -1729,9 +1729,9 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if err != nil {
 		return nil, false, err
 	}
-	if !ok {
-		return nil, false, nil
-	}
+	// if !ok {
+	// 	return nil, false, nil
+	// }
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
 	exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
@@ -1739,9 +1739,10 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
 		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		if !isUseful {
+		if !isUseful && ok {
 			continue
 		}
+		_ = isUseful
 
 		var offset uint64
 		if UseBtree || UseBpsTree {

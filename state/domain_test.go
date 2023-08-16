@@ -1145,6 +1145,80 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	//}
 }
 
+func TestDomainContext_IteratePrefixAgain(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.SetTx(tx)
+	d.historyLargeValues = true
+	d.StartUnbufferedWrites()
+	defer d.FinishWrites()
+
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	key := make([]byte, 20)
+	loc := make([]byte, 32)
+	value := make([]byte, 32)
+	first := []byte{0xab, 0xff}
+	other := []byte{0xcc, 0xfe}
+	copy(key[:], first)
+
+	values := make(map[string][]byte)
+	for i := 0; i < 30; i++ {
+		rnd.Read(key[2:])
+		if i == 15 {
+			copy(key[:2], other)
+		}
+		loc = make([]byte, 32)
+		rnd.Read(loc)
+		rnd.Read(value)
+		// if i%5 == 0 {
+		// 	d.SetTxNum(uint64(i))
+		// }
+
+		if i == 0 || i == 15 {
+			loc = nil
+			copy(key[2:], make([]byte, 18))
+		}
+
+		values[hex.EncodeToString(common.Append(key, loc))] = common.Copy(value)
+		err := d.PutWithPrev(key, loc, value, nil)
+		require.NoError(t, err)
+	}
+
+	dctx := d.MakeContext()
+	defer dctx.Close()
+
+	counter := 0
+	err = dctx.IteratePrefix(tx, other, func(kx, vx []byte) {
+		if !bytes.HasPrefix(kx, other) {
+			return
+		}
+		fmt.Printf("%x \n", kx)
+		counter++
+		v, ok := values[hex.EncodeToString(kx)]
+		require.True(t, ok)
+		require.Equal(t, v, vx)
+	})
+	require.NoError(t, err)
+	err = dctx.IteratePrefix(tx, first, func(kx, vx []byte) {
+		if !bytes.HasPrefix(kx, first) {
+			return
+		}
+		fmt.Printf("%x \n", kx)
+		counter++
+		v, ok := values[hex.EncodeToString(kx)]
+		require.True(t, ok)
+		require.Equal(t, v, vx)
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, len(values), counter)
+}
+
 func TestDomainContext_IteratePrefix(t *testing.T) {
 	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
