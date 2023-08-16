@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const doDownload = false
+const doDownload = true
 
 type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
@@ -233,7 +233,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.dataDirFs, cfg.genesisCfg, cfg.beaconCfg, 500_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.dataDirFs, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
