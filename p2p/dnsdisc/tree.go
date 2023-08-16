@@ -183,7 +183,7 @@ func (t *Tree) build(entries []entry) entry {
 }
 
 func sortByID(nodes []*enode.Node) []*enode.Node {
-	slices.SortFunc(nodes, func(i, j *enode.Node) bool { return bytes.Compare(i.ID().Bytes(), j.ID().Bytes()) < 0 })
+	slices.SortFunc(nodes, func(i, j *enode.Node) int { return bytes.Compare(i.ID().Bytes(), j.ID().Bytes()) })
 	return nodes
 }
 

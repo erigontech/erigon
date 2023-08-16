@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/pelletier/go-toml/v2"
@@ -49,7 +50,7 @@ func doSort(in preverified) Preverified {
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	slices.SortFunc(out, func(i, j PreverifiedItem) bool { return i.Name < j.Name })
+	slices.SortFunc(out, func(i, j PreverifiedItem) int { return cmp.Compare(i.Name, j.Name) })
 	return out
 }
 
