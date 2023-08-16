@@ -43,6 +43,7 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 			case <-retryVerifyTicker.C:
 				res = verifyResponse(stream, peerId)
 			case <-nctx.Done():
+				stream.Reset()
 				return
 			}
 		}
@@ -51,7 +52,6 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	}()
 	select {
 	case <-nctx.Done():
-		stream.Reset()
 		return nil, 189, nctx.Err()
 	case ans := <-ch:
 		if ans.err != nil {
