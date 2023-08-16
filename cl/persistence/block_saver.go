@@ -61,11 +61,11 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 			return err
 		}
 	} else {
-		encoded, err := block.EncodeSSZ(nil)
+		encoded, err := block.EncodeForStorage(nil)
 		if err != nil {
 			return err
 		}
-		fmt.Println(len(encoded))
+		fmt.Println(len(utils.CompressSnappy(encoded)))
 		if _, err := fp.Write(utils.CompressSnappy(encoded)); err != nil {
 			return err
 		}
