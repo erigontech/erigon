@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
 )
 
@@ -52,10 +52,14 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 	if err != nil {
 		return err
 	}
-	err = ssz_snappy.EncodeAndWrite(fp, block)
+	encoded, err := block.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
+	if _, err := fp.Write(utils.CompressSnappy(encoded)); err != nil {
+		return err
+	}
+
 	err = fp.Sync()
 	if err != nil {
 		return err

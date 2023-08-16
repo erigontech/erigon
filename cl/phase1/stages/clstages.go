@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const doDownload = false
+const doDownload = true
 
 type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
