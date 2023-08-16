@@ -67,6 +67,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		sent.SetStatus(initialStatus)
 	}
 	server := NewSentinelServer(ctx, sent, logger)
+	go StartServe(server, srvCfg, creds)
 
 	return direct.NewSentinelClientDirect(server), nil
 }
