@@ -146,27 +146,29 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 	return ctx, cn
 }
 
-func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	retryReqInterval := time.NewTicker(200 * time.Millisecond)
+	retryReqInterval := time.NewTicker(100 * time.Millisecond)
 	defer retryReqInterval.Stop()
-	ctx, cn := s.withTimeoutCtx(pctx, 0)
-	defer cn()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
 	uniquePeers := map[peer.ID]struct{}{}
 	requestPeer := func(peer *peers.Peer) {
 		peer.MarkUsed()
+		defer peer.MarkUnused()
 		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
 		if err != nil {
+			if strings.Contains(err.Error(), "protocols not supported") {
+				peer.Ban("peer does not support protocol")
+			}
 			return
 		}
 		if isError > 3 {
 			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
-			peer.Penalize()
 		}
 		if isError != 0 {
+			peer.Penalize()
 			return
 		}
 		ans := &sentinelrpc.ResponseData{
