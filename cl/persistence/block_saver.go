@@ -45,7 +45,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlock) error {
 	folderPath, path := SlotToPaths(block.Block.Slot, b.cfg)
 	// ignore this error... reason: windows
-	fmt.Println(b.fs.MkdirAll(folderPath, 0o755))
+	_ = b.fs.MkdirAll(folderPath, 0o755)
 	fp, err := b.fs.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o755)
 	if err != nil {
 		return err

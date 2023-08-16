@@ -52,11 +52,11 @@ It supports encoding of various types such as uint64, []byte, and objects that i
 It handles both static (fixed size) and dynamic (variable size) objects, including the calculation and placement of offsets for dynamic objects.
 */
 func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
-	// defer func() {
-	// 	if err2 := recover(); err2 != nil {
-	// 		err = fmt.Errorf("panic while encoding: %v", err2)
-	// 	}
-	// }()
+	defer func() {
+		if err2 := recover(); err2 != nil {
+			err = fmt.Errorf("panic while encoding: %v", err2)
+		}
+	}()
 	dst = buf
 	currentOffset := 0
 	dynamicComponents := []SizedObjectSSZ{}
@@ -93,7 +93,6 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			}
 			currentOffset += len(dst) - startSize
 		default:
-			fmt.Println(obj)
 			// If the element does not match any supported types, panic with an error message
 			panic(fmt.Sprintf("u must suffer from dementia, pls read the doc of this method (aka. comments), bad schema component %d", i))
 		}
