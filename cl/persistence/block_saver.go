@@ -12,8 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/spf13/afero"
 )
+
+const networkEncoding = false
 
 type beaconChainDatabaseFilesystem struct {
 	fs  afero.Fs
@@ -52,12 +55,20 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 	if err != nil {
 		return err
 	}
-	encoded, err := block.EncodeSSZ(nil)
-	if err != nil {
-		return err
-	}
-	if _, err := fp.Write(utils.CompressSnappy(encoded)); err != nil {
-		return err
+	if networkEncoding {
+		err = ssz_snappy.EncodeAndWrite(fp, block)
+		if err != nil {
+			return err
+		}
+	} else {
+		encoded, err := block.EncodeSSZ(nil)
+		if err != nil {
+			return err
+		}
+		fmt.Println(len(encoded))
+		if _, err := fp.Write(utils.CompressSnappy(encoded)); err != nil {
+			return err
+		}
 	}
 
 	err = fp.Sync()
