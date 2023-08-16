@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/afero"
 )
 
 const doDownload = false
@@ -31,7 +30,7 @@ type Cfg struct {
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
-	dataDirFs       afero.Fs
+	beaconDB        persistence.BeaconChainDatabase
 }
 
 type Args struct {
@@ -51,7 +50,7 @@ func ClStagesCfg(
 	executionClient *execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
-	dataDirFs afero.Fs,
+	beaconDB persistence.BeaconChainDatabase,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -61,7 +60,7 @@ func ClStagesCfg(
 		executionClient: executionClient,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
-		dataDirFs:       dataDirFs,
+		beaconDB:        beaconDB,
 	}
 }
 
@@ -150,8 +149,8 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
-	rpcSource := clpersist.NewBeaconRpcSource(cfg.rpc)
-	gossipSource := clpersist.NewGossipSource(ctx, cfg.gossipManager)
+	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
+	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
 	processBlock := func(block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
@@ -159,7 +158,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 		// NOTE: this error is ignored and logged only!
-		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon"), block.Data, cfg.beaconCfg)
+		err := cfg.beaconDB.WriteBlock(block.Data)
 		if err != nil {
 			log.Error("failed to persist block to store", "slot", block.Data.Block.Slot, "err", err)
 		}
@@ -238,7 +237,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.dataDirFs, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
@@ -289,7 +288,7 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
-					sources := []clpersist.BlockSource{gossipSource, rpcSource}
+					sources := []persistence.BlockSource{gossipSource, rpcSource}
 					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()

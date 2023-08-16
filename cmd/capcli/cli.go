@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
@@ -102,7 +102,7 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	for _, vv := range resp {
-		err := clpersist.SaveBlockWithConfig(d, vv, beaconConfig)
+		err := persistence.SaveBlockWithConfig(d, vv, beaconConfig)
 		if err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	rpcSource := clpersist.NewBeaconRpcSource(beacon)
+	rpcSource := persistence.NewBeaconRpcSource(beacon)
 
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
@@ -200,7 +200,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = d, v
-				err := clpersist.SaveBlockWithConfig(d, v.Data, beaconConfig)
+				err := persistence.SaveBlockWithConfig(d, v.Data, beaconConfig)
 				if err != nil {
 					return err
 				}
