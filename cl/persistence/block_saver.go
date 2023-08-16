@@ -23,7 +23,7 @@ type beaconChainDatabaseFilesystem struct {
 
 	networkEncoding bool // same encoding as reqresp
 
-	// TODO(Giulio2002): actually make this possible
+	// TODO(Giulio2002): actually make decoupling possible
 	_ execution_client.ExecutionEngine
 }
 
