@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/spf13/afero"
 )
 
@@ -59,12 +60,21 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 	if err != nil {
 		return err
 	}
-	if b.networkEncoding {
+	if b.networkEncoding { // 10x bigger but less latency
 		err = ssz_snappy.EncodeAndWrite(fp, block)
 		if err != nil {
 			return err
 		}
 	} else {
+		if block.Version() >= clparams.BellatrixVersion {
+			// Need to reference EL somehow on read.
+			if _, err := fp.Write(block.Block.Body.ExecutionPayload.BlockHash[:]); err != nil {
+				return err
+			}
+			if _, err := fp.Write(dbutils.EncodeBlockNumber(block.Block.Body.ExecutionPayload.BlockNumber)); err != nil {
+				return err
+			}
+		}
 		encoded, err := block.EncodeForStorage(nil)
 		if err != nil {
 			return err
