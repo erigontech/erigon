@@ -703,9 +703,9 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.d.txNum / d.d.aggregationStep))
-	defer func() {
-		fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
-	}()
+	// defer func() {
+	// 	fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
+	// }()
 
 	if d.largeValues {
 		if d.buffered {

@@ -1539,10 +1539,10 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.compressHistoryVals = false
+	d.compressHistoryVals = true
 	d.domainLargeValues = true // false requires dupsort value table for domain
-	d.compressValues = false
-	d.withLocalityIndex = true
+	d.compressValues = true
+	d.withLocalityIndex = false
 
 	// UseBpsTree = true
 
@@ -1554,8 +1554,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
 	totalTx := uint64(100)
-	keyTxsLimit := uint64(10)
-	keyLimit := uint64(2)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(20)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)

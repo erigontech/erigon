@@ -550,9 +550,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	defer func() {
-		fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
-	}()
+	// defer func() {
+	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
+	// }()
 
 	ii := h.h.InvertedIndex
 
@@ -666,9 +666,10 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		var bitmap *roaring64.Bitmap
 		var ok bool
 
-		if bitmap, ok = indexBitmaps[hex.EncodeToString(v)]; !ok {
+		ks := hex.EncodeToString(v)
+		if bitmap, ok = indexBitmaps[ks]; !ok {
 			bitmap = bitmapdb.NewBitmap64()
-			indexBitmaps[hex.EncodeToString(v)] = bitmap
+			indexBitmaps[ks] = bitmap
 		}
 		bitmap.Add(txNum)
 	}
@@ -717,7 +718,6 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 				if len(val) == 0 {
 					val = nil
 				}
-				fmt.Printf("HCollat [%x]=>[%x]\n", hk, val)
 				if err = historyComp.AddWord(val); err != nil {
 					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
 				}
@@ -727,7 +727,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 					return HistoryCollation{}, err
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == txNum {
-					fmt.Printf("HCollat [%x]=>[%x]\n", hk, val)
+					// fmt.Printf("HistCollate [%x]=>[%x]\n", hk, val)
 					val = val[8:]
 				} else {
 					val = nil
@@ -859,7 +859,8 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 		var buf []byte
 		for _, key := range keys {
-			if err = efHistoryComp.AddUncompressedWord([]byte(key)); err != nil {
+			hk, _ := hex.DecodeString(key)
+			if err = efHistoryComp.AddUncompressedWord(hk); err != nil {
 				return HistoryFiles{}, fmt.Errorf("add %s ef history key [%x]: %w", h.InvertedIndex.filenameBase, key, err)
 			}
 			bitmap := collation.indexBitmaps[key]
@@ -917,10 +918,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		for _, key := range keys {
 			bitmap := collation.indexBitmaps[key]
 			it := bitmap.Iterator()
+			kb, _ := hex.DecodeString(key)
 			for it.HasNext() {
 				txNum := it.Next()
 				binary.BigEndian.PutUint64(txKey[:], txNum)
-				historyKey = append(append(historyKey[:0], txKey[:]...), key...)
+				historyKey = append(append(historyKey[:0], txKey[:]...), kb...)
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
 					return HistoryFiles{}, fmt.Errorf("add %s history idx [%x]: %w", h.filenameBase, historyKey, err)
 				}
@@ -1346,7 +1348,9 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 			return true
 		}
 		offset := reader.Lookup(key)
-		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.compressHistoryVals)
+
+		// TODO do we always compress inverted index?
+		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compressWorkers > 1)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 
