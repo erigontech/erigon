@@ -920,7 +920,8 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 		peerInfos[i], peerInfos[j] = peerInfos[j], peerInfos[i]
 	})
 	peersToSendCount := len(peerInfos)
-	if peersToSendCount > 0 {
+	// MaxPeers is overloaded 0 means send to all - TODO this could be replaced by a flag
+	if req.MaxPeers > 0 && peersToSendCount > 0 {
 		peerCountConstrained := math.Min(float64(len(peerInfos)), float64(req.MaxPeers))
 		// Ensure we have at least 1 peer during our sqrt operation
 		peersToSendCount = int(math.Max(math.Sqrt(peerCountConstrained), 1.0))
