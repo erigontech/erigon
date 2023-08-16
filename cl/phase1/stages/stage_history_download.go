@@ -45,7 +45,6 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, da
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
-
 	blockRoot := cfg.startingRoot
 	destinationSlot := uint64(0)
 	currentSlot := cfg.startingSlot
@@ -58,7 +57,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidHash := false
+	foundLatestEth1ValidHash := true
 
 	fs := afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon")
 	// Set up onNewBlock callback
