@@ -149,7 +149,7 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	retryReqInterval := time.NewTicker((time.Second) / time.Duration(s.sentinel.GetPeersCount()))
+	retryReqInterval := time.NewTimer((time.Second) / time.Duration(s.sentinel.GetPeersCount()))
 	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
@@ -199,6 +199,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 			}
 			select {
 			case <-retryReqInterval.C:
+				retryReqInterval = time.NewTimer((time.Second) / time.Duration(s.sentinel.GetPeersCount()))
 			case <-ctx.Done():
 				return
 			}
