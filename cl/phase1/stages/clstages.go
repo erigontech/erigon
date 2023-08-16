@@ -237,7 +237,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 500_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {

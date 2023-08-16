@@ -16,18 +16,22 @@ import (
 	"github.com/spf13/afero"
 )
 
-const networkEncoding = false
-
 type beaconChainDatabaseFilesystem struct {
 	fs  afero.Fs
 	cfg *clparams.BeaconChainConfig
+
+	networkEncoding bool // same encoding as reqresp
 
 	// TODO(Giulio2002): actually make this possible
 	_ execution_client.ExecutionEngine
 }
 
 func NewbeaconChainDatabaseFilesystem(fs afero.Fs, cfg *clparams.BeaconChainConfig) BeaconChainDatabase {
-	return beaconChainDatabaseFilesystem{fs: fs, cfg: cfg}
+	return beaconChainDatabaseFilesystem{
+		fs:              fs,
+		cfg:             cfg,
+		networkEncoding: false,
+	}
 }
 
 func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
@@ -41,7 +45,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlock) error {
 	folderPath, path := SlotToPaths(block.Block.Slot, b.cfg)
 	// ignore this error... reason: windows
-	_ = b.fs.MkdirAll(folderPath, 0o755)
+	fmt.Println(b.fs.MkdirAll(folderPath, 0o755))
 	fp, err := b.fs.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o755)
 	if err != nil {
 		return err
@@ -55,7 +59,7 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 	if err != nil {
 		return err
 	}
-	if networkEncoding {
+	if b.networkEncoding {
 		err = ssz_snappy.EncodeAndWrite(fp, block)
 		if err != nil {
 			return err
@@ -65,7 +69,6 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 		if err != nil {
 			return err
 		}
-		fmt.Println(len(utils.CompressSnappy(encoded)))
 		if _, err := fp.Write(utils.CompressSnappy(encoded)); err != nil {
 			return err
 		}
