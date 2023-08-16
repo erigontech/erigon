@@ -93,6 +93,7 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			}
 			currentOffset += len(dst) - startSize
 		default:
+			fmt.Println(obj)
 			// If the element does not match any supported types, panic with an error message
 			panic(fmt.Sprintf("u must suffer from dementia, pls read the doc of this method (aka. comments), bad schema component %d", i))
 		}
