@@ -4,6 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
@@ -13,4 +14,7 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 type ExecutionEngine interface {
 	NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (bool, error)
 	ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error
+	SupportInsertion() bool
+	InsertBlocks([]*types.Block) error
+	InsertBlock(*types.Block) error
 }

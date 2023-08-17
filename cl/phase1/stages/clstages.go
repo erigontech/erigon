@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -23,14 +24,15 @@ import (
 const doDownload = false
 
 type Cfg struct {
-	rpc             *rpc.BeaconRpcP2P
-	genesisCfg      *clparams.GenesisConfig
-	beaconCfg       *clparams.BeaconChainConfig
-	executionClient *execution_client.ExecutionEngine
-	state           *state.CachingBeaconState
-	gossipManager   *network2.GossipManager
-	forkChoice      *forkchoice.ForkChoiceStore
-	beaconDB        persistence.BeaconChainDatabase
+	rpc              *rpc.BeaconRpcP2P
+	genesisCfg       *clparams.GenesisConfig
+	beaconCfg        *clparams.BeaconChainConfig
+	executionClient  *execution_client.ExecutionEngine
+	state            *state.CachingBeaconState
+	gossipManager    *network2.GossipManager
+	forkChoice       *forkchoice.ForkChoiceStore
+	beaconDB         persistence.BeaconChainDatabase
+	executionChainRW *eth1_chain_reader.ChainReaderWriterEth1
 }
 
 type Args struct {
@@ -49,16 +51,18 @@ func ClStagesCfg(
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
+	executionChainRW *eth1_chain_reader.ChainReaderWriterEth1,
 ) *Cfg {
 	return &Cfg{
-		rpc:             rpc,
-		genesisCfg:      genesisCfg,
-		beaconCfg:       beaconCfg,
-		state:           state,
-		executionClient: executionClient,
-		gossipManager:   gossipManager,
-		forkChoice:      forkChoice,
-		beaconDB:        beaconDB,
+		executionChainRW: executionChainRW,
+		rpc:              rpc,
+		genesisCfg:       genesisCfg,
+		beaconCfg:        beaconCfg,
+		state:            state,
+		executionClient:  executionClient,
+		gossipManager:    gossipManager,
+		forkChoice:       forkChoice,
+		beaconDB:         beaconDB,
 	}
 }
 
@@ -236,7 +240,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionChainRW, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {

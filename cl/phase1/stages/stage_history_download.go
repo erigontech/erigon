@@ -6,8 +6,14 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -23,12 +29,13 @@ type StageHistoryReconstructionCfg struct {
 	backFillingAmount uint64
 	tmpdir            string
 	db                persistence.BeaconChainDatabase
+	executionChainRW  *eth1_chain_reader.ChainReaderWriterEth1
 	logger            log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, executionChainRW *eth1_chain_reader.ChainReaderWriterEth1, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:        genesisCfg,
 		beaconCfg:         beaconCfg,
@@ -39,6 +46,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 		logger:            logger,
 		backFillingAmount: backFillingAmount,
 		db:                db,
+		executionChainRW:  executionChainRW,
 	}
 }
 
@@ -51,15 +59,36 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		destinationSlot = currentSlot - cfg.backFillingAmount
 	}
 
+	executionBlocksCollector := etl.NewCollector("SpawnStageHistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer executionBlocksCollector.Close()
 	// Start the procedure
-	logger.Info("Downloading History", "from", currentSlot, "to", destinationSlot)
+	logger.Info("Downloading History", "from", currentSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidHash := true
+	foundLatestEth1ValidHash := false
+	if cfg.executionChainRW == nil {
+		foundLatestEth1ValidHash = true // skip this
+	}
 
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		if !foundLatestEth1ValidHash {
+			payload := blk.Block.Body.ExecutionPayload
+			encodedPayload, err := payload.EncodeSSZ(nil)
+			if err != nil {
+				return false, err
+			}
+			encodedPayload = append(encodedPayload, byte(blk.Version()))
+			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
+				return false, err
+			}
+			foundLatestEth1ValidHash, err = cfg.executionChainRW.IsCanonicalHash(payload.BlockHash)
+		}
+		if err != nil {
+			return false, err
+		}
+
 		slot := blk.Block.Slot
 		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(blk)
 	})
@@ -84,9 +113,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"progress", currProgress,
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount)
-				if currentSlot > destinationSlot {
-					logArgs = append(logArgs, "remaining", currProgress-destinationSlot)
-				}
 				logger.Info("Downloading History", logArgs...)
 			case <-finishCh:
 				return
@@ -99,6 +125,44 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.downloader.RequestMore(ctx)
 	}
 	close(finishCh)
+	// If i do not give it a database, erigon lib starts to cry uncontrollably
+	db := memdb.New(cfg.tmpdir)
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	blockBatch := []*types.Block{}
+	blockBatchMaxSize := 1000
+
+	return executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if cfg.executionChainRW == nil {
+			return next(k, nil, nil)
+		}
+		version := clparams.StateVersion(v[len(v)-1])
+		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
+		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
+			return err
+		}
+		body := executionPayload.Body()
+		header, err := executionPayload.RlpHeader()
+		if err != nil {
+			return err
+		}
+
+		txs, err := types.DecodeTransactions(body.Transactions)
+		if err != nil {
+			return err
+		}
+
+		block := types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals)
+		blockBatch = append(blockBatch, block)
+		if len(blockBatch) >= blockBatchMaxSize {
+			if err := cfg.executionChainRW.InsertBlocksAndWait(blockBatch); err != nil {
+				return err
+			}
+			blockBatch = blockBatch[:0]
+		}
+		return next(k, nil, nil)
+	}, etl.TransformArgs{Quit: ctx.Done()})
 }

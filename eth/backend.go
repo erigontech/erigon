@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -686,6 +687,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pipelineStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, config.HistoryV3)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
+	chainRW := eth1_chain_reader.NewChainReaderEth1(ctx, chainConfig, executionRpc, 1000)
 	engineBackendRPC := engineapi.NewEngineServer(
 		ctx,
 		logger,
@@ -738,7 +740,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil, dirs.DataDir)
+		go caplin1.RunCaplinPhase1(ctx, client, &chainRW, beaconCfg, genesisCfg, engine, state, nil, dirs.DataDir)
 	}
 
 	return backend, nil
