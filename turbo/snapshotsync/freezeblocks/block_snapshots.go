@@ -926,12 +926,12 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
-	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	segments, _, err := BorSegments(dir)
 	if err != nil {
 		return err
 	}
+	logger.Info("[bor snapshots] Build indices", "segments", segments)
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
