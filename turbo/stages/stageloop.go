@@ -153,22 +153,17 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	}
 
 	// -- send notifications START
-	if externalTx {
-		if hook != nil {
+	if hook != nil {
+		if externalTx {
 			if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
 				return err
 			}
-		}
-	} else {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			if hook != nil {
-				if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
-					return err
-				}
+		} else {
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				return hook.AfterRun(tx, finishProgressBefore)
+			}); err != nil {
+				return err
 			}
-			return nil
-		}); err != nil {
-			return err
 		}
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
@@ -273,7 +268,9 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
 		return err
 	}
-	notifications.Accumulator.SetStateID(plainStateVersion)
+	if notifications != nil && notifications.Accumulator != nil {
+		notifications.Accumulator.SetStateID(plainStateVersion)
+	}
 
 	if headTd != nil && headHeader != nil {
 		headTd256, overflow := uint256.FromBig(headTd)
