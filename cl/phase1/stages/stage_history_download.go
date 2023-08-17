@@ -51,6 +51,9 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 }
 
 func waitForExecutionEngineToBeReady(ctx context.Context, engine execution_client.ExecutionEngine) error {
+	if engine == nil {
+		return nil
+	}
 	checkInterval := time.NewTicker(200 * time.Millisecond)
 	for {
 		select {
