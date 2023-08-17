@@ -83,10 +83,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, err
 			}
+
 			foundLatestEth1ValidHash, err = cfg.engine.IsCanonicalHash(payload.BlockHash)
-		}
-		if err != nil {
-			return false, err
+			if err != nil {
+				return false, err
+			}
 		}
 
 		slot := blk.Block.Slot
@@ -131,6 +132,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
@@ -167,5 +169,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	return cfg.engine.InsertBlocks(blockBatch)
+	if cfg.engine != nil && cfg.engine.SupportInsertion() {
+		return cfg.engine.InsertBlocks(blockBatch)
+	}
+	return nil
 }
