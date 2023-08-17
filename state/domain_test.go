@@ -1500,7 +1500,7 @@ func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, ke
 func generateRandomKey(r *rand.Rand, size uint64) string {
 	key := make([]byte, size)
 	r.Read(key)
-	return fmt.Sprintf("%x", key)
+	return string(key)
 }
 
 func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
@@ -1545,10 +1545,14 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.withLocalityIndex = true
 
 	UseBpsTree = true
+	bufferedWrites := true
 
 	d.SetTx(tx)
-	// d.StartWrites()
-	d.StartUnbufferedWrites()
+	if bufferedWrites {
+		d.StartWrites()
+	} else {
+		d.StartUnbufferedWrites()
+	}
 	defer d.FinishWrites()
 
 	keySize1 := uint64(length.Addr)
@@ -1561,16 +1565,18 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		kk, _ := hex.DecodeString(key)
 		for i := 0; i < len(updates); i++ {
 			d.SetTxNum(updates[i].txNum)
-			d.PutWithPrev(kk, nil, updates[i].value, p)
+			d.PutWithPrev([]byte(key), nil, updates[i].value, p)
 			p = common.Copy(updates[i].value)
 		}
 	}
 	d.SetTxNum(totalTx)
-	// err = d.wal.flush(context.Background(), tx)
-	// require.NoError(t, err)
+
+	if bufferedWrites {
+		err = d.Rotate().Flush(context.Background(), tx)
+		require.NoError(t, err)
+	}
 
 	// aggregate
 	collateDomainAndPrune(t, tx, d, totalTx, 1)
@@ -1588,18 +1594,17 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	kc := 0
 	for key, updates := range data {
 		kc++
-		kk, _ := hex.DecodeString(key)
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetBeforeTxNum(kk, updates[i].txNum, tx)
+			v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
-			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %s, tx %d", kc, len(data), key, updates[i-1].txNum)
+			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
 			continue
 		}
-		v, ok, err := dc.GetLatest(kk, nil, tx)
+		v, ok, err := dc.GetLatest([]byte(key), nil, tx)
 		require.NoError(t, err)
-		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %s latest", key)
+		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
 	}
 }

@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -550,9 +549,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	// defer func() {
-	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
-	// }()
+	defer func() {
+		fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
+	}()
 
 	ii := h.h.InvertedIndex
 
@@ -666,7 +665,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		var bitmap *roaring64.Bitmap
 		var ok bool
 
-		ks := hex.EncodeToString(v)
+		ks := string(v)
 		if bitmap, ok = indexBitmaps[ks]; !ok {
 			bitmap = bitmapdb.NewBitmap64()
 			indexBitmaps[ks] = bitmap
@@ -682,7 +681,6 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 	}
 	slices.Sort(keys)
 	historyCount := 0
-	keyBuf := make([]byte, 256)
 
 	var c kv.Cursor
 	var cd kv.CursorDupSort
@@ -699,12 +697,13 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 		defer cd.Close()
 	}
+
+	keyBuf := make([]byte, 0, 256)
 	for _, key := range keys {
 		bitmap := indexBitmaps[key]
 		it := bitmap.Iterator()
-		hk, _ := hex.DecodeString(key)
-		lk := len(hk)
-		copy(keyBuf, hk)
+		keyBuf = append(append(keyBuf[:0], []byte(key)...), make([]byte, 8)...)
+		lk := len([]byte(key))
 
 		for it.HasNext() {
 			txNum := it.Next()
@@ -722,12 +721,12 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
 				}
 			} else {
-				val, err := cd.SeekBothRange(keyBuf[:lk], keyBuf[lk:lk+8])
+				val, err := cd.SeekBothRange(keyBuf[:lk], keyBuf[lk:])
 				if err != nil {
 					return HistoryCollation{}, err
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == txNum {
-					// fmt.Printf("HistCollate [%x]=>[%x]\n", hk, val)
+					fmt.Printf("HistCollate [%x]=>[%x]\n", []byte(key), val)
 					val = val[8:]
 				} else {
 					val = nil
@@ -859,8 +858,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 		var buf []byte
 		for _, key := range keys {
-			hk, _ := hex.DecodeString(key)
-			if err = efHistoryComp.AddUncompressedWord(hk); err != nil {
+			if err = efHistoryComp.AddUncompressedWord([]byte(key)); err != nil {
 				return HistoryFiles{}, fmt.Errorf("add %s ef history key [%x]: %w", h.InvertedIndex.filenameBase, key, err)
 			}
 			bitmap := collation.indexBitmaps[key]
@@ -918,7 +916,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		for _, key := range keys {
 			bitmap := collation.indexBitmaps[key]
 			it := bitmap.Iterator()
-			kb, _ := hex.DecodeString(key)
+			kb := []byte(key)
 			for it.HasNext() {
 				txNum := it.Next()
 				binary.BigEndian.PutUint64(txKey[:], txNum)
