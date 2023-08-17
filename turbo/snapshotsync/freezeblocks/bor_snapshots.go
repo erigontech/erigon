@@ -743,6 +743,7 @@ func (s *BorRoSnapshots) idxAvailability() uint64 {
 		}
 		spans = seg.ranges.to - 1
 	}
+	fmt.Printf("events=%d, spans=%d\b", events, spans)
 	return cmp.Min(events, spans)
 }
 
