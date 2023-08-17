@@ -137,7 +137,7 @@ func (sn *BorSpanSegment) close() {
 }
 func (sn *BorSpanSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.ranges.from, sn.ranges.to, snaptype.BorEvents)
+	fileName := snaptype.SegmentFileName(sn.ranges.from, sn.ranges.to, snaptype.BorSpans)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
