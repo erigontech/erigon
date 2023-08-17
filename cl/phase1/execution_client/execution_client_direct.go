@@ -77,3 +77,7 @@ func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block) error {
 func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {
 	return cc.chainRW.InsertBlockAndWait(blk)
 }
+
+func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.IsCanonicalHash(hash)
+}

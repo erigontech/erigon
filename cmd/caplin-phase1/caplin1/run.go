@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
@@ -23,7 +22,7 @@ import (
 )
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
-	executionChainRW *eth1_chain_reader.ChainReaderWriterEth1, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
 	engine execution_client.ExecutionEngine, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, datadir string) error {
 	ctx, cn := context.WithCancel(ctx)
@@ -89,7 +88,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 		}()
 	}
 	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, datadir), beaconConfig)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, beaconDB, executionChainRW)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, beaconDB)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")

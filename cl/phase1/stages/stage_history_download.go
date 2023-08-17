@@ -10,10 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -29,13 +29,13 @@ type StageHistoryReconstructionCfg struct {
 	backFillingAmount uint64
 	tmpdir            string
 	db                persistence.BeaconChainDatabase
-	executionChainRW  *eth1_chain_reader.ChainReaderWriterEth1
+	engine            execution_client.ExecutionEngine
 	logger            log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, executionChainRW *eth1_chain_reader.ChainReaderWriterEth1, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:        genesisCfg,
 		beaconCfg:         beaconCfg,
@@ -46,7 +46,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 		logger:            logger,
 		backFillingAmount: backFillingAmount,
 		db:                db,
-		executionChainRW:  executionChainRW,
+		engine:            engine,
 	}
 }
 
@@ -67,8 +67,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
 	foundLatestEth1ValidHash := false
-	if cfg.executionChainRW == nil {
-		foundLatestEth1ValidHash = true // skip this
+	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
+		foundLatestEth1ValidHash = true // skip this if we are not using an engine supporting direct insertion
 	}
 
 	// Set up onNewBlock callback
@@ -83,7 +83,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, err
 			}
-			foundLatestEth1ValidHash, err = cfg.executionChainRW.IsCanonicalHash(payload.BlockHash)
+			foundLatestEth1ValidHash, err = cfg.engine.IsCanonicalHash(payload.BlockHash)
 		}
 		if err != nil {
 			return false, err
@@ -135,8 +135,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
 
-	return executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if cfg.executionChainRW == nil {
+	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
 		version := clparams.StateVersion(v[len(v)-1])
@@ -158,11 +158,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		block := types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals)
 		blockBatch = append(blockBatch, block)
 		if len(blockBatch) >= blockBatchMaxSize {
-			if err := cfg.executionChainRW.InsertBlocksAndWait(blockBatch); err != nil {
+			if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
 				return err
 			}
 			blockBatch = blockBatch[:0]
 		}
 		return next(k, nil, nil)
-	}, etl.TransformArgs{Quit: ctx.Done()})
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	return cfg.engine.InsertBlocks(blockBatch)
 }

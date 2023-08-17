@@ -176,3 +176,7 @@ func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block) error {
 func (cc *ExecutionClientRpc) InsertBlock(*types.Block) error {
 	panic("unimplemented")
 }
+
+func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
