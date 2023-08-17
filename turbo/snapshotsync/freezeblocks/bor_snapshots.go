@@ -319,6 +319,7 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 
 // DumpBorEvents - [from, to)
 func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+	logger.Info("DumpBorEvents", "from", blockFrom, "to", blockTo)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -377,11 +378,13 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 			return err
 		}
 	}
+	logger.Info("DumpBorEvents done", "from", blockFrom, "to", blockTo)
 	return nil
 }
 
 // DumpBorEvents - [from, to)
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+	logger.Info("DumpBorSpans", "from", blockFrom, "to", blockTo)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	var spanFrom, spanTo uint64
@@ -417,6 +420,7 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wo
 	}); err != nil {
 		return err
 	}
+	logger.Info("DumpBorSpans done", "from", blockFrom, "to", blockTo)
 	return nil
 }
 
@@ -445,9 +449,9 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
 		}
 		if first {
+			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			first = false
 		}
-		baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
