@@ -919,12 +919,12 @@ func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 	offset := b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.ef.Count(), b.FileName())
+		return nil, nil, fmt.Errorf("pair 1 %d not found. keyCount=%d. file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
 
 	k, _ := g.Next(nil)
-	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.ef.Count(), b.FileName())
+	if !g.HasNext() {
+		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
 	v, _ := g.Next(nil)
 	return k, v, nil
@@ -943,7 +943,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	offset := b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return 0, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.ef.Count(), b.FileName())
+		return 0, nil, fmt.Errorf("pair 3 %d not found. keyCount=%d. file: %s", di, b.ef.Count(), b.FileName())
 	}
 
 	var res []byte
@@ -1089,18 +1089,6 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 	}
 	// cursor could be nil along with err if nothing found
 	return cursor, nil
-}
-
-// deprecated
-func (b *BtIndex) Lookup(key []byte) uint64 {
-	if b.alloc == nil {
-		return 0
-	}
-	cursor, err := b.alloc.Seek(key, nil)
-	if err != nil {
-		panic(err)
-	}
-	return binary.BigEndian.Uint64(cursor.value)
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {

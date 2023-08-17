@@ -1557,7 +1557,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(500)
+	totalTx := uint64(5000)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 

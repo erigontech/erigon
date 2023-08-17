@@ -549,9 +549,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	defer func() {
-		fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
-	}()
+	// defer func() {
+	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
+	// }()
 
 	ii := h.h.InvertedIndex
 
@@ -726,7 +726,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 					return HistoryCollation{}, err
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == txNum {
-					fmt.Printf("HistCollate [%x]=>[%x]\n", []byte(key), val)
+					// fmt.Printf("HistCollate [%x]=>[%x]\n", []byte(key), val)
 					val = val[8:]
 				} else {
 					val = nil

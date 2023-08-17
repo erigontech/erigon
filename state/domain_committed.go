@@ -386,9 +386,15 @@ func (d *DomainCommitted) lookupShortenedKey(shortKey, fullKey []byte, typAS str
 			continue
 		}
 
-		cur := item.bindex.OrdinalLookup(offset)
-		//nolint
-		fullKey = cur.Key()
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
+		fullKey, _, err := item.bindex.dataLookup(offset, g)
+		if err != nil {
+			return false
+		}
+
+		// cur := item.bindex.OrdinalLookup(offset)
+		// //nolint
+		// fullKey = cur.Key()
 		if d.trace {
 			fmt.Printf("offsetToKey %s [%x]=>{%x} step=%d offset=%d, file=%s.%d-%d.kv\n", typAS, fullKey, shortKey, fileStep, offset, typAS, item.startTxNum, item.endTxNum)
 		}
