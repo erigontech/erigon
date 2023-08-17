@@ -743,7 +743,7 @@ func (s *BorRoSnapshots) idxAvailability() uint64 {
 		}
 		spans = seg.ranges.to - 1
 	}
-	fmt.Printf("events=%d, spans=%d\b", events, spans)
+	fmt.Printf("events=%d, spans=%d\n", events, spans)
 	return cmp.Min(events, spans)
 }
 
@@ -850,7 +850,7 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
-			fmt.Printf("reopened idx %v\n", sn)
+			fmt.Printf("reopened idx %v %s\n", sn, fName)
 		case snaptype.BorSpans:
 			var sn *BorSpanSegment
 			var exists bool
@@ -891,7 +891,7 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
-			fmt.Printf("reopened idx %v\n", sn)
+			fmt.Printf("reopened idx %v %s\n", sn, fName)
 		default:
 			processed = false
 		}
