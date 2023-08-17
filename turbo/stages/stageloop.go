@@ -273,7 +273,9 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
 		return err
 	}
-	notifications.Accumulator.SetStateID(plainStateVersion)
+	if notifications != nil && notifications.Accumulator != nil {
+		notifications.Accumulator.SetStateID(plainStateVersion)
+	}
 
 	if headTd != nil && headHeader != nil {
 		headTd256, overflow := uint256.FromBig(headTd)
