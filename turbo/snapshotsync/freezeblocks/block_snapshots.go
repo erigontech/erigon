@@ -931,7 +931,6 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	if err != nil {
 		return err
 	}
-	logger.Info("[bor snapshots] Build indices", "segments", segments)
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
@@ -945,7 +944,6 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 			if hasIdxFile(segment, logger) {
 				continue
 			}
-			logger.Info("indexing", "segment", segment)
 			sn := segment
 			g.Go(func() error {
 				p := &background.Progress{}
