@@ -1299,6 +1299,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 			if err := snapshots.ReopenFolder(); err != nil {
 				return err
 			}
+			snapshots.LogStat()
 			if notifier != nil {
 				notifier.OnNewSnapshot()
 			}
@@ -1330,6 +1331,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				if err := borSnapshots.ReopenFolder(); err != nil {
 					return err
 				}
+				borSnapshots.LogStat()
 				if notifier != nil {
 					notifier.OnNewSnapshot()
 				}

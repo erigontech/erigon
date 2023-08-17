@@ -269,20 +269,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 		}
 	}
-	borBlocksAvailable := blockReader.FrozenBorBlocks()
-	for _, stage := range []stages.SyncStage{stages.BorHeimdall} {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
-		}
-		if progress >= borBlocksAvailable {
-			continue
-		}
-
-		if err = stages.SaveStageProgress(tx, stage, borBlocksAvailable); err != nil {
-			return fmt.Errorf("advancing %s stage: %w", stage, err)
-		}
-	}
 	return nil
 }
 

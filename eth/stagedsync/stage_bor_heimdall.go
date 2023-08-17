@@ -99,7 +99,11 @@ func BorHeimdallForward(
 	if snapshotLastEventId > lastEventId {
 		lastEventId = snapshotLastEventId
 	}
-	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
+	lastBlockNum := s.BlockNumber
+	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
+		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
+	}
+	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
