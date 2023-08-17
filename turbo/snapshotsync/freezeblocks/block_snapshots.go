@@ -945,6 +945,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 			if hasIdxFile(segment, logger) {
 				continue
 			}
+			logger.Info("indexing", "segment", segment)
 			sn := segment
 			g.Go(func() error {
 				p := &background.Progress{}
