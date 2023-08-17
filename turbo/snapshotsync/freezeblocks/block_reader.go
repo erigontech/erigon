@@ -1023,6 +1023,12 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
+		if sn.ranges.from > blockHeight {
+			continue
+		}
+		if sn.ranges.to <= blockHeight {
+			continue
+		}
 		if sn.IdxBorTxnHash == nil {
 			continue
 		}
@@ -1033,8 +1039,26 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
 			buf, _ = gg.Next(buf[:0])
-			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum:])))
+			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
 	return result, nil
+}
+
+func (r *BlockReader) LastFrozenEventID() uint64 {
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Events()
+	if len(segments) == 0 {
+		return 0
+	}
+	lastSegment := segments[len(segments)-1]
+	var lastEventID uint64
+	gg := lastSegment.seg.MakeGetter()
+	var buf []byte
+	for gg.HasNext() {
+		buf, _ = gg.Next(buf[:0])
+		lastEventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+	}
+	return lastEventID
 }

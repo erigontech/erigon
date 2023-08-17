@@ -305,10 +305,11 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 		if err != nil {
 			return err
 		}
-		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum)
+		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum+8)
 		copy(snapshotRecord, txnHash[:])
 		copy(snapshotRecord[length.Hash:], blockNumBuf[:])
-		copy(snapshotRecord[length.Hash+length.BlockNum:], event)
+		binary.BigEndian.PutUint64(snapshotRecord[length.Hash+length.BlockNum:], eventId)
+		copy(snapshotRecord[length.Hash+length.BlockNum+8:], event)
 		if err := collect(snapshotRecord); err != nil {
 			return err
 		}
@@ -436,6 +437,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 	var first bool = true
 	word := make([]byte, 0, 4096)
 	var blockCount int
+	var baseEventId uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
@@ -445,6 +447,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 		if first {
 			first = false
 		}
+		baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -460,7 +463,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  idxFilePath,
-		BaseDataID: 0,
+		BaseDataID: baseEventId,
 	}, logger)
 	if err != nil {
 		return err

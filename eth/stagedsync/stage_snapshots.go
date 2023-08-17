@@ -275,7 +275,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
-		fmt.Printf("progress = %d, borBlockAvailable = %d\n", progress, blocksAvailable)
 		if progress >= borBlocksAvailable {
 			continue
 		}
