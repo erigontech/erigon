@@ -34,31 +34,20 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 
 	retryVerifyTicker := time.NewTicker(10 * time.Millisecond)
 	defer retryVerifyTicker.Stop()
-	ch := make(chan response)
-	go func() {
 
-		res := verifyResponse(stream, peerId)
-		for res.err != nil && res.err == network.ErrReset {
-			select {
-			case <-retryVerifyTicker.C:
-				res = verifyResponse(stream, peerId)
-			case <-nctx.Done():
-				stream.Reset()
-				return
-			}
+	res := verifyResponse(stream, peerId)
+	for res.err != nil && res.err == network.ErrReset {
+		select {
+		case <-retryVerifyTicker.C:
+			res = verifyResponse(stream, peerId)
+		case <-nctx.Done():
+			stream.Reset()
+			return nil, 0, nctx.Err()
 		}
-
-		ch <- res
-	}()
-	select {
-	case <-nctx.Done():
-		return nil, 189, nctx.Err()
-	case ans := <-ch:
-		if ans.err != nil {
-			ans.code = 189
-		}
-		return ans.data, ans.code, ans.err
 	}
+
+	return res.data, res.code, res.err
+
 }
 
 func writeRequestRaw(host host.Host, ctx context.Context, data []byte, peerId peer.ID, topic string) (network.Stream, error) {
