@@ -50,8 +50,30 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 	}
 }
 
+func waitForExecutionEngineToBeReady(ctx context.Context, engine execution_client.ExecutionEngine) error {
+	checkInterval := time.NewTicker(200 * time.Millisecond)
+	for {
+		select {
+		case <-checkInterval.C:
+			ready, err := engine.Ready()
+			if err != nil {
+				return err
+			}
+			if ready {
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
+	// Wait for execution engine to be ready.
+	if err := waitForExecutionEngineToBeReady(ctx, cfg.engine); err != nil {
+		return err
+	}
 	blockRoot := cfg.startingRoot
 	destinationSlot := uint64(0)
 	currentSlot := cfg.startingSlot

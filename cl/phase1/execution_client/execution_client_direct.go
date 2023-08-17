@@ -81,3 +81,7 @@ func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {
 func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
 	return cc.chainRW.IsCanonicalHash(hash)
 }
+
+func (cc *ExecutionClientDirect) Ready() (bool, error) {
+	return cc.chainRW.Ready()
+}

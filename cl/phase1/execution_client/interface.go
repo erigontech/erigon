@@ -18,4 +18,5 @@ type ExecutionEngine interface {
 	InsertBlocks([]*types.Block) error
 	InsertBlock(*types.Block) error
 	IsCanonicalHash(libcommon.Hash) (bool, error)
+	Ready() (bool, error)
 }

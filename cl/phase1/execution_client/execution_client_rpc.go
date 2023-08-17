@@ -180,3 +180,7 @@ func (cc *ExecutionClientRpc) InsertBlock(*types.Block) error {
 func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
 	panic("unimplemented")
 }
+
+func (cc *ExecutionClientRpc) Ready() (bool, error) {
+	return true, nil // Engine API is always ready
+}
