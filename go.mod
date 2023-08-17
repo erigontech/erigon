@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230812055551-be4297fae2a1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230817033317-1fef0d6aa729
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230810173239-feb52fae58d9
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -115,7 +115,7 @@ require (
 	github.com/anacrolix/envpprof v1.2.1 // indirect
 	github.com/anacrolix/generics v0.0.0-20230816103846-fe11fdc0e0e3 // indirect
 	github.com/anacrolix/go-libutp v1.3.1 // indirect
-	github.com/anacrolix/log v0.14.0 // indirect
+	github.com/anacrolix/log v0.14.1 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.2-0.20230527121029-a582b4f397b9 // indirect
