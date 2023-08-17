@@ -737,8 +737,9 @@ func (s *BorRoSnapshots) idxAvailability() uint64 {
 		}
 		events = seg.ranges.to - 1
 	}
-	for _, seg := range s.Spans.segments {
+	for i, seg := range s.Spans.segments {
 		if seg.idx == nil {
+			fmt.Printf("snaps break at %d\n", i)
 			break
 		}
 		spans = seg.ranges.to - 1
