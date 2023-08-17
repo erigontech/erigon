@@ -322,7 +322,6 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 
 // DumpBorEvents - [from, to)
 func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
-	logger.Info("DumpBorEvents", "from", blockFrom, "to", blockTo)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -381,13 +380,11 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 			return err
 		}
 	}
-	logger.Info("DumpBorEvents done", "from", blockFrom, "to", blockTo)
 	return nil
 }
 
 // DumpBorEvents - [from, to)
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
-	logger.Info("DumpBorSpans", "from", blockFrom, "to", blockTo)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	var spanFrom, spanTo uint64
@@ -423,7 +420,6 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wo
 	}); err != nil {
 		return err
 	}
-	logger.Info("DumpBorSpans done", "from", blockFrom, "to", blockTo)
 	return nil
 }
 
@@ -737,14 +733,12 @@ func (s *BorRoSnapshots) idxAvailability() uint64 {
 		}
 		events = seg.ranges.to - 1
 	}
-	for i, seg := range s.Spans.segments {
+	for _, seg := range s.Spans.segments {
 		if seg.idx == nil {
-			fmt.Printf("snaps break at %d\n", i)
 			break
 		}
 		spans = seg.ranges.to - 1
 	}
-	fmt.Printf("events=%d, spans=%d\n", events, spans)
 	return cmp.Min(events, spans)
 }
 
@@ -851,7 +845,6 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
-			fmt.Printf("reopened idx %v %s\n", sn, fName)
 		case snaptype.BorSpans:
 			var sn *BorSpanSegment
 			var exists bool
@@ -892,7 +885,6 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
-			fmt.Printf("reopened idx %v %s\n", sn, fName)
 		default:
 			processed = false
 		}
