@@ -741,7 +741,6 @@ type BtIndex struct {
 
 	compressed   bool
 	decompressor *compress.Decompressor
-	getter       ArchiveGetter
 }
 
 func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed bool, logger log.Logger) (*BtIndex, error) {
@@ -885,20 +884,20 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 
 	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	idx.getter = NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
+	getter := NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
 	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		idx.bplus = NewBpsTree(idx.getter, idx.ef, M)
+		idx.bplus = NewBpsTree(getter, idx.ef, M)
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false)
 		if idx.alloc != nil {
 			idx.alloc.dataLookup = idx.dataLookup
 			idx.alloc.keyCmp = idx.keyCmp
 			idx.alloc.traverseDfs()
-			idx.alloc.fillSearchMx(idx.getter)
+			idx.alloc.fillSearchMx(getter)
 		}
 	}
 
@@ -1056,7 +1055,8 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 //
 //	if x is larger than any other key in index, nil cursor is returned.
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
-	return b.SeekWithGetter(x, b.getter)
+	g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
+	return b.SeekWithGetter(x, g)
 }
 
 // Seek moves cursor to position where key >= x.
@@ -1092,13 +1092,13 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
+	getter := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
 	if UseBpsTree {
-		g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
-		k, v, err := b.dataLookupBplus(i, g)
+		k, v, err := b.dataLookupBplus(i, getter)
 		if err != nil {
 			return nil
 		}
-		cur := b.alloc.newCursor(context.Background(), k, v, i, b.getter)
+		cur := b.alloc.newCursor(context.Background(), k, v, i, getter)
 		cur.bt = &BpsTreeIterator{i: i, t: b.bplus}
 		return cur
 	}
@@ -1108,10 +1108,10 @@ func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
 	if i > b.alloc.K {
 		return nil
 	}
-	k, v, err := b.dataLookup(i, nil)
+	k, v, err := b.dataLookup(i, getter)
 	if err != nil {
 		return nil
 	}
 
-	return b.alloc.newCursor(context.Background(), k, v, i, b.getter)
+	return b.alloc.newCursor(context.Background(), k, v, i, getter)
 }

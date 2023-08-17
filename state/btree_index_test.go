@@ -81,15 +81,17 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
+	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), bt.compressed)
+
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, bt.getter)
+		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), bt.getter)
+		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, bt.getter)
+		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -182,15 +184,17 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
+	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), bt.compressed)
+
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.ef.Count()+1, bt.getter)
+		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.ef.Count(), bt.getter)
+		_, _, err = bt.dataLookup(bt.ef.Count(), getter)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.ef.Count()-1, bt.getter)
+		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
