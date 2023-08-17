@@ -163,6 +163,9 @@ func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *BorSpanSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
+	if sn.idx != nil {
+		return nil
+	}
 	err = sn.reopenIdx(dir)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -846,6 +849,7 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
+			fmt.Printf("reopened idx %v\n", sn)
 		case snaptype.BorSpans:
 			var sn *BorSpanSegment
 			var exists bool
@@ -886,6 +890,7 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
+			fmt.Printf("reopened idx %v\n", sn)
 		default:
 			processed = false
 		}
