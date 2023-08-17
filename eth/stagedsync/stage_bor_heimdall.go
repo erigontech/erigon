@@ -92,6 +92,7 @@ func BorHeimdallForward(
 	if k != nil {
 		lastEventId = binary.BigEndian.Uint64(k)
 	}
+	fmt.Printf("bor_heimdall from %d to %d\n", s.BlockNumber, headNumber)
 	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
