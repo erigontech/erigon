@@ -24,7 +24,6 @@ type response struct {
 }
 
 func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, byte, error) {
-
 	nctx, cn := context.WithTimeout(ctx, 5*time.Second)
 	defer cn()
 	stream, err := writeRequestRaw(host, nctx, data, peerId, topic)
@@ -33,20 +32,27 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	}
 	defer stream.Close()
 
+	retryVerifyTicker := time.NewTicker(10 * time.Millisecond)
+	defer retryVerifyTicker.Stop()
 	ch := make(chan response)
 	go func() {
+
 		res := verifyResponse(stream, peerId)
-		select {
-		case <-ctx.Done():
-			return
-		default:
+		for res.err != nil && res.err == network.ErrReset {
+			select {
+			case <-retryVerifyTicker.C:
+				res = verifyResponse(stream, peerId)
+			case <-nctx.Done():
+				stream.Reset()
+				return
+			}
 		}
+
 		ch <- res
 	}()
 	select {
-	case <-ctx.Done():
-		stream.Reset()
-		return nil, 189, ctx.Err()
+	case <-nctx.Done():
+		return nil, 189, nctx.Err()
 	case ans := <-ch:
 		if ans.err != nil {
 			ans.code = 189

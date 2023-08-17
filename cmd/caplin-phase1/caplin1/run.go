@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -23,6 +24,9 @@ import (
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
 	engine execution_client.ExecutionEngine, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, datadir string) error {
+	ctx, cn := context.WithCancel(ctx)
+	defer cn()
+
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 
 	logger := log.New("app", "caplin")
@@ -45,11 +49,11 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		}
 		return true
 	})
-	gossipManager := network.NewGossipReceiver(ctx, sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
 	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), datadir)
 
 	{ // start the gossip manager
-		go gossipManager.Start()
+		go gossipManager.Start(ctx)
 		logger.Info("Started Ethereum 2.0 Gossip Service")
 	}
 
@@ -82,14 +86,13 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 			}
 		}()
 	}
-
-	// start the downloader service
-	//go initDownloader(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
-
-	//forkChoiceConfig := stages.CaplinStagedSync(nil, beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, dataDirFs)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, datadir), beaconConfig)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, beaconDB)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
+
+	logger.Info("[caplin] starting clstages loop")
 	err = sync.StartWithStage(ctx, "WaitForPeers", logger, stageCfg)
+	logger.Info("[caplin] exiting clstages loop")
 	if err != nil {
 		return err
 	}

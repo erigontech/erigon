@@ -22,8 +22,6 @@ import (
 
 // Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
-	ctx context.Context
-
 	recorder   freezer.Freezer
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
@@ -36,12 +34,11 @@ type GossipManager struct {
 	totalSubs int
 }
 
-func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
+func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
-		ctx:           ctx,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		recorder:      recorder,
@@ -68,7 +65,7 @@ func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan 
 
 }
 
-func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
+func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) error {
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -82,7 +79,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 	case sentinel.GossipType_BeaconBlockGossipType:
 		object = cltypes.NewSignedBeaconBlock(g.beaconConfig)
 		if err := object.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-			g.sentinel.BanPeer(g.ctx, data.Peer)
+			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding block"
 			return err
 		}
@@ -95,12 +92,12 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			return nil
 		}
 		if block.Block.Slot == currentSlotByTime {
-			if _, err := g.sentinel.PublishGossip(g.ctx, data); err != nil {
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
 				log.Debug("failed publish gossip", "err", err)
 			}
 		}
 
-		count, err := g.sentinel.GetPeers(g.ctx, &sentinel.EmptyMessage{})
+		count, err := g.sentinel.GetPeers(ctx, &sentinel.EmptyMessage{})
 		if err != nil {
 			l["at"] = "sentinel peer count"
 			return err
@@ -131,7 +128,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 	case sentinel.GossipType_VoluntaryExitGossipType:
 		object = &cltypes.SignedVoluntaryExit{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
-			g.sentinel.BanPeer(g.ctx, data.Peer)
+			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decode exit"
 			return err
 		}
@@ -139,14 +136,14 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 		object = &cltypes.ProposerSlashing{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			l["at"] = "decode proposer slash"
-			g.sentinel.BanPeer(g.ctx, data.Peer)
+			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
 	case sentinel.GossipType_AttesterSlashingGossipType:
 		object = &cltypes.AttesterSlashing{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			l["at"] = "decode attester slash"
-			g.sentinel.BanPeer(g.ctx, data.Peer)
+			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
 		if err := g.forkChoice.OnAttesterSlashing(object.(*cltypes.AttesterSlashing)); err != nil {
@@ -157,15 +154,15 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 		object = &cltypes.SignedAggregateAndProof{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			l["at"] = "decoding proof"
-			g.sentinel.BanPeer(g.ctx, data.Peer)
+			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
 	}
 	return nil
 }
 
-func (g *GossipManager) Start() {
-	subscription, err := g.sentinel.SubscribeGossip(g.ctx, &sentinel.EmptyMessage{})
+func (g *GossipManager) Start(ctx context.Context) {
+	subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.EmptyMessage{})
 	if err != nil {
 		return
 	}
@@ -180,7 +177,7 @@ func (g *GossipManager) Start() {
 		for k := range l {
 			delete(l, k)
 		}
-		err = g.onRecv(data, l)
+		err = g.onRecv(ctx, data, l)
 		if err != nil {
 			l["err"] = err
 			log.Debug("[Beacon Gossip] Recoverable Error", l)
