@@ -254,7 +254,9 @@ func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.Block
 func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
-	files = append(files, r.borSn.Files()...)
+	if r.borSn != nil {
+		files = append(files, r.borSn.Files()...)
+	}
 	sort.Strings(files)
 	return files
 }
