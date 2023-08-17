@@ -509,12 +509,12 @@ func collateDomainAndPrune(t testing.TB, tx kv.RwTx, d *Domain, txs, stepsToLeav
 		}()
 	}
 
-	// logEvery := time.NewTicker(30 * time.Second)
-	// dc := d.MakeContext()
-	// maxStep--
-	// err := dc.Prune(ctx, tx, maxStep, maxStep*d.aggregationStep, (maxStep+1)*d.aggregationStep, math.MaxUint64, logEvery)
-	// require.NoError(t, err)
-	// dc.Close()
+	logEvery := time.NewTicker(30 * time.Second)
+	dc := d.MakeContext()
+
+	err := dc.Prune(ctx, tx, maxStep, maxStep*d.aggregationStep, (maxStep+1)*d.aggregationStep, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	dc.Close()
 }
 
 func TestHistory(t *testing.T) {
@@ -1542,9 +1542,9 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.compressHistoryVals = true
 	d.domainLargeValues = true // false requires dupsort value table for domain
 	d.compressValues = true
-	d.withLocalityIndex = false
+	d.withLocalityIndex = true
 
-	// UseBpsTree = true
+	UseBpsTree = true
 
 	d.SetTx(tx)
 	// d.StartWrites()
@@ -1553,9 +1553,9 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(100)
+	totalTx := uint64(500)
 	keyTxsLimit := uint64(50)
-	keyLimit := uint64(20)
+	keyLimit := uint64(200)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)

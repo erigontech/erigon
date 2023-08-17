@@ -206,9 +206,9 @@ func (b *BpsTree) SeekWithGetter(g ArchiveGetter, key []byte) (*BpsTreeIterator,
 		}
 	}
 	if l == r {
-		if r == b.offt.Count() {
-			return nil, nil
-		}
+		// if r == b.offt.Count() {
+		// 	return nil, nil
+		// }
 		return &BpsTreeIterator{t: b, i: l}, nil
 	}
 	return &BpsTreeIterator{t: b, i: m}, nil
