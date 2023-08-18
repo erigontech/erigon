@@ -1,8 +1,6 @@
 package fork_graph
 
 import (
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -136,7 +134,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, InvalidBlock, nil
 	}
 
-	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, nil)
+	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, false)
 	if err != nil {
 		return nil, InvalidBlock, err
 	}
@@ -211,7 +209,7 @@ func (f *ForkGraph) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlo
 	return obj, has
 }
 
-func (f *ForkGraph) GetState(blockRoot libcommon.Hash, recipient *state.CachingBeaconState) (*state.CachingBeaconState, bool, error) {
+func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, bool, error) {
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
@@ -237,40 +235,26 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, recipient *state.CachingB
 		currentIteratorRoot = block.Block.ParentRoot
 	}
 
-	copyReferencedState := recipient
+	var copyReferencedState *state.CachingBeaconState
 	didLongRecconnection := currentIteratorRoot == reconnectionRootLong && reconnectionRootLong != reconnectionRootShort
 	if f.currentStateBlockRoot == blockRoot {
-		if recipient != nil {
-			err := f.currentState.CopyInto(recipient)
-			return recipient, didLongRecconnection, err
+		if alwaysCopy {
+			ret, err := f.currentState.Copy()
+			return ret, didLongRecconnection, err
 		}
 		return f.currentState, didLongRecconnection, nil
 	}
 	// Take a copy to the reference state.
 	if currentIteratorRoot == reconnectionRootLong {
-		if copyReferencedState == nil || f.currentReferenceState == nil {
-			copyReferencedState, err = f.currentReferenceState.Copy()
-			if err != nil {
-				return nil, true, err
-			}
-		} else {
-			fmt.Println(copyReferencedState)
-			err = f.currentReferenceState.CopyInto(copyReferencedState)
-			if err != nil {
-				return nil, true, err
-			}
+		copyReferencedState, err = f.currentReferenceState.Copy()
+		if err != nil {
+			return nil, true, err
 		}
+
 	} else {
-		if copyReferencedState == nil || f.nextReferenceState == nil {
-			copyReferencedState, err = f.nextReferenceState.Copy()
-			if err != nil {
-				return nil, false, err
-			}
-		} else {
-			err = f.nextReferenceState.CopyInto(copyReferencedState)
-			if err != nil {
-				return nil, true, err
-			}
+		copyReferencedState, err = f.nextReferenceState.Copy()
+		if err != nil {
+			return nil, false, err
 		}
 	}
 

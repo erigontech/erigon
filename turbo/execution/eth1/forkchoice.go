@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -127,7 +128,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Nonce.Uint64())
+	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
@@ -288,7 +289,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
 		if log {
-			e.logger.Warn("bad forkchoice", "hash", headHash)
+			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
+			h, _ := e.getHeader(ctx, tx, headHash, *headNumber)
+			fmt.Println(h.Hash())
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
