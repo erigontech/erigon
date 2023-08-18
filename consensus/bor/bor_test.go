@@ -107,7 +107,7 @@ func (h test_heimdall) Close() {}
 type test_genesisContract struct {
 }
 
-func (g test_genesisContract) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 

@@ -550,7 +550,7 @@ RETRY:
 	var key [8]byte
 	for g.HasNext() {
 		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		binary.BigEndian.PutUint64(key[:], i)
 		i++
 		if err = rs.AddKey(key[:], offset); err != nil {
 			return err
