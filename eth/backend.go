@@ -1132,9 +1132,11 @@ func (s *Ethereum) Start() error {
 	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
 	var currentTD *big.Int
 	if err := s.chainDB.View(s.sentryCtx, func(tx kv.Tx) error {
-		h := rawdb.ReadCurrentHeader(tx)
-		var err error
-		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.Number.Uint64())
+		h, err := s.blockReader.CurrentBlock(tx)
+		if err != nil {
+			return err
+		}
+		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
 		return err
 	}); err != nil {
 		return err
