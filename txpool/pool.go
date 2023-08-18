@@ -1516,6 +1516,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				var remoteTxSizes []uint32
 				var remoteTxHashes types.Hashes
 				var remoteTxRlps [][]byte
+				var broadCastedHashes types.Hashes
 				slotsRlp := make([][]byte, 0, announcements.Len())
 
 				if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1532,17 +1533,19 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 						// Empty rlp can happen if a transaction we want to broadcast has just been mined, for example
 						slotsRlp = append(slotsRlp, slotRlp)
 						if p.IsLocal(hash) {
+							localTxTypes = append(localTxTypes, t)
+							localTxSizes = append(localTxSizes, size)
+							localTxHashes = append(localTxHashes, hash...)
+
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
-								localTxTypes = append(localTxTypes, t)
-								localTxSizes = append(localTxSizes, size)
-								localTxHashes = append(localTxHashes, hash...)
 								localTxRlps = append(localTxRlps, slotRlp)
+								broadCastedHashes = append(broadCastedHashes, hash...)
 							}
 						} else {
+							remoteTxTypes = append(remoteTxTypes, t)
+							remoteTxSizes = append(remoteTxSizes, size)
+							remoteTxHashes = append(remoteTxHashes, hash...)
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
-								remoteTxTypes = append(remoteTxTypes, t)
-								remoteTxSizes = append(remoteTxSizes, size)
-								remoteTxHashes = append(remoteTxHashes, hash...)
 								remoteTxRlps = append(remoteTxRlps, slotRlp)
 							}
 						}
@@ -1559,10 +1562,13 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 
 				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 				txSentTo := send.BroadcastPooledTxs(localTxRlps)
+				for i, peer := range txSentTo {
+					p.logger.Info("Local tx broadcasted", "txHash", hex.EncodeToString(broadCastedHashes.At(i)), "to peer", peer)
+				}
 				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
-					p.logger.Info("local tx propagated", "tx_hash", hex.EncodeToString(hash), "announced to peers", hashSentTo[i], "broadcast to peers", txSentTo[i], "baseFee", p.pendingBaseFee.Load())
+					p.logger.Info("local tx announced", "tx_hash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
 				send.BroadcastPooledTxs(remoteTxRlps)
 				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes)
