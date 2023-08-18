@@ -8,7 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -56,27 +55,8 @@ func NewGenesisContractsClient(
 	}
 }
 
-func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
-	eventRecord := event.BuildEventRecord()
-
-	recordBytes, err := rlp.EncodeToBytes(eventRecord)
-	if err != nil {
-		return err
-	}
-
-	const method = "commitState"
-
-	t := event.Time.Unix()
-
-	data, err := gc.stateReceiverABI.Pack(method, big.NewInt(0).SetInt64(t), recordBytes)
-	if err != nil {
-		gc.logger.Error("Unable to pack tx for commitState", "err", err)
-		return err
-	}
-
-	gc.logger.Info("→ committing new state", "eventRecord", event.String())
-	_, err = syscall(gc.StateReceiverContract, data)
-
+func (gc *GenesisContractsClient) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+	_, err := syscall(gc.StateReceiverContract, event)
 	return err
 }
 
