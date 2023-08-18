@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -294,7 +295,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
 		if log {
-			e.logger.Warn("bad forkchoice", "hash", headHash)
+			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
+			fmt.Println(e.getHeader(ctx, tx, headHash, *headNumber))
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
