@@ -1518,20 +1518,6 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		seek := make([]byte, len(key)+8)
 		copy(seek, key)
 		binary.BigEndian.PutUint64(seek[len(key):], txNum)
-		for {
-			k, v, err := c.First()
-			if err != nil {
-				panic(err)
-			}
-			if k == nil {
-				break
-			}
-			fmt.Printf("nostate k=%x, v=%x\n", k, v)
-			k, v, err = c.Next()
-			if err != nil {
-				panic(err)
-			}
-		}
 
 		kAndTxNum, val, err := c.Seek(seek)
 		if err != nil {
@@ -1551,21 +1537,6 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	seek := make([]byte, len(key)+8)
 	copy(seek, key)
 	binary.BigEndian.PutUint64(seek[len(key):], txNum)
-
-	for {
-		k, v, err := c.First()
-		if err != nil {
-			panic(err)
-		}
-		if k == nil {
-			break
-		}
-		fmt.Printf("nostate k=%x, v=%x\n", k, v)
-		k, v, err = c.Next()
-		if err != nil {
-			panic(err)
-		}
-	}
 
 	val, err := c.SeekBothRange(key, seek[len(key):])
 	if err != nil {

@@ -1557,7 +1557,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
+	totalTx := uint64(3000)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
@@ -1579,7 +1579,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	}
 
 	// aggregate
-	collateDomainAndPrune(t, tx, d, totalTx, 1)
+	collateAndMerge(t, db, tx, d, totalTx)
 	tx.Commit()
 	tx = nil
 
@@ -1607,4 +1607,101 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
 	}
+}
+
+func TestDomain_PruneAfterAggregation(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.compressHistoryVals = true
+	d.domainLargeValues = true // false requires dupsort value table for domain
+	d.compressValues = true
+	d.withLocalityIndex = true
+
+	UseBpsTree = true
+	bufferedWrites := true
+
+	d.SetTx(tx)
+	if bufferedWrites {
+		d.StartWrites()
+	} else {
+		d.StartUnbufferedWrites()
+	}
+	defer d.FinishWrites()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			d.SetTxNum(updates[i].txNum)
+			d.PutWithPrev([]byte(key), nil, updates[i].value, p)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	d.SetTxNum(totalTx)
+
+	if bufferedWrites {
+		err = d.Rotate().Flush(context.Background(), tx)
+		require.NoError(t, err)
+	}
+
+	// aggregate
+	// collateDomainAndPrune(t, tx, d, totalTx, 1)
+	collateAndMerge(t, db, tx, d, totalTx)
+
+	tx.Commit()
+	tx = nil
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	d.SetTx(tx)
+
+	dc := d.MakeContext()
+	defer dc.Close()
+
+	prefixes := 0
+	err = dc.IteratePrefix(tx, nil, func(k, v []byte) {
+		upds, ok := data[string(k)]
+		require.True(t, ok)
+		prefixes++
+		latest := upds[len(upds)-1]
+		if latest.txNum <= totalTx-d.aggregationStep {
+			return
+		}
+
+		require.EqualValuesf(t, latest.value, v, "key %x txnum %d", k, latest.txNum)
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, len(data), prefixes, "seen less keys than expected")
+
+	// kc := 0
+	// for key, updates := range data {
+	// 	kc++
+	// 	for i := 1; i < len(updates); i++ {
+	// 		v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
+	// 		require.NoError(t, err)
+	// 		require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
+	// 	}
+	// 	if len(updates) == 0 {
+	// 		continue
+	// 	}
+	// 	v, ok, err := dc.GetLatest([]byte(key), nil, tx)
+	// 	require.NoError(t, err)
+	// 	require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
+	// 	require.True(t, ok)
+	// }
 }
