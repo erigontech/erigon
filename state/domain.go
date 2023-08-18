@@ -1714,45 +1714,46 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 }
 
 func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
-	if err != nil {
-		return nil, false, err
-	}
-	if !ok {
-		return nil, false, nil
-	}
+	// exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	// if err != nil {
+	// 	return nil, false, err
+	// }
+	// if !ok {
+	// 	return nil, false, nil
+	// }
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
-	exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
+	// exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
 	//fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
+		// isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
 		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		if !isUseful {
-			continue
-		}
+		// if !isUseful {
+		// 	continue
+		// }
 
 		var offset uint64
 		if UseBtree || UseBpsTree {
-			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.statelessGetter(int(exactColdShard)))
+			_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
 			}
 			if !ok {
 				LatestStateReadColdNotFound.UpdateDuration(t)
+				continue
 				return nil, false, nil
 			}
 			//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 			return v, true, nil
 		}
 
-		reader := dc.statelessIdxReader(int(exactColdShard))
+		reader := dc.statelessIdxReader(i)
 		if reader.Empty() {
 			LatestStateReadColdNotFound.UpdateDuration(t)
 			return nil, false, nil
 		}
 		offset = reader.Lookup(filekey)
-		g := dc.statelessGetter(int(exactColdShard))
+		g := dc.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {

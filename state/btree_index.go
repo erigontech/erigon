@@ -1003,10 +1003,14 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 	if b.Empty() {
 		return k, v, false, nil
 	}
+
 	var index uint64
+	// defer func() {
+	// 	fmt.Printf("[Bindex][%s] Get (%t) '%x' -> '%x' di=%d err %v\n", b.FileName(), found, lookup, v, index, err)
+	// }()
 	if UseBpsTree {
 		if b.bplus == nil {
-			panic(fmt.Errorf("SeekWithGetter: `b.bplus` is nil: %s", gr.FileName()))
+			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 		}
 		it, err := b.bplus.SeekWithGetter(gr, lookup)
 		if err != nil {
@@ -1019,6 +1023,7 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 		if !bytes.Equal(k, lookup) {
 			return nil, nil, false, nil
 		}
+		index = it.i
 		// v is actual value, not offset.
 
 		// weak assumption that k will be ignored and used lookup instead.
@@ -1067,6 +1072,10 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
+	var cursor *Cursor
+	// defer func() {
+	// 	fmt.Printf("[Bindex][%s] Seek '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
+	// }()
 	if UseBpsTree {
 		it, err := b.bplus.SeekWithGetter(g, x)
 		if err != nil {
@@ -1079,9 +1088,9 @@ func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
 		if err != nil {
 			return nil, err
 		}
-		cur := b.alloc.newCursor(context.Background(), k, v, it.i, g)
-		cur.bt = it
-		return cur, nil
+		cursor = b.alloc.newCursor(context.Background(), k, v, it.i, g)
+		cursor.bt = it
+		return cursor, nil
 	}
 	cursor, err := b.alloc.Seek(x, g)
 	if err != nil {
