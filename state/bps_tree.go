@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -54,7 +55,14 @@ func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error)
 		return nil, nil, fmt.Errorf("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
-	return it.t.lookupWithGetter(g, it.i)
+	k, v, err := it.t.lookupWithGetter(g, it.i)
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	return k, v, nil
 }
 
 func (it *BpsTreeIterator) Next() bool {
