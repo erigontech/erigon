@@ -106,9 +106,13 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 		if err != nil {
 			return err
 		}
-		borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
-		if err != nil {
-			return err
+		if cc.Bor == nil {
+			borExistingFilesMap = map[string]struct{}{}
+		} else {
+			borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if len(missingSnapshots) > 0 {
