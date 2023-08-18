@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/core/types"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -20,13 +21,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const doDownload = false
-
 type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
-	executionClient *execution_client.ExecutionEngine
+	executionClient execution_client.ExecutionEngine
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
@@ -45,7 +44,7 @@ func ClStagesCfg(
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
-	executionClient *execution_client.ExecutionEngine,
+	executionClient execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
@@ -83,7 +82,7 @@ func MetaCatchingUp(args Args, hasDownloaded bool) StageName {
 	if args.peers < minPeersForDownload {
 		return WaitForPeers
 	}
-	if !hasDownloaded && doDownload {
+	if !hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
 	if args.seenEpoch < args.targetEpoch {
@@ -236,7 +235,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.genesisCfg, cfg.beaconCfg, 10_000, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
@@ -250,6 +249,9 @@ func ConsensusClStages(ctx context.Context,
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
 					currentEpoch := args.seenEpoch
+					blockBatch := []*types.Block{}
+					blockBatchMaxSize := 1000
+					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 				MainLoop:
 					for currentEpoch <= args.targetEpoch {
 						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
@@ -257,6 +259,7 @@ func ConsensusClStages(ctx context.Context,
 						if err != nil {
 							return err
 						}
+
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
 							if err := processBlock(block, false, false); err != nil {
@@ -264,8 +267,34 @@ func ConsensusClStages(ctx context.Context,
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
 							}
+							if shouldInsert && block.Data.Version() >= clparams.BellatrixVersion {
+								executionPayload := block.Data.Block.Body.ExecutionPayload
+								body := executionPayload.Body()
+								txs, err := types.DecodeTransactions(body.Transactions)
+								if err != nil {
+									log.Warn("bad blocks segment received", "err", err)
+									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+									continue MainLoop
+								}
+								header, err := executionPayload.RlpHeader()
+								if err != nil {
+									log.Warn("bad blocks segment received", "err", err)
+									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+									continue MainLoop
+								}
+								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+								if len(blockBatch) >= blockBatchMaxSize {
+									if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+										return err
+									}
+									blockBatch = blockBatch[:0]
+								}
+							}
 						}
 						currentEpoch++
+					}
+					if shouldInsert {
+						return cfg.executionClient.InsertBlocks(blockBatch)
 					}
 					return nil
 				},

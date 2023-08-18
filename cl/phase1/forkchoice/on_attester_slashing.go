@@ -19,7 +19,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("attestation data is not slashable")
 	}
 	// Retrieve justified state
-	s, _, err := f.forkGraph.GetState(f.justifiedCheckpoint.BlockRoot(), nil)
+	s, _, err := f.forkGraph.GetState(f.justifiedCheckpoint.BlockRoot(), false)
 	if err != nil {
 		return err
 	}
