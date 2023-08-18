@@ -23,7 +23,8 @@ type Peer struct {
 	// acts as the mutex. channel used to avoid use of TryLock
 	working chan struct{}
 	// peer id
-	pid peer.ID
+	pid  peer.ID
+	busy bool
 	// backref to the manager that owns this peer
 	m *Manager
 }
@@ -45,8 +46,13 @@ func (p *Peer) Forgive() {
 
 func (p *Peer) MarkUsed() {
 	p.useCount++
+	p.busy = true
 	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.lastRequest = time.Now()
+}
+
+func (p *Peer) MarkUnused() {
+	p.busy = false
 }
 
 func (p *Peer) MarkReplied() {
@@ -61,10 +67,8 @@ func (p *Peer) IsAvailable() (available bool) {
 	if p.Penalties > MaxBadResponses {
 		return false
 	}
-	if time.Now().Sub(p.lastRequest) > 0*time.Second {
-		return true
-	}
-	return false
+
+	return !p.busy
 }
 
 func (p *Peer) IsBad() (bad bool) {

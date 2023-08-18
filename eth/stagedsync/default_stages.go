@@ -9,7 +9,22 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context,
+	snapshots SnapshotsCfg,
+	headers HeadersCfg,
+	borHeimdallCfg BorHeimdallCfg,
+	blockHashCfg BlockHashesCfg,
+	bodies BodiesCfg,
+	senders SendersCfg,
+	exec ExecuteBlockCfg,
+	hashState HashStateCfg,
+	trieCfg TrieCfg,
+	history HistoryCfg,
+	logIndex LogIndexCfg,
+	callTraces CallTracesCfg,
+	txLookup TxLookupCfg,
+	finish FinishCfg,
+	test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -40,7 +55,23 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return HeadersUnwind(u, s, tx, headers, test)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return HeadersPrune(p, tx, headers, ctx)
+				return nil
+			},
+		},
+		{
+			ID:          stages.BorHeimdall,
+			Description: "Download Bor-specific data from Heimdall",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+				return BorHeimdallUnwind(u, ctx, s, tx, borHeimdallCfg)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
 			},
 		},
 		{
@@ -66,7 +97,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBodiesStage(p, tx, bodies, ctx)
+				return nil
 			},
 		},
 		{
@@ -476,6 +507,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,
+	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Bodies,
 
@@ -516,6 +548,7 @@ var DefaultUnwindOrder = UnwindOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
+	stages.BorHeimdall,
 	stages.Headers,
 }
 
@@ -544,6 +577,7 @@ var StateUnwindOrder = UnwindOrder{
 	stages.Execution,
 	stages.Senders,
 	stages.Bodies,
+	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Headers,
 }
@@ -556,7 +590,7 @@ var DefaultPruneOrder = PruneOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	// Unwinding of IHashes needs to happen after unwinding HashState
+	// Pruning of IHashes needs to happen after pruning HashState
 	stages.HashState,
 	stages.IntermediateHashes,
 
@@ -565,6 +599,7 @@ var DefaultPruneOrder = PruneOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
+	stages.BorHeimdall,
 	stages.Headers,
 	stages.Snapshots,
 }

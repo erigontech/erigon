@@ -30,6 +30,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -232,12 +235,17 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 
 	var blockReader services.FullBlockReader
 	var allSnapshots = freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	var allBorSnapshots = freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
+	defer allBorSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = freezeblocks.NewBlockReader(allSnapshots)
-	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
+	if err := allBorSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen bor snapshot segments: %w", err)
+	}
+	blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots, blockReader, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, historyTx, hash, number)
@@ -600,10 +608,11 @@ func (ww *StateWriterV4) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
+	var heimdallClient bor.IHeimdallClient
 
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
@@ -611,9 +620,15 @@ func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots,
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
+		if !config.WithoutHeimdall {
+			if config.HeimdallgRPCAddress != "" {
+				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
+			} else {
+				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			}
+		}
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
-		config.HeimdallURL, config.WithoutHeimdall, true /* readonly */, logger)
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, true /* readonly */, logger)
 }

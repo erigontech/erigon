@@ -138,7 +138,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
@@ -1330,11 +1330,13 @@ func readSeg(chaindata string) error {
 	g := vDecomp.MakeGetter()
 	var buf []byte
 	var count int
+	var offset, nextPos uint64
 	for g.HasNext() {
-		g.Next(buf[:0])
+		buf, nextPos = g.Next(buf[:0])
+		fmt.Printf("offset: %d, val: %x\n", offset, buf)
+		offset = nextPos
 		count++
 	}
-	fmt.Printf("count=%d\n", count)
 	return nil
 }
 
