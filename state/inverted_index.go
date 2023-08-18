@@ -323,7 +323,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
 	defer item.decompressor.EnableReadAhead().DisableReadAhead()
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), true)
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressWorkers > 0)
 	return buildIndex(ctx, g, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 

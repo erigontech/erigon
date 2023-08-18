@@ -100,6 +100,7 @@ type filesItem struct {
 	bloom        *bloomFilter
 	startTxNum   uint64
 	endTxNum     uint64
+	compressed   bool
 
 	// Frozen: file of size StepsInColdFile. Completely immutable.
 	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -755,16 +756,17 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
-	c        kv.CursorDupSort
-	iter     btree2.MapIter[string, []byte]
-	dg       ArchiveGetter
-	dg2      ArchiveGetter
-	btCursor *Cursor
-	key      []byte
-	val      []byte
-	endTxNum uint64
-	t        CursorType // Whether this item represents state file or DB record, or tree
-	reverse  bool
+	c            kv.CursorDupSort
+	iter         btree2.MapIter[string, []byte]
+	dg           ArchiveGetter
+	dg2          ArchiveGetter
+	btCursor     *Cursor
+	key          []byte
+	val          []byte
+	endTxNum     uint64
+	latestOffset uint64     // offset of the latest value in the file
+	t            CursorType // Whether this item represents state file or DB record, or tree
+	reverse      bool
 }
 
 type CursorHeap []*CursorItem
@@ -830,8 +832,33 @@ type DomainContext struct {
 	keyBuf     [60]byte // 52b key and 8b for inverted step
 	valKeyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf     [8]byte
+}
 
-	kBuf, vBuf []byte
+// getFromFile returns exact match for the given key from the given file
+func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+	g := dc.statelessGetter(i)
+	if UseBtree || UseBpsTree {
+		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
+		if err != nil || !ok {
+			return nil, false, err
+		}
+		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+		return v, true, nil
+	}
+
+	reader := dc.statelessIdxReader(i)
+	if reader.Empty() {
+		return nil, false, nil
+	}
+	offset := reader.Lookup(filekey)
+	g.Reset(offset)
+
+	k, _ := g.Next(nil)
+	if !bytes.Equal(filekey, k) {
+		return nil, false, nil
+	}
+	v, _ := g.Next(nil)
+	return v, true, nil
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -1521,32 +1548,15 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		if UseBtree || UseBpsTree {
-			_, v, ok, err = dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok {
-				continue
-			}
-			found = true
-			break
-		} else {
-			reader := dc.statelessIdxReader(i)
-			if reader.Empty() {
-				continue
-			}
-			offset := reader.Lookup(filekey)
-			g := dc.statelessGetter(i)
-			g.Reset(offset)
-			k, _ := g.Next(nil)
-			if !bytes.Equal(filekey, k) {
-				continue
-			}
-			v, _ = g.Next(nil)
-			found = true
-			break
+		v, ok, err = dc.getFromFile(i, filekey)
+		if err != nil {
+			return nil, false, err
 		}
+		if !ok {
+			continue
+		}
+		found = true
+		break
 
 	}
 	return v, found, nil
@@ -1587,44 +1597,19 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 
-		var offset uint64
-		if UseBpsTree || UseBtree {
-			bt := dc.statelessBtree(i)
-			if bt.Empty() {
-				continue
-			}
-			_, v, ok, err := bt.Get(filekey, dc.statelessGetter(i))
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok {
-				LatestStateReadWarmNotFound.UpdateDuration(t)
-				return nil, false, nil
-			}
-			// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
-			LatestStateReadWarm.UpdateDuration(t)
-			return v, true, nil
+		v, found, err := dc.getFromFile(i, filekey)
+		if err != nil {
+			return nil, false, err
 		}
-
-		reader := dc.statelessIdxReader(i)
-		if reader.Empty() {
+		if !found {
 			LatestStateReadWarmNotFound.UpdateDuration(t)
-			continue
-			return nil, false, nil
-		}
-		offset = reader.Lookup(filekey)
-
-		//dc.d.stats.FilesQuerie.Add(1)
-		g := dc.statelessGetter(i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) {
-			LatestStateReadWarmNotFound.UpdateDuration(t)
+			t = time.Now()
 			continue
 		}
-		v, _ := g.Next(nil)
+		// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
+
 		LatestStateReadWarm.UpdateDuration(t)
-		return v, true, nil
+		return v, found, nil
 	}
 	return nil, false, nil
 }
@@ -1664,49 +1649,15 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		if !isUseful {
 			continue
 		}
-		var offset uint64
-		var ok bool
-		if UseBpsTree || UseBtree {
-			bt := dc.statelessBtree(i)
-			if bt.Empty() {
-				continue
-			}
-			//fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
-			_, v, ok, err = bt.Get(filekey, dc.statelessGetter(i))
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok {
-				LatestStateReadGrindNotFound.UpdateDuration(t)
-				continue
-			}
-			LatestStateReadGrind.UpdateDuration(t)
-			return v, true, nil
+		v, ok, err := dc.getFromFile(i, filekey)
+		if err != nil {
+			return nil, false, err
 		}
-
-		reader := dc.statelessIdxReader(i)
-		if reader.Empty() {
-			continue
-		}
-		offset = reader.Lookup(filekey)
-		g := dc.statelessGetter(i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) {
+		if !ok {
 			LatestStateReadGrindNotFound.UpdateDuration(t)
+			t = time.Now()
 			continue
 		}
-		v, _ = g.Next(nil)
-		//var ok bool
-		//dc.d.stats.FilesQuerie.Add(1)
-		//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
-		//if err != nil {
-		//	return nil, false, err
-		//}
-		//if !ok {
-		//	LatestStateReadGrindNotFound.UpdateDuration(t)
-		//	continue
-		//}
 		LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
@@ -1718,50 +1669,29 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	// if err != nil {
 	// 	return nil, false, err
 	// }
+	// _ = ok
 	// if !ok {
 	// 	return nil, false, nil
 	// }
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
 	// exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
-	//fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
+	// fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		// isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
 		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
 		// if !isUseful {
 		// 	continue
 		// }
-
-		var offset uint64
-		if UseBtree || UseBpsTree {
-			_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok {
-				LatestStateReadColdNotFound.UpdateDuration(t)
-				continue
-				return nil, false, nil
-			}
-			//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-			return v, true, nil
+		v, found, err = dc.getFromFile(i, filekey)
+		if err != nil {
+			return nil, false, err
 		}
-
-		reader := dc.statelessIdxReader(i)
-		if reader.Empty() {
+		if !found {
 			LatestStateReadColdNotFound.UpdateDuration(t)
-			return nil, false, nil
+			t = time.Now()
+			continue
 		}
-		offset = reader.Lookup(filekey)
-		g := dc.statelessGetter(i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) {
-			LatestStateReadColdNotFound.UpdateDuration(t)
-			return nil, false, nil
-		}
-		v, _ = g.Next(nil)
-
 		LatestStateReadCold.UpdateDuration(t)
 		return v, true, nil
 	}
@@ -1800,7 +1730,8 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			_, v, ok, err = dc.statelessBtree(i).Get(key, dc.statelessGetter(i))
+			// _, v, ok, err = dc.statelessBtree(i).Get(key, dc.statelessGetter(i))
+			v, ok, err = dc.getFromFile(i, key)
 			if err != nil {
 				return nil, false, err
 			}
@@ -2032,22 +1963,22 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val := cursor.Value()
-				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 			}
-			//} else {
-			//	ir := dc.statelessIdxReader(i)
-			//	offset := ir.Lookup(prefix)
-			//	g := dc.statelessGetter(i)
-			//	g.Reset(offset)
-			//	if !g.HasNext() {
-			//		continue
-			//	}
-			//	key, _ := g.Next(nil)
-			//dc.d.stats.FilesQueries.Add(1)
-			//if key != nil && bytes.HasPrefix(key, prefix) {
-			//  val, _ := g.Next(nil)
-			//	heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
-			//}
+		} else {
+			ir := dc.statelessIdxReader(i)
+			offset := ir.Lookup(prefix)
+			g := dc.statelessGetter(i)
+			g.Reset(offset)
+			if !g.HasNext() {
+				continue
+			}
+			key, _ := g.Next(nil)
+			dc.d.stats.FilesQueries.Add(1)
+			if key != nil && bytes.HasPrefix(key, prefix) {
+				val, lofft := g.Next(nil)
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: g, latestOffset: lofft, key: key, val: val, endTxNum: item.endTxNum, reverse: true})
+			}
 		}
 
 	}
@@ -2061,11 +1992,21 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			switch ci1.t {
 			case FILE_CURSOR:
-				if ci1.btCursor.Next() {
+				if ci1.btCursor != nil && ci1.btCursor.Next() {
 					ci1.key = ci1.btCursor.Key()
 					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 						ci1.val = ci1.btCursor.Value()
 						heap.Push(&cp, ci1)
+					}
+				} else {
+					ci1.dg.Reset(ci1.latestOffset)
+					if !ci1.dg.HasNext() {
+						break
+					}
+					key, _ := ci1.dg.Next(nil)
+					if key != nil && bytes.HasPrefix(key, prefix) {
+						ci1.key = key
+						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
 					}
 				}
 			case DB_CURSOR:

@@ -298,6 +298,37 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(uint64(2*StepsInColdFile), v2)
 		require.Equal(txsInColdFile*coldFiles, int(from))
 	})
+	t.Run("locality index to kv file", func(t *testing.T) {
+		dc := dom.MakeContext()
+		defer dc.Close()
+
+		for i := len(dc.files) - 1; i >= 0; i-- {
+			// for i := 0; i < len(dc.files); i++ {
+			g := NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compressValues)
+
+			for g.HasNext() {
+				k, _ := g.Next(nil)
+				g.Skip() // v
+				fmt.Printf("key %x\n", k)
+
+				ls, ok, err := dc.hc.ic.warmLocality.lookupLatest(k)
+				// require.NoError(err)
+				// // fmt.Printf("rs %d\n", rs)
+				// require.True(ok)
+
+				// ls, ok, err := dc.hc.ic.coldLocality.lookupLatest(k)
+				require.NoError(err)
+				require.True(ok)
+				fmt.Printf("ls %d\n", ls)
+				// s1, s2, lastTx, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(k, dc.files[i].startTxNum)
+				// fmt.Printf("s1 %d s2 %d i %d\n", s1, s2, i)
+				// require.True(ok1 || ok2)
+				require.GreaterOrEqual(dc.files[i].endTxNum, ls*dc.d.aggregationStep)
+				require.LessOrEqual(dc.files[i].startTxNum, ls*dc.d.aggregationStep)
+			}
+		}
+	})
+
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
