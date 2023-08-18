@@ -433,7 +433,7 @@ func ConsensusClStages(ctx context.Context,
 							return nil
 						}
 						shouldForkChoiceSinceReorg = true
-						logger.Warn("extra block received", "slot", args.seenSlot)
+						logger.Debug("extra block received", "slot", args.seenSlot)
 					}
 					return nil
 				},
