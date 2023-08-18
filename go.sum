@@ -505,8 +505,12 @@ github.com/ledgerwatch/erigon-lib v0.0.0-20230816001947-97f86de957b4 h1:fc723pZa
 github.com/ledgerwatch/erigon-lib v0.0.0-20230816001947-97f86de957b4/go.mod h1:kQSmLCWwsH6cRFdhQOwBQG4anJNQkpFEt05tuYjMoy0=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230817005936-9199d80e547e h1:1dyoNBukmqlNUcxJc1bBfpbf4CE26bREbGqk1lbLf5Q=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230817005936-9199d80e547e/go.mod h1:kQSmLCWwsH6cRFdhQOwBQG4anJNQkpFEt05tuYjMoy0=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230818164856-80d3daa9136e h1:sOR3RVsdZsEvHn1um7j36zwpcRII+iJM+lnmPXF1uj8=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230818164856-80d3daa9136e/go.mod h1:kQSmLCWwsH6cRFdhQOwBQG4anJNQkpFEt05tuYjMoy0=
 github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230810173239-feb52fae58d9 h1:fG8PozTh9rKBRtWwZsoCA8kJ0M/B6SiG4Vo1sF29Inw=
 github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230810173239-feb52fae58d9/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
+github.com/ledgerwatch/interfaces v0.0.0-20230811182153-2fcb75060567 h1:ZZGeye8uJaIYvOmI2TbAdV5Oo9j8+SA4dXlK6y3GJsY=
+github.com/ledgerwatch/interfaces v0.0.0-20230811182153-2fcb75060567/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
 github.com/ledgerwatch/log/v3 v3.8.0 h1:gCpp7uGtIerEz1jKVPeDnbIopFPud9ZnCpBLlLBGqPU=
 github.com/ledgerwatch/log/v3 v3.8.0/go.mod h1:J2Jl6zV/58LeA6LTaVVnCGyf1/cYYSEOOLHY4ZN8S2A=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
@@ -550,6 +554,8 @@ github.com/maticnetwork/crand v1.0.2 h1:Af0tAivC8zrxXDpGWNWVT/0s1fOz8w0eRbahZgUR
 github.com/maticnetwork/crand v1.0.2/go.mod h1:/NRNL3bj2eYdqpWmoIP5puxndTpi0XRxpj5ZKxfHjyg=
 github.com/maticnetwork/polyproto v0.0.2 h1:cPxuxbIDItdwGnucc3lZB58U8Zfe1mH73PWTGd15554=
 github.com/maticnetwork/polyproto v0.0.2/go.mod h1:e1mU2EXSwEpn5jM7GfNwu3AupsV6WAGoPFFfswXOF0o=
+github.com/matryer/moq v0.3.2 h1:z7oltmpTxiQ9nKNg0Jc7z45TM+eO7OhCVohxRxwaudM=
+github.com/matryer/moq v0.3.2/go.mod h1:RJ75ZZZD71hejp39j4crZLsEDszGk6iH4v4YsWFKH4s=
 github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxecdEvA=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27kJ6hsGG94=
