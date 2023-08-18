@@ -96,6 +96,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	}
 	systemcontracts.UpgradeBuildInSystemContract(&cfg.chainConfig, current.Header.Number, ibs, logger)
 
+	chainReader := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
+	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, &cfg.chainConfig, ibs)
+
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
@@ -364,6 +367,9 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	if header.BlobGasUsed != nil {
+		gasPool.AddBlobGas(fixedgas.MaxBlobGasPerBlock - *header.BlobGasUsed)
+	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs

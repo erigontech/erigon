@@ -366,7 +366,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom) {
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,

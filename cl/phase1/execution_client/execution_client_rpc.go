@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
@@ -162,4 +163,24 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 		return fmt.Errorf("status: %s", payloadStatus.Status)
 	}
 	return nil
+}
+
+func (cc *ExecutionClientRpc) SupportInsertion() bool {
+	return false
+}
+
+func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block) error {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) InsertBlock(*types.Block) error {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) Ready() (bool, error) {
+	return true, nil // Engine API is always ready
 }

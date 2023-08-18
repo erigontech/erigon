@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230815105959-5bf0ea099f32
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230818135128-7854cf8709bd
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230817180033-26f667622c3e
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -53,6 +53,7 @@ require (
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
 	github.com/jackpal/go-nat-pmp v1.0.2
+	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/libp2p/go-libp2p v0.28.2
@@ -87,13 +88,13 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.6
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.11.0
+	golang.org/x/crypto v0.12.0
 	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22
 	golang.org/x/net v0.12.0
 	golang.org/x/sync v0.3.0
-	golang.org/x/sys v0.10.0
+	golang.org/x/sys v0.11.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.56.2
+	google.golang.org/grpc v1.57.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -183,6 +184,7 @@ require (
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
+	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/miekg/dns v1.1.54 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
@@ -232,12 +234,13 @@ require (
 	github.com/quic-go/webtransport-go v0.5.3 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.5 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/supranational/blst v0.3.10 // indirect
+	github.com/supranational/blst v0.3.11 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
 	github.com/valyala/fastrand v1.1.0 // indirect
@@ -252,9 +255,9 @@ require (
 	go.uber.org/fx v1.19.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
-	golang.org/x/text v0.11.0 // indirect
+	golang.org/x/text v0.12.0 // indirect
 	golang.org/x/tools v0.9.3 // indirect
-	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230525234030-28d5490b6b19 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 	lukechampine.com/uint128 v1.3.0 // indirect

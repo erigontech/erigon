@@ -37,8 +37,8 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 			// since caplin is designed to always be able to recover regardless of db state, this should be safe
 			select {
 			case errch <- currentStage.ActionFunc(sctx, lg, cfg, args):
-			case <-ctx.Done():
-				errch <- ctx.Err()
+			case <-sctx.Done():
+				errch <- sctx.Err()
 			}
 		}()
 		err := <-errch
