@@ -356,6 +356,16 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	return nil
 }
 
+func (rs *RecSplit) AddOffset(offset uint64) error {
+	if rs.enums {
+		binary.BigEndian.PutUint64(rs.numBuf[:], offset)
+		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (rs *RecSplit) recsplitCurrentBucket() error {
 	// Extend rs.bucketSizeAcc to accomodate current bucket index + 1
 	for len(rs.bucketSizeAcc) <= int(rs.currentBucketIdx)+1 {

@@ -34,6 +34,7 @@ const (
 	ETHBACKEND_NodeInfo_FullMethodName        = "/remote.ETHBACKEND/NodeInfo"
 	ETHBACKEND_Peers_FullMethodName           = "/remote.ETHBACKEND/Peers"
 	ETHBACKEND_PendingBlock_FullMethodName    = "/remote.ETHBACKEND/PendingBlock"
+	ETHBACKEND_BorEvent_FullMethodName        = "/remote.ETHBACKEND/BorEvent"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -65,6 +66,7 @@ type ETHBACKENDClient interface {
 	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
+	BorEvent(ctx context.Context, in *BorEventRequest, opts ...grpc.CallOption) (*BorEventReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -237,6 +239,15 @@ func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, 
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) BorEvent(ctx context.Context, in *BorEventRequest, opts ...grpc.CallOption) (*BorEventReply, error) {
+	out := new(BorEventReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_BorEvent_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
@@ -266,6 +277,7 @@ type ETHBACKENDServer interface {
 	Peers(context.Context, *emptypb.Empty) (*PeersReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
+	BorEvent(context.Context, *BorEventRequest) (*BorEventReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -311,6 +323,9 @@ func (UnimplementedETHBACKENDServer) Peers(context.Context, *emptypb.Empty) (*Pe
 }
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
+}
+func (UnimplementedETHBACKENDServer) BorEvent(context.Context, *BorEventRequest) (*BorEventReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BorEvent not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -570,6 +585,24 @@ func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_BorEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BorEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).BorEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_BorEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).BorEvent(ctx, req.(*BorEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -620,6 +653,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PendingBlock",
 			Handler:    _ETHBACKEND_PendingBlock_Handler,
+		},
+		{
+			MethodName: "BorEvent",
+			Handler:    _ETHBACKEND_BorEvent_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

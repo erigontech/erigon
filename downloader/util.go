@@ -190,6 +190,9 @@ func buildTorrentIfNeed(fName, root string) (err error) {
 	if dir2.FileExist(fPath + ".torrent") {
 		return
 	}
+	if !dir2.FileExist(fPath) {
+		return
+	}
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
@@ -232,7 +235,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
 	var sem = semaphore.NewWeighted(int64(workers))
 	i := atomic.Int32{}
-	for _, f := range files {
+	for _, file := range files {
 		wg.Add(1)
 		if err := sem.Acquire(ctx, 1); err != nil {
 			return nil, err
@@ -252,7 +255,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			case <-logEvery.C:
 				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			}
-		}(f)
+		}(file)
 	}
 	go func() {
 		wg.Wait()

@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -65,7 +66,8 @@ type AggStats struct {
 	Completed bool
 	Progress  float32
 
-	BytesCompleted, BytesTotal uint64
+	BytesCompleted, BytesTotal     uint64
+	DroppedCompleted, DroppedTotal uint64
 
 	BytesDownload, BytesUpload uint64
 	UploadRate, DownloadRate   uint64
@@ -132,11 +134,21 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) {
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
 	go func() {
-		for {
-			torrents := d.Torrent().Torrents()
+		// Torrents that are already taken care of
+		torrentMap := map[metainfo.Hash]struct{}{}
+		// First loop drops torrents that were downloaded or are already complete
+		// This improves efficiency of download by reducing number of active torrent (empirical observation)
+		for torrents := d.Torrent().Torrents(); len(torrents) > 0; torrents = d.Torrent().Torrents() {
 			for _, t := range torrents {
+				if _, already := torrentMap[t.InfoHash()]; already {
+					continue
+				}
 				<-t.GotInfo()
 				if t.Complete.Bool() {
+					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+					t.Drop()
+					torrentMap[t.InfoHash()] = struct{}{}
 					continue
 				}
 				if err := sem.Acquire(ctx, 1); err != nil {
@@ -144,12 +156,42 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) {
 				}
 				t.AllowDataDownload()
 				t.DownloadAll()
+				torrentMap[t.InfoHash()] = struct{}{}
+				go func(t *torrent.Torrent) {
+					defer sem.Release(1)
+					<-t.Complete.On()
+					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+					t.Drop()
+				}(t)
+			}
+		}
+		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
+		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
+		d.addSegments()
+		maps.Clear(torrentMap)
+		for {
+			torrents := d.Torrent().Torrents()
+			for _, t := range torrents {
+				if _, already := torrentMap[t.InfoHash()]; already {
+					continue
+				}
+				<-t.GotInfo()
+				if t.Complete.Bool() {
+					torrentMap[t.InfoHash()] = struct{}{}
+					continue
+				}
+				if err := sem.Acquire(ctx, 1); err != nil {
+					return
+				}
+				t.AllowDataDownload()
+				t.DownloadAll()
+				torrentMap[t.InfoHash()] = struct{}{}
 				go func(t *torrent.Torrent) {
 					defer sem.Release(1)
 					//r := t.NewReader()
 					//r.SetReadahead(t.Length())
 					//_, _ = io.Copy(io.Discard, r) // enable streaming - it will prioritize sequential download
-
 					<-t.Complete.On()
 				}(t)
 			}
@@ -178,11 +220,6 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) {
 			}
 
 			stats := d.Stats()
-
-			if stats.MetadataReady < stats.FilesTotal {
-				log.Info(fmt.Sprintf("[snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
-				continue
-			}
 
 			if stats.Completed {
 				if justCompleted {
@@ -237,7 +274,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 
-	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0, 0
+	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():

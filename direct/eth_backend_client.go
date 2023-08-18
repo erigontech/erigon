@@ -210,3 +210,7 @@ func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, o
 func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
 	return s.server.PendingBlock(ctx, in)
 }
+
+func (s *EthBackendClientDirect) BorEvent(ctx context.Context, in *remote.BorEventRequest, opts ...grpc.CallOption) (*remote.BorEventReply, error) {
+	return s.server.BorEvent(ctx, in)
+}
