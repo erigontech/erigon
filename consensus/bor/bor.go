@@ -25,7 +25,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
@@ -37,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 const (
@@ -234,6 +234,7 @@ type Bor struct {
 	chainConfig *chain.Config    // Chain config
 	config      *chain.BorConfig // Consensus engine configuration parameters for bor consensus
 	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
+	blockReader services.FullBlockReader
 
 	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
@@ -353,6 +354,7 @@ func CalculateSprint(config *chain.BorConfig, number uint64) uint64 {
 func New(
 	chainConfig *chain.Config,
 	db kv.RwDB,
+	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient IHeimdallClient,
 	genesisContracts GenesisContract,
@@ -373,6 +375,7 @@ func New(
 		chainConfig:            chainConfig,
 		config:                 borConfig,
 		DB:                     db,
+		blockReader:            blockReader,
 		recents:                recents,
 		signatures:             signatures,
 		spanner:                spanner,
@@ -684,7 +687,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 
-		if number <= chain.FrozenBlocks() {
+		if number < chain.FrozenBlocks() {
 			break
 		}
 
@@ -758,7 +761,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		c.logger.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -917,7 +920,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	var err error
 
@@ -931,7 +934,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			return nil, types.Receipts{}, err
 		}
 
-		if c.HeimdallClient != nil {
+		if c.blockReader != nil {
 			// commit states
 			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
@@ -992,7 +995,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
@@ -1329,85 +1332,12 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	fetchStart := time.Now()
-	number := header.Number.Uint64()
-
-	var (
-		lastStateIDBig *big.Int
-		from           uint64
-		to             time.Time
-		err            error
-	)
-
-	// Explicit condition for Indore fork won't be needed for fetching this
-	// as erigon already performs this call on the IBS (Intra block state) of
-	// the incoming chain.
-	lastStateIDBig, err = c.GenesisContractsClient.LastStateId(syscall)
-	if err != nil {
-		return err
-	}
-
-	if c.config.IsIndore(number) {
-		stateSyncDelay := c.config.CalculateStateSyncDelay(number)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-	} else {
-		to = time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
-	}
-
-	lastStateID := lastStateIDBig.Uint64()
-	from = lastStateID + 1
-
-	c.logger.Info(
-		"Fetching state updates from Heimdall",
-		"fromID", from,
-		"to", to.Format(time.RFC3339),
-	)
-
-	eventRecords, err := c.HeimdallClient.StateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
-	if err != nil {
-		return err
-	}
-
-	if c.config.OverrideStateSyncRecords != nil {
-		if val, ok := c.config.OverrideStateSyncRecords[strconv.FormatUint(number, 10)]; ok {
-			eventRecords = eventRecords[0:val]
-		}
-	}
-
-	fetchTime := time.Since(fetchStart)
-	processStart := time.Now()
-	chainID := c.chainConfig.ChainID.String()
-
-	for _, eventRecord := range eventRecords {
-		if eventRecord.ID <= lastStateID {
-			continue
-		}
-
-		if err := validateEventRecord(eventRecord, number, to, lastStateID, chainID); err != nil {
-			c.logger.Error("while validating event record", "block", number, "to", to, "stateID", lastStateID+1, "error", err.Error())
-			break
-		}
-
-		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
+	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+	for _, event := range events {
+		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
 			return err
 		}
-
-		lastStateID++
 	}
-
-	processTime := time.Since(processStart)
-
-	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
-
-	return nil
-}
-
-func validateEventRecord(eventRecord *clerk.EventRecordWithTime, number uint64, to time.Time, lastStateID uint64, chainID string) error {
-	// event id should be sequential and event.Time should lie in the range [from, to)
-	if lastStateID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
-		return &InvalidStateReceivedError{number, lastStateID, &to, eventRecord}
-	}
-
 	return nil
 }
 

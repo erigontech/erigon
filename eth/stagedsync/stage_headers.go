@@ -481,12 +481,13 @@ func logProgressHeaders(logPrefix string, prev, now uint64, logger log.Logger) u
 
 type ChainReaderImpl struct {
 	config      *chain.Config
-	tx          kv.Getter
+	tx          kv.Tx
 	blockReader services.FullBlockReader
+	logger      log.Logger
 }
 
-func NewChainReaderImpl(config *chain.Config, tx kv.Getter, blockReader services.FullBlockReader) *ChainReaderImpl {
-	return &ChainReaderImpl{config, tx, blockReader}
+func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
+	return &ChainReaderImpl{config, tx, blockReader, logger}
 }
 
 func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
@@ -520,30 +521,25 @@ func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
-		log.Error("ReadTd failed", "err", err)
+		cr.logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
 }
-
 func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
-
-func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
+func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	panic("")
+}
+func (cr ChainReaderImpl) HasBlock(hash libcommon.Hash, number uint64) bool {
+	panic("")
+}
+func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
+	if err != nil {
+		cr.logger.Error("BorEventsByBlock failed", "err", err)
+		return nil
 	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return events
 }
