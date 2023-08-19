@@ -728,6 +728,10 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	}
 	comp = NewArchiveWriter(cmp, d.Domain.compressValues)
 
+	for _, f := range domainFiles {
+		defer f.decompressor.EnableReadAhead().DisableReadAhead()
+	}
+
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
