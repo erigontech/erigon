@@ -245,7 +245,7 @@ Finish:
 
 	ac := agg.MakeContext()
 	defer ac.Close()
-	if err := rawdb.WriteSnapshots(tx, blockReader.Files(), ac.Files()); err != nil {
+	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 		return err
 	}
 	if notifier != nil { // can notify right here, even that write txn is not commit

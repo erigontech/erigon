@@ -84,7 +84,7 @@ func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not i
 func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
-func (back *RemoteBackend) Files() (list []string)                { return back.blockReader.Files() }
+func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
