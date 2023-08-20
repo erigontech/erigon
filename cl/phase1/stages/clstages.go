@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -30,6 +31,7 @@ type Cfg struct {
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
+	dirs            datadir.Dirs
 }
 
 type Args struct {
@@ -48,6 +50,7 @@ func ClStagesCfg(
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
+	dirs datadir.Dirs,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -58,6 +61,7 @@ func ClStagesCfg(
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
 		beaconDB:        beaconDB,
+		dirs:            dirs,
 	}
 }
 
@@ -235,7 +239,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, "/tmp", logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
