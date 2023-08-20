@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indexes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -31,6 +32,7 @@ type Cfg struct {
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
+	beaconIndexer   beacon_indexes.BeaconIndexer
 	dirs            datadir.Dirs
 }
 
@@ -51,6 +53,7 @@ func ClStagesCfg(
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
 	dirs datadir.Dirs,
+	beaconIndexer beacon_indexes.BeaconIndexer,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -62,6 +65,7 @@ func ClStagesCfg(
 		forkChoice:      forkChoice,
 		beaconDB:        beaconDB,
 		dirs:            dirs,
+		beaconIndexer:   beaconIndexer,
 	}
 }
 
@@ -238,7 +242,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 500_000, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
@@ -390,6 +394,34 @@ func ConsensusClStages(ctx context.Context,
 							cfg.forkChoice.GetEth1Hash(headRoot),
 						); err != nil {
 							logger.Warn("Could not set forkchoice", "err", err)
+							return err
+						}
+					}
+					// Update canonical chain on the database.
+					if err := cfg.beaconIndexer.TruncateCanonicalChain(headSlot); err != nil {
+						return err
+					}
+					currentRoot := headRoot
+					currentSlot := headSlot
+					currentCanonical, err := cfg.beaconIndexer.ReadCanonicalBlockRoot(currentSlot)
+					if err != nil {
+						return err
+					}
+					for currentRoot != currentCanonical {
+						if err := cfg.beaconIndexer.MarkRootCanonical(currentSlot, currentRoot); err != nil {
+							return err
+						}
+						if currentRoot, err = cfg.beaconIndexer.ReadParentBlockRoot(currentRoot); err != nil {
+							return err
+						}
+						if currentSlot, err = cfg.beaconIndexer.ReadBlockSlotByBlockRoot(currentRoot); err != nil {
+							return err
+						}
+						if currentSlot == 0 {
+							break
+						}
+						currentCanonical, err = cfg.beaconIndexer.ReadCanonicalBlockRoot(currentSlot)
+						if err != nil {
 							return err
 						}
 					}

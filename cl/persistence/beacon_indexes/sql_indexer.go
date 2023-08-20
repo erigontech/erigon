@@ -10,7 +10,7 @@ import (
 )
 
 // Define all queries templates
-var beaconIndiciesCreateTableQuery = `CREATE TABLE beacon_indicies (
+var beaconIndiciesCreateTableQuery = `CREATE TABLE IF NOT EXISTS beacon_indicies (
     Slot INTEGER NOT NULL,
 	BeaconBlockRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32), -- Ensure it's 32 bytes
 	StateRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32),
@@ -20,7 +20,7 @@ var beaconIndiciesCreateTableQuery = `CREATE TABLE beacon_indicies (
 );`
 
 var beaconIndiciesUniqueIndiciesQuery = `
-	CREATE UNIQUE INDEX idx_unique_canonical 
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_canonical 
 	ON beacon_indicies (Slot) 
 	WHERE Canonical = 1;`
 
@@ -40,8 +40,14 @@ var resetOtherRootsCanonicalQuery = `UPDATE beacon_indicies
 	WHERE Slot = ? AND BeaconBlockRoot != ?`
 
 var insertOrUpdateBlockRoot = `
-	INSERT INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical) 
+	INSERT OR IGNORE INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical) 
 	VALUES (?, ?, ?, ?, 0);
+`
+
+var truncateCanonicalChain = `
+	UPDATE beacon_indicies
+	SET Canonical = 0
+	WHERE Slot > ?;
 `
 
 type SqliteBeaconIndexer struct {
@@ -68,7 +74,7 @@ func (s SqliteBeaconIndexer) ReadBlockSlotByBlockRoot(blockRoot libcommon.Hash) 
 	err := s.db.QueryRow(beaconReadBlockSlotByBlockRoot, blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("no block found with the provided BeaconBlockRoot: %v", err)
+			return 0, nil
 		}
 		return 0, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
 	}
@@ -83,7 +89,7 @@ func (s SqliteBeaconIndexer) ReadCanonicalBlockRoot(slot uint64) (libcommon.Hash
 	err := s.db.QueryRow(beaconReadCanonicalBlockRootBySlot, slot).Scan(&blockRootBytes)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return libcommon.Hash{}, fmt.Errorf("no canonical block found for the provided slot: %v", err)
+			return libcommon.Hash{}, nil
 		}
 		return libcommon.Hash{}, fmt.Errorf("failed to retrieve BeaconBlockRoot for slot: %v", err)
 	}
@@ -129,10 +135,23 @@ func (s SqliteBeaconIndexer) ReadParentBlockRoot(blockRoot libcommon.Hash) (libc
 	err := s.db.QueryRow(beaconReadParentRootByBlockRoot, blockRoot[:]).Scan(parentRoot[:])
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return libcommon.Hash{}, fmt.Errorf("no block found with the provided BeaconBlockRoot: %v", err)
+			return libcommon.Hash{}, nil
 		}
-		return libcommon.Hash{}, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
+		return libcommon.Hash{}, fmt.Errorf("failed to retrieve ParentBlockRoot for BeaconBlockRoot: %v", err)
 	}
 
 	return parentRoot, nil
+}
+
+func (s SqliteBeaconIndexer) TruncateCanonicalChain(slot uint64) error {
+	// Execute the query.
+	_, err := s.db.Exec(truncateCanonicalChain, slot)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("failed to truncate canonical chain: %v", err)
+	}
+
+	return nil
 }
