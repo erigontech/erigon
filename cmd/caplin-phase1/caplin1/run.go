@@ -2,12 +2,15 @@ package caplin1
 
 import (
 	"context"
+	"database/sql"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indexes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -53,6 +56,16 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
 	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), dirs.DataDir)
+	dataDirIndexer := path.Join(dirs.DataDir, "beacon_indicies")
+	db, err := sql.Open("sqlite3", dataDirIndexer)
+	if err != nil {
+		return err
+	}
+
+	beaconIndexer, err := beacon_indexes.NewSqlBeaconIndexer(db)
+	if err != nil {
+		return err
+	}
 
 	{ // start the gossip manager
 		go gossipManager.Start(ctx)
@@ -88,7 +101,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 			}
 		}()
 	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig)
+
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, beaconIndexer)
 	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 

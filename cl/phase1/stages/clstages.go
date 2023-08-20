@@ -157,10 +157,9 @@ func ConsensusClStages(ctx context.Context,
 			cfg.rpc.BanPeer(block.Peer)
 			return err
 		}
-		// NOTE: this error is ignored and logged only!
-		err := cfg.beaconDB.WriteBlock(block.Data)
-		if err != nil {
-			log.Error("failed to persist block to store", "slot", block.Data.Block.Slot, "err", err)
+		// Write block to database optimistically if we are very behind.
+		if !fullValidation {
+			return cfg.beaconDB.WriteBlock(block.Data)
 		}
 		return nil
 	}
@@ -239,7 +238,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 500_000, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
