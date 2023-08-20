@@ -88,7 +88,7 @@ func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not 
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
-func (r *RemoteBlockReader) Files() (list []string)                { panic("not supported") }
+func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
@@ -252,7 +252,7 @@ func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
 func (r *BlockReader) BorSnapshots() services.BlockSnapshots { return r.borSn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
 func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
-func (r *BlockReader) Files() []string {
+func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
 	if r.borSn != nil {
 		files = append(files, r.borSn.Files()...)
