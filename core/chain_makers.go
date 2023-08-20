@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -647,3 +648,6 @@ func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.B
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
+func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}

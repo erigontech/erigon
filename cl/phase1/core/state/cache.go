@@ -31,7 +31,6 @@ type CachingBeaconState struct {
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
 	previousStateRoot           common.Hash
-	// Configs
 }
 
 func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
@@ -216,6 +215,7 @@ func (b *CachingBeaconState) initBeaconState() error {
 
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
+
 		return true
 	})
 

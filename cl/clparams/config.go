@@ -100,7 +100,6 @@ type NetworkConfig struct {
 	GossipMaxSize                   uint64        `json:"gossip_max_size"`                    // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64        `json:"gossip_max_size_bellatrix"`          // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxRequestBlocks                uint64        `json:"max_request_blocks"`                 // Maximum number of blocks in a single request
-	MinEpochsForBlockRequests       uint64        `json:"min_epochs_for_block_requests"`      // The minimum epoch range over which a node must serve blocks
 	MaxChunkSize                    uint64        `json:"max_chunk_size"`                     // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64        `json:"attestation_subnet_count"`           // The number of attestation subnets used in the gossipsub protocol.
 	TtfbTimeout                     time.Duration `json:"ttfbt_timeout"`                      // The maximum time to wait for first byte of request response (time-to-first-byte).
@@ -278,6 +277,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
+}
+
+// MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
+func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
+	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
+
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.

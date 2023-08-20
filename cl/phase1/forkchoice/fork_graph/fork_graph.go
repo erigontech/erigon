@@ -239,8 +239,8 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	didLongRecconnection := currentIteratorRoot == reconnectionRootLong && reconnectionRootLong != reconnectionRootShort
 	if f.currentStateBlockRoot == blockRoot {
 		if alwaysCopy {
-			s, err := f.currentState.Copy()
-			return s, didLongRecconnection, err
+			ret, err := f.currentState.Copy()
+			return ret, didLongRecconnection, err
 		}
 		return f.currentState, didLongRecconnection, nil
 	}
@@ -250,6 +250,7 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		if err != nil {
 			return nil, true, err
 		}
+
 	} else {
 		copyReferencedState, err = f.nextReferenceState.Copy()
 		if err != nil {

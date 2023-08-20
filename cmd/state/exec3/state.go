@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -293,6 +294,15 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 }
 func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
+}
+func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	panic("")
+}
+func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
+	panic("")
+}
+func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	panic("")
 }
 
 func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

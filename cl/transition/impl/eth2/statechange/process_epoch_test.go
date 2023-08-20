@@ -91,7 +91,7 @@ var startingSlashingsResetState []byte
 
 func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s abstract.BeaconState) error {
-		return ProcessRewardsAndPenalties(s)
+		return ProcessRewardsAndPenalties(s, state.EligibleValidatorsIndicies(s), GetUnslashedIndiciesSet(s))
 	})
 }
 
@@ -128,7 +128,7 @@ func TestProcessSlashings(t *testing.T) {
 
 func TestProcessJustificationAndFinality(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingJustificationAndFinalityState, expectedJustificationAndFinalityState, func(s abstract.BeaconState) error {
-		return ProcessJustificationBitsAndFinality(s)
+		return ProcessJustificationBitsAndFinality(s, nil)
 	})
 }
 
@@ -161,6 +161,6 @@ var startingInactivityScoresState []byte
 
 func TestInactivityScores(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingInactivityScoresState, expectedInactivityScoresState, func(s abstract.BeaconState) error {
-		return ProcessInactivityScores(s)
+		return ProcessInactivityScores(s, state.EligibleValidatorsIndicies(s), GetUnslashedIndiciesSet(s))
 	})
 }

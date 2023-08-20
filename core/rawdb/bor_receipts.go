@@ -164,7 +164,7 @@ func ReadBorTransaction(db kv.Tx, borTxHash libcommon.Hash) (types.Transaction, 
 	return borTx, err
 }
 
-func ReadBorTxLookupEntry(db kv.Tx, borTxHash libcommon.Hash) (*uint64, error) {
+func ReadBorTxLookupEntry(db kv.Getter, borTxHash libcommon.Hash) (*uint64, error) {
 	blockNumBytes, err := db.GetOne(kv.BorTxLookup, borTxHash.Bytes())
 	if err != nil {
 		return nil, err

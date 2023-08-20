@@ -243,3 +243,19 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	}
 	return fmt.Errorf("no logs filter available")
 }
+
+func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return &remote.BorEventReply{}, nil
+	}
+	return &remote.BorEventReply{}, nil
+}
