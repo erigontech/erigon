@@ -554,7 +554,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if err := rawdb.WriteSnapshots(tx, blockReader.Files(), ac.Files()); err != nil {
+			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
