@@ -272,7 +272,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if err := rawdb.WriteSnapshots(tx, blockReader.Files(), ac.Files()); err != nil {
+			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 				return err
 			}
 			ac.Close()
@@ -308,7 +308,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			aggFiles := ac.Files()
 			ac.Close()
 
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.Files(), aggFiles); err != nil {
+			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
 				return err
 			}
 		}
