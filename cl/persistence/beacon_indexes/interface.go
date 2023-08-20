@@ -13,6 +13,7 @@ type BeaconIndexer interface {
 type BeaconIndexerReader interface {
 	ReadBlockSlotByBlockRoot(blockRoot libcommon.Hash) (uint64, error)
 	ReadCanonicalBlockRoot(slot uint64) (libcommon.Hash, error)
+	ReadParentBlockRoot(blockRoot libcommon.Hash) (libcommon.Hash, error)
 }
 
 type BeaconIndexerWriter interface {

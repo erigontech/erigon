@@ -14,6 +14,7 @@ var beaconIndiciesCreateTableQuery = `CREATE TABLE beacon_indicies (
     Slot INTEGER NOT NULL,
 	BeaconBlockRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32), -- Ensure it's 32 bytes
 	StateRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32),
+	ParentBlockRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32),
     Canonical INTEGER NOT NULL DEFAULT 0, -- 0 for false, 1 for true
     PRIMARY KEY (Slot, BeaconBlockRoot)  -- Composite key ensuring unique combination of Slot and BeaconBlockRoot
 );`
@@ -24,6 +25,8 @@ var beaconIndiciesUniqueIndiciesQuery = `
 	WHERE Canonical = 1;`
 
 var beaconReadBlockSlotByBlockRoot = "SELECT Slot FROM beacon_indicies WHERE BeaconBlockRoot = ?"
+
+var beaconReadParentRootByBlockRoot = "SELECT ParentBlockRoot FROM beacon_indicies WHERE BeaconBlockRoot = ?"
 
 var beaconReadCanonicalBlockRootBySlot = `SELECT BeaconBlockRoot FROM beacon_indicies 
 	WHERE Slot = ? AND Canonical = 1`
@@ -37,8 +40,8 @@ var resetOtherRootsCanonicalQuery = `UPDATE beacon_indicies
 	WHERE Slot = ? AND BeaconBlockRoot != ?`
 
 var insertOrUpdateBlockRoot = `
-	INSERT INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, Canonical) 
-	VALUES (?, ?, ?, 0);
+	INSERT INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical) 
+	VALUES (?, ?, ?, ?, 0);
 `
 
 type SqliteBeaconIndexer struct {
@@ -111,10 +114,25 @@ func (s SqliteBeaconIndexer) GenerateBlockIndicies(block *cltypes.BeaconBlock) e
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(insertOrUpdateBlockRoot, block.Slot, blockRoot[:], block.StateRoot)
+	_, err = s.db.Exec(insertOrUpdateBlockRoot, block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 	}
 
 	return nil
+}
+
+func (s SqliteBeaconIndexer) ReadParentBlockRoot(blockRoot libcommon.Hash) (libcommon.Hash, error) {
+	var parentRoot libcommon.Hash
+
+	// Execute the query.
+	err := s.db.QueryRow(beaconReadParentRootByBlockRoot, blockRoot[:]).Scan(parentRoot[:])
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return libcommon.Hash{}, fmt.Errorf("no block found with the provided BeaconBlockRoot: %v", err)
+		}
+		return libcommon.Hash{}, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
+	}
+
+	return parentRoot, nil
 }
