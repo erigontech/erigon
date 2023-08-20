@@ -13,7 +13,7 @@ type BlockSource interface {
 }
 
 type BeaconChainWriter interface {
-	WriteBlock(block *cltypes.SignedBeaconBlock) error
+	WriteBlock(block *cltypes.SignedBeaconBlock, canonical bool) error
 }
 
 type BeaconChainDatabase interface {

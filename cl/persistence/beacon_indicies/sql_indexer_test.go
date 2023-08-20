@@ -1,6 +1,6 @@
 // beacon_indexes_test.go
 
-package beacon_indexes
+package beacon_indicies
 
 import (
 	"database/sql"

@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indexes"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -26,16 +27,16 @@ type beaconChainDatabaseFilesystem struct {
 	networkEncoding bool // same encoding as reqresp
 
 	// TODO(Giulio2002): actually make decoupling possible
-	_       execution_client.ExecutionEngine
-	indexer beacon_indexes.BeaconIndexer
+	_          execution_client.ExecutionEngine
+	indiciesDB *sql.DB
 }
 
-func NewbeaconChainDatabaseFilesystem(fs afero.Fs, cfg *clparams.BeaconChainConfig, indexer beacon_indexes.BeaconIndexer) BeaconChainDatabase {
+func NewbeaconChainDatabaseFilesystem(fs afero.Fs, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
 	return beaconChainDatabaseFilesystem{
 		fs:              fs,
 		cfg:             cfg,
 		networkEncoding: false,
-		indexer:         indexer,
+		indiciesDB:      indiciesDB,
 	}
 }
 
@@ -47,7 +48,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 	panic("not imlemented")
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlock) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -97,7 +98,7 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 		return err
 	}
 
-	return b.indexer.GenerateBlockIndicies(block.Block)
+	return beacon_indicies.GenerateBlockIndicies(b.indiciesDB, block.Block, canonical)
 }
 
 // SlotToPaths define the file structure to store a block

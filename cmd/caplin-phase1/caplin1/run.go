@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indexes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -61,10 +60,19 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	if err != nil {
 		return err
 	}
-
-	beaconIndexer, err := beacon_indexes.NewSqlBeaconIndexer(db)
-	if err != nil {
-		return err
+	{ // start ticking forkChoice
+		go func() {
+			tickInterval := time.NewTicker(50 * time.Millisecond)
+			for {
+				select {
+				case <-tickInterval.C:
+					forkChoice.OnTick(uint64(time.Now().Unix()))
+				case <-ctx.Done():
+					db.Close() // close sql database here
+					return
+				}
+			}
+		}()
 	}
 
 	{ // start the gossip manager
@@ -88,23 +96,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 		}()
 	}
 
-	{ // start ticking forkChoice
-		go func() {
-			tickInterval := time.NewTicker(50 * time.Millisecond)
-			for {
-				select {
-				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().Unix()))
-				case <-ctx.Done():
-					db.Close() // close sql database here
-					return
-				}
-			}
-		}()
-	}
-
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, beaconIndexer)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, beaconIndexer)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, db)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")
