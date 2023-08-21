@@ -413,7 +413,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	blockReader := freezeblocks.NewBlockReader(snapshots)
+	blockReader := freezeblocks.NewBlockReader(snapshots, nil /* borSnapshots */)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
@@ -450,7 +450,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100); err != nil {
+				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
 					return err
 				}
 			}

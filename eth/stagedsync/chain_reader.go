@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -78,4 +79,8 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 
 func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.BlockReader.FrozenBlocks()
+}
+
+func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	panic("")
 }

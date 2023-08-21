@@ -41,10 +41,18 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2SegmentSize {
 				continue
 			}
-			for _, t := range snaptype.AllSnapshotTypes {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-				})
+			if r.Bor {
+				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+					})
+				}
+			} else {
+				for _, t := range snaptype.AllSnapshotTypes {
+					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+					})
+				}
 			}
 		}
 	}
@@ -65,9 +73,15 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
+	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
+		}
+		if cc.Bor != nil {
+			if err := borSnapshots.ReopenFolder(); err != nil {
+				return err
+			}
 		}
 		if notifier != nil { // can notify right here, even that write txn is not commit
 			notifier.OnNewSnapshot()
@@ -85,12 +99,20 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var existingFilesMap map[string]struct{}
-	var missingSnapshots []*services.Range
+	var existingFilesMap, borExistingFilesMap map[string]struct{}
+	var missingSnapshots, borMissingSnapshots []*services.Range
 	if !dbEmpty {
 		existingFilesMap, missingSnapshots, err = snapshots.ScanDir()
 		if err != nil {
 			return err
+		}
+		if cc.Bor == nil {
+			borExistingFilesMap = map[string]struct{}{}
+		} else {
+			borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if len(missingSnapshots) > 0 {
@@ -98,25 +120,32 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	}
 
 	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, snInDB, snHistInDB).Preverified
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
-		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash))
+		_, exists := existingFilesMap[p.Name]
+		_, borExists := borExistingFilesMap[p.Name]
+		if !exists && !borExists { // Not to download existing files "behind the scenes"
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
 	if histV3 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cc.ChainName, snInDB, snHistInDB).PreverifiedHistory
 		for _, p := range preverifiedHistorySnapshots {
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash))
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
 
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", ""))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
+	}
+	if cc.Bor != nil {
+		for _, r := range borMissingSnapshots {
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))
@@ -155,17 +184,19 @@ Loop:
 			if stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				if !blockReader.FreezingCfg().Verify { // will verify after loop
-					if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-						return err
+				/*
+					if !blockReader.FreezingCfg().Verify { // will verify after loop
+						if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+							return err
+						}
 					}
-				}
+				*/
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
 					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-					continue
+					//continue
 				}
 				dbg.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
@@ -192,9 +223,21 @@ Finish:
 			return err
 		}
 	}
+	stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	if err != nil {
+		return err
+	}
+	if !stats.Completed {
+		goto Loop
+	}
 
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
+	}
+	if cc.Bor != nil {
+		if err := borSnapshots.ReopenFolder(); err != nil {
+			return err
+		}
 	}
 	if err := agg.OpenFolder(); err != nil {
 		return err

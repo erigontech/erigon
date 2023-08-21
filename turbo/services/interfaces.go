@@ -33,6 +33,11 @@ type HeaderReader interface {
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 }
 
+type BorEventReader interface {
+	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
+	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
+}
+
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
@@ -65,15 +70,18 @@ type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
+	BorEventReader
 	TxnReader
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	FrozenBorBlocks() uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() BlockSnapshots
+	BorSnapshots() BlockSnapshots
 }
 
 type BlockSnapshots interface {
@@ -84,8 +92,8 @@ type BlockSnapshots interface {
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int) error
-	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error)
+	PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error
+	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 }
@@ -114,10 +122,11 @@ type DownloadRequest struct {
 	Ranges      *Range
 	Path        string
 	TorrentHash string
+	Bor         bool
 }
 
-func NewDownloadRequest(ranges *Range, path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash}
+func NewDownloadRequest(ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
+	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
 }
 
 type Range struct {

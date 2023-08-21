@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -101,7 +102,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	}() // avoid crash because Erigon's core does many things
 
 	externalTx := tx != nil
-	finishProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, tx)
+	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, tx)
 	if err != nil {
 		return err
 	}
@@ -109,6 +110,9 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	if blockReader.BorSnapshots() != nil {
+		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
+	}
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
 		canRunCycleInOneTransaction = true
@@ -191,15 +195,18 @@ func stageLoopStepPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	return db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, err error) {
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, bor, fin uint64, err error) {
 	if tx != nil {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, fin, err
+			return head, bor, fin, err
 		}
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, fin, err
+			return head, bor, fin, err
 		}
-		return head, fin, nil
+		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
+			return head, bor, fin, err
+		}
+		return head, bor, fin, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -208,11 +215,14 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, err error) 
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
+		if bor, err = stages.GetStageProgress(tx, stages.BorHeimdall); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
-		return head, fin, err
+		return head, bor, fin, err
 	}
-	return head, fin, nil
+	return head, bor, fin, nil
 }
 
 type Hook struct {
@@ -418,6 +428,7 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	agg *state.AggregatorV3,
 	forkValidator *engine_helpers.ForkValidator,
+	heimdallClient bor.IHeimdallClient,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
@@ -430,6 +441,7 @@ func NewDefaultStages(ctx context.Context,
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator),
+		stagedsync.StageBorHeimdallCfg(db, *controlServer.ChainConfig, heimdallClient, blockReader),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),

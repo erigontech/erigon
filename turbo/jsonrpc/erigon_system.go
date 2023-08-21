@@ -30,7 +30,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	if err != nil {
 		return Forks{}, err
 	}
-	heightForks, timeForks := forkid.GatherForks(chainConfig)
+	heightForks, timeForks := forkid.GatherForks(chainConfig, genesis.Time())
 
 	return Forks{genesis.Hash(), heightForks, timeForks}, nil
 }

@@ -109,3 +109,11 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }
+
+// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
+// keeps genesis in db
+// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit)
+}

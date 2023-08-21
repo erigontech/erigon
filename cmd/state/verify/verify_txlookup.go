@@ -28,7 +28,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
