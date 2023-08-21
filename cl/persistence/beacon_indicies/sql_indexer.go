@@ -83,24 +83,23 @@ func GenerateBlockIndicies(db *sql.DB, block *cltypes.BeaconBlock, forceCanonica
 	if err != nil {
 		return err
 	}
-	if forceCanonical {
-		_, err = db.Exec(`
-		BEGIN TRANSACTION;
-		-- Delete existing entries with the same Slot
-		DELETE FROM beacon_indices WHERE Slot = ?;
-
-		-- Insert the new entry
-		INSERT INTO beacon_indices (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical) 
-		VALUES (?, ?, ?, ?, 1);
-		COMMIT;`, block.Slot, block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
-	} else {
-		_, err = db.Exec("INSERT OR IGNORE INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical)  VALUES (?, ?, ?, ?, 0);", block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+	tx, err := db.Begin()
+	if err != nil {
+		return err
 	}
+	if forceCanonical {
+		_, err = tx.Exec("DELETE FROM beacon_indices WHERE Slot = ?;", block.Slot)
+		if err != nil {
+			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
+		}
+	}
+	_, err = tx.Exec("INSERT OR IGNORE INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical)  VALUES (?, ?, ?, ?, 0);", block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func ReadParentBlockRoot(db *sql.DB, blockRoot libcommon.Hash) (libcommon.Hash, error) {
