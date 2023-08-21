@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -241,7 +240,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, math.MaxUint64, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
+					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
 				},
 			},
 			CatchUpEpochs: {
