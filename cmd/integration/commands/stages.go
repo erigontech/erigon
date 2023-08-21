@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +61,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDBWithDefaultV3(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -165,7 +166,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDBWithDefaultV3(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -657,9 +658,38 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				return fmt.Errorf("saving Snapshots progress failed: %w", err)
 			}
 		}
+		sn, borSn, agg := allSnapshots(ctx, db, logger)
+		defer sn.Close()
+		defer borSn.Close()
+		defer agg.Close()
+
+		agg.SetTx(tx)
+		ac := agg.MakeContext()
+		defer ac.Close()
+
+		domains := agg.SharedDomains(ac)
+		defer domains.Close()
+
+		blockNum, txnUm, err := domains.SeekCommitment(0, math.MaxUint64)
+		if err != nil {
+			return fmt.Errorf("seek commitment: %w", err)
+		}
+		_ = txnUm
+
+		// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
 		progress, err := stages.GetStageProgress(tx, stages.Snapshots)
 		if err != nil {
 			return fmt.Errorf("re-read Snapshots progress: %w", err)
+		}
+
+		if blockNum > progress {
+			if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
+				return fmt.Errorf("saving Snapshots progress failed: %w", err)
+			}
+			progress, err = stages.GetStageProgress(tx, stages.Snapshots)
+			if err != nil {
+				return fmt.Errorf("re-read Snapshots progress: %w", err)
+			}
 		}
 		logger.Info("Progress", "snapshots", progress)
 		return nil
@@ -1028,7 +1058,7 @@ func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
-	sn, agg := allSnapshots(ctx, db, logger)
+	sn, _, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
@@ -1522,7 +1552,7 @@ func newDomains(ctx context.Context, db kv.RwDB, logger log.Logger) (consensus.E
 	cfg.Genesis = core.GenesisBlockByChainName(chain)
 	cfg.Dirs = datadir.New(datadirCli)
 
-	allSn, agg := allSnapshots(ctx, db, logger)
+	allSn, _, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
 
 	blockReader, _ := blocksIO(db, logger)

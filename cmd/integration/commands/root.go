@@ -61,11 +61,16 @@ func RootCommand() *cobra.Command {
 }
 
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
-	const ThreadsLimit = 9_000
+	const (
+		ThreadsLimit = 9_000
+		DBSizeLimit  = 8 * datasize.TB
+		DBPageSize   = 8 * datasize.KB
+	)
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 	if label == kv.ChainDB {
-		opts = opts.MapSize(8 * datasize.TB)
+		opts = opts.MapSize(DBSizeLimit)
+		opts = opts.PageSize(DBPageSize.Bytes())
 	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
@@ -73,7 +78,16 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+func openDBWithDefaultV3(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+	db, err := openDBOnly(opts, applyMigrations, true, logger)
+	if err != nil {
+		return nil, err
+	}
+	db.Close()
+	return openDB(opts, false, logger)
+}
+
+func openDBOnly(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists bool, logger log.Logger) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
@@ -92,9 +106,28 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			if err := migrator.Apply(db, datadirCli, logger); err != nil {
 				return nil, err
 			}
+
+			if enableV3IfDBNotExists {
+				logger.Info("history V3 is enabled")
+				err = db.Update(context.Background(), func(tx kv.RwTx) error {
+					return kvcfg.HistoryV3.ForceWrite(tx, true)
+				})
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			db.Close()
 			db = opts.MustOpen()
 		}
+	}
+	return db, nil
+}
+
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+	db, err := openDBOnly(opts, applyMigrations, false, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	if opts.GetLabel() == kv.ChainDB {
