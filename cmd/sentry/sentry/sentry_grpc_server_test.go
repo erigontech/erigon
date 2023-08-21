@@ -37,7 +37,7 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommo
 
 	headTd256 := new(uint256.Int)
 	headTd256.SetFromBig(headTd)
-	heightForks, timeForks := forkid.GatherForks(genesis.Config)
+	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
 	s.statusData = &proto_sentry.StatusData{
 		NetworkId:       1,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
