@@ -74,14 +74,28 @@ type Cursor struct {
 }
 
 // getter should be alive all the tinme of cursor usage
+// Key and value is valid until next successful is called Cursor.Next
 func (a *btAlloc) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
 	return &Cursor{
-		getter: g,
 		ctx:    ctx,
+		getter: g,
+		ix:     a,
+		bt:     &BpsTreeIterator{},
 		key:    common.Copy(k),
 		value:  common.Copy(v),
 		d:      d,
-		ix:     a,
+	}
+}
+
+func NewCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
+	return &Cursor{
+		ctx:    ctx,
+		getter: g,
+		ix:     nil,
+		bt:     &BpsTreeIterator{},
+		key:    common.Copy(k),
+		value:  common.Copy(v),
+		d:      d,
 	}
 }
 
@@ -98,17 +112,19 @@ func (c *Cursor) Value() []byte {
 }
 
 func (c *Cursor) Next() bool {
+	var key, value []byte
 	if UseBpsTree {
 		n := c.bt.Next()
 		if !n {
 			return false
 		}
 		var err error
-		c.key, c.value, err = c.bt.KVFromGetter(c.getter)
+		key, value, err = c.bt.KVFromGetter(c.getter)
 		if err != nil {
 			log.Warn("BpsTreeIterator.Next error", "err", err)
 			return false
 		}
+		c.key, c.value = common.Copy(key), common.Copy(value)
 		c.d++
 		return n
 	}
@@ -116,10 +132,11 @@ func (c *Cursor) Next() bool {
 		return false
 	}
 	var err error
-	c.key, c.value, err = c.ix.dataLookup(c.d+1, c.getter)
+	key, value, err = c.ix.dataLookup(c.d+1, c.getter)
 	if err != nil {
 		return false
 	}
+	c.key, c.value = common.Copy(key), common.Copy(value)
 	c.d++
 	return true
 }

@@ -12,18 +12,20 @@ import (
 type indexSeeker interface {
 	WarmUp(g ArchiveGetter) error
 	Get(g ArchiveGetter, key []byte) (*BpsTreeIterator, error)
-	SeekWithGetter(g ArchiveGetter, key []byte) (*BpsTreeIterator, error)
+	SeekWithGetter(g ArchiveGetter, key []byte) (indexSeekerIterator, error)
 }
 
 type indexSeekerIterator interface {
 	Next() bool
-	Offset() uint64
-	KV(g ArchiveGetter) ([]byte, []byte)
+	//Offset() uint64
+	KVFromGetter(g ArchiveGetter) ([]byte, []byte, error)
 }
 
 func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, kv: kv}
-	bt.initialize()
+	if err := bt.WarmUp(kv); err != nil {
+		panic(err)
+	}
 	return bt
 }
 
@@ -121,12 +123,12 @@ func (b *BpsTree) traverse(mx [][]Node, n, di, i uint64) {
 	}
 }
 
-func (b *BpsTree) initialize() {
+func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	k := b.offt.Count()
 	d := logBase(k, b.M)
 
 	mx := make([][]Node, d+1)
-	key, offt := b.lookupKeyWGetter(b.kv, 0)
+	key, offt := b.lookupKeyWGetter(kv, 0)
 	if key != nil {
 		mx[0] = append(mx[0], Node{off: offt, prefix: common.Copy(key)})
 		//fmt.Printf("d=%d k %x %d\n", di, k, offt)
@@ -141,6 +143,7 @@ func (b *BpsTree) initialize() {
 		}
 	}
 	b.mx = mx
+	return nil
 }
 
 func (a *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
