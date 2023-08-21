@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -24,7 +25,7 @@ import (
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
 	engine execution_client.ExecutionEngine, state *state.CachingBeaconState,
-	caplinFreezer freezer.Freezer, datadir string) error {
+	caplinFreezer freezer.Freezer, dirs datadir.Dirs) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
@@ -51,7 +52,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 		return true
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
-	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), datadir)
+	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), dirs.DataDir)
 
 	{ // start the gossip manager
 		go gossipManager.Start(ctx)
@@ -87,8 +88,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 			}
 		}()
 	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, datadir), beaconConfig)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")

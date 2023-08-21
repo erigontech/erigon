@@ -145,7 +145,8 @@ func TestCreation(t *testing.T) {
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
-			if have := NewID(tt.config, tt.genesis, ttt.head, ttt.time); have != ttt.want {
+			heightForks, timeForks := GatherForks(tt.config, 0 /* genesisTime */)
+			if have := NewIDFromForks(heightForks, timeForks, tt.genesis, ttt.head, ttt.time); have != ttt.want {
 				t.Errorf("test %d, case %d: fork ID mismatch: have %x, want %x", i, j, have, ttt.want)
 			}
 		}
@@ -222,7 +223,7 @@ func TestValidation(t *testing.T) {
 		// fork) at block 7279999, before Petersburg. Local is incompatible.
 		{7279999, ID{Hash: checksumToBytes(0xa00bc324), Next: 7279999}, ErrLocalIncompatibleOrStale},
 	}
-	heightForks, timeForks := GatherForks(params.MainnetChainConfig)
+	heightForks, timeForks := GatherForks(params.MainnetChainConfig, 0 /* genesisTime */)
 	for i, tt := range tests {
 		filter := newFilter(heightForks, timeForks, params.MainnetGenesisHash, tt.head, 0)
 		if err := filter(tt.id); err != tt.err {

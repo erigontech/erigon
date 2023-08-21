@@ -493,6 +493,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().NodeName(),
 		chainConfig,
 		genesis.Hash(),
+		genesis.Time(),
 		backend.engine,
 		backend.config.NetworkID,
 		sentries,
@@ -748,7 +749,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 		fmt.Println(engine)
-		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil, dirs.DataDir)
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil, dirs)
 	}
 
 	return backend, nil
@@ -1148,12 +1149,11 @@ func (s *Ethereum) Start() error {
 	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
 	var currentTD *big.Int
 	if err := s.chainDB.View(s.sentryCtx, func(tx kv.Tx) error {
-		h := rawdb.ReadCurrentHeader(tx)
-		if h == nil {
-			return nil
+		h, err := s.blockReader.CurrentBlock(tx)
+		if err != nil {
+			return err
 		}
-		var err error
-		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.Number.Uint64())
+		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
 		return err
 	}); err != nil {
 		return err
