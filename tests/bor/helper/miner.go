@@ -84,6 +84,12 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 			PrivateKey:      privKey,
 			NAT:             nat.Any(),
 		},
+
+		// These are set to prevent disk and page size churn which can be excessive
+		// when running multiple nodes
+		// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
+		MdbxGrowthStep:  32 * datasize.MB,
+		MdbxDBSizeLimit: 512 * datasize.MB,
 	}
 
 	stack, err := node.New(nodeCfg, logger)
