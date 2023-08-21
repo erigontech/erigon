@@ -494,6 +494,7 @@ func init() {
 
 	withConfig(cmdStageSnapshots)
 	withDataDir(cmdStageSnapshots)
+	withChain(cmdStageSnapshots)
 	withReset(cmdStageSnapshots)
 	rootCmd.AddCommand(cmdStageSnapshots)
 
@@ -652,17 +653,25 @@ func init() {
 }
 
 func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	sn, borSn, agg := allSnapshots(ctx, db, logger)
+	defer sn.Close()
+	defer borSn.Close()
+	defer agg.Close()
+
+	br, bw := blocksIO(db, logger)
+	engine, _, _, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
 			if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
 				return fmt.Errorf("saving Snapshots progress failed: %w", err)
 			}
 		}
-		sn, borSn, agg := allSnapshots(ctx, db, logger)
-		defer sn.Close()
-		defer borSn.Close()
-		defer agg.Close()
-
+		dirs := datadir.New(datadirCli)
+		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
+			return fmt.Errorf("resetting blocks: %w", err)
+		}
 		agg.SetTx(tx)
 		ac := agg.MakeContext()
 		defer ac.Close()
