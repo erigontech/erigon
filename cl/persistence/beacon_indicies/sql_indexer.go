@@ -88,7 +88,7 @@ func GenerateBlockIndicies(db *sql.DB, block *cltypes.BeaconBlock, forceCanonica
 		return err
 	}
 	if forceCanonical {
-		_, err = tx.Exec("DELETE FROM beacon_indices WHERE Slot = ?;", block.Slot)
+		_, err = tx.Exec("DELETE FROM beacon_indicies WHERE Slot = ?;", block.Slot)
 		if err != nil {
 			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 		}
