@@ -36,8 +36,9 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, agg := allSnapshots(ctx, db, logger)
+		sn, borSn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
+		defer borSn.Close()
 		defer agg.Close()
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {

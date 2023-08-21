@@ -93,7 +93,7 @@ func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 	return fv.extendingForkHeadHash
 }
 
-// NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
+// NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
@@ -229,7 +229,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
-// because fcu decides what the head is and after the call is done all the non-chosed forks are
+// because fcu decides what the head is and after the call is done all the non-chosen forks are
 // to be considered obsolete.
 func (fv *ForkValidator) clear() {
 	fv.extendingForkHeadHash = libcommon.Hash{}
@@ -237,7 +237,7 @@ func (fv *ForkValidator) clear() {
 	fv.memoryDiff = nil
 }
 
-// Clear wipes out current extending fork data and notify txpool.
+// Clear wipes out current extending fork data.
 func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()

@@ -107,7 +107,7 @@ func (h test_heimdall) Close() {}
 type test_genesisContract struct {
 }
 
-func (g test_genesisContract) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -230,6 +230,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
+		nil, /* blockReader */
 		&spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
 		heimdall,
 		test_genesisContract{},

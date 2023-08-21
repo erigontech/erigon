@@ -119,8 +119,12 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 	if sub == nil {
 		return peer.ID(""), fmt.Errorf("no peers")
 	}
-
 	validPeerList := s.Host().Network().Peers()
+	// blocksSub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
+	// if blocksSub != nil {
+	// 	validPeerList = blocksSub.topic.ListPeers()
+	// }
+
 	//validPeerList := sub.topic.ListPeers()
 	if len(validPeerList) == 0 {
 		return peer.ID(""), fmt.Errorf("no peers")

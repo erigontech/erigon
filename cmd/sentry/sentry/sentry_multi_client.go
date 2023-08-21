@@ -278,6 +278,7 @@ func NewMultiClient(
 	nodeName string,
 	chainConfig *chain.Config,
 	genesisHash libcommon.Hash,
+	genesisTime uint64,
 	engine consensus.Engine,
 	networkID uint64,
 	sentries []direct.SentryClient,
@@ -322,7 +323,7 @@ func NewMultiClient(
 		logger:                            logger,
 	}
 	cs.ChainConfig = chainConfig
-	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
+	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig, genesisTime)
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error

@@ -86,12 +86,30 @@ func (b *SignedBeaconBlock) Version() clparams.StateVersion {
 }
 
 // Version returns beacon block version.
+func (b *SignedBeaconBlock) EncodeForStorage(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.getSchemaForStorage()...)
+}
+
+func (b *SignedBeaconBlock) DecodeForStorage(buf []byte, s int) error {
+	if len(buf) < b.EncodingSizeSSZ() {
+		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
+	}
+	return ssz2.UnmarshalSSZ(buf, s, b.getSchemaForStorage()...)
+}
+
+// Version returns beacon block version.
+func (b *SignedBeaconBlock) getSchemaForStorage() []interface{} {
+	return append([]interface{}{b.Signature[:], &b.Block.Slot, &b.Block.ProposerIndex, b.Block.StateRoot[:], b.Block.ParentRoot[:]},
+		b.Block.Body.getSchema(true)...)
+}
+
+// Version returns beacon block version.
 func (b *BeaconBlock) Version() clparams.StateVersion {
 	return b.Body.Version
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema()...)
+	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
@@ -155,20 +173,20 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.getSchema()...)
+	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
-func (b *BeaconBody) getSchema() []interface{} {
+func (b *BeaconBody) getSchema(storage bool) []interface{} {
 	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
-	if b.Version >= clparams.BellatrixVersion {
+	if b.Version >= clparams.BellatrixVersion && !storage {
 		s = append(s, b.ExecutionPayload)
 	}
 	if b.Version >= clparams.CapellaVersion {

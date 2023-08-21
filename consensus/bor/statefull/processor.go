@@ -11,7 +11,7 @@ import (
 )
 
 type ChainContext struct {
-	Chain consensus.ChainHeaderReader
+	Chain consensus.ChainReader
 	Bor   consensus.Engine
 }
 
