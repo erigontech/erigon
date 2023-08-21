@@ -98,7 +98,15 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 		return err
 	}
 
-	return beacon_indicies.GenerateBlockIndicies(b.indiciesDB, block.Block, canonical)
+	tx, err := b.indiciesDB.Begin()
+	if err != nil {
+		return err
+	}
+
+	if err := beacon_indicies.GenerateBlockIndicies(tx, block.Block, canonical); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SlotToPaths define the file structure to store a block

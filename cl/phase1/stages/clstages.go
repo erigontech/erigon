@@ -395,37 +395,42 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
+					tx, err := cfg.indiciesDB.Begin()
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
 					// Fix canonical chain in the indexed datatabase.
-					if err := beacon_indicies.TruncateCanonicalChain(cfg.indiciesDB, headSlot); err != nil {
+					if err := beacon_indicies.TruncateCanonicalChain(tx, headSlot); err != nil {
 						return err
 					}
 
 					currentRoot := headRoot
 					currentSlot := headSlot
-					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(cfg.indiciesDB, currentSlot)
+					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 					if err != nil {
 						return err
 					}
 					for currentRoot != currentCanonical {
-						if err := beacon_indicies.MarkRootCanonical(cfg.indiciesDB, currentSlot, currentRoot); err != nil {
+						if err := beacon_indicies.MarkRootCanonical(tx, currentSlot, currentRoot); err != nil {
 							return err
 						}
-						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(cfg.indiciesDB, currentRoot); err != nil {
+						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot); err != nil {
 							return err
 						}
-						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(cfg.indiciesDB, currentRoot); err != nil {
+						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
 							return err
 						}
 						if currentSlot == 0 {
 							break
 						}
-						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(cfg.indiciesDB, currentSlot)
+						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 						if err != nil {
 							return err
 						}
 					}
 					logger.Debug("Imported chain segment", "hash", headRoot, "slot", headSlot)
-					return nil
+					return tx.Commit()
 				},
 			},
 			ListenForForks: {

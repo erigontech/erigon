@@ -22,21 +22,19 @@ func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	indexer, err := NewSqlBeaconIndexer(db)
-	require.NoError(t, err)
+	InitBeaconIndicies(db)
 
 	// Mock a block
 	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig)
 	block.EncodingSizeSSZ()
 
-	err = indexer.GenerateBlockIndicies(block)
-	require.NoError(t, err)
+	require.NoError(t, GenerateBlockIndicies(db, block, false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.HashSSZ()
 	require.NoError(t, err)
 
-	retrievedSlot, err := indexer.ReadBlockSlotByBlockRoot(blockRoot)
+	retrievedSlot, err := ReadBlockSlotByBlockRoot(db, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, block.Slot, retrievedSlot)
 
