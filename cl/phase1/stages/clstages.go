@@ -163,7 +163,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 		// Write block to database optimistically if we are very behind.
-		return cfg.beaconDB.WriteBlock(block.Data, false)
+		return cfg.beaconDB.WriteBlock(ctx, block.Data, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -401,30 +401,30 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 					// Fix canonical chain in the indexed datatabase.
-					if err := beacon_indicies.TruncateCanonicalChain(tx, headSlot); err != nil {
+					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, headSlot); err != nil {
 						return err
 					}
 
 					currentRoot := headRoot
 					currentSlot := headSlot
-					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
+					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
 					if err != nil {
 						return err
 					}
 					for currentRoot != currentCanonical {
-						if err := beacon_indicies.MarkRootCanonical(tx, currentSlot, currentRoot); err != nil {
+						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
 							return err
 						}
-						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot); err != nil {
+						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
-						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
+						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
 						if currentSlot == 0 {
 							break
 						}
-						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
+						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
 						if err != nil {
 							return err
 						}

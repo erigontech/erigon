@@ -1,6 +1,7 @@
 package beacon_indicies
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,12 +12,12 @@ import (
 )
 
 type SQLObject interface {
-	QueryRow(query string, args ...any) *sql.Row
-	Exec(query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func InitBeaconIndicies(db SQLObject) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS beacon_indicies (
+func InitBeaconIndicies(ctx context.Context, db SQLObject) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS beacon_indicies (
 		Slot INTEGER NOT NULL,
 		BeaconBlockRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32), -- Ensure it's 32 bytes
 		StateRoot BLOB NOT NULL CHECK(length(BeaconBlockRoot) = 32),
@@ -26,7 +27,7 @@ func InitBeaconIndicies(db SQLObject) error {
 	);`); err != nil {
 		return err
 	}
-	if _, err := db.Exec(`
+	if _, err := db.ExecContext(ctx, `
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_canonical 
 		ON beacon_indicies (Slot) 
 		WHERE Canonical = 1;`); err != nil {
@@ -36,11 +37,11 @@ func InitBeaconIndicies(db SQLObject) error {
 	return nil
 }
 
-func ReadBlockSlotByBlockRoot(tx SQLObject, blockRoot libcommon.Hash) (uint64, error) {
+func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (uint64, error) {
 	var slot uint64
 
 	// Execute the query.
-	err := tx.QueryRow("SELECT Slot FROM beacon_indicies WHERE BeaconBlockRoot = ?", blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
+	err := tx.QueryRowContext(ctx, "SELECT Slot FROM beacon_indicies WHERE BeaconBlockRoot = ?", blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
@@ -51,11 +52,11 @@ func ReadBlockSlotByBlockRoot(tx SQLObject, blockRoot libcommon.Hash) (uint64, e
 	return slot, nil
 }
 
-func ReadCanonicalBlockRoot(db SQLObject, slot uint64) (libcommon.Hash, error) {
+func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (libcommon.Hash, error) {
 	var blockRoot libcommon.Hash
 
 	// Execute the query.
-	err := db.QueryRow("SELECT BeaconBlockRoot FROM beacon_indicies WHERE Slot = ? AND Canonical = 1", slot).Scan(&blockRoot)
+	err := db.QueryRowContext(ctx, "SELECT BeaconBlockRoot FROM beacon_indicies WHERE Slot = ? AND Canonical = 1", slot).Scan(&blockRoot)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return libcommon.Hash{}, nil
@@ -68,33 +69,33 @@ func ReadCanonicalBlockRoot(db SQLObject, slot uint64) (libcommon.Hash, error) {
 	return blockRoot, nil
 }
 
-func MarkRootCanonical(db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
+func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
 	// First, reset the Canonical status for all other block roots with the same slot
-	if _, err := db.Exec("UPDATE beacon_indicies SET Canonical = 0 WHERE Slot = ? AND BeaconBlockRoot != ?", slot, blockRoot[:]); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET Canonical = 0 WHERE Slot = ? AND BeaconBlockRoot != ?", slot, blockRoot[:]); err != nil {
 		return fmt.Errorf("failed to reset canonical status for other block roots: %v", err)
 	}
 
 	// Next, mark the given blockRoot as canonical
-	if _, err := db.Exec("UPDATE beacon_indicies SET Canonical = 1 WHERE Slot = ? AND BeaconBlockRoot = ?", slot, blockRoot[:]); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET Canonical = 1 WHERE Slot = ? AND BeaconBlockRoot = ?", slot, blockRoot[:]); err != nil {
 		return fmt.Errorf("failed to mark block root as canonical: %v", err)
 	}
 
 	return nil
 }
 
-func GenerateBlockIndicies(db SQLObject, block *cltypes.BeaconBlock, forceCanonical bool) error {
+func GenerateBlockIndicies(ctx context.Context, db SQLObject, block *cltypes.BeaconBlock, forceCanonical bool) error {
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
 		return err
 	}
 
 	if forceCanonical {
-		_, err = db.Exec("DELETE FROM beacon_indicies WHERE Slot = ?;", block.Slot)
+		_, err = db.ExecContext(ctx, "DELETE FROM beacon_indicies WHERE Slot = ?;", block.Slot)
 		if err != nil {
 			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 		}
 	}
-	_, err = db.Exec("INSERT OR IGNORE INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical)  VALUES (?, ?, ?, ?, 0);", block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (Slot, BeaconBlockRoot, StateRoot, ParentBlockRoot, Canonical)  VALUES (?, ?, ?, ?, 0);", block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
 
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
@@ -103,11 +104,11 @@ func GenerateBlockIndicies(db SQLObject, block *cltypes.BeaconBlock, forceCanoni
 	return nil
 }
 
-func ReadParentBlockRoot(db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+func ReadParentBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
 	var parentRoot libcommon.Hash
 
 	// Execute the query.
-	err := db.QueryRow("SELECT ParentBlockRoot FROM beacon_indicies WHERE BeaconBlockRoot = ?", blockRoot[:]).Scan(parentRoot[:])
+	err := db.QueryRowContext(ctx, "SELECT ParentBlockRoot FROM beacon_indicies WHERE BeaconBlockRoot = ?", blockRoot[:]).Scan(parentRoot[:])
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return libcommon.Hash{}, nil
@@ -118,9 +119,9 @@ func ReadParentBlockRoot(db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash
 	return parentRoot, nil
 }
 
-func TruncateCanonicalChain(db SQLObject, slot uint64) error {
+func TruncateCanonicalChain(ctx context.Context, db SQLObject, slot uint64) error {
 	// Execute the query.
-	_, err := db.Exec(`
+	_, err := db.ExecContext(ctx, `
 		UPDATE beacon_indicies
 		SET Canonical = 0
 		WHERE Slot > ?;

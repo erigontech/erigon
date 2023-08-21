@@ -48,7 +48,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 	panic("not imlemented")
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlock, canonical bool) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(block *cltypes.SignedBeaconBlo
 		return err
 	}
 
-	if err := beacon_indicies.GenerateBlockIndicies(tx, block.Block, canonical); err != nil {
+	if err := beacon_indicies.GenerateBlockIndicies(ctx, tx, block.Block, canonical); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -58,6 +59,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	dataDirIndexer := path.Join(dirs.DataDir, "beacon_indicies")
 	db, err := sql.Open("sqlite3", dataDirIndexer)
 	if err != nil {
+		return err
+	}
+	if err := beacon_indicies.InitBeaconIndicies(ctx, db); err != nil {
 		return err
 	}
 	{ // start ticking forkChoice

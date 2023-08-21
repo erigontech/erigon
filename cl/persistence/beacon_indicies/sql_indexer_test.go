@@ -3,6 +3,7 @@
 package beacon_indicies
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -22,19 +23,19 @@ func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	InitBeaconIndicies(db)
+	InitBeaconIndicies(context.Background(), db)
 
 	// Mock a block
 	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig)
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, GenerateBlockIndicies(db, block, false))
+	require.NoError(t, GenerateBlockIndicies(context.Background(), db, block, false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.HashSSZ()
 	require.NoError(t, err)
 
-	retrievedSlot, err := ReadBlockSlotByBlockRoot(db, blockRoot)
+	retrievedSlot, err := ReadBlockSlotByBlockRoot(context.Background(), db, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, block.Slot, retrievedSlot)
 

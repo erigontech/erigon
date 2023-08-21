@@ -110,7 +110,7 @@ func (b *Blocks) Run(ctx *Context) error {
 	defer sqlDB.Close()
 	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig, sqlDB)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(vv, true)
+		err := beaconDB.WriteBlock(ctx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -215,7 +215,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(v.Data, true)
+				err := beaconDB.WriteBlock(ctx, v.Data, true)
 				if err != nil {
 					return err
 				}
