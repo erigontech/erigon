@@ -493,6 +493,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().NodeName(),
 		chainConfig,
 		genesis.Hash(),
+		genesis.Time(),
 		backend.engine,
 		backend.config.NetworkID,
 		sentries,

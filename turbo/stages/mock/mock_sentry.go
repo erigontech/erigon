@@ -369,6 +369,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		"mock",
 		mock.ChainConfig,
 		mock.Genesis.Hash(),
+		mock.Genesis.Time(),
 		mock.Engine,
 		networkID,
 		sentries,
