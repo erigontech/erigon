@@ -1958,7 +1958,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 			if cursor == nil {
 				continue
 			}
-			cursor.getter = dc.statelessGetter(i)
 			dc.d.stats.FilesQueries.Add(1)
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
