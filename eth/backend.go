@@ -1241,6 +1241,8 @@ func RemoveContents(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			// ignore due to windows
+			_ = os.MkdirAll(dir, 0o755)
 			return nil
 		}
 		return err
