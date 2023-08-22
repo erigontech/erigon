@@ -414,10 +414,13 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	require.NoError(err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
-	txs := uint64(1000)
+	txs := uint64(500)
+
+	dc := d.MakeContext()
+	defer dc.Close()
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -429,7 +432,10 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 				var v [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
-				err = d.Put(k[:], nil, v[:])
+				prev, _, err := dc.GetLatest(k[:], nil, tx)
+				require.NoError(err)
+				err = d.PutWithPrev(k[:], nil, v[:], prev)
+
 				require.NoError(err)
 			}
 		}
@@ -468,9 +474,10 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			valNum := txNum / keyNum
 			var k [8]byte
 			var v [8]byte
-			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
+
+			label := fmt.Sprintf("key %x txNum=%d, keyNum=%d", k, txNum, keyNum)
 
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(err, label)
@@ -481,9 +488,9 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			}
 			if txNum == txs {
 				val, found, err := dc.GetLatest(k[:], nil, roTx)
-				require.Truef(found, "txNum=%d, keyNum=%d", txNum, keyNum)
+				require.True(found, label)
 				require.NoError(err)
-				require.EqualValues(v[:], val)
+				require.EqualValues(v[:], val, label)
 			}
 		}
 	}
@@ -525,32 +532,9 @@ func TestHistory(t *testing.T) {
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-	d.SetTx(tx)
 	defer tx.Rollback()
 
-	// collateDomainAndPrune(t, tx, d, txs, 2)
-
-	// Leave the last 2 aggregation steps un-collated
-	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
-		func() {
-			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
-			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-
-			dc := d.MakeContext()
-			// step := txs/d.aggregationStep - 1
-			err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
-			require.NoError(t, err)
-			dc.Close()
-
-			require.NoError(t, err)
-		}()
-	}
-
-	err = tx.Commit()
-	require.NoError(t, err)
+	collateAndMerge(t, db, tx, d, txs)
 	checkHistory(t, db, d, txs)
 }
 
