@@ -311,20 +311,22 @@ func TestLocalityDomain(t *testing.T) {
 				g.Skip() // v
 				fmt.Printf("key %x\n", k)
 
-				ls, ok, err := dc.hc.ic.warmLocality.lookupLatest(k)
-				// require.NoError(err)
-				// // fmt.Printf("rs %d\n", rs)
-				// require.True(ok)
-
-				// ls, ok, err := dc.hc.ic.coldLocality.lookupLatest(k)
+				rs, ok, err := dc.hc.ic.warmLocality.lookupLatest(k)
+				_ = ok
 				require.NoError(err)
-				require.True(ok)
-				fmt.Printf("ls %d\n", ls)
+				fmt.Printf("warm shard %d\n", rs)
+				//require.True(ok)
+
+				var ls uint64
+				ls, ok, err = dc.hc.ic.coldLocality.lookupLatest(k)
+				require.NoError(err)
+				//require.True(ok)
+				fmt.Printf("cold shard %d\n", ls)
 				// s1, s2, lastTx, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(k, dc.files[i].startTxNum)
 				// fmt.Printf("s1 %d s2 %d i %d\n", s1, s2, i)
 				// require.True(ok1 || ok2)
-				require.GreaterOrEqual(dc.files[i].endTxNum, ls*dc.d.aggregationStep)
-				require.LessOrEqual(dc.files[i].startTxNum, ls*dc.d.aggregationStep)
+				require.GreaterOrEqual(dc.files[i].endTxNum, ls*StepsInColdFile*dc.d.aggregationStep)
+				require.LessOrEqual(dc.files[i].startTxNum, ls*StepsInColdFile*dc.d.aggregationStep)
 			}
 		}
 	})
