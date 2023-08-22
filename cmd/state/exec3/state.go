@@ -42,7 +42,7 @@ type Worker struct {
 	engine   consensus.Engine
 	genesis  *types.Genesis
 	resultCh *state.ResultsQueue
-	chain    ChainReader
+	chain    consensus.ChainReader
 
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
@@ -98,7 +98,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.stateWriter.SetTx(rw.chainTx)
-		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader, logger: rw.logger}
 	}
 }
 
@@ -249,6 +249,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 type ChainReader struct {
 	config      *chain.Config
 	tx          kv.Tx
+	logger      log.Logger
 	blockReader services.FullBlockReader
 }
 
@@ -302,7 +303,12 @@ func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
 	panic("")
 }
 func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
-	panic("")
+	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
+	if err != nil {
+		cr.logger.Error("BorEventsByBlock failed", "err", err)
+		return nil
+	}
+	return events
 }
 
 func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
