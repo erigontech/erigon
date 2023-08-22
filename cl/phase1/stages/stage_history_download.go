@@ -116,7 +116,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		slot := blk.Block.Slot
-		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(blk)
+		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(ctx, blk, true)
 	})
 	prevProgress := cfg.downloader.Progress()
 

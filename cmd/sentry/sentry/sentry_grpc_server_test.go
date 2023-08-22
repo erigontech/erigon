@@ -54,6 +54,19 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommo
 
 }
 
+func startHandshake(
+	ctx context.Context,
+	status *proto_sentry.StatusData,
+	pipe *p2p.MsgPipeRW,
+	protocolVersion uint,
+	errChan chan error,
+) {
+	go func() {
+		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion)
+		errChan <- err
+	}()
+}
+
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
 func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, direct.ETH66) }
@@ -98,8 +111,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pProFork.Close()
 
 	errc := make(chan error, 2)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -116,8 +129,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s1.statusData.MaxBlockHeight = 1
 	s2.statusData.MaxBlockHeight = 1
 
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -135,8 +148,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s2.statusData.MaxBlockHeight = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	var successes int
 	for i := 0; i < 2; i++ {

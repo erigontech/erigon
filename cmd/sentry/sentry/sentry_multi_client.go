@@ -565,14 +565,16 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
-	if cs.dropUselessPeers && len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId: inreq.PeerId,
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
+		if cs.dropUselessPeers {
+			outreq := proto_sentry.PenalizePeerRequest{
+				PeerId: inreq.PeerId,
+			}
+			if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			cs.logger.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		}
-		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		cs.logger.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		// No point processing empty response
 		return nil
 	}
