@@ -1147,18 +1147,16 @@ func (s *Ethereum) Start() error {
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
-	var currentTD *big.Int
-	if err := s.chainDB.View(s.sentryCtx, func(tx kv.Tx) error {
-		h, err := s.blockReader.CurrentBlock(tx)
+
+	currentTDProvider := func() *big.Int {
+		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
 		if err != nil {
-			return err
+			panic(err)
 		}
-		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
-		return err
-	}); err != nil {
-		return err
+		return currentTD
 	}
-	if currentTD != nil && isChainPoS(s.chainConfig, currentTD) {
+
+	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
@@ -1271,13 +1269,20 @@ func checkPortIsFree(addr string) (free bool) {
 	return false
 }
 
-func isChainPoS(chainConfig *chain.Config, currentTD *big.Int) bool {
-	id := chainConfig.ChainID.Int64()
-	return id == 1 ||
-		id == 5 ||
-		id == 11155111 ||
-		id == 100 ||
-		id == 10200 ||
-		(chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.Cmp(currentTD) <= 0) ||
-		chainConfig.TerminalTotalDifficultyPassed
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*big.Int, error) {
+	var currentTD *big.Int
+	err := db.View(ctx, func(tx kv.Tx) error {
+		h, err := blockReader.CurrentBlock(tx)
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			currentTD = nil
+			return nil
+		}
+
+		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
+		return err
+	})
+	return currentTD, err
 }
