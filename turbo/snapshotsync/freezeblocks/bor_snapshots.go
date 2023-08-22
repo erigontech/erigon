@@ -755,7 +755,7 @@ func (s *BorRoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 	})
 }
 
-func (s *BorRoSnapshots) Files() (list []string) {
+func (s *BorRoSnapshots) FrozenFiles() (list []string) {
 	s.Events.lock.RLock()
 	defer s.Events.lock.RUnlock()
 	s.Spans.lock.RLock()

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"sort"
 	"syscall"
 	"time"
@@ -81,12 +80,14 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	if err != nil {
 		return err
 	}
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	dirs := datadir.New(datadirCli)
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap, logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil /* BorSnapshots */)
+	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	chainDb := db
 	defer chainDb.Close()
