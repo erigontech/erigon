@@ -48,7 +48,8 @@ func runErigon(cliCtx *cli.Context) error {
 	configFilePath := cliCtx.String(utils.ConfigFlag.Name)
 	if configFilePath != "" {
 		if err := setFlagsFromConfigFile(cliCtx, configFilePath); err != nil {
-			log.Warn("failed setting config flags from yaml/toml file", "err", err)
+			log.Error("failed setting config flags from yaml/toml file", "err", err)
+			return err
 		}
 	}
 
