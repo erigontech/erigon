@@ -66,7 +66,6 @@ var (
 	// diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
 	validatorHeaderBytesLength = length.Addr + 20 // address + power
-	// systemAddress              = libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // Various error messages to mark blocks invalid. These should be private to
