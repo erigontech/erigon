@@ -1426,7 +1426,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if index, err = buildIndexThenOpen(ctx, decomp, false, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, ii.compressInvertedIndex, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 

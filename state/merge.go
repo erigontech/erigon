@@ -833,6 +833,9 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 }
 
 func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, workers int, ps *background.ProgressSet) (*filesItem, error) {
+	if ii.compressInvertedIndex {
+		panic("implement me")
+	}
 	for _, h := range files {
 		defer h.decompressor.EnableReadAhead().DisableReadAhead()
 	}
@@ -873,10 +876,8 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	var cp CursorHeap
 	heap.Init(&cp)
 
-	var dataCompressed bool
-
 	for _, item := range files {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), dataCompressed)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressInvertedIndex)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -959,7 +960,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, dataCompressed, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compressInvertedIndex, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
@@ -978,6 +979,9 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			}
 		}
 	}()
+	if h.InvertedIndex.compressInvertedIndex {
+		panic("implement me")
+	}
 	if indexIn, err = h.InvertedIndex.mergeFiles(ctx, indexFiles, r.indexStartTxNum, r.indexEndTxNum, workers, ps); err != nil {
 		return nil, nil, err
 	}
