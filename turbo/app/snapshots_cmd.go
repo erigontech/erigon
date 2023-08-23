@@ -441,13 +441,14 @@ func doUncompress(cliCtx *cli.Context) error {
 		}
 	}
 
-	reduced := map[uint64]string{}
+	reduced := map[uint64]uint64{}
 	for i, v := range valLenDistibution {
-		if v > 1000 || i > 4096 {
-			reduced[uint64(i)] = fmt.Sprintf("%dKb", v/1024)
+		if _, ok := reduced[uint64(i/4096)]; !ok {
+			reduced[uint64(i/4096)] = 0
 		}
+		reduced[uint64(i/4096)] += v
 	}
-	log.Warn("", "l", fmt.Sprintf("words length distribution: %v", reduced))
+	log.Warn("", "l", fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced))
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
