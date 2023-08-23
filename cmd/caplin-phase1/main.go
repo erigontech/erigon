@@ -51,7 +51,9 @@ func main() {
 }
 
 func runCaplinNode(cliCtx *cli.Context) error {
-	ctx := context.Background()
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
+
 	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
@@ -133,5 +135,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer, cfg.DataDir)
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer, cfg.Dirs)
 }

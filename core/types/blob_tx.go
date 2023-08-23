@@ -150,18 +150,12 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 		return err
 	}
 	// encode To
-	if stx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
+	b[0] = 128 + 20
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if stx.To != nil {
-		if _, err := w.Write(stx.To.Bytes()); err != nil {
-			return err
-		}
+	if _, err := w.Write(stx.To.Bytes()); err != nil {
+		return err
 	}
 	// encode Value
 	if err := stx.Value.EncodeRLP(w); err != nil {
@@ -276,13 +270,11 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
+	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	if len(b) > 0 {
-		stx.To = &libcommon.Address{}
-		copy((*stx.To)[:], b)
-	}
+	stx.To = &libcommon.Address{}
+	copy((*stx.To)[:], b)
 
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

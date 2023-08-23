@@ -1,4 +1,4 @@
-package clpersist
+package persistence
 
 import (
 	"context"
@@ -10,11 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/tidwall/btree"
 )
-
-type BlockSource interface {
-	GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
-	PurgeRange(ctx context.Context, from uint64, count uint64) error
-}
 
 var _ BlockSource = (*BeaconRpcSource)(nil)
 

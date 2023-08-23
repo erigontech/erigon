@@ -55,12 +55,6 @@ type ID struct {
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
-// NewID calculates the Ethereum fork ID from the chain config, genesis hash, head height and time.
-func NewID(config *chain.Config, genesis libcommon.Hash, headHeight, headTime uint64) ID {
-	heightForks, timeForks := GatherForks(config)
-	return NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
-}
-
 func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
@@ -104,9 +98,9 @@ func NewFilterFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash,
 }
 
 // NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *chain.Config, genesis libcommon.Hash) Filter {
-	heightForks, timeForks := GatherForks(config)
-	return newFilter(heightForks, timeForks, genesis, 0, 0)
+func NewStaticFilter(config *chain.Config, genesisHash libcommon.Hash, genesisTime uint64) Filter {
+	heightForks, timeForks := GatherForks(config, genesisTime)
+	return newFilter(heightForks, timeForks, genesisHash, 0 /* headHeight */, genesisTime)
 }
 
 // Simple heuristic returning true if the value is a Unix time after 2 Dec 2022.
@@ -215,7 +209,7 @@ func checksumToBytes(hash uint32) [4]byte {
 }
 
 // GatherForks gathers all the known forks and creates a sorted list out of them.
-func GatherForks(config *chain.Config) (heightForks []uint64, timeForks []uint64) {
+func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64, timeForks []uint64) {
 	// Gather all the fork block numbers via reflection
 	kind := reflect.TypeOf(chain.Config{})
 	conf := reflect.ValueOf(config).Elem()
@@ -237,7 +231,10 @@ func GatherForks(config *chain.Config) (heightForks []uint64, timeForks []uint64
 		rule := conf.Field(i).Interface().(*big.Int)
 		if rule != nil {
 			if time {
-				timeForks = append(timeForks, rule.Uint64())
+				t := rule.Uint64()
+				if t > genesisTime {
+					timeForks = append(timeForks, t)
+				}
 			} else {
 				heightForks = append(heightForks, rule.Uint64())
 			}

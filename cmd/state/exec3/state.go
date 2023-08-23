@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -161,7 +162,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break
@@ -280,6 +281,15 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 }
 func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
+}
+func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	panic("")
+}
+func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
+	panic("")
+}
+func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	panic("")
 }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {

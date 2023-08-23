@@ -79,10 +79,12 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	block, _, err := back.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
-func (back *RemoteBackend) TxsV3Enabled() bool                 { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() services.BlockSnapshots { panic("not implemented") }
-func (back *RemoteBackend) FrozenBlocks() uint64               { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenFiles() (list []string)       { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) TxsV3Enabled() bool                    { panic("not implemented") }
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
+func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
@@ -262,6 +264,12 @@ func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, bloc
 }
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
+}
+func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	return back.blockReader.EventLookup(ctx, tx, txnHash)
+}
+func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

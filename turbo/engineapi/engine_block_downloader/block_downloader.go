@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -205,73 +204,51 @@ func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 	return nil
 }
 
-func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint64, fromHash libcommon.Hash) error {
-	blockBatchSize := 10_000
+func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint64, fromHash libcommon.Hash, toBlock uint64) error {
+	blockBatchSize := 500
+	blockWrittenLogSize := 20_000
 	// We divide them in batches
-	headersBatch := []*types.Header{}
-	// For bodies we need to batch block numbers and block hashes
-	bodiesBatch := []*types.RawBody{}
-	blockNumbersBatch := []uint64{}
-	blockHashesBatch := []libcommon.Hash{}
+	blocksBatch := []*types.Block{}
 
 	headersCursors, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
 	}
-	bodiesCursors, err := tx.Cursor(kv.BlockBody)
-	if err != nil {
-		return err
-	}
-	log.Info("Beginning downloaded headers insertion")
+
+	log.Info("Beginning downloaded blocks insertion")
 	// Start by seeking headers
 	for k, v, err := headersCursors.Seek(dbutils.HeaderKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
 		if err != nil {
 			return err
 		}
-		if len(headersBatch) == blockBatchSize {
-			if err := e.chainRW.InsertHeadersAndWait(headersBatch); err != nil {
+		if len(blocksBatch) == blockBatchSize {
+			if err := e.chainRW.InsertBlocksAndWait(blocksBatch); err != nil {
 				return err
 			}
-			headersBatch = headersBatch[:0]
+			blocksBatch = blocksBatch[:0]
 		}
 		header := new(types.Header)
 		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
 			e.logger.Error("Invalid block header RLP", "err", err)
 			return nil
 		}
-		headersBatch = append(headersBatch, header)
+		number := header.Number.Uint64()
+		if number > toBlock {
+			return e.chainRW.InsertBlocksAndWait(blocksBatch)
+		}
+		hash := header.Hash()
+		body, err := rawdb.ReadBodyWithTransactions(tx, hash, number)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			return fmt.Errorf("missing body at block=%d", number)
+		}
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, nil, body.Withdrawals))
+		if number%uint64(blockWrittenLogSize) == 0 {
+			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
+		}
 	}
-	if err := e.chainRW.InsertHeadersAndWait(headersBatch); err != nil {
-		return err
-	}
-	log.Info("Beginning downloaded bodies insertion")
+	return e.chainRW.InsertBlocksAndWait(blocksBatch)
 
-	// then seek bodies
-	for k, _, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, _, err = bodiesCursors.Next() {
-		if err != nil {
-			return err
-		}
-		if len(bodiesBatch) == blockBatchSize {
-			if err := e.chainRW.InsertBodiesAndWait(bodiesBatch, blockNumbersBatch, blockHashesBatch); err != nil {
-				return err
-			}
-			bodiesBatch = bodiesBatch[:0]
-			blockNumbersBatch = blockNumbersBatch[:0]
-			blockHashesBatch = blockHashesBatch[:0]
-		}
-		if len(k) != 40 {
-			continue
-		}
-		blockNumber := binary.BigEndian.Uint64(k[:length.BlockNum])
-		var blockHash libcommon.Hash
-		copy(blockHash[:], k[length.BlockNum:])
-		blockBody, err := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
-		if err != nil {
-			return err
-		}
-		bodiesBatch = append(bodiesBatch, blockBody.RawBody())
-		blockNumbersBatch = append(blockNumbersBatch, blockNumber)
-		blockHashesBatch = append(blockHashesBatch, blockHash)
-	}
-	return e.chainRW.InsertBodiesAndWait(bodiesBatch, blockNumbersBatch, blockHashesBatch)
 }

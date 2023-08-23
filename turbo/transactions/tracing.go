@@ -78,9 +78,9 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
+	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb)
 
 	for idx, txn := range block.Transactions() {
 		select {

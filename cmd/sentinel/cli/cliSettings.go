@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -54,6 +55,7 @@ type ConsensusClientCliCfg struct {
 	JwtSecret             []byte
 
 	InitalState *state.CachingBeaconState
+	Dirs        datadir.Dirs
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
@@ -97,6 +99,7 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
 	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
 	cfg.DataDir = ctx.String(utils.DataDirFlag.Name)
+	cfg.Dirs = datadir.New(cfg.DataDir)
 
 	cfg.RunEngineAPI = ctx.Bool(flags.RunEngineAPI.Name)
 	cfg.EngineAPIAddr = ctx.String(flags.EngineApiHostFlag.Name)
