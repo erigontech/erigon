@@ -461,7 +461,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		}
 		reduced2[pagesAmount+1] = fmt.Sprintf("%d", keysAmount)
 	}
-	log.Warn("", "l", fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced2))
+	logger.Warn(fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced2))
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
