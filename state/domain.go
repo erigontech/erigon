@@ -815,6 +815,9 @@ type ctxItem struct {
 	src *filesItem
 }
 
+func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
+func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
+
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
 	file            *ctxItem

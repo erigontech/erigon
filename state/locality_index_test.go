@@ -302,31 +302,33 @@ func TestLocalityDomain(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
 
-		for i := len(dc.files) - 1; i >= 0; i-- {
-			// for i := 0; i < len(dc.files); i++ {
-			g := NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compressValues)
+		for _, f := range dc.files {
+			g := NewArchiveGetter(f.src.decompressor.MakeGetter(), dc.d.compressValues)
 
 			for g.HasNext() {
 				k, _ := g.Next(nil)
 				g.Skip() // v
-				fmt.Printf("key %x\n", k)
 
-				rs, ok, err := dc.hc.ic.warmLocality.lookupLatest(k)
-				_ = ok
-				require.NoError(err)
-				fmt.Printf("warm shard %d\n", rs)
-				//require.True(ok)
+				coveredByWarmIdx := f.isSubsetOf(dc.hc.ic.warmLocality.file)
+				if coveredByWarmIdx {
+					exactStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(k)
+					require.NoError(err)
+					require.True(ok)
+					comment := fmt.Sprintf("files: %s, %s", f.src.decompressor.FileName(), dc.hc.ic.warmLocality.file.src.bm.FileName())
+					exactTxNum := exactStep * dc.d.aggregationStep
+					require.LessOrEqual(f.startTxNum, exactTxNum, comment)
+				}
 
-				var ls uint64
-				ls, ok, err = dc.hc.ic.coldLocality.lookupLatest(k)
-				require.NoError(err)
-				//require.True(ok)
-				fmt.Printf("cold shard %d\n", ls)
-				// s1, s2, lastTx, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(k, dc.files[i].startTxNum)
-				// fmt.Printf("s1 %d s2 %d i %d\n", s1, s2, i)
-				// require.True(ok1 || ok2)
-				require.GreaterOrEqual(dc.files[i].endTxNum, ls*StepsInColdFile*dc.d.aggregationStep)
-				require.LessOrEqual(dc.files[i].startTxNum, ls*StepsInColdFile*dc.d.aggregationStep)
+				coveredByColdIdx := f.isSubsetOf(dc.hc.ic.coldLocality.file)
+				if coveredByColdIdx {
+					exactSuperStep, ok, err := dc.hc.ic.coldLocality.lookupLatest(k)
+					require.NoError(err)
+					require.True(ok)
+					exactTxNum := exactSuperStep * StepsInColdFile * dc.d.aggregationStep
+					comment := fmt.Sprintf("files: %s, %s", f.src.decompressor.FileName(), dc.hc.ic.coldLocality.file.src.bm.FileName())
+					require.GreaterOrEqual(dc.hc.ic.coldLocality.file.endTxNum, exactTxNum, comment)
+					require.LessOrEqual(f.startTxNum, exactTxNum, comment)
+				}
 			}
 		}
 	})
