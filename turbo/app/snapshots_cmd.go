@@ -387,6 +387,8 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 }
 
 func doUncompress(cliCtx *cli.Context) error {
+	var valLenDistibution [100_000]uint64
+
 	var logger log.Logger
 	var err error
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
@@ -419,6 +421,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	buf := make([]byte, 0, 1*datasize.MB)
 	for g.HasNext() {
 		buf, _ = g.Next(buf[:0])
+		valLenDistibution[len(buf)]++
 		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
 		if _, err := wr.Write(numBuf[:n]); err != nil {
 			return err
@@ -437,6 +440,14 @@ func doUncompress(cliCtx *cli.Context) error {
 		default:
 		}
 	}
+
+	reduced := map[uint64]string{}
+	for i, v := range valLenDistibution {
+		if v > 1000 {
+			reduced[uint64(i)] = fmt.Sprintf("%dK", v)
+		}
+	}
+	log.Warn("", "l", fmt.Sprintf("words length distribution: %v", reduced))
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
@@ -448,7 +459,7 @@ func doCompress(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
-	if args.Len() != 1 {
+	if args.Len() < 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args.First()
