@@ -44,6 +44,7 @@ import (
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
+	lists = append(lists, debug.Flags, logging.Flags, utils.MetricFlags)
 	for _, list := range lists {
 		res = append(res, list...)
 	}
@@ -62,7 +63,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
 				&SnapshotRebuildFlag,
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 		{
 			Name:   "retire",
@@ -73,28 +74,28 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
-			Flags:  joinFlags([]cli.Flag{}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "compress",
 			Action: doCompress,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "bt_search",
@@ -108,12 +109,12 @@ var snapshotCommand = cli.Command{
 					Name:     "key",
 					Required: true,
 				},
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 		{
 			Name:   "locality_idx",
 			Action: doLocalityIdx,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}),
 		},
 		{
 			Name:   "diff",
@@ -127,7 +128,7 @@ var snapshotCommand = cli.Command{
 					Name:     "dst",
 					Required: true,
 				},
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 	},
 }
