@@ -87,7 +87,7 @@ func ReadParentBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.
 	var parentRoot libcommon.Hash
 
 	// Execute the query.
-	err := db.QueryRowContext(ctx, "SELECT parent_block_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(parentRoot[:])
+	err := db.QueryRowContext(ctx, "SELECT parent_block_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(&parentRoot)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return libcommon.Hash{}, nil
