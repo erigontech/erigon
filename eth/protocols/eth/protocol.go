@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -181,73 +180,6 @@ type StatusPacket struct {
 type NewBlockHashesPacket []struct {
 	Hash   libcommon.Hash // Hash of one particular block being announced
 	Number uint64         // Number of one particular block being announced
-}
-
-// TransactionsPacket is the network packet for broadcasting new transactions.
-type TransactionsPacket []types.Transaction
-
-func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of Transactions
-	encodingSize++
-	var txsLen int
-	for _, tx := range tp {
-		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
-		if txLen >= 56 {
-			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
-	}
-	if txsLen >= 56 {
-		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
-	}
-	encodingSize += txsLen
-	// encode Transactions
-	var b [33]byte
-	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
-		return err
-	}
-	for _, tx := range tp {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (tp *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
-	}
-	var tx types.Transaction
-	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
-		*tp = append(*tp, tx)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	return s.ListEnd()
 }
 
 // GetBlockHeadersPacket represents a block header query.
@@ -492,9 +424,6 @@ func (*StatusPacket) Kind() byte   { return StatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }
-
-func (*TransactionsPacket) Name() string { return "Transactions" }
-func (*TransactionsPacket) Kind() byte   { return TransactionsMsg }
 
 func (*GetBlockHeadersPacket) Name() string { return "GetBlockHeaders" }
 func (*GetBlockHeadersPacket) Kind() byte   { return GetBlockHeadersMsg }
