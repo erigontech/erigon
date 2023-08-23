@@ -8,6 +8,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type SQLObject interface {
