@@ -443,8 +443,8 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	reduced := map[uint64]string{}
 	for i, v := range valLenDistibution {
-		if v > 1000 {
-			reduced[uint64(i)] = fmt.Sprintf("%dK", v/1000)
+		if v > 1000 || i > 4096 {
+			reduced[uint64(i)] = fmt.Sprintf("%dKb", v/1024)
 		}
 	}
 	log.Warn("", "l", fmt.Sprintf("words length distribution: %v", reduced))
