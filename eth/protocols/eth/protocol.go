@@ -374,24 +374,6 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.
 	return txSet, uncleSet, withdrawalSet
 }
 
-// GetNodeDataPacket represents a trie node data query.
-type GetNodeDataPacket []libcommon.Hash
-
-// GetNodeDataPacket represents a trie node data query over eth/66.
-type GetNodeDataPacket66 struct {
-	RequestId uint64
-	GetNodeDataPacket
-}
-
-// NodeDataPacket is the network packet for trie node data distribution.
-type NodeDataPacket [][]byte
-
-// NodeDataPacket is the network packet for trie node data distribution over eth/66.
-type NodeDataPacket66 struct {
-	RequestId uint64
-	NodeDataPacket
-}
-
 // GetReceiptsPacket represents a block receipts query.
 type GetReceiptsPacket []libcommon.Hash
 
@@ -439,12 +421,6 @@ func (*BlockBodiesPacket) Kind() byte   { return BlockBodiesMsg }
 
 func (*NewBlockPacket) Name() string { return "NewBlock" }
 func (*NewBlockPacket) Kind() byte   { return NewBlockMsg }
-
-func (*GetNodeDataPacket) Name() string { return "GetNodeData" }
-func (*GetNodeDataPacket) Kind() byte   { return GetNodeDataMsg }
-
-func (*NodeDataPacket) Name() string { return "NodeData" }
-func (*NodeDataPacket) Kind() byte   { return NodeDataMsg }
 
 func (*GetReceiptsPacket) Name() string { return "GetReceipts" }
 func (*GetReceiptsPacket) Kind() byte   { return GetReceiptsMsg }
