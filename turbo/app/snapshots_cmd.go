@@ -459,7 +459,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		if pagesAmount == 1 && keysAmount < 1000 {
 			continue
 		}
-		reduced2[pagesAmount] = fmt.Sprintf("%d", keysAmount)
+		reduced2[pagesAmount+1] = fmt.Sprintf("%d", keysAmount)
 	}
 	log.Warn("", "l", fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced2))
 	return nil
