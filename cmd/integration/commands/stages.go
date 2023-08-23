@@ -1602,6 +1602,7 @@ func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, blockReader 
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
+		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
 			if config.HeimdallgRPCAddress != "" {
 				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
