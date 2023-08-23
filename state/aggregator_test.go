@@ -550,7 +550,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
 	tb.Helper()
 
 	args := BtIndexWriterArgs{
@@ -586,12 +586,12 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 		require.NoError(tb, err)
 	}
 
+	writer := NewArchiveWriter(comp, compressFlags)
+
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//err = comp.AddWord(k)
-		err = comp.AddUncompressedWord(k)
+		err = writer.AddWord(k)
 		require.NoError(tb, err)
-		//err = comp.AddWord(v)
-		err = comp.AddUncompressedWord(v)
+		err = writer.AddWord(v)
 		require.NoError(tb, err)
 		return nil
 	}
@@ -608,7 +608,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	decomp, err := compress.NewDecompressor(dataPath)
 	require.NoError(tb, err)
 
-	getter := decomp.MakeGetter()
+	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)
 	getter.Reset(0)
 
 	var pos uint64

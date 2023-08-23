@@ -564,7 +564,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		return nil, nil, nil, fmt.Errorf("merge %s domain compressor: %w", d.filenameBase, err)
 	}
 
-	comp = NewArchiveWriter(compr, d.compressValues)
+	comp = NewArchiveWriter(compr, d.compression)
 	if d.noFsync {
 		comp.DisableFsync()
 	}
@@ -574,7 +574,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range valuesFiles {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -653,20 +653,16 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	idxPath := filepath.Join(d.dir, idxFileName)
 	//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir,  false /* values */); err != nil {
 	if !UseBpsTree {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compressValues, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
 
 	btFileName := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	btPath := filepath.Join(d.dir, btFileName)
-	err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, d.compressValues, ps, d.tmpdir, d.logger)
+	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-	}
-
-	if valuesIn.bindex, err = OpenBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compressValues); err != nil {
-		return nil, nil, nil, fmt.Errorf("merge %s btindex2 [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
 	closeItem = false
@@ -726,7 +722,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 	}
-	comp = NewArchiveWriter(cmp, d.Domain.compressValues)
+	comp = NewArchiveWriter(cmp, d.compression)
 
 	for _, f := range domainFiles {
 		defer f.decompressor.EnableReadAhead().DisableReadAhead()
@@ -735,7 +731,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -817,13 +813,13 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	idxPath := filepath.Join(d.dir, idxFileName)
 	if !UseBpsTree {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compressValues, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
 
 	btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compressValues, ps, d.tmpdir, d.logger)
+	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
@@ -833,9 +829,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 }
 
 func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, workers int, ps *background.ProgressSet) (*filesItem, error) {
-	if ii.compressInvertedIndex {
-		panic("implement me")
-	}
 	for _, h := range files {
 		defer h.decompressor.EnableReadAhead().DisableReadAhead()
 	}
@@ -870,6 +863,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	if ii.noFsync {
 		comp.DisableFsync()
 	}
+	write := NewArchiveWriter(comp, ii.compression)
 	p := ps.AddNew(datFileName, 1)
 	defer ps.Delete(p)
 
@@ -877,7 +871,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	heap.Init(&cp)
 
 	for _, item := range files {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressInvertedIndex)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -927,11 +921,11 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			}
 		}
 		if keyBuf != nil {
-			if err = comp.AddUncompressedWord(keyBuf); err != nil {
+			if err = write.AddWord(keyBuf); err != nil {
 				return nil, err
 			}
 			keyCount++ // Only counting keys, not values
-			if err = comp.AddUncompressedWord(valBuf); err != nil {
+			if err = write.AddWord(valBuf); err != nil {
 				return nil, err
 			}
 		}
@@ -939,19 +933,20 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 		valBuf = append(valBuf[:0], lastVal...)
 	}
 	if keyBuf != nil {
-		if err = comp.AddUncompressedWord(keyBuf); err != nil {
+		if err = write.AddWord(keyBuf); err != nil {
 			return nil, err
 		}
 		keyCount++ // Only counting keys, not values
-		if err = comp.AddUncompressedWord(valBuf); err != nil {
+		if err = write.AddWord(valBuf); err != nil {
 			return nil, err
 		}
 	}
-	if err = comp.Compress(); err != nil {
+	if err = write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
 	comp = nil
+
 	outItem = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 	if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
@@ -960,7 +955,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compressInvertedIndex, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
@@ -979,9 +974,6 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			}
 		}
 	}()
-	if h.InvertedIndex.compressInvertedIndex {
-		panic("implement me")
-	}
 	if indexIn, err = h.InvertedIndex.mergeFiles(ctx, indexFiles, r.indexStartTxNum, r.indexEndTxNum, workers, ps); err != nil {
 		return nil, nil, err
 	}
@@ -1024,7 +1016,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
-		compr := NewArchiveWriter(comp, h.compressHistoryVals)
+		compr := NewArchiveWriter(comp, h.compression)
 		if h.noFsync {
 			compr.DisableFsync()
 		}
@@ -1034,13 +1026,13 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := NewArchiveGetter(item.decompressor.MakeGetter(), h.compressHistoryVals)
+			g := NewArchiveGetter(item.decompressor.MakeGetter(), h.compression)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 ArchiveGetter
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = NewArchiveGetter(hi.decompressor.MakeGetter(), h.compressHistoryVals)
+						g2 = NewArchiveGetter(hi.decompressor.MakeGetter(), h.compression)
 						break
 					}
 				}
@@ -1129,8 +1121,8 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			valOffset  uint64
 		)
 
-		g := NewArchiveGetter(indexIn.decompressor.MakeGetter(), h.InvertedIndex.compressInvertedIndex)
-		g2 := NewArchiveGetter(decomp.MakeGetter(), h.compressHistoryVals)
+		g := NewArchiveGetter(indexIn.decompressor.MakeGetter(), h.InvertedIndex.compression)
+		g2 := NewArchiveGetter(decomp.MakeGetter(), h.compression)
 
 		for {
 			g.Reset(0)

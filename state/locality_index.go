@@ -28,6 +28,9 @@ import (
 
 	_ "github.com/FastFilter/xorfilter"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
+
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -35,8 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spaolacci/murmur3"
 )
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
@@ -571,16 +572,16 @@ func (si *LocalityIterator) advance() {
 		top := heap.Pop(&si.h).(*ReconItem)
 		key := top.key
 		var offset uint64
-		if si.compressVals {
-			offset, _ = top.g.Skip()
-		} else {
-			offset, _ = top.g.SkipUncompressed()
-		}
+		//if si.compressVals {
+		offset, _ = top.g.Skip()
+		//} else {
+		//	offset, _ = top.g.SkipUncompressed()
+		//}
 		si.progress += offset - top.lastOffset
 		top.lastOffset = offset
 		inStep := top.startTxNum / si.aggStep
 		if top.g.HasNext() {
-			top.key, _ = top.g.NextUncompressed()
+			top.key, _ = top.g.Next(nil)
 			heap.Push(&si.h, top)
 		}
 
@@ -654,9 +655,9 @@ func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromSte
 		item.src.decompressor.EnableReadAhead() // disable in destructor of iterator
 		si.involvedFiles = append(si.involvedFiles, item.src.decompressor)
 
-		g := item.src.decompressor.MakeGetter()
+		g := NewArchiveGetter(item.src.decompressor.MakeGetter(), ic.ii.compression)
 		if g.HasNext() {
-			key, offset := g.NextUncompressed()
+			key, offset := g.Next(nil)
 
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
@@ -669,9 +670,9 @@ func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromSte
 		//add last one
 		last.EnableReadAhead() // disable in destructor of iterator
 		si.involvedFiles = append(si.involvedFiles, last)
-		g := last.MakeGetter()
+		g := NewArchiveGetter(last.MakeGetter(), ic.ii.compression)
 		if g.HasNext() {
-			key, offset := g.NextUncompressed()
+			key, offset := g.Next(nil)
 
 			startTxNum, endTxNum := (toStep-1)*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
 			heapItem := &ReconItem{startTxNum: startTxNum, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}

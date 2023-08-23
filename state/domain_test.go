@@ -79,7 +79,7 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 	t.Cleanup(db.Close)
 	cfg := domainCfg{
 		domainLargeValues: AccDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: AccDomainLargeValues}}
+		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues}}
 	d, err := NewDomain(cfg, coldDir, coldDir, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -115,7 +115,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	defer d.Close()
 
 	d.domainLargeValues = domainLargeValues
-	d.compressValues = compressDomainVals
+	d.compression = CompressKeys | CompressVals
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 		require.NoError(t, err)
 		c.Close()
 
-		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compressValues)
+		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -1463,6 +1463,8 @@ type upd struct {
 }
 
 func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
+	t.Helper()
+
 	data := make(map[string][]upd)
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	if keyLimit == 1 {
@@ -1523,9 +1525,9 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.compressHistoryVals = true
+	d.History.compression = CompressKeys | CompressVals
 	d.domainLargeValues = true // false requires dupsort value table for domain
-	d.compressValues = true
+	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 
 	UseBpsTree = true
@@ -1603,9 +1605,9 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.compressHistoryVals = true
+	d.History.compression = CompressKeys | CompressVals
 	d.domainLargeValues = true // false requires dupsort value table for domain
-	d.compressValues = true
+	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 
 	UseBpsTree = true

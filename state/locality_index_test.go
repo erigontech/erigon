@@ -303,7 +303,7 @@ func TestLocalityDomain(t *testing.T) {
 		defer dc.Close()
 
 		for _, f := range dc.files {
-			g := NewArchiveGetter(f.src.decompressor.MakeGetter(), dc.d.compressValues)
+			g := NewArchiveGetter(f.src.decompressor.MakeGetter(), dc.d.compression)
 
 			for g.HasNext() {
 				k, _ := g.Next(nil)

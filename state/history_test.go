@@ -59,7 +59,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	cfg := histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: largeValues}
+	cfg := histCfg{withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: largeValues}
 	h, err := NewHistory(cfg, dir, dir, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
@@ -263,7 +263,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites()
+	h.StartUnbufferedWrites()
 	defer h.FinishWrites()
 
 	txs := uint64(1000)

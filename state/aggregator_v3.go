@@ -44,8 +44,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
-const AccDomainLargeValues = true
-const StorageDomainLargeValues = true
+const (
+	AccDomainLargeValues        = true
+	StorageDomainLargeValues    = true
+	CodeDomainLargeValues       = true
+	CommitmentDomainLargeValues = true
+)
 
 type AggregatorV3 struct {
 	rwTx             kv.RwTx
@@ -115,25 +119,26 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	var err error
 	cfg := domainCfg{
 		domainLargeValues: AccDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: false}}
+		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: false}}
 	if a.accounts, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
 		domainLargeValues: StorageDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: false}}
+		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: false}}
 	if a.storage, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
-		domainLargeValues: true,
-		hist:              histCfg{withLocalityIndex: true, compressVals: true, historyLargeValues: true}}
+		domainLargeValues: CodeDomainLargeValues,
+		hist:              histCfg{withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true}}
 	if a.code, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
-		domainLargeValues: true,
-		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: true}}
+		domainLargeValues: CommitmentDomainLargeValues,
+		compress:          CompressNone,
+		hist:              histCfg{withLocalityIndex: false, compression: CompressNone, historyLargeValues: true}}
 	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err

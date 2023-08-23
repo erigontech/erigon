@@ -100,7 +100,6 @@ type filesItem struct {
 	bloom        *bloomFilter
 	startTxNum   uint64
 	endTxNum     uint64
-	compressed   bool
 
 	// Frozen: file of size StepsInColdFile. Completely immutable.
 	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -157,7 +156,7 @@ func (b *bloomFilter) Close() {
 	}
 }
 
-func newFilesItem(startTxNum, endTxNum uint64, stepSize uint64) *filesItem {
+func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep == StepsInColdFile
@@ -284,25 +283,27 @@ type Domain struct {
 	*/
 
 	domainLargeValues bool
-	compressValues    bool // true if all key-values in domain are compressed
+	compression       FileCompression
 
 	dir string
 }
 
 type domainCfg struct {
 	hist              histCfg
+	compress          FileCompression
 	domainLargeValues bool
 }
 
 func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	baseDir := filepath.Dir(dir)
 	d := &Domain{
-		dir:       filepath.Join(baseDir, "warm"),
-		keysTable: keysTable,
-		valsTable: valsTable,
-		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
-		logger:    logger,
+		dir:         filepath.Join(baseDir, "warm"),
+		keysTable:   keysTable,
+		valsTable:   valsTable,
+		compression: cfg.compress,
+		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+		logger:      logger,
 
 		domainLargeValues: cfg.domainLargeValues,
 	}
@@ -496,7 +497,7 @@ func (d *Domain) openFiles() (err error) {
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(bidxPath) {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor, d.compressValues); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
 						err = errors.Wrap(err, "btree index")
 						d.logger.Debug("Domain.openFiles: %w, %s", err, bidxPath)
 						return false
@@ -961,7 +962,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
-	comp := NewArchiveWriter(coll.valuesComp, d.compressValues)
+	comp := NewArchiveWriter(coll.valuesComp, d.compression)
 
 	keysCursor, err := roTx.CursorDupSort(d.keysTable)
 	if err != nil {
@@ -1127,7 +1128,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
 	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
 	if !UseBpsTree {
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compressValues, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1136,7 +1137,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	{
 		btFileName := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, step, step+1)
 		btPath := filepath.Join(d.dir, btFileName)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compressValues, ps, d.tmpdir, d.logger)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
@@ -1196,7 +1197,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		g.Go(func() error {
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, ps, d.tmpdir, d.logger); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.tmpdir, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
@@ -1211,7 +1212,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compressValues, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
+			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1221,7 +1222,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed bool, idxPath, tmpdir string, values bool, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1802,7 +1803,7 @@ func (dc *DomainContext) statelessGetter(i int) ArchiveGetter {
 	}
 	r := dc.getters[i]
 	if r == nil {
-		r = NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compressValues)
+		r = NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compression)
 		dc.getters[i] = r
 	}
 	return r

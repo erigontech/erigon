@@ -62,7 +62,6 @@ type InvertedIndex struct {
 	dir, warmDir, tmpdir string // Directory where static files are created
 	filenameBase         string
 	aggregationStep      uint64
-	compressWorkers      int
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
@@ -85,6 +84,8 @@ type InvertedIndex struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	compressInvertedIndex bool
+	compression           FileCompression
+	compressWorkers       int
 }
 
 func NewInvertedIndex(
@@ -325,7 +326,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
 	defer item.decompressor.EnableReadAhead().DisableReadAhead()
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressInvertedIndex)
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compression)
 	return buildIndex(ctx, g, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 
@@ -1177,9 +1178,9 @@ func (it *InvertedIterator1) advanceInFiles() {
 	for it.h.Len() > 0 {
 		top := heap.Pop(&it.h).(*ReconItem)
 		key := top.key
-		val, _ := top.g.NextUncompressed()
+		val, _ := top.g.Next(nil)
 		if top.g.HasNext() {
-			top.key, _ = top.g.NextUncompressed()
+			top.key, _ = top.g.Next(nil)
 			heap.Push(&it.h, top)
 		}
 		if !bytes.Equal(key, it.key) {
@@ -1285,9 +1286,9 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := item.src.decompressor.MakeGetter()
+		g := NewArchiveGetter(item.src.decompressor.MakeGetter(), ic.ii.compression)
 		if g.HasNext() {
-			key, _ := g.NextUncompressed()
+			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
 			ii1.hasNextInFiles = true
 		}
@@ -1426,7 +1427,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if index, err = buildIndexThenOpen(ctx, decomp, ii.compressInvertedIndex, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, ii.compression, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 

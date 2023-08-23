@@ -756,11 +756,12 @@ type BtIndex struct {
 	modTime  time.Time
 	filePath string
 
-	compressed   bool
+	// TODO do not sotre decompressor ptr in index, pass ArchiveGetter always instead of decomp directly
+	compressed   FileCompression
 	decompressor *compress.Decompressor
 }
 
-func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed bool, logger log.Logger) (*BtIndex, error) {
+func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, logger log.Logger) (*BtIndex, error) {
 	err := BuildBtreeIndex(dataPath, indexPath, compressed, logger)
 	if err != nil {
 		return nil, err
@@ -768,7 +769,7 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed bool, log
 	return OpenBtreeIndex(indexPath, dataPath, M, compressed, false)
 }
 
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed bool, ps *background.ProgressSet, tmpdir string, logger log.Logger) (*BtIndex, error) {
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed FileCompression, ps *background.ProgressSet, tmpdir string, logger log.Logger) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, logger)
 	if err != nil {
 		return nil, err
@@ -777,7 +778,7 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func BuildBtreeIndex(dataPath, indexPath string, compressed bool, logger log.Logger) error {
+func BuildBtreeIndex(dataPath, indexPath string, compressed FileCompression, logger log.Logger) error {
 	decomp, err := compress.NewDecompressor(dataPath)
 	if err != nil {
 		return err
@@ -788,7 +789,7 @@ func BuildBtreeIndex(dataPath, indexPath string, compressed bool, logger log.Log
 	return BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), logger)
 }
 
-func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed, trace bool) (*BtIndex, error) {
+func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, trace bool) (*BtIndex, error) {
 	kv, err := compress.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, err
@@ -796,7 +797,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed, trace bool
 	return OpenBtreeIndexWithDecompressor(indexPath, M, kv, compressed)
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compressed bool, ps *background.ProgressSet, tmpdir string, logger log.Logger) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compression FileCompression, ps *background.ProgressSet, tmpdir string, logger log.Logger) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
@@ -823,7 +824,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		return err
 	}
 
-	getter := NewArchiveGetter(kv.MakeGetter(), compressed)
+	getter := NewArchiveGetter(kv.MakeGetter(), compression)
 	getter.Reset(0)
 
 	key := make([]byte, 0, 64)
@@ -865,7 +866,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Decompressor, compress bool) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Decompressor, compress FileCompression) (*BtIndex, error) {
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err

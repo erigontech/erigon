@@ -39,15 +39,15 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	tmp := t.TempDir()
 
 	keyCount, M := 100, uint64(4)
-	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount, logger)
+	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, 0)
 	decomp, err := compress.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, false, background.NewProgressSet(), tmp, logger)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, CompressNone, background.NewProgressSet(), tmp, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, true)
+	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, CompressKeys|CompressVals)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
@@ -57,31 +57,32 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 120, 30
+	compressFlags := FileCompression(CompressKeys | CompressVals)
 
 	t.Run("empty index", func(t *testing.T) {
-		dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, 0, logger)
+		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
 		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-		err := BuildBtreeIndex(dataPath, indexPath, false, logger)
+		err := BuildBtreeIndex(dataPath, indexPath, compressFlags, logger)
 		require.NoError(t, err)
 
-		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
+		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
 	})
-	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount, logger)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
+	err := BuildBtreeIndex(dataPath, indexPath, compressFlags, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), bt.compressed)
+	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -136,15 +137,17 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 20000, 510
-	dataPath := generateCompressedKV(t, tmp, 52, 48 /*val size*/, keyCount, logger)
+
+	compressFlags := FileCompression(CompressKeys | CompressVals)
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err = BuildBtreeIndex(dataPath, indexPath, false, logger)
+	err = BuildBtreeIndex(dataPath, indexPath, compressFlags, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
@@ -171,20 +174,21 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keyCount, M := 1_200_000, 1024
 	UseBpsTree = false
 
-	dataPath := generateCompressedKV(t, tmp, 52, 48 /*val size*/, keyCount, logger)
+	compressFlags := FileCompression(CompressKeys | CompressVals)
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
+	err := BuildBtreeIndex(dataPath, indexPath, compressFlags, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), bt.compressed)
+	getter := NewArchiveGetter(bt.decompressor.MakeGetter(), compressFlags)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.ef.Count()+1, getter)
@@ -240,13 +244,15 @@ func TestBpsTree_Seek(t *testing.T) {
 	tmp := t.TempDir()
 
 	logger := log.New()
-	dataPath := generateCompressedKV(t, tmp, 10, 48 /*val size*/, keyCount, logger)
+
+	compressFlag := CompressNone
+	dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
 
 	kv, err := compress.NewDecompressor(dataPath)
 	require.NoError(t, err)
 	defer kv.Close()
 
-	g := NewArchiveGetter(kv.MakeGetter(), false)
+	g := NewArchiveGetter(kv.MakeGetter(), compressFlag)
 
 	g.Reset(0)
 	ps := make([]uint64, 0, keyCount)

@@ -348,7 +348,7 @@ func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, type
 	numBuf := [2]byte{}
 	var found bool
 	for _, item := range list {
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		//index := recsplit.NewIndexReader(item.index)
 
 		cur, err := item.bindex.SeekWithGetter(fullKey, g)
@@ -386,7 +386,7 @@ func (d *DomainCommitted) lookupShortenedKey(shortKey, fullKey []byte, typAS str
 			continue
 		}
 
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compressValues)
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		fullKey, _, err := item.bindex.dataLookup(offset, g)
 		if err != nil {
 			return false

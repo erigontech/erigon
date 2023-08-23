@@ -28,7 +28,7 @@ import (
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *compress.Getter
+	g           ArchiveGetter
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64

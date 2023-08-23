@@ -580,7 +580,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 	sctx := sd.aggCtx.storage
 	for _, item := range sctx.files {
-		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), item.src.bindex.compressed)
+		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), sd.Storage.compression)
 		cursor, err := item.src.bindex.SeekWithGetter(prefix, gg)
 		if err != nil {
 			return err
