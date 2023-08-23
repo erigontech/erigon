@@ -114,7 +114,7 @@ func (h *HeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to 
 
 func (h *HeimdallClient) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
 	url, err := spanURL(h.urlString, spanID)
-	fmt.Printf("[dbg] alex: %s, %s, %s\n", h.urlString, url.String(), err)
+	log.Warn(fmt.Sprintf("[dbg] alex: %s, %s, %s\n", h.urlString, url.String(), err))
 	if err != nil {
 		return nil, err
 	}
