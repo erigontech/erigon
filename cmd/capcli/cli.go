@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -101,9 +102,15 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig)
+
+	sqlDB, err := sql.Open("sqlite3", "caplin/db")
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig, sqlDB)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(vv)
+		err := beaconDB.WriteBlock(ctx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -137,7 +144,12 @@ func (b *Epochs) Run(cctx *Context) error {
 	if err != nil {
 		return err
 	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig)
+	sqlDB, err := sql.Open("sqlite3", "caplin/db")
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig, sqlDB)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 	rpcSource := persistence.NewBeaconRpcSource(beacon)
@@ -203,7 +215,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(v.Data)
+				err := beaconDB.WriteBlock(ctx, v.Data, true)
 				if err != nil {
 					return err
 				}

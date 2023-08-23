@@ -568,8 +568,11 @@ func (srv *Server) setupLocalNode() error {
 			defer debug.LogPanic()
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
+				srv.logger.Info("NAT ExternalIP resolved", "ip", ip)
 				srv.localnode.SetStaticIP(ip)
 				srv.updateLocalNodeStaticAddrCache()
+			} else {
+				srv.logger.Warn("NAT ExternalIP resolution has failed, try to pass a different --nat option", "err", err)
 			}
 		}()
 	}

@@ -2,12 +2,15 @@ package caplin1
 
 import (
 	"context"
+	"database/sql"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -53,6 +56,36 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
 	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), dirs.DataDir)
+	dataDirIndexer := path.Join(dirs.DataDir, "beacon_indicies")
+	db, err := sql.Open("sqlite3", dataDirIndexer)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := sql_migrations.ApplyMigrations(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	{ // start ticking forkChoice
+		go func() {
+			tickInterval := time.NewTicker(50 * time.Millisecond)
+			for {
+				select {
+				case <-tickInterval.C:
+					forkChoice.OnTick(uint64(time.Now().Unix()))
+				case <-ctx.Done():
+					db.Close() // close sql database here
+					return
+				}
+			}
+		}()
+	}
 
 	{ // start the gossip manager
 		go gossipManager.Start(ctx)
@@ -75,21 +108,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 		}()
 	}
 
-	{ // start ticking forkChoice
-		go func() {
-			tickInterval := time.NewTicker(50 * time.Millisecond)
-			for {
-				select {
-				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().Unix()))
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, db)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")
