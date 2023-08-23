@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ledgerwatch/interfaces v0.0.0-20230818152001-a8f70b6e9ac6
-	github.com/ledgerwatch/log/v3 v3.8.0
+	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0
 	github.com/torquem-ch/mdbx-go v0.27.10
@@ -14,9 +14,9 @@ require (
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/dht/v2 v2.19.2-0.20221121215055-066ad8494444
-	github.com/anacrolix/go-libutp v1.3.0
-	github.com/anacrolix/log v0.14.0
-	github.com/anacrolix/torrent v1.52.0
+	github.com/anacrolix/go-libutp v1.3.1
+	github.com/anacrolix/log v0.14.2
+	github.com/anacrolix/torrent v1.52.6-0.20230816110201-613470861e67
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/crate-crypto/go-kzg-4844 v0.3.0
 	github.com/deckarep/golang-set/v2 v2.3.0
@@ -48,7 +48,7 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/envpprof v1.2.1 // indirect
-	github.com/anacrolix/generics v0.0.0-20230428105757-683593396d68 // indirect
+	github.com/anacrolix/generics v0.0.0-20230816103846-fe11fdc0e0e3 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.2-0.20230527121029-a582b4f397b9 // indirect
@@ -72,9 +72,8 @@ require (
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
-	github.com/lispad/go-generics-tools v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.17 // indirect
+	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
