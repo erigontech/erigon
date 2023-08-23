@@ -9,6 +9,7 @@ by default.
 ![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
 
 <!--ts-->
+// hi 
 
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
