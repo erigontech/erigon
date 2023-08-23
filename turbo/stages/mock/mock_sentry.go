@@ -364,6 +364,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	forkValidator := engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
 	networkID := uint64(1)
+	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
+
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,
 		"mock",
@@ -378,6 +380,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		blockBufferSize,
 		false,
 		forkValidator,
+		maxBlockBroadcastPeers,
 		cfg.DropUselessPeers,
 		logger,
 	)
