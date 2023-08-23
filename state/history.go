@@ -1348,7 +1348,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		offset := reader.Lookup(key)
 
 		// TODO do we always compress inverted index?
-		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compressWorkers > 0)
+		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compressInvertedIndex)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 

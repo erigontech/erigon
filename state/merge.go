@@ -1125,7 +1125,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			valOffset  uint64
 		)
 
-		g := NewArchiveGetter(indexIn.decompressor.MakeGetter(), h.InvertedIndex.compressWorkers > 0) //h.compressHistoryVals)
+		g := NewArchiveGetter(indexIn.decompressor.MakeGetter(), h.InvertedIndex.compressInvertedIndex)
 		g2 := NewArchiveGetter(decomp.MakeGetter(), h.compressHistoryVals)
 
 		for {

@@ -83,6 +83,8 @@ type InvertedIndex struct {
 	logger     log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+
+	compressInvertedIndex bool
 }
 
 func NewInvertedIndex(
@@ -323,7 +325,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
 	defer item.decompressor.EnableReadAhead().DisableReadAhead()
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressWorkers > 0)
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compressInvertedIndex)
 	return buildIndex(ctx, g, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 
