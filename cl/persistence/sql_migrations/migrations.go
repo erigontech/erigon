@@ -18,6 +18,7 @@ var migrations = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_canonical 
 		ON beacon_indicies (slot) 
 		WHERE canonical = 1;`,
+	`CREATE TABLE IF NOT EXISTS data_config (prune_depth INTEGER NOT NULL)`,
 }
 
 func ApplyMigrations(ctx context.Context, tx *sql.Tx) error {
