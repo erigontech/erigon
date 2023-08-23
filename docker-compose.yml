@@ -110,7 +110,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:10.0.1
+    image: grafana/grafana:10.0.3
     user: "472:0" # required for grafana version >= 7.3
     ports: [ "3000:3000" ]
     volumes:
