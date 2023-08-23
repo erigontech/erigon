@@ -448,6 +448,13 @@ func doUncompress(cliCtx *cli.Context) error {
 		}
 		reduced[uint64(i/4096)] += v
 	}
+	reduced2 := map[uint64]string{}
+	for pagesAmount, keysAmount := range reduced {
+		if pagesAmount == 1 && keysAmount < 1000 {
+			continue
+		}
+		reduced2[pagesAmount] += fmt.Sprintf("%dK", keysAmount)
+	}
 	log.Warn("", "l", fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced))
 	return nil
 }
