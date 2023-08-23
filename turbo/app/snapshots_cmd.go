@@ -387,7 +387,7 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 }
 
 func doUncompress(cliCtx *cli.Context) error {
-	var valLenDistibution [100_000]uint64
+	var valLenDistibution [10_000_000]uint64
 
 	var logger log.Logger
 	var err error
