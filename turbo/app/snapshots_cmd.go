@@ -467,6 +467,8 @@ func doUncompress(cliCtx *cli.Context) error {
 }
 func doCompress(cliCtx *cli.Context) error {
 	var err error
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	var logger log.Logger
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
@@ -488,6 +490,7 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
+	i := 0
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
 			buf = make([]byte, l)
@@ -500,7 +503,11 @@ func doCompress(cliCtx *cli.Context) error {
 		if err = c.AddWord(buf); err != nil {
 			return err
 		}
+		i++
 		select {
+		case <-logEvery.C:
+			_, fileName := filepath.Split(f)
+			logger.Info("[adding] ", "progress", fmt.Sprintf("%dK", i/1000), "file", fileName)
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
