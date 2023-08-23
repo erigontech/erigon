@@ -443,6 +443,9 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	reduced := map[uint64]uint64{}
 	for i, v := range valLenDistibution {
+		if v == 0 {
+			continue
+		}
 		if _, ok := reduced[uint64(i/4096)]; !ok {
 			reduced[uint64(i/4096)] = 0
 		}
