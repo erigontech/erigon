@@ -479,7 +479,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger.Info("file", "f", f, "datadir", dirs.DataDir)
+	logger.Info("file", "datadir", dirs.DataDir, "f", f)
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
 		return err
