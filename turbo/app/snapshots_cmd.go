@@ -477,6 +477,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting file path as a first argument")
 	}
 	f := args.First()
+	logger.Info("file", "f", f)
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
