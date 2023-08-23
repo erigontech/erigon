@@ -179,7 +179,7 @@ func (v validator) generateChain(length int) (*core.ChainPack, error) {
 }
 
 func (v validator) IsProposer(block *types.Block) (bool, error) {
-	return v.Engine.(*bor.Bor).IsProposer(headerReader{v}, block)
+	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
 func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {

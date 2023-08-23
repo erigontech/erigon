@@ -911,7 +911,7 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
-	peerInfos := make([]*PeerInfo, 0, 32) // 32 gives capacity for 1024 peers, well beyond default
+	peerInfos := make([]*PeerInfo, 0, 100)
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		peerInfos = append(peerInfos, peerInfo)
 		return true
@@ -919,20 +919,21 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 	rand.Shuffle(len(peerInfos), func(i int, j int) {
 		peerInfos[i], peerInfos[j] = peerInfos[j], peerInfos[i]
 	})
-	peersToSendCount := len(peerInfos)
-	if peersToSendCount > 0 {
-		peerCountConstrained := math.Min(float64(len(peerInfos)), float64(req.MaxPeers))
-		// Ensure we have at least 1 peer during our sqrt operation
-		peersToSendCount = int(math.Max(math.Sqrt(peerCountConstrained), 1.0))
+
+	var peersToSendCount int
+	if req.MaxPeers > 0 {
+		peersToSendCount = int(math.Min(float64(req.MaxPeers), float64(len(peerInfos))))
+	} else {
+		// MaxPeers == 0 means send to all
+		peersToSendCount = len(peerInfos)
 	}
 
-	var lastErr error
 	// Send the block to a subset of our peers at random
 	for _, peerInfo := range peerInfos[:peersToSendCount] {
 		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 	}
-	return reply, lastErr
+	return reply, nil
 }
 
 func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
