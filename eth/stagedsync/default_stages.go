@@ -580,7 +580,6 @@ var StateUnwindOrder = UnwindOrder{
 	stages.Execution,
 	stages.Senders,
 	stages.Bodies,
-	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Headers,
 }

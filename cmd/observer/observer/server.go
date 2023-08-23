@@ -108,7 +108,11 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
-	heightForks, timeForks := forkid.GatherForks(chainConfig)
+	// TODO(yperbasis) This might be a problem for chains that have a time-based fork (Shanghai, Cancun, etc)
+	// in genesis already, e.g. Holesky.
+	genesisTime := uint64(0)
+
+	heightForks, timeForks := forkid.GatherForks(chainConfig, genesisTime)
 	return eth.CurrentENREntryFromForks(heightForks, timeForks, *genesisHash, 0, 0), nil
 }
 

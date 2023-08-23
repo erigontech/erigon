@@ -268,3 +268,37 @@ func NetworkIDByChainName(chain string) uint64 {
 		return config.ChainID.Uint64()
 	}
 }
+
+func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
+}
+
+func isChainIDPoS(chainID *big.Int) bool {
+	ids := []*big.Int{
+		MainnetChainConfig.ChainID,
+		GoerliChainConfig.ChainID,
+		SepoliaChainConfig.ChainID,
+		GnosisChainConfig.ChainID,
+		ChiadoChainConfig.ChainID,
+	}
+	for _, id := range ids {
+		if id.Cmp(chainID) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+	if chainConfig.TerminalTotalDifficultyPassed {
+		return true
+	}
+
+	terminalTD := chainConfig.TerminalTotalDifficulty
+	if terminalTD == nil {
+		return false
+	}
+
+	currentTD := currentTDProvider()
+	return (currentTD != nil) && (terminalTD.Cmp(currentTD) <= 0)
+}
