@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -73,16 +72,8 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		log.Error("broadcastNewBlock", "err", err)
 	}
 
-	maxPeers := uint64(1024)
-	if borEngine, ok := cs.Engine.(*bor.Bor); ok {
-		if sendAll, _ := borEngine.IsValidator(header); sendAll {
-			// max peers is overloaded a zero value is interpreted as send all
-			maxPeers = 0
-		}
-	}
-
 	req66 := proto_sentry.SendMessageToRandomPeersRequest{
-		MaxPeers: maxPeers,
+		MaxPeers: uint64(cs.maxBlockBroadcastPeers(header)),
 		Data: &proto_sentry.OutboundMessageData{
 			Id:   proto_sentry.MessageId_NEW_BLOCK_66,
 			Data: data,
