@@ -487,83 +487,6 @@ type ReceiptsRLPPacket66 struct {
 	ReceiptsRLPPacket
 }
 
-// NewPooledTransactionHashesPacket represents a transaction announcement packet.
-type NewPooledTransactionHashesPacket []libcommon.Hash
-
-// GetPooledTransactionsPacket represents a transaction query.
-type GetPooledTransactionsPacket []libcommon.Hash
-
-// PooledTransactionsPacket is the network packet for transaction distribution.
-type PooledTransactionsPacket []types.Transaction
-
-func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of Transactions
-	encodingSize++
-	var txsLen int
-	for _, tx := range ptp {
-		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
-		if txLen >= 56 {
-			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
-	}
-	if txsLen >= 56 {
-		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
-	}
-	encodingSize += txsLen
-	// encode Transactions
-	var b [33]byte
-	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
-		return err
-	}
-	for _, tx := range ptp {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (ptp *PooledTransactionsPacket) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
-	}
-	var tx types.Transaction
-	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
-		*ptp = append(*ptp, tx)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	return s.ListEnd()
-}
-
-// PooledTransactionsPacket is the network packet for transaction distribution, used
-// in the cases we already have them in rlp-encoded form
-type PooledTransactionsRLPPacket []rlp.RawValue
-
 func (*StatusPacket) Name() string { return "Status" }
 func (*StatusPacket) Kind() byte   { return StatusMsg }
 
@@ -599,12 +522,3 @@ func (*GetReceiptsPacket) Kind() byte   { return GetReceiptsMsg }
 
 func (*ReceiptsPacket) Name() string { return "Receipts" }
 func (*ReceiptsPacket) Kind() byte   { return ReceiptsMsg }
-
-func (*NewPooledTransactionHashesPacket) Name() string { return "NewPooledTransactionHashes" }
-func (*NewPooledTransactionHashesPacket) Kind() byte   { return NewPooledTransactionHashesMsg }
-
-func (*GetPooledTransactionsPacket) Name() string { return "GetPooledTransactions" }
-func (*GetPooledTransactionsPacket) Kind() byte   { return GetPooledTransactionsMsg }
-
-func (*PooledTransactionsPacket) Name() string { return "PooledTransactions" }
-func (*PooledTransactionsPacket) Kind() byte   { return PooledTransactionsMsg }
