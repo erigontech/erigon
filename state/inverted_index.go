@@ -605,7 +605,7 @@ func (ic *InvertedIndexContext) Close() {
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
 			if ic.ii.filenameBase == AggTraceFileLife {
-				ic.ii.logger.Warn(fmt.Sprintf("[dbg.agg] real remove at ctx close: %s", item.src.decompressor.FileName()))
+				ic.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", item.src.decompressor.FileName()))
 			}
 			item.src.closeFilesAndRemove()
 		}
@@ -1449,7 +1449,7 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	fromStep, toStep := ic.minWarmStep(), step+1
 	defer func() {
 		if ic.ii.filenameBase == AggTraceFileLife {
-			ii.logger.Warn(fmt.Sprintf("[dbg.agg] BuildWarmLocality done: %s.%d-%d", ii.filenameBase, fromStep, toStep))
+			ii.logger.Warn(fmt.Sprintf("[agg] BuildWarmLocality done: %s.%d-%d", ii.filenameBase, fromStep, toStep))
 		}
 	}()
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
