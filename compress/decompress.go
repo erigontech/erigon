@@ -424,7 +424,7 @@ func (g *Getter) Trace(t bool)     { g.trace = t }
 func (g *Getter) FileName() string { return g.fName }
 
 func (g *Getter) touch() { _ = g.data[g.dataP] }
-func (g *Getter) nextPos(clean bool) uint64 {
+func (g *Getter) nextPos(clean bool) (pos uint64) {
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
@@ -433,10 +433,8 @@ func (g *Getter) nextPos(clean bool) uint64 {
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
-	var l byte
-	var pos uint64
-	for l == 0 {
-		g.touch()
+	for l := byte(0); l == 0; {
+		//g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
