@@ -377,7 +377,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		false,
 		forkValidator,
 		maxBlockBroadcastPeers,
-		cfg.DropUselessPeers,
 		logger,
 	)
 	if err != nil {

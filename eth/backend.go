@@ -523,7 +523,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
 		maxBlockBroadcastPeers,
-		config.DropUselessPeers,
 		logger,
 	)
 	if err != nil {
