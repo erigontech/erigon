@@ -101,7 +101,7 @@ func appendBytes32(data ...[]byte) []byte {
 		var padded [32]byte
 
 		if l > 0 && l <= 32 {
-			copy(padded[32-l:], v[:])
+			copy(padded[32-l:], v)
 		}
 
 		result = append(result, padded[:]...)

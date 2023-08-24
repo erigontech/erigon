@@ -298,10 +298,11 @@ func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.
 				continue
 			}
 
+			hash := transaction.Hash
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				receipt, errs[i] = node.GetTransactionReceipt(transaction.Hash)
+				receipt, errs[i] = node.GetTransactionReceipt(hash)
 				path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
 				rawReceipt := getReceiptBytes(receipt)
 				lock.Lock()
@@ -375,7 +376,7 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 		nLeaves := uint64(2) << (merkleTreeDepth - depth)
 
 		// The pivot leaf is the last leaf which is included in the left subtree
-		pivotLeaf := uint64(leftBound + nLeaves/2 - 1)
+		pivotLeaf := leftBound + nLeaves/2 - 1
 
 		if targetIndex > pivotLeaf {
 			// Get the root hash to the merkle subtree to the left
@@ -437,6 +438,11 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 				}
 
 				subTreeMerkleRoot, err := merkle_tree.HashTreeRoot(leaves)
+
+				if err != nil {
+					return nil, err
+				}
+
 				reversedProof = append(reversedProof, subTreeMerkleRoot[:])
 			}
 
