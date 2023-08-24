@@ -832,7 +832,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	if err != nil {
 		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
-	fmt.Println("NODES: ", nodes)
 
 	cfg.BootstrapNodes = nodes
 }

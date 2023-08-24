@@ -343,7 +343,7 @@ func MainnetGenesisBlock() *types.Genesis {
 	}
 }
 
-// HoleskyGenesisBlock returns the Ethereum main net genesis block.
+// HoleskyGenesisBlock returns the Holesky main net genesis block.
 func HoleskyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HoleskyChainConfig,
