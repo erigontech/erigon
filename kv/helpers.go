@@ -24,8 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func DefaultPageSize() uint64 {
