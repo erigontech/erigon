@@ -22,8 +22,7 @@ func TestExecutionSpec(t *testing.T) {
 	// TODO(yperbasis): fix me
 	bt.skipLoad(`^cancun/`)
 
-	// TODO(yperbasis): re-enable checkStateRoot
-	checkStateRoot := false
+	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
