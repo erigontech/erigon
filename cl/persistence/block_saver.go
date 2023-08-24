@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -51,7 +50,6 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 		return err
 	}
 	defer tx.Rollback()
-	s := time.Now()
 
 	if err := beacon_indicies.IterateBeaconIndicies(ctx, tx, from, from+count, func(_ uint64, beaconBlockRoot, _, _ libcommon.Hash, _ bool) bool {
 		_, path := RootToPaths(beaconBlockRoot, b.cfg)
@@ -60,7 +58,6 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 	}); err != nil {
 		return err
 	}
-	fmt.Println(time.Since(s))
 
 	if err := beacon_indicies.PruneIndicies(ctx, tx, from, from+count); err != nil {
 		return err
