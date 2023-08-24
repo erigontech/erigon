@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
