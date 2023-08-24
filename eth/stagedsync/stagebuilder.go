@@ -43,8 +43,6 @@ func MiningStages(
 				if badBlockUnwind {
 					return nil
 				}
-				//fmt.Println("BorHeimdallForward", "mine")
-				//defer fmt.Println("BorHeimdallForward", "mine", "DONE")
 				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, true, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
