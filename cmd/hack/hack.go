@@ -20,6 +20,9 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -30,12 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	librlp "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -45,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -56,6 +54,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -1356,33 +1356,6 @@ func dumpState(chaindata string) error {
 	return nil
 }
 
-type NewPooledTransactionHashesPacket68 struct {
-	Types  []byte
-	Sizes  []uint32
-	Hashes []libcommon.Hash
-}
-
-func rlptest() error {
-	var p = NewPooledTransactionHashesPacket68{
-		Types:  []byte{44, 200},
-		Sizes:  []uint32{56, 57680},
-		Hashes: []libcommon.Hash{{}, {}},
-	}
-	b, err := rlp.EncodeToBytes(&p)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%x\n", b)
-	var hashes []byte
-	for _, h := range p.Hashes {
-		hashes = append(hashes, h[:]...)
-	}
-	b = make([]byte, librlp.AnnouncementsLen(p.Types, p.Sizes, hashes))
-	l := librlp.EncodeAnnouncements(p.Types, p.Sizes, hashes, b)
-	fmt.Printf("%x\n%d %d\n", b, len(b), l)
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1514,8 +1487,6 @@ func main() {
 		err = readSeg(*chaindata)
 	case "dumpState":
 		err = dumpState(*chaindata)
-	case "rlptest":
-		err = rlptest()
 	case "readAccountAtVersion":
 		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
