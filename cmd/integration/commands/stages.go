@@ -1506,6 +1506,8 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockReader, blockWriter := blocksIO(db, logger)
 	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
+	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
+
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",
@@ -1520,6 +1522,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		blockBufferSize,
 		false,
 		nil,
+		maxBlockBroadcastPeers,
 		ethconfig.Defaults.DropUselessPeers,
 		logger,
 	)
@@ -1602,6 +1605,7 @@ func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, blockReader 
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
+		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
 			if config.HeimdallgRPCAddress != "" {
 				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)

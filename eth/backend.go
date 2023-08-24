@@ -488,6 +488,26 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
+	// limit "new block" broadcasts to at most 10 random peers at time
+	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
+
+	// unlimited "new block" broadcasts to all peers for blocks announced by Bor validators
+	if borEngine, ok := backend.engine.(*bor.Bor); ok {
+		defaultValue := maxBlockBroadcastPeers(nil)
+		maxBlockBroadcastPeers = func(header *types.Header) uint {
+			isValidator, err := borEngine.IsValidator(header)
+			if err != nil {
+				logger.Error("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
+				return defaultValue
+			}
+			if isValidator {
+				// 0 means send to all
+				return 0
+			}
+			return defaultValue
+		}
+	}
+
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
 		stack.Config().NodeName(),
@@ -502,6 +522,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
+		maxBlockBroadcastPeers,
 		config.DropUselessPeers,
 		logger,
 	)
