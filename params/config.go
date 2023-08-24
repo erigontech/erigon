@@ -51,6 +51,7 @@ func readChainSpec(filename string) *chain.Config {
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	HoleskyGenesisHash    = libcommon.HexToHash("0xff9006519a8ce843ac9c28549d24211420b546e12ce2d170c77a8cca7964f23d")
 	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
@@ -68,6 +69,9 @@ var (
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
+
+	// HoleskyChainConfi contains the chain parameters to run a node on the Holesky test network.
+	HoleskyChainConfig = readChainSpec("chainspecs/holesky.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
@@ -191,6 +195,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	switch chain {
 	case networkname.MainnetChainName:
 		return MainnetChainConfig
+	case networkname.HoleskyChainName:
+		return HoleskyChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
 	case networkname.GoerliChainName:
@@ -214,6 +220,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 	switch chain {
 	case networkname.MainnetChainName:
 		return &MainnetGenesisHash
+	case networkname.HoleskyChainName:
+		return &HoleskyGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
 	case networkname.GoerliChainName:
@@ -237,6 +245,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 	switch {
 	case genesisHash == MainnetGenesisHash:
 		return MainnetChainConfig
+	case genesisHash == HoleskyGenesisHash:
+		return HoleskyChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
 	case genesisHash == GoerliGenesisHash:
