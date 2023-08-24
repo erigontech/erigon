@@ -584,6 +584,15 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	}); err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
+
+	// This is a hack to make us work with erigon 2.48 peers that have --sentry.drop-useless-peers
+	// If we reply with an empty list, we're going to be considered useless and kicked.
+	// Once enough of erigon nodes are updated in the network past this commit, this check should be removed,
+	// because it is totally acceptable to return an empty list.
+	if len(headers) == 0 {
+		return nil
+	}
+
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          query.RequestId,
 		BlockHeadersPacket: headers,
