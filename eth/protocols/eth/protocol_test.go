@@ -115,7 +115,6 @@ func TestEth66Messages(t *testing.T) {
 		blockBody    *types.Body
 		blockBodyRlp rlp.RawValue
 		txs          []types.Transaction
-		txRlps       []rlp.RawValue
 		hashes       []libcommon.Hash
 		receipts     []*types.Receipt
 		receiptsRlp  rlp.RawValue
@@ -143,7 +142,6 @@ func TestEth66Messages(t *testing.T) {
 				t.Fatal(err1)
 			}
 			txs = append(txs, tx)
-			txRlps = append(txRlps, rlpdata)
 		}
 	}
 	// init the block body data, both object and rlp form
