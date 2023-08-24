@@ -85,6 +85,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		growthStep:      2 * datasize.GB,
 		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
+		label:           kv.InMem,
 	}
 	return opts
 }
@@ -803,7 +804,7 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.label == kv.ChainDB {
 		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
-		kv.DbCommitAudit.Update(latency.Audit.Seconds())
+		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
 		kv.DbCommitWrite.Update(latency.Write.Seconds())
 		kv.DbCommitSync.Update(latency.Sync.Seconds())
 		kv.DbCommitEnding.Update(latency.Ending.Seconds())

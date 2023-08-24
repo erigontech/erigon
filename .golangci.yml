@@ -8,6 +8,7 @@ linters:
     - unused
     - performance
   disable:
+    - gosec
     - exhaustive
     - musttag
     - contextcheck

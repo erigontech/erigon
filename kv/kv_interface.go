@@ -82,29 +82,29 @@ const Unlim int = -1
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
-	DbSize    = metrics.NewCounter(`db_size`)    //nolint
-	TxLimit   = metrics.NewCounter(`tx_limit`)   //nolint
-	TxSpill   = metrics.NewCounter(`tx_spill`)   //nolint
-	TxUnspill = metrics.NewCounter(`tx_unspill`) //nolint
-	TxDirty   = metrics.NewCounter(`tx_dirty`)   //nolint
+	DbSize    = metrics.GetOrCreateCounter(`db_size`)    //nolint
+	TxLimit   = metrics.GetOrCreateCounter(`tx_limit`)   //nolint
+	TxSpill   = metrics.GetOrCreateCounter(`tx_spill`)   //nolint
+	TxUnspill = metrics.GetOrCreateCounter(`tx_unspill`) //nolint
+	TxDirty   = metrics.GetOrCreateCounter(`tx_dirty`)   //nolint
 
-	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`)   //nolint
-	DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
-	DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
-	DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
-	DbCommitWrite       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)         //nolint
-	DbCommitSync        = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)          //nolint
-	DbCommitEnding      = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`)        //nolint
-	DbCommitTotal       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)         //nolint
+	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
+	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
+	//DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
+	//DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
+	DbCommitWrite  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)  //nolint
+	DbCommitSync   = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)   //nolint
+	DbCommitEnding = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`) //nolint
+	DbCommitTotal  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)  //nolint
 
-	DbPgopsNewly   = metrics.NewCounter(`db_pgops{phase="newly"}`)   //nolint
-	DbPgopsCow     = metrics.NewCounter(`db_pgops{phase="cow"}`)     //nolint
-	DbPgopsClone   = metrics.NewCounter(`db_pgops{phase="clone"}`)   //nolint
-	DbPgopsSplit   = metrics.NewCounter(`db_pgops{phase="split"}`)   //nolint
-	DbPgopsMerge   = metrics.NewCounter(`db_pgops{phase="merge"}`)   //nolint
-	DbPgopsSpill   = metrics.NewCounter(`db_pgops{phase="spill"}`)   //nolint
-	DbPgopsUnspill = metrics.NewCounter(`db_pgops{phase="unspill"}`) //nolint
-	DbPgopsWops    = metrics.NewCounter(`db_pgops{phase="wops"}`)    //nolint
+	DbPgopsNewly   = metrics.GetOrCreateCounter(`db_pgops{phase="newly"}`)   //nolint
+	DbPgopsCow     = metrics.GetOrCreateCounter(`db_pgops{phase="cow"}`)     //nolint
+	DbPgopsClone   = metrics.GetOrCreateCounter(`db_pgops{phase="clone"}`)   //nolint
+	DbPgopsSplit   = metrics.GetOrCreateCounter(`db_pgops{phase="split"}`)   //nolint
+	DbPgopsMerge   = metrics.GetOrCreateCounter(`db_pgops{phase="merge"}`)   //nolint
+	DbPgopsSpill   = metrics.GetOrCreateCounter(`db_pgops{phase="spill"}`)   //nolint
+	DbPgopsUnspill = metrics.GetOrCreateCounter(`db_pgops{phase="unspill"}`) //nolint
+	DbPgopsWops    = metrics.GetOrCreateCounter(`db_pgops{phase="wops"}`)    //nolint
 	/*
 		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
 		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
@@ -138,9 +138,9 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
-	GcLeafMetric     = metrics.NewCounter(`db_gc_leaf`)     //nolint
-	GcOverflowMetric = metrics.NewCounter(`db_gc_overflow`) //nolint
-	GcPagesMetric    = metrics.NewCounter(`db_gc_pages`)    //nolint
+	GcLeafMetric     = metrics.GetOrCreateCounter(`db_gc_leaf`)     //nolint
+	GcOverflowMetric = metrics.GetOrCreateCounter(`db_gc_overflow`) //nolint
+	GcPagesMetric    = metrics.GetOrCreateCounter(`db_gc_pages`)    //nolint
 
 )
 
