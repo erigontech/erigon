@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -101,6 +102,11 @@ type AggregatorV3 struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
+	salt, err := getIndicesSaltFromDB(db)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{
 		ctx:              ctx,
@@ -116,50 +122,115 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		backgroundResult: &BackgroundResult{},
 		logger:           logger,
 	}
-	var err error
 	cfg := domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			withLocalityIndex: true, compression: CompressNone, historyLargeValues: false,
+		},
 		domainLargeValues: AccDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: false}}
-	if a.accounts, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
+	}
+	if a.accounts, err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			withLocalityIndex: true, compression: CompressNone, historyLargeValues: false,
+		},
 		domainLargeValues: StorageDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: false}}
-	if a.storage, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
+	}
+	if a.storage, err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
+		},
 		domainLargeValues: CodeDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true}}
-	if a.code, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
+	}
+	if a.code, err = NewDomain(cfg, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			withLocalityIndex: false, compression: CompressNone, historyLargeValues: true,
+		},
 		domainLargeValues: CommitmentDomainLargeValues,
 		compress:          CompressNone,
-		hist:              histCfg{withLocalityIndex: false, compression: CompressNone, historyLargeValues: true}}
-	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
+	}
+	commitd, err := NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
-	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
+	idxCfg := iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	a.recalcMaxTxNum()
 
 	return a, nil
 }
+
+// getIndicesSaltFromDB - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
+func getIndicesSaltFromDB(db kv.RoDB) (salt *uint32, err error) {
+	rwdb, ok := db.(kv.RwDB)
+	if !ok { // if db is read-only then we will not create new indices. and can read salt from idx files.
+		return nil, err
+	}
+
+	var saltKey = []byte("agg_salt")
+
+	if err = rwdb.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.DatabaseInfo, saltKey)
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 {
+			return nil
+		}
+		saltV := binary.BigEndian.Uint32(v)
+		salt = &saltV
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if salt != nil {
+		return salt, nil
+	}
+
+	if err = rwdb.Update(context.Background(), func(tx kv.RwTx) error {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return err
+		}
+		saltV := binary.BigEndian.Uint32(seedBytes)
+		salt = &saltV
+		if err := tx.Put(kv.DatabaseInfo, saltKey, seedBytes); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return salt, nil
+}
+
 func (a *AggregatorV3) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
 func (a *AggregatorV3) DisableFsync() {
 	a.accounts.DisableFsync()
