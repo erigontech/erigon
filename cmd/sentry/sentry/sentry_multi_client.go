@@ -267,6 +267,7 @@ type MultiClient struct {
 	blockReader                       services.FullBlockReader
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
+	maxBlockBroadcastPeers            func(*types.Header) uint
 
 	historyV3        bool
 	dropUselessPeers bool
@@ -287,6 +288,7 @@ func NewMultiClient(
 	blockBufferSize int,
 	logPeerInfo bool,
 	forkValidator *engine_helpers.ForkValidator,
+	maxBlockBroadcastPeers func(*types.Header) uint,
 	dropUselessPeers bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
@@ -319,6 +321,7 @@ func NewMultiClient(
 		logPeerInfo:                       logPeerInfo,
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
+		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		dropUselessPeers:                  dropUselessPeers,
 		logger:                            logger,
 	}

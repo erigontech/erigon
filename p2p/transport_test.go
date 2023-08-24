@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"sync"
@@ -144,5 +145,56 @@ func TestProtocolHandshakeErrors(t *testing.T) {
 		if !reflect.DeepEqual(err, test.err) {
 			t.Errorf("test %d: error mismatch: got %q, want %q", i, err, test.err)
 		}
+	}
+}
+
+func TestDisconnectMessagePayloadDecode(t *testing.T) {
+	var buffer bytes.Buffer
+	err := DisconnectMessagePayloadEncode(&buffer, DiscTooManyPeers)
+	if err != nil {
+		t.Error(err)
+	}
+	reason, err := DisconnectMessagePayloadDecode(&buffer)
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscTooManyPeers {
+		t.Fail()
+	}
+
+	// plain integer
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{uint8(DiscTooManyPeers)}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscTooManyPeers {
+		t.Fail()
+	}
+
+	// single-element RLP list
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{0xC1, uint8(DiscTooManyPeers)}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscTooManyPeers {
+		t.Fail()
+	}
+
+	// empty RLP list
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{0xC0}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscRequested {
+		t.Fail()
+	}
+
+	// empty payload
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscRequested {
+		t.Fail()
 	}
 }
