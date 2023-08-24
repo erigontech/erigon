@@ -24,7 +24,7 @@ func TestArchiveWriter(t *testing.T) {
 	openWriter := func(t testing.TB, tmp, name string, compFlags FileCompression) ArchiveWriter {
 		t.Helper()
 		file := filepath.Join(tmp, name)
-		comp, err := compress.NewCompressor(context.Background(), "", file, tmp, 100, 1, log.LvlDebug, logger)
+		comp, err := compress.NewCompressor(context.Background(), "", file, tmp, 8, 1, log.LvlDebug, logger)
 		require.NoError(t, err)
 		return NewArchiveWriter(comp, compFlags)
 	}
