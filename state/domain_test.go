@@ -421,7 +421,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
-	txs := uint64(500)
+	txs := uint64(1000)
 
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -533,12 +533,12 @@ func TestHistory(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d, txs := filledDomain(t, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	//ctx := context.Background()
+	//tx, err := db.BeginRw(ctx)
+	//require.NoError(t, err)
+	//defer tx.Rollback()
 
-	collateAndMerge(t, db, tx, d, txs)
+	collateAndMerge(t, db, nil, d, txs)
 	checkHistory(t, db, d, txs)
 }
 

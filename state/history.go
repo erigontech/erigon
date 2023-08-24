@@ -710,7 +710,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			binary.BigEndian.PutUint64(keyBuf[lk:], txNum)
 			//TODO: use cursor range
 			if h.historyLargeValues {
-				val, err := roTx.GetOne(h.historyValsTable, keyBuf[:lk])
+				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
 				if err != nil {
 					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, k, err)
 				}
