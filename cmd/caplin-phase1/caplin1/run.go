@@ -120,7 +120,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	}
 
 	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, db)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db, database_config)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db, haveDatabaseConfig)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")
