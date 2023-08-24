@@ -42,16 +42,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		)
 		evm.IntraBlockState().GetState(contract.Address(), &slot, &current)
 		// Check slot presence in the access list
-		if addrPresent, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
+		if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
 			cost = params.ColdSloadCostEIP2929
 			// If the caller cannot afford the cost, this change will be rolled back
 			evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot)
-			if !addrPresent {
-				// Once we're done with YOLOv2 and schedule this for mainnet, might
-				// be good to remove this panic here, which is just really a
-				// canary to have during testing
-				panic("impossible case: address was not present in access list during sstore op")
-			}
 		}
 		var value uint256.Int
 		value.Set(y)
