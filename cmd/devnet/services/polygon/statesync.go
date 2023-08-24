@@ -54,7 +54,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 
 	for _ /*key*/, event := range h.pendingSyncRecords {
 		if event.ID >= fromID {
-			if event.Time.Unix() <= to {
+			if event.Time.Unix() < to {
 				events = append(events, event)
 			}
 
@@ -94,7 +94,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	//}
 
 	h.logger.Info("Processed sync request",
-		"from", fromID, "to", time.Unix(to, 0),
+		"from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime,
 		"pending", len(h.pendingSyncRecords), "filtered", len(events),
 		"sent", fmt.Sprintf("%d-%d", events[0].ID, events[len(events)-1].ID))
 

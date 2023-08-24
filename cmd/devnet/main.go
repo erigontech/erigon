@@ -378,7 +378,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					BorStateSyncDelay:  10 * time.Second,
+					BorStateSyncDelay:  5 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
