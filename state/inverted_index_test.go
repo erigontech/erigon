@@ -27,16 +27,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 )
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
@@ -54,7 +52,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
-	ii, err := NewInvertedIndex(dir, dir, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, nil, logger)
+	salt := uint32(1)
+	cfg := iiCfg{salt: &salt, dir: dir, tmpdir: dir}
+	ii, err := NewInvertedIndex(cfg, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -441,7 +441,9 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	// Recreate InvertedIndex to scan the files
 	var err error
-	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, false, nil, logger)
+	salt := uint32(1)
+	cfg := iiCfg{salt: &salt, dir: path, tmpdir: path}
+	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, false, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()
 
@@ -512,11 +514,7 @@ func TestChangedKeysIterator(t *testing.T) {
 }
 
 func TestScanStaticFiles(t *testing.T) {
-	logger := log.New()
-	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
-	}
+	ii := emptyTestInvertedIndex(1)
 	files := []string{
 		"test.0-1.ef",
 		"test.1-2.ef",
@@ -536,11 +534,7 @@ func TestScanStaticFiles(t *testing.T) {
 }
 
 func TestCtxFiles(t *testing.T) {
-	logger := log.New()
-	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
-	}
+	ii := emptyTestInvertedIndex(1)
 	files := []string{
 		"test.0-1.ef", // overlap with same `endTxNum=4`
 		"test.1-2.ef",

@@ -79,17 +79,17 @@ type History struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
-	wal    *historyWAL
-	logger log.Logger
+	wal *historyWAL
 }
 
 type histCfg struct {
+	iiCfg              iiCfg
 	compression        FileCompression
 	historyLargeValues bool
 	withLocalityIndex  bool
 }
 
-func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
 	h := History{
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:        historyValsTable,
@@ -97,11 +97,10 @@ func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenam
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
 		historyLargeValues:      cfg.historyLargeValues,
-		logger:                  logger,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}

@@ -271,7 +271,6 @@ type Domain struct {
 	wal       *domainWAL
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
-	logger       log.Logger
 
 	/*
 	   not large:
@@ -294,23 +293,21 @@ type domainCfg struct {
 	domainLargeValues bool
 }
 
-func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
-	baseDir := filepath.Dir(dir)
+func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	d := &Domain{
-		dir:         filepath.Join(baseDir, "warm"),
+		dir:         filepath.Join(filepath.Dir(cfg.hist.iiCfg.dir), "warm"),
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
-		logger:      logger,
 
 		domainLargeValues: cfg.domainLargeValues,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
 		return nil, err
 	}
 

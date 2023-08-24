@@ -15,10 +15,9 @@ import (
 )
 
 func TestScanStaticFilesLocality(t *testing.T) {
-	logger, baseName := log.New(), "test"
 
 	t.Run("new", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: baseName, aggregationStep: 1, dir: "", tmpdir: "", logger: logger}
+		ii := emptyTestInvertedIndex(1)
 		ii.enableLocalityIndex()
 		files := []string{
 			"test.0-1.l",
@@ -36,7 +35,7 @@ func TestScanStaticFilesLocality(t *testing.T) {
 		require.Equal(t, 5, int(ii.coldLocalityIdx.file.endTxNum))
 	})
 	t.Run("overlap", func(t *testing.T) {
-		ii := &InvertedIndex{filenameBase: baseName, aggregationStep: 1, dir: "", tmpdir: "", logger: logger}
+		ii := emptyTestInvertedIndex(1)
 		ii.enableLocalityIndex()
 		ii.warmLocalityIdx.scanStateFiles([]string{
 			"test.0-50.l",

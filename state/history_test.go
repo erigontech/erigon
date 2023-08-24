@@ -59,8 +59,10 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	cfg := histCfg{withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: largeValues}
-	h, err := NewHistory(cfg, dir, dir, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
+	salt := uint32(1)
+	cfg := histCfg{iiCfg: iiCfg{salt: &salt, dir: dir, tmpdir: dir},
+		withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: largeValues}
+	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
@@ -824,10 +826,8 @@ func TestIterateChanged2(t *testing.T) {
 }
 
 func TestScanStaticFilesH(t *testing.T) {
-	logger := log.New()
-	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+	h := &History{InvertedIndex: emptyTestInvertedIndex(1),
+		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
 		"test.0-1.v",

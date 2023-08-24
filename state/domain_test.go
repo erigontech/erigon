@@ -77,10 +77,14 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 		return tcfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
+	salt := uint32(1)
 	cfg := domainCfg{
 		domainLargeValues: AccDomainLargeValues,
-		hist:              histCfg{withLocalityIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues}}
-	d, err := NewDomain(cfg, coldDir, coldDir, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
+		hist: histCfg{
+			iiCfg:             iiCfg{salt: &salt, dir: coldDir, tmpdir: coldDir},
+			withLocalityIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues,
+		}}
+	d, err := NewDomain(cfg, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -1033,10 +1037,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 }
 
 func TestScanStaticFilesD(t *testing.T) {
-	logger := log.New()
-	ii := &Domain{History: &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger}, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+	ii := &Domain{History: &History{InvertedIndex: emptyTestInvertedIndex(1)},
+		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
 		"test.0-1.kv",

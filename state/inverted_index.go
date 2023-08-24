@@ -51,17 +51,18 @@ import (
 )
 
 type InvertedIndex struct {
+	iiCfg
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles atomic.Pointer[[]ctxItem]
 
-	indexKeysTable       string // txnNum_u64 -> key (k+auto_increment)
-	indexTable           string // k -> txnNum_u64 , Needs to be table with DupSort
-	dir, warmDir, tmpdir string // Directory where static files are created
-	filenameBase         string
-	aggregationStep      uint64
+	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
+	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
+	warmDir         string // Directory where static files are created
+	filenameBase    string
+	aggregationStep uint64
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
@@ -88,8 +89,13 @@ type InvertedIndex struct {
 	compressWorkers       int
 }
 
+type iiCfg struct {
+	salt        *uint32
+	dir, tmpdir string
+}
+
 func NewInvertedIndex(
-	dir, tmpdir string,
+	cfg iiCfg,
 	aggregationStep uint64,
 	filenameBase string,
 	indexKeysTable string,
@@ -98,11 +104,10 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	baseDir := filepath.Dir(dir)
+	baseDir := filepath.Dir(cfg.dir)
 	ii := InvertedIndex{
-		dir:                     dir,
+		iiCfg:                   cfg,
 		warmDir:                 filepath.Join(baseDir, "warm"),
-		tmpdir:                  tmpdir,
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
@@ -139,7 +144,7 @@ func (ii *InvertedIndex) enableLocalityIndex() error {
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	files, err := os.ReadDir(ii.dir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
 	}
 	filteredFiles := make([]string, 0, len(files))
 	for _, f := range files {
@@ -152,7 +157,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	warmFiles := make([]string, 0, len(files))
 	files, err = os.ReadDir(ii.warmDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
 	}
 	for _, f := range files {
 		if !f.Type().IsRegular() {
