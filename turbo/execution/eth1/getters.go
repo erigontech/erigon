@@ -62,6 +62,13 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
 	}
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+	}
+	if td == nil {
+		return &execution.GetBodyResponse{Body: nil}, nil
+	}
 	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: coild not read body: %s", err)
@@ -87,6 +94,13 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if err == errNotFound {
+		return &execution.GetHeaderResponse{Header: nil}, nil
+	}
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
+	}
+	if td == nil {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
 	if err != nil {
@@ -124,6 +138,13 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+	}
+	td, err := rawdb.ReadTd(tx, hash, *blockNumber)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+	}
+	if td == nil {
+		return false, nil
 	}
 	return expectedHash == hash, nil
 }
