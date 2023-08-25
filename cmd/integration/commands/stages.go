@@ -1523,7 +1523,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		false,
 		nil,
 		maxBlockBroadcastPeers,
-		ethconfig.Defaults.DropUselessPeers,
 		logger,
 	)
 	if err != nil {
