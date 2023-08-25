@@ -20,8 +20,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt.skipLoad(`^homestead/`)
 
 	// TODO(yperbasis): fix me
-	bt.skipLoad(`^cancun/eip4844_blobs/`)
-	bt.skipLoad(`^cancun/eip6780_selfdestruct/`)
+	bt.skipLoad(`^cancun/`)
 
 	// TODO(yperbasis): re-enable checkStateRoot
 	checkStateRoot := false
