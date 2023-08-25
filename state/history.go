@@ -65,7 +65,6 @@ type History struct {
 
 	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	compressWorkers         int
-	compressHistoryVals     bool
 	compression             FileCompression
 	integrityFileExtensions []string
 

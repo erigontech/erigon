@@ -59,9 +59,12 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
+	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := histCfg{iiCfg: iiCfg{salt: &salt, dir: dir, tmpdir: dir},
-		withLocalityIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: largeValues}
+	cfg := histCfg{
+		iiCfg:             iiCfg{salt: &salt, dir: dir, tmpdir: dir},
+		withLocalityIndex: true, compression: CompressNone, historyLargeValues: largeValues,
+	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()

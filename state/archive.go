@@ -5,9 +5,9 @@ import "github.com/ledgerwatch/erigon-lib/compress"
 type FileCompression uint8
 
 const (
-	CompressNone FileCompression = 0 // no compression
-	CompressKeys FileCompression = 1 // compress keys only
-	CompressVals FileCompression = 2 // compress values only
+	CompressNone FileCompression = 0b0  // no compression
+	CompressKeys FileCompression = 0b1  // compress keys only
+	CompressVals FileCompression = 0b10 // compress values only
 )
 
 type getter struct {
