@@ -264,6 +264,7 @@ type Sync struct {
 // Chains where snapshots are enabled by default
 var ChainsWithSnapshots = map[string]struct{}{
 	networkname.MainnetChainName:    {},
+	networkname.HoleskyChainName:    {},
 	networkname.SepoliaChainName:    {},
 	networkname.GoerliChainName:     {},
 	networkname.MumbaiChainName:     {},
