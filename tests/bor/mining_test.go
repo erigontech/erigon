@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 )
@@ -73,13 +74,17 @@ func TestMiningBenchmark(t *testing.T) {
 			panic(err)
 		}
 
-		time.Sleep(200 * time.Millisecond)
+		var nodeInfo *remote.NodesInfoReply
 
-		nodeInfo, err := ethBackend.NodesInfo(1)
-		if err != nil {
-			panic(err)
+		for nodeInfo == nil || len(nodeInfo.NodesInfo) == 0 {
+			nodeInfo, err = ethBackend.NodesInfo(1)
+
+			if err != nil {
+				panic(err)
+			}
+
+			time.Sleep(200 * time.Millisecond)
 		}
-
 		// nolint : staticcheck
 		stacks = append(stacks, stack)
 

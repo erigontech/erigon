@@ -140,8 +140,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 		DeprecatedTxPool: ethconfig.Defaults.DeprecatedTxPool,
 		RPCGasCap:        50000000,
 		RPCTxFeeCap:      1, // 1 ether
-		Snapshot:         ethconfig.Defaults.Snapshot,
-		DropUselessPeers: ethconfig.Defaults.DropUselessPeers,
+		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
 		P2PEnabled:       true,
 		StateStream:      true,
 	}
