@@ -241,11 +241,6 @@ type EthGetLogs struct {
 	Result []Log `json:"result"`
 }
 
-type EthGetTransactionCount struct {
-	CommonResponse
-	Result hexutil.Uint64 `json:"result"`
-}
-
 // AccountResult is the result struct for GetProof
 type AccountResult struct {
 	Address      libcommon.Address `json:"address"`

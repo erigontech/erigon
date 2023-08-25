@@ -49,6 +49,9 @@ type SyncMode string
 
 const (
 	TriesInMemory = 128
+
+	// See gas_limit in https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	SysCallGasLimit = uint64(30_000_000)
 )
 
 type RejectedTx struct {
@@ -216,7 +219,8 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		state.SystemAddress,
 		&contract,
 		0, u256.Num0,
-		math.MaxUint64, u256.Num0,
+		SysCallGasLimit,
+		u256.Num0,
 		nil, nil,
 		data, nil, false,
 		true, // isFree
@@ -257,7 +261,8 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		contract,
 		nil, // to
 		0, u256.Num0,
-		math.MaxUint64, u256.Num0,
+		SysCallGasLimit,
+		u256.Num0,
 		nil, nil,
 		data, nil, false,
 		true, // isFree

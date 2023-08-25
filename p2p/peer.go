@@ -322,11 +322,13 @@ func (p *Peer) handle(msg Msg) error {
 		msg.Discard()
 		go SendItems(p.rw, pongMsg)
 	case msg.Code == discMsg:
-		// This is the last message. We don't need to discard or
-		// check errors because, the connection will be closed after it.
-		var m struct{ R DiscReason }
-		rlp.Decode(msg.Payload, &m)
-		return m.R
+		// This is the last message.
+		// We don't need to discard because the connection will be closed after it.
+		reason, err := DisconnectMessagePayloadDecode(msg.Payload)
+		if err != nil {
+			p.log.Debug("Peer.handle: failed to rlp.Decode msg.Payload", "err", err)
+		}
+		return reason
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
 		msg.Discard()

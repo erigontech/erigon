@@ -35,7 +35,7 @@ func (d *Downloader) DownloadEpoch(ctx context.Context, epoch uint64) error {
 	// NOTE: the downloader does not perform any real verification on these blocks
 	// validation must be done separately
 	for _, v := range blocks {
-		err := d.beacondDB.WriteBlock(v.Data)
+		err := d.beacondDB.WriteBlock(ctx, v.Data, true)
 		if err != nil {
 			return err
 		}

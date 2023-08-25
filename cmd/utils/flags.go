@@ -510,11 +510,6 @@ var (
 		Name:  "sentry.log-peer-info",
 		Usage: "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
 	}
-	SentryDropUselessPeers = cli.BoolFlag{
-		Name:  "sentry.drop-useless-peers",
-		Usage: "Drop useless peers, those returning empty body or header responses",
-		Value: false,
-	}
 	DownloaderAddrFlag = cli.StringFlag{
 		Name:  "downloader.api.addr",
 		Usage: "downloader address '<host>:<port>'",
@@ -1591,10 +1586,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
 		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
-	}
-
-	if ctx.IsSet(SentryDropUselessPeers.Name) {
-		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
 	}
 
 	if ctx.IsSet(TrustedSetupFile.Name) {

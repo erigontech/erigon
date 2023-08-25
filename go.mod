@@ -3,12 +3,11 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230818153309-3aa5249d48c1
+	github.com/erigontech/mdbx-go v0.27.13
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230825043214-9e17cced67ba
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230818153427-cc16b83a89be
-	github.com/ledgerwatch/log/v3 v3.8.0
+	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
-	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.10
 )
 
 require (
@@ -20,7 +19,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/alecthomas/kong v0.8.0
 	github.com/anacrolix/sync v0.4.0
-	github.com/anacrolix/torrent v1.52.0
+	github.com/anacrolix/torrent v1.52.6-0.20230816110201-613470861e67
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -29,14 +28,14 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.3.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
-	github.com/deckarep/golang-set/v2 v2.3.0
+	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/docker/docker v1.6.2
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
-	github.com/emicklei/dot v1.4.2
+	github.com/emicklei/dot v1.6.0
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
-	github.com/go-chi/chi/v5 v5.0.8
+	github.com/go-chi/chi/v5 v5.0.10
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.5.0
@@ -60,6 +59,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/maticnetwork/crand v1.0.2
 	github.com/maticnetwork/polyproto v0.0.2
+	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -87,10 +87,10 @@ require (
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.6
 	github.com/xsleonard/go-merkle v1.1.0
-	go.uber.org/zap v1.24.0
+	go.uber.org/zap v1.25.0
 	golang.org/x/crypto v0.12.0
 	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22
-	golang.org/x/net v0.12.0
+	golang.org/x/net v0.14.0
 	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.11.0
 	golang.org/x/time v0.3.0
@@ -101,8 +101,8 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.23.1
-	pgregory.net/rapid v1.0.0
+	modernc.org/sqlite v1.25.0
+	pgregory.net/rapid v1.1.0
 )
 
 require (
@@ -113,9 +113,9 @@ require (
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/dht/v2 v2.19.2-0.20221121215055-066ad8494444 // indirect
 	github.com/anacrolix/envpprof v1.2.1 // indirect
-	github.com/anacrolix/generics v0.0.0-20230428105757-683593396d68 // indirect
-	github.com/anacrolix/go-libutp v1.3.0 // indirect
-	github.com/anacrolix/log v0.14.0 // indirect
+	github.com/anacrolix/generics v0.0.0-20230816103846-fe11fdc0e0e3 // indirect
+	github.com/anacrolix/go-libutp v1.3.1 // indirect
+	github.com/anacrolix/log v0.14.2 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.2-0.20230527121029-a582b4f397b9 // indirect
@@ -179,7 +179,6 @@ require (
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/libp2p/go-reuseport v0.3.0 // indirect
 	github.com/libp2p/go-yamux/v4 v4.0.0 // indirect
-	github.com/lispad/go-generics-tools v1.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -250,7 +249,6 @@ require (
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.19.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -263,9 +261,9 @@ require (
 	lukechampine.com/uint128 v1.3.0 // indirect
 	modernc.org/cc/v3 v3.40.0 // indirect
 	modernc.org/ccgo/v3 v3.16.13 // indirect
-	modernc.org/libc v1.22.5 // indirect
+	modernc.org/libc v1.24.1 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
-	modernc.org/memory v1.5.0 // indirect
+	modernc.org/memory v1.6.0 // indirect
 	modernc.org/opt v0.1.3 // indirect
 	modernc.org/strutil v1.1.3 // indirect
 	modernc.org/token v1.1.0 // indirect

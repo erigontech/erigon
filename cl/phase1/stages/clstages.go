@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -31,6 +33,7 @@ type Cfg struct {
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
+	indiciesDB      *sql.DB
 	dirs            datadir.Dirs
 }
 
@@ -51,6 +54,7 @@ func ClStagesCfg(
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
 	dirs datadir.Dirs,
+	indiciesDB *sql.DB,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -62,6 +66,7 @@ func ClStagesCfg(
 		forkChoice:      forkChoice,
 		beaconDB:        beaconDB,
 		dirs:            dirs,
+		indiciesDB:      indiciesDB,
 	}
 }
 
@@ -157,12 +162,8 @@ func ConsensusClStages(ctx context.Context,
 			cfg.rpc.BanPeer(block.Peer)
 			return err
 		}
-		// NOTE: this error is ignored and logged only!
-		err := cfg.beaconDB.WriteBlock(block.Data)
-		if err != nil {
-			log.Error("failed to persist block to store", "slot", block.Data.Block.Slot, "err", err)
-		}
-		return nil
+		// Write block to database optimistically if we are very behind.
+		return cfg.beaconDB.WriteBlock(ctx, block.Data, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -394,8 +395,42 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
+					tx, err := cfg.indiciesDB.Begin()
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+					// Fix canonical chain in the indexed datatabase.
+					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, headSlot); err != nil {
+						return err
+					}
+
+					currentRoot := headRoot
+					currentSlot := headSlot
+					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
+					if err != nil {
+						return err
+					}
+					for currentRoot != currentCanonical {
+						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
+							return err
+						}
+						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
+							return err
+						}
+						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(ctx, tx, currentRoot); err != nil {
+							return err
+						}
+						if currentSlot == 0 {
+							break
+						}
+						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
+						if err != nil {
+							return err
+						}
+					}
 					logger.Debug("Imported chain segment", "hash", headRoot, "slot", headSlot)
-					return nil
+					return tx.Commit()
 				},
 			},
 			ListenForForks: {

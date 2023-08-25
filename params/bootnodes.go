@@ -151,6 +151,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "mainnet"
 	case GoerliGenesisHash:
 		net = "goerli"
+	case SepoliaGenesisHash:
+		net = "sepolia"
 	default:
 		return ""
 	}

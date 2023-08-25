@@ -5,7 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 )
 
 type ctxKey int
@@ -26,11 +26,23 @@ func Faucet(ctx context.Context) *accounts.Faucet {
 	return nil
 }
 
-func Heimdall(ctx context.Context) *bor.Heimdall {
+func Heimdall(ctx context.Context) *polygon.Heimdall {
 	if network := devnet.CurrentNetwork(ctx); network != nil {
 		for _, service := range network.Services {
-			if heimdall, ok := service.(*bor.Heimdall); ok {
+			if heimdall, ok := service.(*polygon.Heimdall); ok {
 				return heimdall
+			}
+		}
+	}
+
+	return nil
+}
+
+func ProofGenerator(ctx context.Context) *polygon.ProofGenerator {
+	if network := devnet.CurrentNetwork(ctx); network != nil {
+		for _, service := range network.Services {
+			if proofGenerator, ok := service.(*polygon.ProofGenerator); ok {
+				return proofGenerator
 			}
 		}
 	}

@@ -28,7 +28,7 @@ We have Go, Rust and C++ implementations of `RoKV` interface.
 Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](../../ethdb/Readme.md)
 
 MDBX: [docs](https://libmdbx.website.yandexcloud.net)
-and [mdbx.h](https://github.com/torquem-ch/libmdbx/blob/master/mdbx.h)
+and [mdbx.h](https://github.com/erigontech/libmdbx/blob/master/mdbx.h)
 
 
 ### How RAM used
