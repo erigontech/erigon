@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
@@ -63,11 +64,6 @@ type TraceCallStateDiffStorage struct {
 	To   libcommon.Hash `json:"to"`
 }
 
-type TraceTransaction struct {
-	CommonResponse
-	Result []TransactionTrace `json:"result"`
-}
-
 type TransactionTrace struct {
 	Type                string          `json:"type"`
 	Action              TraceCallAction `json:"action"`
@@ -93,7 +89,7 @@ var TraceOpts = struct {
 	StateDiff: "stateDiff",
 }
 
-func (reqGen *requestGenerator) TraceCall(blockRef string, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
+func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	var b TraceCall
 
 	if args.Data == nil {
@@ -130,29 +126,17 @@ func (reqGen *requestGenerator) TraceCall(blockRef string, args ethapi.CallArgs,
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) traceCall(blockRef string, callArgs string, traceOpts string) (RPCMethod, string) {
+func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,%s,"%s"],"id":%d}`
-	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef, req.reqID)
+	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
 }
 
 func (reqGen *requestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {
-	var b TraceTransaction
+	var result []TransactionTrace
 
-	method, body := reqGen.traceTransaction(hash)
-	res := reqGen.call(method, body, &b)
-
-	if res.Err != nil {
-		return nil, fmt.Errorf("TraceTransaction rpc failed: %w", res.Err)
+	if err := reqGen.callCli(&result, Methods.TraceTransaction, hash); err != nil {
+		return nil, err
 	}
 
-	if b.Error != nil {
-		return nil, fmt.Errorf("TraceTransaction rpc failed: %w", b.Error)
-	}
-
-	return b.Result, nil
-}
-
-func (req *requestGenerator) traceTransaction(hash libcommon.Hash) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":[%q],"id":%d}`
-	return Methods.TraceTransaction, fmt.Sprintf(template, Methods.TraceTransaction, hash.Hex(), req.reqID)
+	return result, nil
 }

@@ -1,8 +1,7 @@
 {
     "000-fork=Berlin": {
         "_info": {
-            "filling-transition-tool": "evm version 1.12.1-unstable-c7b099b2",
-            "filling-block-build-tool": "evm version 1.12.1-unstable-c7b099b2",
+            "filling-transition-tool": "evm version 1.12.1-unstable-cf01e7db-20230808",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2930.md",
             "reference-spec-version": "c9db53a936c5c9cbe2db32ba0d1b86c4c6e73534"
         },
@@ -33,8 +32,10 @@
                         "chainId": "0x01",
                         "nonce": "0x00",
                         "gasPrice": "0x07",
-                        "value": "0x01",
+                        "gasLimit": "0x04ef00",
                         "to": "0x000000000000000000000000000000000000aaaa",
+                        "value": "0x01",
+                        "data": "0x",
                         "accessList": [
                             {
                                 "address": "0x0000000000000000000000000000000000000000",
@@ -43,10 +44,10 @@
                                 ]
                             }
                         ],
-                        "protected": true,
-                        "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
-                        "data": "0x",
-                        "gasLimit": "0x04ef00"
+                        "v": "0x01",
+                        "r": "0x2e16eb72206c93c471b5894800495ee9c64ae2d9823bcc4d6adeb5d9d9af0dd4",
+                        "s": "0x3be6691e933a0816c59d059a556c27c6753e6ce76d1e357b9201865c80b28df3",
+                        "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
                     }
                 ],
                 "uncleHeaders": []
@@ -111,8 +112,7 @@
     },
     "001-fork=London": {
         "_info": {
-            "filling-transition-tool": "evm version 1.12.1-unstable-c7b099b2",
-            "filling-block-build-tool": "evm version 1.12.1-unstable-c7b099b2",
+            "filling-transition-tool": "evm version 1.12.1-unstable-cf01e7db-20230808",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2930.md",
             "reference-spec-version": "c9db53a936c5c9cbe2db32ba0d1b86c4c6e73534"
         },
@@ -144,8 +144,10 @@
                         "chainId": "0x01",
                         "nonce": "0x00",
                         "gasPrice": "0x07",
-                        "value": "0x01",
+                        "gasLimit": "0x04ef00",
                         "to": "0x000000000000000000000000000000000000aaaa",
+                        "value": "0x01",
+                        "data": "0x",
                         "accessList": [
                             {
                                 "address": "0x0000000000000000000000000000000000000000",
@@ -154,10 +156,10 @@
                                 ]
                             }
                         ],
-                        "protected": true,
-                        "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8",
-                        "data": "0x",
-                        "gasLimit": "0x04ef00"
+                        "v": "0x01",
+                        "r": "0x2e16eb72206c93c471b5894800495ee9c64ae2d9823bcc4d6adeb5d9d9af0dd4",
+                        "s": "0x3be6691e933a0816c59d059a556c27c6753e6ce76d1e357b9201865c80b28df3",
+                        "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
                     }
                 ],
                 "uncleHeaders": []

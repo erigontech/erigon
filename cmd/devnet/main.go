@@ -17,7 +17,7 @@ import (
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 	"github.com/ledgerwatch/erigon/core/types"
 
@@ -276,8 +276,18 @@ func action(ctx *cli.Context) error {
 				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
 				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
 				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
-				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2}},
-				{Text: "BatchProcessTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
+				{Text: "ProcessRootTransfers", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "BatchProcessRootTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
+			},
+		},
+		"child-chain-exit": {
+			Steps: []*scenarios.Step{
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
+				{Text: "DeployRootChainReceiver", Args: []any{"root-funder"}},
+				{Text: "DeployChildChainSender", Args: []any{"child-funder"}},
+				{Text: "ProcessChildTransfers", Args: []any{"child-funder", 1, 2, 2}},
+				//{Text: "BatchProcessTransfers", Args: []any{"child-funder", 1, 10, 2, 2}},
 			},
 		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
@@ -340,6 +350,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 			var heimdallGrpc string
 			var services []devnet.Service
 
+			checkpointOwner := accounts.NewAccount("checkpoint-owner")
+
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
 
@@ -347,9 +359,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
 				}
 
-				services = append(services, bor.NewHeimdall(&config, logger))
+				services = append(services, polygon.NewHeimdall(&config,
+					&polygon.CheckpointConfig{
+						CheckpointBufferTime: 60 * time.Second,
+						CheckpointAccount:    checkpointOwner,
+					},
+					logger))
 
-				heimdallGrpc = bor.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
+				heimdallGrpc = polygon.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
 			}
 
 			return []*devnet.Network{
@@ -361,7 +378,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					BorStateSyncDelay:  30 * time.Second,
+					BorStateSyncDelay:  5 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -402,7 +419,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BaseRPCPort:        8645,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
-						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
+						checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
 					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{

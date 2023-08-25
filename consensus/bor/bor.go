@@ -66,7 +66,6 @@ var (
 	// diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
 	validatorHeaderBytesLength = length.Addr + 20 // address + power
-	// systemAddress              = libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -674,7 +673,10 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			parents = parents[:len(parents)-1]
 		} else {
 			// No explicit parents (or no more left), reach out to the database
-			header = chain.GetHeader(hash, number)
+			if chain != nil {
+				header = chain.GetHeader(hash, number)
+			}
+
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
 			}
@@ -687,7 +689,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 
-		if number < chain.FrozenBlocks() {
+		if chain != nil && number < chain.FrozenBlocks() {
 			break
 		}
 
@@ -697,7 +699,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		default:
 		}
 	}
-	if snap == nil && number <= chain.FrozenBlocks() {
+	if snap == nil && chain != nil && number <= chain.FrozenBlocks() {
 		// Special handling of the headers in the snapshot
 		zeroHeader := chain.GetHeaderByNumber(0)
 		if zeroHeader != nil {
@@ -1142,16 +1144,33 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	return nil
 }
 
-// IsProposer returns true if this instance is the proposer for this block
-func (c *Bor) IsProposer(chain consensus.ChainHeaderReader, block *types.Block) (bool, error) {
-	header := block.Header()
+// IsValidator returns true if this instance is the validator for this block
+func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 	number := header.Number.Uint64()
 
 	if number == 0 {
 		return false, nil
 	}
 
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.snapshot(nil, number-1, header.ParentHash, nil)
+	if err != nil {
+		return false, err
+	}
+
+	currentSigner := c.authorizedSigner.Load()
+
+	return snap.ValidatorSet.HasAddress(currentSigner.signer), nil
+}
+
+// IsProposer returns true if this instance is the proposer for this block
+func (c *Bor) IsProposer(header *types.Header) (bool, error) {
+	number := header.Number.Uint64()
+
+	if number == 0 {
+		return false, nil
+	}
+
+	snap, err := c.snapshot(nil, number-1, header.ParentHash, nil)
 	if err != nil {
 		return false, err
 	}
