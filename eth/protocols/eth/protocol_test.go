@@ -143,7 +143,6 @@ func TestEth66Messages(t *testing.T) {
 				t.Fatal(err1)
 			}
 			txs = append(txs, tx)
-			txRlps = append(txRlps, rlpdata)
 		}
 	}
 	// init the block body data, both object and rlp form
