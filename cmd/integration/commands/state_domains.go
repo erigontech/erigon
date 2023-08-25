@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 
@@ -106,7 +105,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	libstate.CompareRecsplitBtreeIndexes = true
+	//libstate.CompareRecsplitBtreeIndexes = true
 
 	sn, bsn, agg := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
