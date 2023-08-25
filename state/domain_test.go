@@ -1468,7 +1468,11 @@ func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, ke
 	t.Helper()
 
 	data := make(map[string][]upd)
-	r := rand.New(rand.NewSource(time.Now().Unix()))
+	//seed := time.Now().Unix()
+	seed := 31
+	defer t.Logf("generated data with seed %d, keys %d", seed, keyLimit)
+
+	r := rand.New(rand.NewSource(0))
 	if keyLimit == 1 {
 		key1 := generateRandomKey(r, keySize1)
 		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
@@ -1647,8 +1651,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	}
 
 	// aggregate
-	// collateDomainAndPrune(t, tx, d, totalTx, 1)
-	collateAndMerge(t, db, tx, d, totalTx)
+	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
 
 	tx.Commit()
 	tx = nil
@@ -1667,8 +1670,18 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		require.True(t, ok)
 		prefixes++
 		latest := upds[len(upds)-1]
-		if latest.txNum <= totalTx-d.aggregationStep {
-			return
+		if string(latest.value) != string(v) {
+			fmt.Printf("opanki %x\n", k)
+			for li := len(upds) - 1; li >= 0; li-- {
+				latest := upds[li]
+				if bytes.Equal(latest.value, v) {
+					t.Logf("returned value was set with nonce %d/%d (tx %d, step %d)", li+1, len(upds), latest.txNum, latest.txNum/d.aggregationStep)
+				} else {
+					continue
+				}
+				require.EqualValuesf(t, latest.value, v, "key %x txNum %d", k, latest.txNum)
+				break
+			}
 		}
 
 		require.EqualValuesf(t, latest.value, v, "key %x txnum %d", k, latest.txNum)
@@ -1676,20 +1689,20 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, len(data), prefixes, "seen less keys than expected")
 
-	// kc := 0
-	// for key, updates := range data {
-	// 	kc++
-	// 	for i := 1; i < len(updates); i++ {
-	// 		v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
-	// 		require.NoError(t, err)
-	// 		require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
-	// 	}
-	// 	if len(updates) == 0 {
-	// 		continue
-	// 	}
-	// 	v, ok, err := dc.GetLatest([]byte(key), nil, tx)
-	// 	require.NoError(t, err)
-	// 	require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
-	// 	require.True(t, ok)
-	// }
+	kc := 0
+	for key, updates := range data {
+		kc++
+		for i := 1; i < len(updates); i++ {
+			v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
+			require.NoError(t, err)
+			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		v, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		require.NoError(t, err)
+		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
+		require.True(t, ok)
+	}
 }

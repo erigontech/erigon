@@ -1922,12 +1922,21 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
-	dc.d.stats.TotalQueries.Add(1)
-
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
+
+	//iter := sd.storage.Iter()
+	//if iter.Seek(string(prefix)) {
+	//	kx := iter.Key()
+	//	v = iter.Value()
+	//	k = []byte(kx)
+	//
+	//	if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
+	//		heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
+	//	}
+	//}
 
 	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -1946,7 +1955,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum + dc.d.aggregationStep, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -1979,23 +1988,35 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: g, latestOffset: lofft, key: key, val: val, endTxNum: item.endTxNum, reverse: true})
 			}
 		}
-
 	}
 
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
-
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
+			//if string(ci1.key) == string(hexutility.MustDecodeString("301f9a245a0adeb61835403f6fd256dd96d103942d747c6d41e95a5d655bc20ab0fac941c854894cc0ed84cdaf557374b49ed723")) {
+			//	fmt.Printf("found %x\n", ci1.key)
+			//}
 			switch ci1.t {
+			//case RAM_CURSOR:
+			//	if ci1.iter.Next() {
+			//		k = []byte(ci1.iter.Key())
+			//		if k != nil && bytes.HasPrefix(k, prefix) {
+			//			ci1.key = common.Copy(k)
+			//			ci1.val = common.Copy(ci1.iter.Value())
+			//		}
+			//	}
+			//	heap.Push(&cp, ci1)
 			case FILE_CURSOR:
-				if ci1.btCursor != nil && ci1.btCursor.Next() {
-					ci1.key = ci1.btCursor.Key()
-					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-						ci1.val = ci1.btCursor.Value()
-						heap.Push(&cp, ci1)
+				if UseBtree || UseBpsTree {
+					if ci1.btCursor.Next() {
+						ci1.key = ci1.btCursor.Key()
+						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+							ci1.val = ci1.btCursor.Value()
+							heap.Push(&cp, ci1)
+						}
 					}
 				} else {
 					ci1.dg.Reset(ci1.latestOffset)
@@ -2006,6 +2027,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+						heap.Push(&cp, ci1)
 					}
 				}
 			case DB_CURSOR:
@@ -2148,12 +2170,18 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			return err
 		}
 		seek = append(append(seek[:0], k...), v...)
+		//if bytes.HasPrefix(seek, hexutility.MustDecodeString("1a4a4de8fe37b308fea3eb786195af8c813e18f8196bcb830a40cd57f169692572197d70495a7c6d0184c5093dcc960e1384239e")) {
+		//	fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+		//}
 		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 
 		mxPruneSizeDomain.Inc()
 		prunedKeys++
 
 		if dc.d.domainLargeValues {
+			//if bytes.HasPrefix(seek, hexutility.MustDecodeString("1a4a4de8fe37b308fea3eb786195af8c813e18f8196bcb830a40cd57f169692572197d70495a7c6d0184c5093dcc960e1384239e")) {
+			//	fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+			//}
 			//fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 			err = rwTx.Delete(dc.d.valsTable, seek)
 		} else {

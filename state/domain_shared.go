@@ -602,7 +602,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
+			ci1 := heap.Pop(&cp).(*CursorItem)
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
@@ -610,42 +610,36 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
-						heap.Fix(&cp, 0)
-					} else {
-						heap.Pop(&cp)
+						heap.Push(&cp, ci1)
 					}
-				} else {
-					heap.Pop(&cp)
 				}
 			case FILE_CURSOR:
-				if ci1.btCursor.Next() {
-					ci1.key = ci1.btCursor.Key()
-					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-						ci1.val = ci1.btCursor.Value()
-						heap.Fix(&cp, 0)
-					} else {
-						heap.Pop(&cp)
+				if UseBtree || UseBpsTree {
+					if ci1.btCursor.Next() {
+						ci1.key = ci1.btCursor.Key()
+						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+							ci1.val = ci1.btCursor.Value()
+							heap.Push(&cp, ci1)
+						}
 					}
 				} else {
-					heap.Pop(&cp)
+					ci1.dg.Reset(ci1.latestOffset)
+					if !ci1.dg.HasNext() {
+						break
+					}
+					key, _ := ci1.dg.Next(nil)
+					if key != nil && bytes.HasPrefix(key, prefix) {
+						ci1.key = key
+						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+						heap.Push(&cp, ci1)
+					}
 				}
-
-				//if ci1.dg.HasNext() {
-				//	ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-				//	if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-				//		ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-				//		heap.Fix(&cp, 0)
-				//	} else {
-				//		heap.Pop(&cp)
-				//	}
-				//} else {
-				//	heap.Pop(&cp)
-				//}
 			case DB_CURSOR:
 				k, v, err = ci1.c.NextNoDup()
 				if err != nil {
 					return err
 				}
+
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
 					keySuffix := make([]byte, len(k)+8)
@@ -655,9 +649,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 						return err
 					}
 					ci1.val = common.Copy(v)
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Pop(&cp)
+					heap.Push(&cp, ci1)
 				}
 			}
 		}

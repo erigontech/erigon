@@ -601,13 +601,11 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
+			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
-				heap.Fix(&cp, 0)
-			} else {
-				heap.Pop(&cp)
+				heap.Push(&cp, ci1)
 			}
 		}
 
@@ -758,13 +756,11 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
+			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
-				heap.Fix(&cp, 0)
-			} else {
-				heap.Pop(&cp)
+				heap.Push(&cp, ci1)
 			}
 		}
 		// For the rest of types, empty value means deletion
@@ -902,7 +898,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
+			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
 				if lastVal, err = mergeEfs(ci1.val, lastVal, nil); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", ii.filenameBase, err)
@@ -915,9 +911,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
 				//fmt.Printf("heap next push %s [%d] %x\n", ii.indexKeysTable, ci1.endTxNum, ci1.key)
-				heap.Fix(&cp, 0)
-			} else {
-				heap.Pop(&cp)
+				heap.Push(&cp, ci1)
 			}
 		}
 		if keyBuf != nil {
@@ -1063,7 +1057,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			lastKey := common.Copy(cp[0].key)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-				ci1 := cp[0]
+				ci1 := heap.Pop(&cp).(*CursorItem)
 				count := eliasfano32.Count(ci1.val)
 				for i := uint64(0); i < count; i++ {
 					if !ci1.dg2.HasNext() {
@@ -1079,9 +1073,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.Next(nil)
 					ci1.val, _ = ci1.dg.Next(nil)
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Remove(&cp, 0)
+					heap.Push(&cp, ci1)
 				}
 			}
 		}

@@ -355,13 +355,13 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newTx, err := newDb.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer newTx.Rollback()
-
 	newAgg, err := NewAggregatorV3(context.Background(), agg.dir, agg.dir, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
+
+	newTx, err := newDb.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer newTx.Rollback()
 
 	newAgg.SetTx(newTx)
 	defer newAgg.StartWrites().FinishWrites()
