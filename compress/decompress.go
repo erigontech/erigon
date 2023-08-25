@@ -543,6 +543,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
+		if buf == nil { // wordLen == 0, means we have valid record of 0 size. nil - is the marker of "something not found"
+			buf = []byte{}
+		}
 		return buf, g.dataP
 	}
 	bufPos := len(buf) // Tracking position in buf where to insert part of the word
