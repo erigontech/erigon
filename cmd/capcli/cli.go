@@ -108,7 +108,7 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig, sqlDB)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, nil, false, beaconConfig, sqlDB)
 	for _, vv := range resp {
 		err := beaconDB.WriteBlock(ctx, vv, true)
 		if err != nil {
@@ -149,7 +149,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, beaconConfig, sqlDB)
+	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(aferoFS, nil, false, beaconConfig, sqlDB)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 	rpcSource := persistence.NewBeaconRpcSource(beacon)
