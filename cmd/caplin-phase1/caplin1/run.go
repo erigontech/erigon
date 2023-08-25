@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -31,6 +32,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
+
+	database_config := db_config.DefaultDatabaseConfiguration
 
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 
@@ -69,9 +72,17 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	if err := sql_migrations.ApplyMigrations(ctx, tx); err != nil {
 		return err
 	}
+	if err := db_config.WriteConfigurationIfNotExist(ctx, tx, database_config); err != nil {
+		return err
+	}
+	var haveDatabaseConfig db_config.DatabaseConfiguration
+	if haveDatabaseConfig, err = db_config.ReadConfiguration(ctx, tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	logger.Info("Caplin Pruning", "pruning provided", database_config.PruneDepth, "effective pruning", haveDatabaseConfig.PruneDepth)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(50 * time.Millisecond)
@@ -109,7 +120,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	}
 
 	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), beaconConfig, db)
-	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, dirs, db, haveDatabaseConfig)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[caplin] starting clstages loop")

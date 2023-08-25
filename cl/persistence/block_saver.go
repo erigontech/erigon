@@ -45,7 +45,25 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 }
 
 func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint64, count uint64) error {
-	panic("not imlemented")
+	tx, err := b.indiciesDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := beacon_indicies.IterateBeaconIndicies(ctx, tx, from, from+count, func(_ uint64, beaconBlockRoot, _, _ libcommon.Hash, _ bool) bool {
+		_, path := RootToPaths(beaconBlockRoot, b.cfg)
+		_ = b.fs.Remove(path)
+		return true
+	}); err != nil {
+		return err
+	}
+
+	if err := beacon_indicies.PruneIndicies(ctx, tx, from, from+count); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
