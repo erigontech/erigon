@@ -185,8 +185,6 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
-	sealResults := make(chan *types.Block)
-
 	hr := headerReader{v}
 
 	for _, block := range blocks {
@@ -199,6 +197,8 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 		if parent := hr.GetHeaderByNumber(header.Number.Uint64() - 1); parent != nil {
 			header.ParentHash = parent.Hash()
 		}
+
+		sealResults := make(chan *types.Block, 1)
 
 		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
 			return nil, err
