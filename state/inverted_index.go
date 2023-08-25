@@ -1402,9 +1402,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		if err != nil {
 			return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 		}
+		writer := NewArchiveWriter(comp, ii.compression)
 		var buf []byte
 		for _, key := range keys {
-			if err = comp.AddUncompressedWord([]byte(key)); err != nil {
+			if err = writer.AddWord([]byte(key)); err != nil {
 				return InvertedFiles{}, fmt.Errorf("add %s key [%x]: %w", ii.filenameBase, key, err)
 			}
 			bitmap := bitmaps[key]
@@ -1415,7 +1416,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 			ef.Build()
 			buf = ef.AppendBytes(buf[:0])
-			if err = comp.AddUncompressedWord(buf); err != nil {
+			if err = writer.AddWord(buf); err != nil {
 				return InvertedFiles{}, fmt.Errorf("add %s val: %w", ii.filenameBase, err)
 			}
 		}
