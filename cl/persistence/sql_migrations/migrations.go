@@ -16,9 +16,6 @@ var migrations = []string{
 		PRIMARY KEY (beacon_block_root)
 	);`,
 	`CREATE INDEX idx_slot ON beacon_indicies (slot);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_canonical 
-		ON beacon_indicies (slot) 
-		WHERE canonical = 1;`,
 	`CREATE TABLE IF NOT EXISTS data_config (prune_depth INTEGER NOT NULL)`,
 }
 
