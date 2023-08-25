@@ -7,17 +7,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+type BalanceEntry struct {
+	Address common.Address
+	Balance big.Int
+}
+
 type BlockSource interface {
 	// Returns next block
 	PollBlocks(fromBlock uint64) ([]types.Block, error)
+
+	// Returns initial balances
+	GetInitialBalances() ([]BalanceEntry, error)
 }
 
 type HttpBlockSource struct {
