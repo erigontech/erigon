@@ -235,12 +235,8 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
 	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
 ) *MockSentry {
-	var tmpdir string
-	if tb != nil {
-		tmpdir = tb.TempDir()
-	} else {
-		tmpdir = os.TempDir()
-	}
+	tmpdir := os.TempDir()
+
 	dirs := datadir.New(tmpdir)
 	var err error
 
@@ -254,7 +250,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	logger := log.New()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	histV3, db, agg := temporal.NewTestDB(tb, dirs, gspec)
+	histV3, db, agg := temporal.NewTestDB(nil, dirs, gspec)
 	cfg.HistoryV3 = histV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
@@ -381,7 +377,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		false,
 		forkValidator,
 		maxBlockBroadcastPeers,
-		cfg.DropUselessPeers,
 		logger,
 	)
 	if err != nil {

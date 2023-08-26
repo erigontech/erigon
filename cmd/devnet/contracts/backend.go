@@ -7,10 +7,13 @@ import (
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 func NewBackend(node devnet.Node) bind.ContractBackend {
@@ -22,19 +25,44 @@ type contractBackend struct {
 }
 
 func (cb contractBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
-	return cb.node.GetCode(contract, requests.AsBlockNumber(blockNumber))
+	return cb.node.GetCode(contract, rpc.AsBlockReference(blockNumber))
 }
 
 func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
-	return nil, fmt.Errorf("TODO")
+	var gasPrice *hexutil.Big
+	var value *hexutil.Big
+
+	if call.Value != nil {
+		value = (*hexutil.Big)(call.Value.ToBig())
+	}
+
+	if call.GasPrice != nil {
+		gasPrice = (*hexutil.Big)(call.GasPrice.ToBig())
+	}
+
+	var blockRef rpc.BlockReference
+	if blockNumber != nil {
+		blockRef = rpc.AsBlockReference(blockNumber)
+	} else {
+		blockRef = rpc.LatestBlock
+	}
+
+	return cb.node.Call(ethapi.CallArgs{
+		From:     &call.From,
+		To:       call.To,
+		Gas:      (*hexutil.Uint64)(&call.Gas),
+		GasPrice: gasPrice,
+		Value:    value,
+		Data:     (*hexutility.Bytes)(&call.Data),
+	}, blockRef, nil)
 }
 
 func (cb contractBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
-	return cb.node.GetCode(account, requests.BlockNumbers.Pending)
+	return cb.node.GetCode(account, rpc.PendingBlock)
 }
 
 func (cb contractBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
-	res, err := cb.node.GetTransactionCount(account, requests.BlockNumbers.Pending)
+	res, err := cb.node.GetTransactionCount(account, rpc.PendingBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", account, err)

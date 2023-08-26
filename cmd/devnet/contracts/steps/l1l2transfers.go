@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
@@ -27,8 +28,8 @@ func init() {
 		scenarios.StepHandler(DeployChildChainReceiver),
 		scenarios.StepHandler(DeployRootChainSender),
 		scenarios.StepHandler(GenerateSyncEvents),
-		scenarios.StepHandler(ProcessTransfers),
-		scenarios.StepHandler(BatchProcessTransfers),
+		scenarios.StepHandler(ProcessRootTransfers),
+		scenarios.StepHandler(BatchProcessRootTransfers),
 	)
 }
 
@@ -43,9 +44,6 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 	}
 
 	heimdall := services.Heimdall(ctx)
-
-	waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
-	defer cancel()
 
 	stateSender := heimdall.StateSenderContract()
 
@@ -69,56 +67,67 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 		{Name: "amount", Type: Uint256},
 	}
 
-	//for i := 0; i < numberOfTransfers; i++ {
-	sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
+	for i := 0; i < numberOfTransfers; i++ {
+		err := func() error {
+			sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
 
-	if err != nil {
-		return err
-	}
+			if err != nil {
+				return err
+			}
 
-	transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
+			waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
+			defer cancel()
 
-	if err != nil {
-		return err
-	}
+			transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
 
-	block, err := waiter.Await(transaction.Hash())
+			if err != nil {
+				return err
+			}
 
-	if err != nil {
-		return fmt.Errorf("Failed to wait for sync block: %w", err)
-	}
+			block, err := waiter.Await(transaction.Hash())
 
-	blockNum := block.BlockNumber.Uint64()
+			if err != nil {
+				return fmt.Errorf("Failed to wait for sync block: %w", err)
+			}
 
-	logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
-		Start: blockNum,
-		End:   &blockNum,
-	}, nil, nil)
+			blockNum := block.Number.Uint64()
 
-	if err != nil {
-		return fmt.Errorf("Failed to get post sync logs: %w", err)
-	}
+			logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
+				Start: blockNum,
+				End:   &blockNum,
+			}, nil, nil)
 
-	sendConfirmed := false
+			if err != nil {
+				return fmt.Errorf("Failed to get post sync logs: %w", err)
+			}
 
-	for logs.Next() {
-		if logs.Event.ContractAddress != receiverAddress {
-			return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
+			sendConfirmed := false
+
+			for logs.Next() {
+				if logs.Event.ContractAddress != receiverAddress {
+					return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
+				}
+
+				if !bytes.Equal(logs.Event.Data, sendData) {
+					return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
+				}
+
+				sendConfirmed = true
+			}
+
+			if !sendConfirmed {
+				return fmt.Errorf("No post sync log received")
+			}
+
+			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
+
+			return nil
+		}()
+
+		if err != nil {
+			return err
 		}
-
-		if !bytes.Equal(logs.Event.Data, sendData) {
-			return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
-		}
-
-		sendConfirmed = true
 	}
-
-	if !sendConfirmed {
-		return fmt.Errorf("No post sync log received")
-	}
-
-	//	auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
-	//}
 
 	receivedCount := 0
 
@@ -134,7 +143,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 		}
 
 		receivedCount++
-		if receivedCount == 1 /*numberOfTransfers*/ {
+		if receivedCount == numberOfTransfers {
 			break
 		}
 	}
@@ -171,7 +180,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.BorDevnetChainName, "block", block.BlockNumber, "addr", address)
+	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.DevChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootSenderAddress", address).
 		WithParam("rootSender", contract), nil
@@ -196,13 +205,13 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.BlockNumber, "addr", address)
+	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childReceiverAddress", address).
 		WithParam("childReceiver", contract), nil
 }
 
-func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
+func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -260,7 +269,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				}
 
 				for _, traceResult := range traceResults {
-					callResults, err := node.TraceCall(string(block.BlockNumber), ethapi.CallArgs{
+					callResults, err := node.TraceCall(rpc.AsBlockReference(block.Number), ethapi.CallArgs{
 						From: &traceResult.Action.From,
 						To:   &traceResult.Action.To,
 						Data: &traceResult.Action.Input,
@@ -277,7 +286,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				return terr
 			}
 
-			blockNum := block.BlockNumber.Uint64()
+			blockNum := block.Number.Uint64()
 
 			logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
 				Start: blockNum,
@@ -352,7 +361,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 	return nil
 }
 
-func BatchProcessTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
+func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -416,7 +425,7 @@ func BatchProcessTransfers(ctx context.Context, sourceName string, batches int, 
 		endBlock := uint64(0)
 
 		for _, block := range blocks {
-			blockNum := block.BlockNumber.Uint64()
+			blockNum := block.Number.Uint64()
 
 			if blockNum < startBlock {
 				startBlock = blockNum

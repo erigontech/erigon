@@ -1,7 +1,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -491,57 +490,38 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
+	bodies := s.chainRW.GetBodiesByHases(request)
 
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, len(request))
-
-	for hashIdx, hash := range request {
-		block := s.chainRW.GetBlockByHash(hash)
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		bodies[hashIdx] = body
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range request {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
-func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPayloadBodyV1, error) {
-	if block == nil {
-		return nil, nil
+func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBodyV1 {
+	if body == nil {
+		return nil
 	}
 
-	txs := block.Transactions()
-	bdTxs := make([]hexutility.Bytes, len(txs))
-	for idx, tx := range txs {
-		var buf bytes.Buffer
-		if err := tx.MarshalBinary(&buf); err != nil {
-			return nil, err
-		} else {
-			bdTxs[idx] = buf.Bytes()
-		}
+	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	for idx := range body.Transactions {
+		bdTxs[idx] = body.Transactions[idx]
 	}
 
-	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: block.Withdrawals()}, nil
+	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: body.Withdrawals}
 }
 
 func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
+	bodies := s.chainRW.GetBodiesByRange(start, count)
 
-	for i := uint64(0); i < count; i++ {
-		block := s.chainRW.GetBlockByNumber(start + i)
-
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			break
-		}
-		bodies = append(bodies, body)
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {

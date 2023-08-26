@@ -14,6 +14,7 @@ import (
 type SQLObject interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (uint64, error) {
@@ -74,7 +75,7 @@ func GenerateBlockIndicies(ctx context.Context, db SQLObject, block *cltypes.Bea
 			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 		}
 	}
-	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, 0);", block.Slot, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, ?, 0);", block.Slot, block.ProposerIndex, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
 
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
@@ -110,6 +111,44 @@ func TruncateCanonicalChain(ctx context.Context, db SQLObject, slot uint64) erro
 			return nil
 		}
 		return fmt.Errorf("failed to truncate canonical chain: %v", err)
+	}
+
+	return nil
+}
+
+func PruneIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64) error {
+	_, err := db.ExecContext(ctx, "DELETE FROM beacon_indicies WHERE slot >= ? AND slot <= ?", fromSlot, toSlot)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func IterateBeaconIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot, parentBlockRoot, stateRoot libcommon.Hash, canonical bool) bool) error {
+	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root, state_root, parent_block_root, canonical FROM beacon_indicies WHERE slot >= ? AND slot <= ?", fromSlot, toSlot)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var slot uint64
+		var beaconBlockRoot libcommon.Hash
+		var stateRoot libcommon.Hash
+		var parentBlockRoot libcommon.Hash
+		var canonical uint64
+
+		err := rows.Scan(&slot, &beaconBlockRoot, &stateRoot, &parentBlockRoot, &canonical)
+		if err != nil {
+			return err
+		}
+		if !fn(slot, beaconBlockRoot, parentBlockRoot, stateRoot, canonical != 0) {
+			break
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return err
 	}
 
 	return nil
