@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	emath "github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -41,6 +42,9 @@ type Config struct {
 	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
 	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
 	OverrideCancunTime    *big.Int
+	MdbxPageSize          datasize.ByteSize
+	MdbxDBSizeLimit       datasize.ByteSize
+	MdbxGrowthStep        datasize.ByteSize
 }
 
 var DefaultConfig = Config{

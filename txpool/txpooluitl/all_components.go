@@ -102,12 +102,29 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 
 func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxs chan types.Announcements, chainDB kv.RoDB,
 	sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
-	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
+	opts := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
-		GrowthStep(16 * datasize.MB).
-		SyncPeriod(30 * time.Second).
-		Open()
+		SyncPeriod(30 * time.Second)
+
+	if cfg.MdbxPageSize.Bytes() > 0 {
+		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())
+	}
+
+	if cfg.MdbxDBSizeLimit > 0 {
+		opts = opts.MapSize(cfg.MdbxDBSizeLimit)
+	} else {
+		opts = opts.MapSize(1 * datasize.GB)
+
+	}
+	if cfg.MdbxGrowthStep > 0 {
+		opts = opts.GrowthStep(cfg.MdbxGrowthStep)
+	} else {
+		opts = opts.GrowthStep(16 * datasize.MB)
+	}
+
+	txPoolDB, err := opts.Open()
+
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
