@@ -343,6 +343,19 @@ func MainnetGenesisBlock() *types.Genesis {
 	}
 }
 
+// HoleskyGenesisBlock returns the Holesky main net genesis block.
+func HoleskyGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HoleskyChainConfig,
+		Nonce:      4660,
+		ExtraData:  hexutil.MustDecode("0x686f77206d7563682069732074686520666973683f"),
+		GasLimit:   25000000,
+		Difficulty: big.NewInt(1),
+		Timestamp:  1694786100,
+		Alloc:      readPrealloc("allocs/holesky.json"),
+	}
+}
+
 // SepoliaGenesisBlock returns the Sepolia network genesis block.
 func SepoliaGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -629,6 +642,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 	switch chain {
 	case networkname.MainnetChainName:
 		return MainnetGenesisBlock()
+	case networkname.HoleskyChainName:
+		return HoleskyGenesisBlock()
 	case networkname.SepoliaChainName:
 		return SepoliaGenesisBlock()
 	case networkname.GoerliChainName:
