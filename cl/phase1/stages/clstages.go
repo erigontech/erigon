@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -35,6 +36,7 @@ type Cfg struct {
 	beaconDB        persistence.BeaconChainDatabase
 	indiciesDB      *sql.DB
 	dirs            datadir.Dirs
+	dbConfig        db_config.DatabaseConfiguration
 }
 
 type Args struct {
@@ -55,6 +57,7 @@ func ClStagesCfg(
 	beaconDB persistence.BeaconChainDatabase,
 	dirs datadir.Dirs,
 	indiciesDB *sql.DB,
+	dbConfig db_config.DatabaseConfiguration,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -67,6 +70,7 @@ func ClStagesCfg(
 		beaconDB:        beaconDB,
 		dirs:            dirs,
 		indiciesDB:      indiciesDB,
+		dbConfig:        dbConfig,
 	}
 }
 
@@ -444,10 +448,8 @@ func ConsensusClStages(ctx context.Context,
 					if shouldForkChoiceSinceReorg {
 						return ForkChoice
 					}
-					if args.seenSlot%cfg.beaconCfg.SlotsPerEpoch == 0 {
-						return CleanupAndPruning
-					}
-					return SleepForSlot
+					return CleanupAndPruning
+
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
@@ -488,6 +490,10 @@ func ConsensusClStages(ctx context.Context,
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					// clean up some old ranges
 					err := gossipSource.PurgeRange(ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
+					if err != nil {
+						return err
+					}
+					err = cfg.beaconDB.PurgeRange(ctx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
 					if err != nil {
 						return err
 					}

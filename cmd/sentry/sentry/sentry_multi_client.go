@@ -267,10 +267,10 @@ type MultiClient struct {
 	blockReader                       services.FullBlockReader
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
+	maxBlockBroadcastPeers            func(*types.Header) uint
 
-	historyV3        bool
-	dropUselessPeers bool
-	logger           log.Logger
+	historyV3 bool
+	logger    log.Logger
 }
 
 func NewMultiClient(
@@ -287,7 +287,7 @@ func NewMultiClient(
 	blockBufferSize int,
 	logPeerInfo bool,
 	forkValidator *engine_helpers.ForkValidator,
-	dropUselessPeers bool,
+	maxBlockBroadcastPeers func(*types.Header) uint,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
@@ -319,7 +319,7 @@ func NewMultiClient(
 		logPeerInfo:                       logPeerInfo,
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
-		dropUselessPeers:                  dropUselessPeers,
+		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		logger:                            logger,
 	}
 	cs.ChainConfig = chainConfig
@@ -403,15 +403,6 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	if len(pkt) == 0 {
-		if cs.dropUselessPeers {
-			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId: peerID,
-			}
-			if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-				return fmt.Errorf("sending peer useless request: %v", err)
-			}
-			cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
-		}
 		// No point processing empty response
 		return nil
 	}
@@ -566,15 +557,6 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
 	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
-		if cs.dropUselessPeers {
-			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId: inreq.PeerId,
-			}
-			if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-				return fmt.Errorf("sending peer useless request: %v", err)
-			}
-			cs.logger.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
-		}
 		// No point processing empty response
 		return nil
 	}
@@ -602,6 +584,15 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	}); err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
+
+	// This is a hack to make us work with erigon 2.48 peers that have --sentry.drop-useless-peers
+	// If we reply with an empty list, we're going to be considered useless and kicked.
+	// Once enough of erigon nodes are updated in the network past this commit, this check should be removed,
+	// because it is totally acceptable to return an empty list.
+	if len(headers) == 0 {
+		return nil
+	}
+
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          query.RequestId,
 		BlockHeadersPacket: headers,

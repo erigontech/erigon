@@ -1,4 +1,4 @@
-package bor
+package polygon
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 )
@@ -23,6 +23,25 @@ type EventRecordWithBlock struct {
 	BlockNumber uint64
 }
 
+func (h *Heimdall) startStateSyncSubacription() {
+	var err error
+	syncChan := make(chan *contracts.TestStateSenderStateSynced, 100)
+
+	h.syncSubscription, err = h.syncSenderBinding.WatchStateSynced(&bind.WatchOpts{}, syncChan, nil, nil)
+
+	if err != nil {
+		h.unsubscribe()
+		h.logger.Error("Failed to subscribe to sync events", "err", err)
+		return
+	}
+
+	for stateSyncedEvent := range syncChan {
+		if err := h.handleStateSynced(stateSyncedEvent); err != nil {
+			h.logger.Error("L1 sync event processing failed", "event", stateSyncedEvent.Raw.Index, "err", err)
+		}
+	}
+}
+
 func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64, limit int) (uint64, []*clerk.EventRecordWithTime, error) {
 	h.Lock()
 	defer h.Unlock()
@@ -31,10 +50,18 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 
 	//var removalKeys []syncRecordKey
 
+	var minEventTime *time.Time
+
 	for _ /*key*/, event := range h.pendingSyncRecords {
 		if event.ID >= fromID {
-			if event.Time.Unix() <= to {
+			if event.Time.Unix() < to {
 				events = append(events, event)
+			}
+
+			eventTime := event.Time.Round(1 * time.Second)
+
+			if minEventTime == nil || eventTime.Before(*minEventTime) {
+				minEventTime = &eventTime
 			}
 		}
 		//else {
@@ -43,7 +70,8 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	}
 
 	if len(events) == 0 {
-		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "pending", len(h.pendingSyncRecords), "filtered", len(events))
+		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime,
+			"pending", len(h.pendingSyncRecords), "filtered", len(events))
 		return 0, nil, nil
 	}
 
@@ -66,7 +94,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	//}
 
 	h.logger.Info("Processed sync request",
-		"from", fromID, "to", time.Unix(to, 0),
+		"from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime,
 		"pending", len(h.pendingSyncRecords), "filtered", len(events),
 		"sent", fmt.Sprintf("%d-%d", events[0].ID, events[len(events)-1].ID))
 
@@ -131,20 +159,4 @@ func (h *Heimdall) handleStateSynced(event *contracts.TestStateSenderStateSynced
 	}
 
 	return nil
-}
-
-func (h *Heimdall) isOldTx(txHash libcommon.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {
-
-	// define the endpoint based on the type of event
-	var status bool
-
-	switch eventType {
-	case BridgeEvents.StakingEvent:
-	case BridgeEvents.TopupEvent:
-	case BridgeEvents.ClerkEvent:
-		_, status = h.pendingSyncRecords[syncRecordKey{txHash, logIndex}]
-	case BridgeEvents.SlashingEvent:
-	}
-
-	return status, nil
 }
