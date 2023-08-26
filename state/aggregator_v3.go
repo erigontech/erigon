@@ -1064,9 +1064,18 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 		bn := tx2block(item.endTxNum)
 		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.aggregationStep, bn/1_000))
 	}
-	str2 := make([]string, 0, len(ac.accounts.files))
-	for _, item := range ac.storage.files {
-		str = append(str, fmt.Sprintf("%s:%dm", item.src.decompressor.FileName(), item.src.decompressor.Count()/1_000_000))
+	//str2 := make([]string, 0, len(ac.storage.files))
+	//for _, item := range ac.storage.files {
+	//	str2 = append(str2, fmt.Sprintf("%s:%dm", item.src.decompressor.FileName(), item.src.decompressor.Count()/1_000_000))
+	//}
+	//for _, item := range ac.commitment.files {
+	//	bn := tx2block(item.endTxNum) / 1_000
+	//	str2 = append(str2, fmt.Sprintf("%s:%dK", item.src.decompressor.FileName(), bn))
+	//}
+	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
+	if len(ac.commitment.files) > 0 {
+		lastCommitmentTxNum = ac.commitment.files[len(ac.commitment.files)-1].endTxNum
+		lastCommitmentBlockNum = tx2block(lastCommitmentTxNum)
 	}
 	firstHistoryIndexBlockInDB := tx2block(ac.a.accounts.FirstStepInDB(tx) * ac.a.aggregationStep)
 	var m runtime.MemStats
@@ -1076,7 +1085,9 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
-		"cnt_in_files", strings.Join(str2, ","),
+		"last_comitment_block", lastCommitmentBlockNum,
+		"last_comitment_tx_num", lastCommitmentTxNum,
+		//"cnt_in_files", strings.Join(str2, ","),
 		//"used_files", strings.Join(ac.Files(), ","),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 
