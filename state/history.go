@@ -317,7 +317,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	idxPath := filepath.Join(h.dir, fName)
 
 	//h.logger.Info("[snapshots] build idx", "file", fName)
-	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.InvertedIndex.compression, h.compression, h.logger)
+	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.InvertedIndex.compression, h.compression, h.salt, h.logger)
 }
 
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -331,7 +331,7 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	}
 }
 
-func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, ps *background.ProgressSet, compressIindex, compressHist FileCompression, logger log.Logger) error {
+func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, ps *background.ProgressSet, compressIindex, compressHist FileCompression, salt *uint32, logger log.Logger) error {
 	defer iiItem.decompressor.EnableReadAhead().DisableReadAhead()
 	defer historyItem.decompressor.EnableReadAhead().DisableReadAhead()
 
@@ -363,6 +363,7 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 		TmpDir:      tmpdir,
 		IndexFile:   historyIdxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
+		Salt:        salt,
 	}, logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -887,7 +888,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
 	efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
-	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, ps, h.logger, h.noFsync); err != nil {
+	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -898,6 +899,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		TmpDir:      h.tmpdir,
 		IndexFile:   historyIdxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
+		Salt:        h.salt,
 	}, h.logger); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}

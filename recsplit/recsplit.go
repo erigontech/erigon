@@ -128,7 +128,7 @@ type RecSplitArgs struct {
 	BucketSize  int
 	BaseDataID  uint64
 	EtlBufLimit datasize.ByteSize
-	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
 }
 
@@ -144,21 +144,23 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
-	rs.salt = args.Salt
-	if rs.salt == 0 {
-		seedBytes := make([]byte, 4)
-		if _, err := rand.Read(seedBytes); err != nil {
-			return nil, err
-		}
-		rs.salt = binary.BigEndian.Uint32(seedBytes)
-	}
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
 	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
+	if args.Salt == nil {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return nil, err
+		}
+		rs.salt = binary.BigEndian.Uint32(seedBytes)
+		fmt.Printf("salt1: %s\n", fname)
+	} else {
+		rs.salt = *args.Salt
+	}
+	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		rs.etlBufLimit = etl.BufferOptimalSize

@@ -130,11 +130,11 @@ func NewInvertedIndex(
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
-	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
-	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
@@ -327,12 +327,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(ii.dir, fName)
-	p := ps.AddNew(fName, uint64(item.decompressor.Count()/2))
-	defer ps.Delete(p)
-	//ii.logger.Info("[snapshots] build idx", "file", fName)
-	defer item.decompressor.EnableReadAhead().DisableReadAhead()
-	g := NewArchiveGetter(item.decompressor.MakeGetter(), ii.compression)
-	return buildIndex(ctx, g, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
+	return buildIndex(ctx, item.decompressor, CompressNone, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync)
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1433,7 +1428,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if index, err = buildIndexThenOpen(ctx, decomp, ii.compression, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, ii.compression, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
