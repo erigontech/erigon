@@ -87,7 +87,8 @@ type AggregatorV3 struct {
 	ctxCancel context.CancelFunc
 
 	needSaveFilesListInDB atomic.Bool
-	wg                    sync.WaitGroup
+
+	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFreeze OnFreezeFunc
 	walLock  sync.RWMutex // TODO transfer it to the shareddomain
