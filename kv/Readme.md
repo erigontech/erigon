@@ -21,7 +21,7 @@ open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_for
 // And show which classes satisfy which interfaces.
 
 +-----------------------------------+   +-----------------------------------+ 
-|  github.com/torquem-ch/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
+|  github.com/erigonteh/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
 |  (app-agnostic MDBX go bindings)  |   | (app-agnostic RPC and streaming)  |
 +-----------------------------------+   +-----------------------------------+
                   |                                      |

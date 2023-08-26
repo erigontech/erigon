@@ -30,6 +30,8 @@ const (
 	Execution_GetTD_FullMethodName               = "/execution.Execution/GetTD"
 	Execution_GetHeader_FullMethodName           = "/execution.Execution/GetHeader"
 	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
+	Execution_GetBodiesByRange_FullMethodName    = "/execution.Execution/GetBodiesByRange"
+	Execution_GetBodiesByHashes_FullMethodName   = "/execution.Execution/GetBodiesByHashes"
 	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
 	Execution_GetHeaderHashNumber_FullMethodName = "/execution.Execution/GetHeaderHashNumber"
 	Execution_GetForkChoice_FullMethodName       = "/execution.Execution/GetForkChoice"
@@ -54,6 +56,10 @@ type ExecutionClient interface {
 	GetTD(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetTDResponse, error)
 	GetHeader(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetHeaderResponse, error)
 	GetBody(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetBodyResponse, error)
+	// Ranges
+	GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
+	GetBodiesByHashes(ctx context.Context, in *GetBodiesByHashesRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
+	// Chain checkers
 	IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*GetHeaderHashNumberResponse, error)
 	GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ForkChoice, error)
@@ -151,6 +157,24 @@ func (c *executionClient) GetBody(ctx context.Context, in *GetSegmentRequest, op
 	return out, nil
 }
 
+func (c *executionClient) GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error) {
+	out := new(GetBodiesBatchResponse)
+	err := c.cc.Invoke(ctx, Execution_GetBodiesByRange_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionClient) GetBodiesByHashes(ctx context.Context, in *GetBodiesByHashesRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error) {
+	out := new(GetBodiesBatchResponse)
+	err := c.cc.Invoke(ctx, Execution_GetBodiesByHashes_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *executionClient) IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error) {
 	out := new(IsCanonicalResponse)
 	err := c.cc.Invoke(ctx, Execution_IsCanonicalHash_FullMethodName, in, out, opts...)
@@ -205,6 +229,10 @@ type ExecutionServer interface {
 	GetTD(context.Context, *GetSegmentRequest) (*GetTDResponse, error)
 	GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error)
 	GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error)
+	// Ranges
+	GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error)
+	GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error)
+	// Chain checkers
 	IsCanonicalHash(context.Context, *types.H256) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(context.Context, *types.H256) (*GetHeaderHashNumberResponse, error)
 	GetForkChoice(context.Context, *emptypb.Empty) (*ForkChoice, error)
@@ -244,6 +272,12 @@ func (UnimplementedExecutionServer) GetHeader(context.Context, *GetSegmentReques
 }
 func (UnimplementedExecutionServer) GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBody not implemented")
+}
+func (UnimplementedExecutionServer) GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBodiesByRange not implemented")
+}
+func (UnimplementedExecutionServer) GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBodiesByHashes not implemented")
 }
 func (UnimplementedExecutionServer) IsCanonicalHash(context.Context, *types.H256) (*IsCanonicalResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IsCanonicalHash not implemented")
@@ -432,6 +466,42 @@ func _Execution_GetBody_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Execution_GetBodiesByRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBodiesByRangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).GetBodiesByRange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_GetBodiesByRange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).GetBodiesByRange(ctx, req.(*GetBodiesByRangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Execution_GetBodiesByHashes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBodiesByHashesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).GetBodiesByHashes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_GetBodiesByHashes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).GetBodiesByHashes(ctx, req.(*GetBodiesByHashesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Execution_IsCanonicalHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(types.H256)
 	if err := dec(in); err != nil {
@@ -546,6 +616,14 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBody",
 			Handler:    _Execution_GetBody_Handler,
+		},
+		{
+			MethodName: "GetBodiesByRange",
+			Handler:    _Execution_GetBodiesByRange_Handler,
+		},
+		{
+			MethodName: "GetBodiesByHashes",
+			Handler:    _Execution_GetBodiesByHashes_Handler,
 		},
 		{
 			MethodName: "IsCanonicalHash",

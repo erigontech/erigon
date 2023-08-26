@@ -37,6 +37,14 @@ func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution
 	return s.server.AssembleBlock(ctx, in)
 }
 
+func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *execution.GetBodiesByHashesRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+	return s.server.GetBodiesByHashes(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execution.GetBodiesByRangeRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+	return s.server.GetBodiesByRange(ctx, in)
+}
+
 func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {
 	return s.server.GetAssembledBlock(ctx, in)
 }

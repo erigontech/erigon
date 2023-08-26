@@ -1370,6 +1370,155 @@ func (x *GetAssembledBlockResponse) GetBusy() bool {
 	return false
 }
 
+type GetBodiesBatchResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Bodies []*BlockBody `protobuf:"bytes,1,rep,name=bodies,proto3" json:"bodies,omitempty"`
+}
+
+func (x *GetBodiesBatchResponse) Reset() {
+	*x = GetBodiesBatchResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_execution_execution_proto_msgTypes[20]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetBodiesBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBodiesBatchResponse) ProtoMessage() {}
+
+func (x *GetBodiesBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[20]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBodiesBatchResponse.ProtoReflect.Descriptor instead.
+func (*GetBodiesBatchResponse) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetBodiesBatchResponse) GetBodies() []*BlockBody {
+	if x != nil {
+		return x.Bodies
+	}
+	return nil
+}
+
+type GetBodiesByHashesRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Hashes []*types.H256 `protobuf:"bytes,1,rep,name=hashes,proto3" json:"hashes,omitempty"`
+}
+
+func (x *GetBodiesByHashesRequest) Reset() {
+	*x = GetBodiesByHashesRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_execution_execution_proto_msgTypes[21]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetBodiesByHashesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBodiesByHashesRequest) ProtoMessage() {}
+
+func (x *GetBodiesByHashesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[21]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBodiesByHashesRequest.ProtoReflect.Descriptor instead.
+func (*GetBodiesByHashesRequest) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *GetBodiesByHashesRequest) GetHashes() []*types.H256 {
+	if x != nil {
+		return x.Hashes
+	}
+	return nil
+}
+
+type GetBodiesByRangeRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Start uint64 `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
+	Count uint64 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+}
+
+func (x *GetBodiesByRangeRequest) Reset() {
+	*x = GetBodiesByRangeRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_execution_execution_proto_msgTypes[22]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetBodiesByRangeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBodiesByRangeRequest) ProtoMessage() {}
+
+func (x *GetBodiesByRangeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[22]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBodiesByRangeRequest.ProtoReflect.Descriptor instead.
+func (*GetBodiesByRangeRequest) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GetBodiesByRangeRequest) GetStart() uint64 {
+	if x != nil {
+		return x.Start
+	}
+	return 0
+}
+
+func (x *GetBodiesByRangeRequest) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
 type ReadyResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1381,7 +1530,7 @@ type ReadyResponse struct {
 func (x *ReadyResponse) Reset() {
 	*x = ReadyResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_execution_execution_proto_msgTypes[20]
+		mi := &file_execution_execution_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1394,7 +1543,7 @@ func (x *ReadyResponse) String() string {
 func (*ReadyResponse) ProtoMessage() {}
 
 func (x *ReadyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_execution_execution_proto_msgTypes[20]
+	mi := &file_execution_execution_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,7 +1556,7 @@ func (x *ReadyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadyResponse.ProtoReflect.Descriptor instead.
 func (*ReadyResponse) Descriptor() ([]byte, []int) {
-	return file_execution_execution_proto_rawDescGZIP(), []int{20}
+	return file_execution_execution_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ReadyResponse) GetReady() bool {
@@ -1643,7 +1792,20 @@ var file_execution_execution_proto_rawDesc = []byte{
 	0x2e, 0x41, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x65, 0x64, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x44,
 	0x61, 0x74, 0x61, 0x48, 0x00, 0x52, 0x04, 0x64, 0x61, 0x74, 0x61, 0x88, 0x01, 0x01, 0x12, 0x12,
 	0x0a, 0x04, 0x62, 0x75, 0x73, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08, 0x52, 0x04, 0x62, 0x75,
-	0x73, 0x79, 0x42, 0x07, 0x0a, 0x05, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x22, 0x25, 0x0a, 0x0d, 0x52,
+	0x73, 0x79, 0x42, 0x07, 0x0a, 0x05, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x22, 0x46, 0x0a, 0x16, 0x47,
+	0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x61, 0x74, 0x63, 0x68, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x2c, 0x0a, 0x06, 0x62, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x18,
+	0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f,
+	0x6e, 0x2e, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x42, 0x6f, 0x64, 0x79, 0x52, 0x06, 0x62, 0x6f, 0x64,
+	0x69, 0x65, 0x73, 0x22, 0x3f, 0x0a, 0x18, 0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73,
+	0x42, 0x79, 0x48, 0x61, 0x73, 0x68, 0x65, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x23, 0x0a, 0x06, 0x68, 0x61, 0x73, 0x68, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32,
+	0x0b, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x48, 0x32, 0x35, 0x36, 0x52, 0x06, 0x68, 0x61,
+	0x73, 0x68, 0x65, 0x73, 0x22, 0x45, 0x0a, 0x17, 0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65,
+	0x73, 0x42, 0x79, 0x52, 0x61, 0x6e, 0x67, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x14, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x72, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x05,
+	0x73, 0x74, 0x61, 0x72, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x04, 0x52, 0x05, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x25, 0x0a, 0x0d, 0x52,
 	0x65, 0x61, 0x64, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x14, 0x0a, 0x05,
 	0x72, 0x65, 0x61, 0x64, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x05, 0x72, 0x65, 0x61,
 	0x64, 0x79, 0x2a, 0x71, 0x0a, 0x0f, 0x45, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x53,
@@ -1653,7 +1815,7 @@ var file_execution_execution_proto_rawDesc = []byte{
 	0x12, 0x12, 0x0a, 0x0e, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6e, 0x67, 0x53, 0x65, 0x67, 0x6d, 0x65,
 	0x6e, 0x74, 0x10, 0x03, 0x12, 0x15, 0x0a, 0x11, 0x49, 0x6e, 0x76, 0x61, 0x6c, 0x69, 0x64, 0x46,
 	0x6f, 0x72, 0x6b, 0x63, 0x68, 0x6f, 0x69, 0x63, 0x65, 0x10, 0x04, 0x12, 0x08, 0x0a, 0x04, 0x42,
-	0x75, 0x73, 0x79, 0x10, 0x05, 0x32, 0xbe, 0x07, 0x0a, 0x09, 0x45, 0x78, 0x65, 0x63, 0x75, 0x74,
+	0x75, 0x73, 0x79, 0x10, 0x05, 0x32, 0xf6, 0x08, 0x0a, 0x09, 0x45, 0x78, 0x65, 0x63, 0x75, 0x74,
 	0x69, 0x6f, 0x6e, 0x12, 0x4a, 0x0a, 0x0c, 0x49, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x42, 0x6c, 0x6f,
 	0x63, 0x6b, 0x73, 0x12, 0x1e, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e,
 	0x49, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x73, 0x52, 0x65, 0x71, 0x75,
@@ -1697,25 +1859,36 @@ var file_execution_execution_proto_rawDesc = []byte{
 	0x6e, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x52, 0x65, 0x71, 0x75,
 	0x65, 0x73, 0x74, 0x1a, 0x1a, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e,
 	0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
-	0x3e, 0x0a, 0x0f, 0x49, 0x73, 0x43, 0x61, 0x6e, 0x6f, 0x6e, 0x69, 0x63, 0x61, 0x6c, 0x48, 0x61,
-	0x73, 0x68, 0x12, 0x0b, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x48, 0x32, 0x35, 0x36, 0x1a,
-	0x1e, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x49, 0x73, 0x43, 0x61,
-	0x6e, 0x6f, 0x6e, 0x69, 0x63, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
-	0x4a, 0x0a, 0x13, 0x47, 0x65, 0x74, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x48, 0x61, 0x73, 0x68,
-	0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x12, 0x0b, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x48,
-	0x32, 0x35, 0x36, 0x1a, 0x26, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e,
-	0x47, 0x65, 0x74, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x48, 0x61, 0x73, 0x68, 0x4e, 0x75, 0x6d,
-	0x62, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x3e, 0x0a, 0x0d, 0x47,
-	0x65, 0x74, 0x46, 0x6f, 0x72, 0x6b, 0x43, 0x68, 0x6f, 0x69, 0x63, 0x65, 0x12, 0x16, 0x2e, 0x67,
+	0x59, 0x0a, 0x10, 0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x79, 0x52, 0x61,
+	0x6e, 0x67, 0x65, 0x12, 0x22, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e,
+	0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x79, 0x52, 0x61, 0x6e, 0x67, 0x65,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x21, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74,
+	0x69, 0x6f, 0x6e, 0x2e, 0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x61, 0x74,
+	0x63, 0x68, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x5b, 0x0a, 0x11, 0x47, 0x65,
+	0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x79, 0x48, 0x61, 0x73, 0x68, 0x65, 0x73, 0x12,
+	0x23, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x47, 0x65, 0x74, 0x42,
+	0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x79, 0x48, 0x61, 0x73, 0x68, 0x65, 0x73, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x21, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e,
+	0x2e, 0x47, 0x65, 0x74, 0x42, 0x6f, 0x64, 0x69, 0x65, 0x73, 0x42, 0x61, 0x74, 0x63, 0x68, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x3e, 0x0a, 0x0f, 0x49, 0x73, 0x43, 0x61, 0x6e,
+	0x6f, 0x6e, 0x69, 0x63, 0x61, 0x6c, 0x48, 0x61, 0x73, 0x68, 0x12, 0x0b, 0x2e, 0x74, 0x79, 0x70,
+	0x65, 0x73, 0x2e, 0x48, 0x32, 0x35, 0x36, 0x1a, 0x1e, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74,
+	0x69, 0x6f, 0x6e, 0x2e, 0x49, 0x73, 0x43, 0x61, 0x6e, 0x6f, 0x6e, 0x69, 0x63, 0x61, 0x6c, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x4a, 0x0a, 0x13, 0x47, 0x65, 0x74, 0x48, 0x65,
+	0x61, 0x64, 0x65, 0x72, 0x48, 0x61, 0x73, 0x68, 0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x12, 0x0b,
+	0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x48, 0x32, 0x35, 0x36, 0x1a, 0x26, 0x2e, 0x65, 0x78,
+	0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x47, 0x65, 0x74, 0x48, 0x65, 0x61, 0x64, 0x65,
+	0x72, 0x48, 0x61, 0x73, 0x68, 0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x12, 0x3e, 0x0a, 0x0d, 0x47, 0x65, 0x74, 0x46, 0x6f, 0x72, 0x6b, 0x43, 0x68,
+	0x6f, 0x69, 0x63, 0x65, 0x12, 0x16, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74, 0x79, 0x1a, 0x15, 0x2e, 0x65,
+	0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x46, 0x6f, 0x72, 0x6b, 0x43, 0x68, 0x6f,
+	0x69, 0x63, 0x65, 0x12, 0x39, 0x0a, 0x05, 0x52, 0x65, 0x61, 0x64, 0x79, 0x12, 0x16, 0x2e, 0x67,
 	0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x45,
-	0x6d, 0x70, 0x74, 0x79, 0x1a, 0x15, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e,
-	0x2e, 0x46, 0x6f, 0x72, 0x6b, 0x43, 0x68, 0x6f, 0x69, 0x63, 0x65, 0x12, 0x39, 0x0a, 0x05, 0x52,
-	0x65, 0x61, 0x64, 0x79, 0x12, 0x16, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x45, 0x6d, 0x70, 0x74, 0x79, 0x1a, 0x18, 0x2e, 0x65,
-	0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x52, 0x65, 0x61, 0x64, 0x79, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42, 0x17, 0x5a, 0x15, 0x2e, 0x2f, 0x65, 0x78, 0x65, 0x63,
-	0x75, 0x74, 0x69, 0x6f, 0x6e, 0x3b, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x62,
-	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6d, 0x70, 0x74, 0x79, 0x1a, 0x18, 0x2e, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e,
+	0x2e, 0x52, 0x65, 0x61, 0x64, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42, 0x17,
+	0x5a, 0x15, 0x2e, 0x2f, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x3b, 0x65, 0x78,
+	0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1731,7 +1904,7 @@ func file_execution_execution_proto_rawDescGZIP() []byte {
 }
 
 var file_execution_execution_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_execution_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_execution_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_execution_execution_proto_goTypes = []interface{}{
 	(ExecutionStatus)(0),                // 0: execution.ExecutionStatus
 	(*ForkChoiceReceipt)(nil),           // 1: execution.ForkChoiceReceipt
@@ -1754,88 +1927,97 @@ var file_execution_execution_proto_goTypes = []interface{}{
 	(*GetAssembledBlockRequest)(nil),    // 18: execution.GetAssembledBlockRequest
 	(*AssembledBlockData)(nil),          // 19: execution.AssembledBlockData
 	(*GetAssembledBlockResponse)(nil),   // 20: execution.GetAssembledBlockResponse
-	(*ReadyResponse)(nil),               // 21: execution.ReadyResponse
-	(*types.H256)(nil),                  // 22: types.H256
-	(*types.H160)(nil),                  // 23: types.H160
-	(*types.H2048)(nil),                 // 24: types.H2048
-	(*types.Withdrawal)(nil),            // 25: types.Withdrawal
-	(*types.ExecutionPayload)(nil),      // 26: types.ExecutionPayload
-	(*types.BlobsBundleV1)(nil),         // 27: types.BlobsBundleV1
-	(*emptypb.Empty)(nil),               // 28: google.protobuf.Empty
+	(*GetBodiesBatchResponse)(nil),      // 21: execution.GetBodiesBatchResponse
+	(*GetBodiesByHashesRequest)(nil),    // 22: execution.GetBodiesByHashesRequest
+	(*GetBodiesByRangeRequest)(nil),     // 23: execution.GetBodiesByRangeRequest
+	(*ReadyResponse)(nil),               // 24: execution.ReadyResponse
+	(*types.H256)(nil),                  // 25: types.H256
+	(*types.H160)(nil),                  // 26: types.H160
+	(*types.H2048)(nil),                 // 27: types.H2048
+	(*types.Withdrawal)(nil),            // 28: types.Withdrawal
+	(*types.ExecutionPayload)(nil),      // 29: types.ExecutionPayload
+	(*types.BlobsBundleV1)(nil),         // 30: types.BlobsBundleV1
+	(*emptypb.Empty)(nil),               // 31: google.protobuf.Empty
 }
 var file_execution_execution_proto_depIdxs = []int32{
 	0,  // 0: execution.ForkChoiceReceipt.status:type_name -> execution.ExecutionStatus
-	22, // 1: execution.ForkChoiceReceipt.latest_valid_hash:type_name -> types.H256
+	25, // 1: execution.ForkChoiceReceipt.latest_valid_hash:type_name -> types.H256
 	0,  // 2: execution.ValidationReceipt.validation_status:type_name -> execution.ExecutionStatus
-	22, // 3: execution.ValidationReceipt.latest_valid_hash:type_name -> types.H256
-	22, // 4: execution.Header.parent_hash:type_name -> types.H256
-	23, // 5: execution.Header.coinbase:type_name -> types.H160
-	22, // 6: execution.Header.state_root:type_name -> types.H256
-	22, // 7: execution.Header.receipt_root:type_name -> types.H256
-	24, // 8: execution.Header.logs_bloom:type_name -> types.H2048
-	22, // 9: execution.Header.prev_randao:type_name -> types.H256
-	22, // 10: execution.Header.difficulty:type_name -> types.H256
-	22, // 11: execution.Header.block_hash:type_name -> types.H256
-	22, // 12: execution.Header.ommer_hash:type_name -> types.H256
-	22, // 13: execution.Header.transaction_hash:type_name -> types.H256
-	22, // 14: execution.Header.base_fee_per_gas:type_name -> types.H256
-	22, // 15: execution.Header.withdrawal_hash:type_name -> types.H256
-	22, // 16: execution.Header.parent_beacon_block_root:type_name -> types.H256
-	22, // 17: execution.BlockBody.block_hash:type_name -> types.H256
+	25, // 3: execution.ValidationReceipt.latest_valid_hash:type_name -> types.H256
+	25, // 4: execution.Header.parent_hash:type_name -> types.H256
+	26, // 5: execution.Header.coinbase:type_name -> types.H160
+	25, // 6: execution.Header.state_root:type_name -> types.H256
+	25, // 7: execution.Header.receipt_root:type_name -> types.H256
+	27, // 8: execution.Header.logs_bloom:type_name -> types.H2048
+	25, // 9: execution.Header.prev_randao:type_name -> types.H256
+	25, // 10: execution.Header.difficulty:type_name -> types.H256
+	25, // 11: execution.Header.block_hash:type_name -> types.H256
+	25, // 12: execution.Header.ommer_hash:type_name -> types.H256
+	25, // 13: execution.Header.transaction_hash:type_name -> types.H256
+	25, // 14: execution.Header.base_fee_per_gas:type_name -> types.H256
+	25, // 15: execution.Header.withdrawal_hash:type_name -> types.H256
+	25, // 16: execution.Header.parent_beacon_block_root:type_name -> types.H256
+	25, // 17: execution.BlockBody.block_hash:type_name -> types.H256
 	4,  // 18: execution.BlockBody.uncles:type_name -> execution.Header
-	25, // 19: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
+	28, // 19: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
 	4,  // 20: execution.Block.header:type_name -> execution.Header
 	5,  // 21: execution.Block.body:type_name -> execution.BlockBody
 	4,  // 22: execution.GetHeaderResponse.header:type_name -> execution.Header
-	22, // 23: execution.GetTDResponse.td:type_name -> types.H256
+	25, // 23: execution.GetTDResponse.td:type_name -> types.H256
 	5,  // 24: execution.GetBodyResponse.body:type_name -> execution.BlockBody
-	22, // 25: execution.GetSegmentRequest.block_hash:type_name -> types.H256
+	25, // 25: execution.GetSegmentRequest.block_hash:type_name -> types.H256
 	6,  // 26: execution.InsertBlocksRequest.blocks:type_name -> execution.Block
-	22, // 27: execution.ForkChoice.head_block_hash:type_name -> types.H256
-	22, // 28: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
-	22, // 29: execution.ForkChoice.safe_block_hash:type_name -> types.H256
+	25, // 27: execution.ForkChoice.head_block_hash:type_name -> types.H256
+	25, // 28: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
+	25, // 29: execution.ForkChoice.safe_block_hash:type_name -> types.H256
 	0,  // 30: execution.InsertionResult.result:type_name -> execution.ExecutionStatus
-	22, // 31: execution.ValidationRequest.hash:type_name -> types.H256
-	22, // 32: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
-	22, // 33: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
-	23, // 34: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
-	25, // 35: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
-	22, // 36: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
-	26, // 37: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
-	22, // 38: execution.AssembledBlockData.block_value:type_name -> types.H256
-	27, // 39: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundleV1
+	25, // 31: execution.ValidationRequest.hash:type_name -> types.H256
+	25, // 32: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
+	25, // 33: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
+	26, // 34: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
+	28, // 35: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
+	25, // 36: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
+	29, // 37: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
+	25, // 38: execution.AssembledBlockData.block_value:type_name -> types.H256
+	30, // 39: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundleV1
 	19, // 40: execution.GetAssembledBlockResponse.data:type_name -> execution.AssembledBlockData
-	12, // 41: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
-	15, // 42: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
-	13, // 43: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
-	16, // 44: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
-	18, // 45: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
-	28, // 46: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
-	11, // 47: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
-	11, // 48: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
-	11, // 49: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
-	22, // 50: execution.Execution.IsCanonicalHash:input_type -> types.H256
-	22, // 51: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
-	28, // 52: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
-	28, // 53: execution.Execution.Ready:input_type -> google.protobuf.Empty
-	14, // 54: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
-	2,  // 55: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
-	1,  // 56: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
-	17, // 57: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
-	20, // 58: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
-	7,  // 59: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
-	8,  // 60: execution.Execution.GetTD:output_type -> execution.GetTDResponse
-	7,  // 61: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
-	9,  // 62: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
-	3,  // 63: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
-	10, // 64: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
-	13, // 65: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
-	21, // 66: execution.Execution.Ready:output_type -> execution.ReadyResponse
-	54, // [54:67] is the sub-list for method output_type
-	41, // [41:54] is the sub-list for method input_type
-	41, // [41:41] is the sub-list for extension type_name
-	41, // [41:41] is the sub-list for extension extendee
-	0,  // [0:41] is the sub-list for field type_name
+	5,  // 41: execution.GetBodiesBatchResponse.bodies:type_name -> execution.BlockBody
+	25, // 42: execution.GetBodiesByHashesRequest.hashes:type_name -> types.H256
+	12, // 43: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
+	15, // 44: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
+	13, // 45: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
+	16, // 46: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
+	18, // 47: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
+	31, // 48: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
+	11, // 49: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
+	11, // 50: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
+	11, // 51: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
+	23, // 52: execution.Execution.GetBodiesByRange:input_type -> execution.GetBodiesByRangeRequest
+	22, // 53: execution.Execution.GetBodiesByHashes:input_type -> execution.GetBodiesByHashesRequest
+	25, // 54: execution.Execution.IsCanonicalHash:input_type -> types.H256
+	25, // 55: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
+	31, // 56: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
+	31, // 57: execution.Execution.Ready:input_type -> google.protobuf.Empty
+	14, // 58: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
+	2,  // 59: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
+	1,  // 60: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
+	17, // 61: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
+	20, // 62: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
+	7,  // 63: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
+	8,  // 64: execution.Execution.GetTD:output_type -> execution.GetTDResponse
+	7,  // 65: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
+	9,  // 66: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
+	21, // 67: execution.Execution.GetBodiesByRange:output_type -> execution.GetBodiesBatchResponse
+	21, // 68: execution.Execution.GetBodiesByHashes:output_type -> execution.GetBodiesBatchResponse
+	3,  // 69: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
+	10, // 70: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
+	13, // 71: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
+	24, // 72: execution.Execution.Ready:output_type -> execution.ReadyResponse
+	58, // [58:73] is the sub-list for method output_type
+	43, // [43:58] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_execution_execution_proto_init() }
@@ -2085,6 +2267,42 @@ func file_execution_execution_proto_init() {
 			}
 		}
 		file_execution_execution_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetBodiesBatchResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_execution_execution_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetBodiesByHashesRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_execution_execution_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetBodiesByRangeRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_execution_execution_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ReadyResponse); i {
 			case 0:
 				return &v.state
@@ -2112,7 +2330,7 @@ func file_execution_execution_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_execution_execution_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   21,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
