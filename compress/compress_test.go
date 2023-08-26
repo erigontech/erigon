@@ -128,7 +128,8 @@ func TestCompressDict1(t *testing.T) {
 		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
 		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		word, _ := g.Next(nil)
-		require.Nil(t, word)
+		require.NotNil(t, word)
+		require.Zero(t, len(word))
 
 		// next word is `long`
 		require.True(t, g.MatchPrefix([]byte("long")))
@@ -215,7 +216,8 @@ func TestCompressDictCmp(t *testing.T) {
 		g.Reset(savePos)
 
 		word, _ := g.Next(nil)
-		require.Nil(t, word)
+		require.NotNil(t, word)
+		require.Zero(t, len(word))
 
 		// next word is `long`
 		savePos = g.dataP
