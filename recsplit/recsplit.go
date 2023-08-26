@@ -156,7 +156,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			return nil, err
 		}
 		rs.salt = binary.BigEndian.Uint32(seedBytes)
-		fmt.Printf("salt1: %s\n", fname)
 	} else {
 		rs.salt = *args.Salt
 	}
