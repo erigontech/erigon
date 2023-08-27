@@ -23,7 +23,12 @@ func RunImport(settings *Settings, blockSource BlockSource) error {
 	}
 	defer db.Close()
 
-	state, err := NewState(db)
+	initBalances, err := blockSource.GetInitialBalances()
+	if err != nil {
+		panic(err)
+	}
+
+	state, err := NewState(db, initBalances)
 	if err != nil {
 		panic(err)
 	}
