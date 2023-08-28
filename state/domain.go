@@ -1733,7 +1733,6 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			if !filtered {
 				LatestStateReadGrindNotFound.UpdateDuration(t)
 			}
-			t = time.Now()
 			continue
 		}
 		LatestStateReadGrind.UpdateDuration(t)
