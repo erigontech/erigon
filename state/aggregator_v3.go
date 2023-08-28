@@ -18,11 +18,12 @@ package state
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	math2 "math"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -30,8 +31,9 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
-
+	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -103,7 +105,7 @@ type AggregatorV3 struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
-	salt, err := getIndicesSaltFromDB(db)
+	salt, err := getIndicesSalt(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -187,48 +189,27 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	return a, nil
 }
 
-// getIndicesSaltFromDB - try read salt for all indices from DB. Or fall-back to new salt creation.
+// getIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
-func getIndicesSaltFromDB(db kv.RoDB) (salt *uint32, err error) {
-	rwdb, ok := db.(kv.RwDB)
-	if !ok { // if db is read-only then we will not create new indices. and can read salt from idx files.
+func getIndicesSalt(baseDir string) (salt *uint32, err error) {
+	fpath := filepath.Join(baseDir, "salt.txt")
+	if !dir.FileExist(fpath) {
+		if salt == nil {
+			saltV := rand2.Uint32()
+			salt = &saltV
+		}
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, *salt)
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return nil, err
+		}
+	}
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
 		return nil, err
 	}
-
-	var saltKey = []byte("agg_salt")
-
-	if err = rwdb.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.DatabaseInfo, saltKey)
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 {
-			return nil
-		}
-		saltV := binary.BigEndian.Uint32(v)
-		salt = &saltV
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if salt != nil {
-		return salt, nil
-	}
-
-	if err = rwdb.Update(context.Background(), func(tx kv.RwTx) error {
-		seedBytes := make([]byte, 4)
-		if _, err := rand.Read(seedBytes); err != nil {
-			return err
-		}
-		saltV := binary.BigEndian.Uint32(seedBytes)
-		salt = &saltV
-		if err := tx.Put(kv.DatabaseInfo, saltKey, seedBytes); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+	saltV := binary.BigEndian.Uint32(saltBytes)
+	salt = &saltV
 	return salt, nil
 }
 
@@ -679,7 +660,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build failed: %w", err)
+		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
