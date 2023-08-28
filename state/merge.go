@@ -650,7 +650,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	idxPath := filepath.Join(d.dir, idxFileName)
 	//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir,  false /* values */); err != nil {
 	if !UseBpsTree {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
@@ -818,7 +818,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	idxPath := filepath.Join(d.dir, idxFileName)
 	if !UseBpsTree {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
@@ -958,7 +958,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
@@ -1106,6 +1106,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			TmpDir:      h.tmpdir,
 			IndexFile:   idxPath,
 			EtlBufLimit: etl.BufferOptimalSize / 2,
+			Salt:        h.salt,
 		}, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}

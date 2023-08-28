@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 
 	_ "github.com/FastFilter/xorfilter"
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -48,6 +47,7 @@ type LocalityIndex struct {
 	dir, tmpdir     string // Directory where static files are created
 	aggregationStep uint64 // immutable
 
+	salt *uint32
 	// preferSmallerFiles forcing files like `32-40.l` have higher priority than `0-40.l`.
 	// It's used by "warm data indexing": new small "warm index" created after old data
 	// merged and indexed by "cold index"
@@ -61,10 +61,11 @@ type LocalityIndex struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, logger log.Logger) *LocalityIndex {
+func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, salt *uint32, logger log.Logger) *LocalityIndex {
 	return &LocalityIndex{
 		preferSmallerFiles: preferSmallerFiles,
 		dir:                dir,
+		salt:               salt,
 		tmpdir:             tmpdir,
 		aggregationStep:    aggregationStep,
 		filenameBase:       filenameBase,
@@ -342,14 +343,6 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
 
-// newStateBloomWithSize creates a brand new state bloom for state generation.
-// The bloom filter will be created by the passing bloom filter size. According
-// to the https://hur.st/bloomfilter/?n=600000000&p=&m=2048MB&k=4, the parameters
-// are picked so that the false-positive rate for mainnet is low enough.
-func newColdBloomWithSize(megabytes uint64) (*bloomfilter.Filter, error) {
-	return bloomfilter.New(megabytes*1024*1024*8, 4)
-}
-
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	if li == nil {
 		return nil, nil
@@ -388,6 +381,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		TmpDir:      li.tmpdir,
 		IndexFile:   idxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
+		Salt:        li.salt,
 	}, li.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)
