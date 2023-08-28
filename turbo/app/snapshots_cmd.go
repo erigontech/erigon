@@ -305,7 +305,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
@@ -330,16 +329,22 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = agg.OpenFolder()
-	if err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		return err
 	}
-	err = agg.BuildOptionalMissedIndices(ctx, indexWorkers)
-	if err != nil {
+	chainDB.View(ctx, func(tx kv.Tx) error {
+		ac := agg.MakeContext()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress
+		})
+		return nil
+	})
+	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
-	err = agg.BuildMissedIndices(ctx, indexWorkers)
-	if err != nil {
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 
