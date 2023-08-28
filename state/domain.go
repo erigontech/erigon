@@ -873,36 +873,36 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 	return v, true, nil
 }
 
-func (dc *DomainContext) getFromFile2(i int, filekey []byte, hi uint64) ([]byte, bool, error) {
+func (dc *DomainContext) getFromFile2(i int, filekey []byte, hi uint64) ([]byte, bool, bool, error) {
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
 		if dc.files[i].src.bloom != nil {
 			if !dc.files[i].src.bloom.ContainsHash(hi) {
-				return nil, false, nil
+				return nil, false, true, nil
 			}
 		}
 
 		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-		return v, true, nil
+		return v, true, false, nil
 	}
 
 	reader := dc.statelessIdxReader(i)
 	if reader.Empty() {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	offset := reader.Lookup(filekey)
 	g.Reset(offset)
 
 	k, _ := g.Next(nil)
 	if !bytes.Equal(filekey, k) {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	v, _ := g.Next(nil)
-	return v, true, nil
+	return v, true, false, nil
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -1725,12 +1725,14 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		//	continue
 		//}
 		t := time.Now()
-		v, ok, err := dc.getFromFile2(i, filekey, hi)
+		v, ok, filtered, err := dc.getFromFile2(i, filekey, hi)
 		if err != nil {
 			return nil, false, err
 		}
 		if !ok {
-			LatestStateReadGrindNotFound.UpdateDuration(t)
+			if !filtered {
+				LatestStateReadGrindNotFound.UpdateDuration(t)
+			}
 			t = time.Now()
 			continue
 		}
