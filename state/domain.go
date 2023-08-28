@@ -1719,24 +1719,29 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	dc.hasher.Write(filekey) //nolint:errcheck
 	hi, _ := dc.hasher.Sum128()
 
+	var ok, needMetric, filtered bool
+	needMetric = true
+	t := time.Now()
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		//isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
 		//if !isUseful {
 		//	continue
 		//}
-		t := time.Now()
-		v, ok, filtered, err := dc.getFromFile2(i, filekey, hi)
+		v, ok, filtered, err = dc.getFromFile2(i, filekey, hi)
 		if err != nil {
 			return nil, false, err
 		}
 		if !ok {
 			if !filtered {
-				LatestStateReadGrindNotFound.UpdateDuration(t)
+				needMetric = false
 			}
 			continue
 		}
 		LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
+	}
+	if !needMetric {
+		LatestStateReadGrindNotFound.UpdateDuration(t)
 	}
 	return nil, false, nil
 }
