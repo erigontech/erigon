@@ -59,7 +59,7 @@ func startHandshake(
 	status *proto_sentry.StatusData,
 	pipe *p2p.MsgPipeRW,
 	protocolVersion uint,
-	errChan chan error,
+	errChan chan *p2p.PeerError,
 ) {
 	go func() {
 		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion)
@@ -110,7 +110,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pNoFork.Close()
 	defer p2pProFork.Close()
 
-	errc := make(chan error, 2)
+	errc := make(chan *p2p.PeerError, 2)
 	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
 	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 

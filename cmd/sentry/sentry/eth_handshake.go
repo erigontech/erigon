@@ -15,20 +15,24 @@ func readAndValidatePeerStatusMessage(
 	status *proto_sentry.StatusData,
 	version uint,
 	minVersion uint,
-) (*eth.StatusPacket, error) {
+) (*eth.StatusPacket, *p2p.PeerError) {
 	msg, err := rw.ReadMsg()
 	if err != nil {
-		return nil, err
+		return nil, p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscNetworkError, err, "readAndValidatePeerStatusMessage rw.ReadMsg error")
 	}
 
 	reply, err := tryDecodeStatusMessage(&msg)
 	msg.Discard()
 	if err != nil {
-		return nil, err
+		return nil, p2p.NewPeerError(p2p.PeerErrorStatusDecode, p2p.DiscProtocolError, err, "readAndValidatePeerStatusMessage tryDecodeStatusMessage error")
 	}
 
 	err = checkPeerStatusCompatibility(reply, status, version, minVersion)
-	return reply, err
+	if err != nil {
+		return nil, p2p.NewPeerError(p2p.PeerErrorStatusIncompatible, p2p.DiscUselessPeer, err, "readAndValidatePeerStatusMessage checkPeerStatusCompatibility error")
+	}
+
+	return reply, nil
 }
 
 func tryDecodeStatusMessage(msg *p2p.Msg) (*eth.StatusPacket, error) {
@@ -48,8 +52,6 @@ func tryDecodeStatusMessage(msg *p2p.Msg) (*eth.StatusPacket, error) {
 	return &reply, nil
 }
 
-var NetworkIdMissmatchErr = fmt.Errorf("network id does not match")
-
 func checkPeerStatusCompatibility(
 	reply *eth.StatusPacket,
 	status *proto_sentry.StatusData,
@@ -58,7 +60,7 @@ func checkPeerStatusCompatibility(
 ) error {
 	networkID := status.NetworkId
 	if reply.NetworkID != networkID {
-		return fmt.Errorf("%w: theirs %d, ours %d", NetworkIdMissmatchErr, reply.NetworkID, networkID)
+		return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
 	}
 
 	if uint(reply.ProtocolVersion) > version {
