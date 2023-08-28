@@ -28,13 +28,12 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/etl"
-
-	"github.com/ledgerwatch/erigon-lib/common/background"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -665,9 +664,11 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 
 	{
 		fileName := fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		if dir.FileExist(filepath.Join(d.dir, fileName)) {
+			valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			}
 		}
 	}
 
@@ -686,7 +687,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	historyFiles := oldFiles.commitmentHist
 
 	var comp ArchiveWriter
-	var closeItem bool = true
+	var closeItem = true
 	defer func() {
 		if closeItem {
 			if comp != nil {

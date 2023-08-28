@@ -679,7 +679,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build failed: %w", err)
+		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)

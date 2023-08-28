@@ -806,7 +806,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".ibl"
 	var bloom *bloomFilter
 	var err error
-	if kv.Count() > 0 {
+	if kv.Count() >= 2 {
 		bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
@@ -823,6 +823,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	if err != nil {
 		return err
 	}
+	defer iw.Close()
 
 	getter := NewArchiveGetter(kv.MakeGetter(), compression)
 	getter.Reset(0)
@@ -855,7 +856,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	if err := iw.Build(); err != nil {
 		return err
 	}
-	iw.Close()
 
 	if bloom != nil {
 		if err := bloom.Build(); err != nil {

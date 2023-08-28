@@ -132,11 +132,12 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 func (b *bloomFilter) FileName() string { return b.fileName }
 
 func (b *bloomFilter) Build() error {
-	log.Warn("[agg] write file", "f", b.FileName())
+	log.Trace("[agg] write file", "file", b.FileName())
 	//TODO: fsync and tmp-file rename
 	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -394,7 +395,6 @@ func (d *Domain) GetAndResetStats() DomainStats {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
-
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -845,6 +845,7 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 			dc.hasher.Reset()
 			dc.hasher.Write(filekey) //nolint:errcheck
 			hi, _ := dc.hasher.Sum128()
+			fmt.Printf("a: %s, %t, %x\n", dc.files[i].src.decompressor.FileName(), dc.files[i].src.bloom.ContainsHash(hi), filekey)
 			if !dc.files[i].src.bloom.ContainsHash(hi) {
 				return nil, false, nil
 			}
@@ -1149,15 +1150,17 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		btPath := filepath.Join(d.dir, btFileName)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.tmpdir, d.logger)
 		if err != nil {
-			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
+			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
 	var bloom *bloomFilter
 	{
 		fileName := fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, step, step+1)
-		bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
-		if err != nil {
-			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
+		if dir.FileExist(filepath.Join(d.dir, fileName)) {
+			bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+			if err != nil {
+				return StaticFiles{}, fmt.Errorf("build %s .ibl: %w", d.filenameBase, err)
+			}
 		}
 	}
 	closeComp = false
@@ -1174,7 +1177,8 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))) {
+			fname := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep)
+			if !dir.FileExist(filepath.Join(d.dir, fname)) {
 				l = append(l, item)
 			}
 		}
