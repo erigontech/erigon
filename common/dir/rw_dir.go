@@ -49,6 +49,23 @@ func FileExist(path string) bool {
 	return true
 }
 
+func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if err != nil {
+		return err
+	}
+	return err
+}
+
 func Recreate(dir string) {
 	if Exist(dir) {
 		_ = os.RemoveAll(dir)

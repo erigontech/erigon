@@ -843,7 +843,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		hasher.Write(key) //nolint:errcheck
 		hi, _ := hasher.Sum128()
 		bloom.AddHash(hi)
-
 		pos, _ = getter.Skip()
 		//if pos-kp == 1 {
 		//	ks[len(key)]++

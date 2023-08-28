@@ -845,7 +845,6 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 			dc.hasher.Reset()
 			dc.hasher.Write(filekey) //nolint:errcheck
 			hi, _ := dc.hasher.Sum128()
-			fmt.Printf("a: %s, %t, %x\n", dc.files[i].src.decompressor.FileName(), dc.files[i].src.bloom.ContainsHash(hi), filekey)
 			if !dc.files[i].src.bloom.ContainsHash(hi) {
 				return nil, false, nil
 			}
