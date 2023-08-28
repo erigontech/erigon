@@ -11,6 +11,7 @@ import (
 
 // TODO(enriavil1): Make this configurable via flags
 type RouterConfiguration struct {
+	Active   bool
 	Protocol string
 	Address  string
 

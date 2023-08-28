@@ -774,7 +774,7 @@ Loop:
 					return err
 				}
 
-				var t1, t3, t32, t4, t5, t6 time.Duration
+				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
 				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
@@ -797,7 +797,6 @@ Loop:
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
-					t32 = time.Since(tt)
 					if !useExternalTx {
 						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
@@ -846,7 +845,7 @@ Loop:
 					return err
 				}
 				logger.Info("Committed", "time", time.Since(commtitStart),
-					"commitment", t1, "flush", t3, "tx.CollectMetrics", t32, "tx.commit", t4, "aggregate", t5, "prune", t6)
+					"commitment", t1, "flush", t3, "tx.commit", t4, "aggregate", t5, "prune", t6)
 			default:
 			}
 		}

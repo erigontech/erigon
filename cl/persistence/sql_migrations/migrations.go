@@ -8,16 +8,19 @@ import (
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS beacon_indicies (
+		beacon_block_root BLOB NOT NULL CHECK(length(beacon_block_root) = 32),
 		slot INTEGER NOT NULL,
-		beacon_block_root BLOB NOT NULL CHECK(length(beacon_block_root) = 32), -- Ensure it's 32 bytes
+		proposer_index INTEGER NOT NULL,
 		state_root BLOB NOT NULL CHECK(length(state_root) = 32),
 		parent_block_root BLOB NOT NULL CHECK(length(parent_block_root) = 32),
 		canonical INTEGER NOT NULL DEFAULT 0, -- 0 for false, 1 for true
-		PRIMARY KEY (slot, beacon_block_root)  -- Composite key ensuring unique combination of Slot and BeaconBlockRoot
+		PRIMARY KEY (beacon_block_root)
 	);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_canonical 
-		ON beacon_indicies (slot) 
-		WHERE canonical = 1;`,
+	`CREATE INDEX idx_slot ON beacon_indicies (slot);`,
+	`CREATE TABLE IF NOT EXISTS data_config (
+		prune_depth INTEGER NOT NULL,
+		full_blocks BOOLEAN NOT NULL
+	);`,
 }
 
 func ApplyMigrations(ctx context.Context, tx *sql.Tx) error {

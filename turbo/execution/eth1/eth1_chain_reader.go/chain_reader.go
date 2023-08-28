@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/log/v3"
@@ -179,6 +180,41 @@ func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.In
 		return nil
 	}
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
+}
+
+func (c ChainReaderWriterEth1) GetBodiesByHases(hashes []libcommon.Hash) []*types.RawBody {
+	grpcHashes := make([]*types2.H256, len(hashes))
+	for i := range grpcHashes {
+		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
+	}
+	resp, err := c.executionModule.GetBodiesByHashes(c.ctx, &execution.GetBodiesByHashesRequest{
+		Hashes: grpcHashes,
+	})
+	if err != nil {
+		log.Error("GetBodiesByHases failed", "err", err)
+		return nil
+	}
+	ret := make([]*types.RawBody, len(resp.Bodies))
+	for i := range ret {
+		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+	}
+	return ret
+}
+
+func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) []*types.RawBody {
+	resp, err := c.executionModule.GetBodiesByRange(c.ctx, &execution.GetBodiesByRangeRequest{
+		Start: start,
+		Count: count,
+	})
+	if err != nil {
+		log.Error("GetBodiesByHases failed", "err", err)
+		return nil
+	}
+	ret := make([]*types.RawBody, len(resp.Bodies))
+	for i := range ret {
+		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+	}
+	return ret
 }
 
 func (c ChainReaderWriterEth1) Ready() (bool, error) {

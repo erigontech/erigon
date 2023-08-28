@@ -138,7 +138,6 @@ func (nw *Network) Start(ctx context.Context) error {
 		}
 
 		nw.peers = append(nw.peers, enode)
-		baseNode.StaticPeers = strings.Join(nw.peers, ",")
 
 		// TODO do we need to call AddPeer to the nodes to make them aware of this one
 		// the current model only works for an appending node network where the peers gossip
@@ -205,6 +204,23 @@ func (nw *Network) startNode(n Node) error {
 
 	if err != nil {
 		return err
+	}
+
+	if len(nw.peers) > 0 {
+		peersIndex := -1
+
+		for i, arg := range args {
+			if strings.HasPrefix(arg, "--staticpeers") {
+				peersIndex = i
+				break
+			}
+		}
+
+		if peersIndex >= 0 {
+			args[peersIndex] = args[peersIndex] + "," + strings.Join(nw.peers, ",")
+		} else {
+			args = append(args, "--staticpeers="+strings.Join(nw.peers, ","))
+		}
 	}
 
 	go func() {

@@ -17,6 +17,8 @@ type ExecutionEngine interface {
 	SupportInsertion() bool
 	InsertBlocks([]*types.Block) error
 	InsertBlock(*types.Block) error
+	// GetBodiesByRange(start, count uint64) *types.RawBody TODO(Giulio2002): implement
+	// GetBodiesByHashes([]) *types.RawBody TODO(Giulio2002): implement
 	IsCanonicalHash(libcommon.Hash) (bool, error)
 	Ready() (bool, error)
 }

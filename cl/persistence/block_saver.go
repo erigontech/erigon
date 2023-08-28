@@ -24,19 +24,19 @@ type beaconChainDatabaseFilesystem struct {
 	fs  afero.Fs
 	cfg *clparams.BeaconChainConfig
 
-	networkEncoding bool // same encoding as reqresp
+	fullBlocks bool // same encoding as reqresp
 
-	// TODO(Giulio2002): actually make decoupling possible
-	_          execution_client.ExecutionEngine
-	indiciesDB *sql.DB
+	executionEngine execution_client.ExecutionEngine
+	indiciesDB      *sql.DB
 }
 
-func NewbeaconChainDatabaseFilesystem(fs afero.Fs, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
+func NewbeaconChainDatabaseFilesystem(fs afero.Fs, executionEngine execution_client.ExecutionEngine, fullBlocks bool, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
 	return beaconChainDatabaseFilesystem{
 		fs:              fs,
 		cfg:             cfg,
-		networkEncoding: false,
+		fullBlocks:      fullBlocks,
 		indiciesDB:      indiciesDB,
+		executionEngine: executionEngine,
 	}
 }
 
@@ -45,7 +45,25 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 }
 
 func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint64, count uint64) error {
-	panic("not imlemented")
+	tx, err := b.indiciesDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := beacon_indicies.IterateBeaconIndicies(ctx, tx, from, from+count, func(_ uint64, beaconBlockRoot, _, _ libcommon.Hash, _ bool) bool {
+		_, path := RootToPaths(beaconBlockRoot, b.cfg)
+		_ = b.fs.Remove(path)
+		return true
+	}); err != nil {
+		return err
+	}
+
+	if err := beacon_indicies.PruneIndicies(ctx, tx, from, from+count); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
@@ -69,15 +87,28 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cl
 	if err != nil {
 		return err
 	}
-	if b.networkEncoding { // 10x bigger but less latency
+	if b.fullBlocks { // 10x bigger but less latency
 		err = ssz_snappy.EncodeAndWrite(fp, block)
 		if err != nil {
 			return err
 		}
 	} else {
 		if block.Version() >= clparams.BellatrixVersion {
+			// Keep track of EL headers so that we can do deduplication.
+			payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
+			if err != nil {
+				return err
+			}
+			encodedPayloadHeader, err := payloadHeader.EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
 			// Need to reference EL somehow on read.
-			if _, err := fp.Write(block.Block.Body.ExecutionPayload.BlockHash[:]); err != nil {
+			if _, err := fp.Write(dbutils.EncodeBlockNumber(uint64(len(encodedPayloadHeader)))); err != nil {
+				return err
+			}
+			// Need to reference EL somehow on read.
+			if _, err := fp.Write(encodedPayloadHeader); err != nil {
 				return err
 			}
 			if _, err := fp.Write(dbutils.EncodeBlockNumber(block.Block.Body.ExecutionPayload.BlockNumber)); err != nil {
