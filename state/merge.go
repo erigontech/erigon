@@ -658,9 +658,17 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 
 	btFileName := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	btPath := filepath.Join(d.dir, btFileName)
-	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, ps, d.tmpdir, d.logger)
+	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+	}
+
+	{
+		fileName := fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
+		valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
 	}
 
 	closeItem = false
@@ -815,7 +823,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	}
 
 	btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, ps, d.tmpdir, d.logger)
+	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}

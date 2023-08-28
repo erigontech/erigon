@@ -28,9 +28,6 @@ import (
 
 	_ "github.com/FastFilter/xorfilter"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spaolacci/murmur3"
-
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -38,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
@@ -310,7 +308,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	hi, lo := lc.reader.Sum(key)
-	if !lc.file.src.bloom.ContainsHash(hi) {
+	if lc.file.src.bloom != nil && !lc.file.src.bloom.ContainsHash(hi) {
 		return 0, false, nil
 	}
 
@@ -400,7 +398,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		rs.DisableFsync()
 	}
 
-	hasher := murmur3.New128WithSeed(rs.Salt())
+	//hasher := murmur3.New128WithSeed(rs.Salt())
 	var bloom *bloomFilter
 	for {
 		p.Processed.Store(0)
@@ -420,12 +418,12 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			dense.DisableFsync()
 		}
 
-		if count > 0 {
-			bloom, err = NewBloom(uint64(count), idxPath+".lb")
-			if err != nil {
-				return nil, err
-			}
-		}
+		//if count > 0 {
+		//	bloom, err = NewBloom(uint64(count), idxPath+".lb")
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//}
 
 		it = makeIter()
 		defer it.Close()
@@ -444,10 +442,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
-			hasher.Reset()
-			hasher.Write(k) //nolint:errcheck
-			hi, _ := hasher.Sum128()
-			bloom.AddHash(hi)
+			//hasher.Reset()
+			//hasher.Write(k) //nolint:errcheck
+			//hi, _ := hasher.Sum128()
+			//bloom.AddHash(hi)
 
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
@@ -477,12 +475,12 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 	}
 
-	if bloom != nil {
-		if err := bloom.Build(); err != nil {
-			return nil, err
-		}
-		bloom.Close() //TODO: move to defer, and move building and opennig to different funcs
-	}
+	//if bloom != nil {
+	//	if err := bloom.Build(); err != nil {
+	//		return nil, err
+	//	}
+	//	bloom.Close() //TODO: move to defer, and move building and opennig to different funcs
+	//}
 
 	idx, err := recsplit.OpenIndex(idxPath)
 	if err != nil {
@@ -492,12 +490,12 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	if dir.FileExist(idxPath + ".lb") {
-		bloom, err = OpenBloom(idxPath + ".lb")
-		if err != nil {
-			return nil, err
-		}
-	}
+	//if dir.FileExist(idxPath + ".lb") {
+	//	bloom, err = OpenBloom(idxPath + ".lb")
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//}
 	return &LocalityIndexFiles{index: idx, bm: bm, bloom: bloom, fromStep: fromStep, toStep: toStep}, nil
 }
 
