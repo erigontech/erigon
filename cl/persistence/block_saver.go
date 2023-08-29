@@ -79,6 +79,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 				return nil, err
 			}
 		} else {
+			// Below is a frankenstein monster, i am sorry.
 			executionPayloadHeader := cltypes.NewEth1Header(version)
 			if version >= clparams.BellatrixVersion {
 				elBlockCount++
@@ -149,7 +150,6 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 		blocks = append(blocks, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block})
 	}
 	if startELNumber != nil {
-		fmt.Println(*startELNumber, count)
 		bodies, err := b.executionEngine.GetBodiesByRange(*startELNumber, count)
 		if err != nil {
 			return nil, err
@@ -162,7 +162,6 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 			body := bodies[bodyIdx]
 			blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(bodies[bodyIdx].Transactions)
 			blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload.Withdrawals = solid.NewDynamicListSSZFromList[*types.Withdrawal](body.Withdrawals, int(b.cfg.MaxWithdrawalsPerPayload))
-			fmt.Println(blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload)
 		}
 	}
 	return blocks, nil
@@ -228,7 +227,6 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cl
 			if err != nil {
 				return err
 			}
-			fmt.Println(block.Block.Body.ExecutionPayload)
 
 			// Need to reference EL somehow on read.
 			if _, err := fp.Write(dbutils.EncodeBlockNumber(uint64(len(encodedPayloadHeader)))); err != nil {
