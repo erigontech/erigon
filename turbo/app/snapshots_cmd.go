@@ -185,7 +185,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 
 	seek := common.FromHex(cliCtx.String("key"))
 
-	cur, err := idx.Seek(seek)
+	cur, err := idx.SeekDeprecated(seek)
 	if err != nil {
 		return err
 	}
