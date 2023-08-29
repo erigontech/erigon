@@ -75,7 +75,7 @@ func GenerateBlockIndicies(ctx context.Context, db SQLObject, block *cltypes.Bea
 			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 		}
 	}
-	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, ?, 0);", block.Slot, block.ProposerIndex, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, ?, ?);", block.Slot, block.ProposerIndex, blockRoot[:], block.StateRoot[:], block.ParentRoot[:], forceCanonical)
 
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
@@ -125,7 +125,7 @@ func PruneIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64) e
 }
 
 func IterateBeaconIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot, parentBlockRoot, stateRoot libcommon.Hash, canonical bool) bool) error {
-	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root, state_root, parent_block_root, canonical FROM beacon_indicies WHERE slot >= ? AND slot <= ?", fromSlot, toSlot)
+	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root, state_root, parent_block_root, canonical FROM beacon_indicies WHERE slot BETWEEN ? AND ?", fromSlot, toSlot)
 	if err != nil {
 		return err
 	}
@@ -152,4 +152,30 @@ func IterateBeaconIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot u
 	}
 
 	return nil
+}
+
+func ReadBeaconBlockRootsInSlotRange(ctx context.Context, db SQLObject, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
+	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root FROM beacon_indicies WHERE slot >= ? AND canonical > 0 LIMIT ?", fromSlot, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	roots := []libcommon.Hash{}
+	slots := []uint64{}
+	for rows.Next() {
+		var beaconBlockRoot libcommon.Hash
+		var slot uint64
+		err := rows.Scan(&slot, &beaconBlockRoot)
+		if err != nil {
+			return nil, nil, err
+		}
+		roots = append(roots, beaconBlockRoot)
+		slots = append(slots, slot)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return roots, slots, nil
 }
