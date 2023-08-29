@@ -5,10 +5,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
