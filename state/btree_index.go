@@ -415,36 +415,10 @@ func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
 	}))
 }
 
-func (a *btAlloc) Seek(g ArchiveGetter, ik []byte) (k []byte, di uint64, found bool, err error) {
-	return a.seek(g, ik)
-	//k, di, found, err = a.seek(g, ik)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if !found {
-	//	return nil, nil
-	//}
-	// if !bytes.Equal(k, k1) {
-	// 	panic(fmt.Errorf("key mismatch found1 %x != lookup2 %x seek %x", k, k1, ik))
-	// }
-
-	//k1, v, err := a.dataLookup(di, g)
-	//if err != nil {
-	//	if errors.Is(err, ErrBtIndexLookupBounds) {
-	//		return nil, nil
-	//	}
-	//	if a.trace {
-	//		fmt.Printf("finally found key %x v=%x naccess_disk=%d\n", k, v, a.naccess)
-	//	}
-	//	return nil, err
-	//}
-	//return NewCursor(context.TODO(), k1, v, di, g), nil
-}
-
 // Get returns value if found exact match of key
 // TODO k as return is useless(almost)
 func (a *btAlloc) Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uint64, err error) {
-	k, di, found, err = a.seek(g, key)
+	k, di, found, err = a.Seek(g, key)
 	if err != nil {
 		return nil, false, 0, err
 	}
@@ -452,21 +426,9 @@ func (a *btAlloc) Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uin
 		return nil, false, 0, nil
 	}
 	return k, found, di, nil
-
-	//_, v, err = a.dataLookup(di, g)
-	//if err != nil {
-	//	if errors.Is(err, ErrBtIndexLookupBounds) {
-	//		return nil, false, 0, nil
-	//	}
-	//	if a.trace {
-	//		fmt.Printf("finally found key %x v=%x naccess_disk=%d\n", k, v, a.naccess)
-	//	}
-	//	return nil, false, 0, err
-	//}
-	//return v, true, di, nil
 }
 
-func (a *btAlloc) seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error) {
+func (a *btAlloc) Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error) {
 	if a.trace {
 		fmt.Printf("seek key %x\n", seek)
 	}
@@ -543,7 +505,7 @@ func (a *btAlloc) seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found
 		if a.trace {
 			fmt.Printf("key %x not found\n", seek)
 		}
-		return k, 0, false, err
+		return nil, 0, false, err
 	}
 	return k, di, found, nil
 }
