@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -372,7 +371,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				misc.ApplyDAOHardFork(ibs)
 			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs, logger)
+		if b.engine != nil {
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)

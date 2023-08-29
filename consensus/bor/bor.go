@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -1046,7 +1047,8 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	systemcontracts.UpgradeBuildInSystemContract(config, header.Number, state, logger)
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
