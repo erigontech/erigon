@@ -11,6 +11,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
@@ -18,10 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -672,12 +673,12 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
 			return fmt.Errorf("resetting blocks: %w", err)
 		}
-		agg.SetTx(tx)
 		ac := agg.MakeContext()
 		defer ac.Close()
 
 		domains := agg.SharedDomains(ac)
 		defer domains.Close()
+		domains.SetTx(tx)
 
 		blockNum, txnUm, err := domains.SeekCommitment(0, math.MaxUint64)
 		if err != nil {

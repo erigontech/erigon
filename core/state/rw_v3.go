@@ -115,7 +115,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 const Assert = false
 
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
-	//return nil
 	var acc accounts.Account
 
 	for table, list := range txTask.WriteLists {
@@ -219,16 +218,47 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 func (rs *StateV3) ApplyState4(txTask *TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	agg.SetTxNum(txTask.TxNum)
 	rs.domains.SetTxNum(txTask.TxNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
-		return err
+		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 
+	if err := rs.ApplyLogsAndTraces4(txTask, rs.domains); err != nil {
+		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
+	}
+
 	txTask.ReadLists, txTask.WriteLists = nil, nil
+	return nil
+}
+
+func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
+	if dbg.DiscardHistory() {
+		return nil
+	}
+
+	for addr := range txTask.TraceFroms {
+		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
+			return err
+		}
+	}
+	for addr := range txTask.TraceTos {
+		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
+			return err
+		}
+	}
+	for _, lg := range txTask.Logs {
+		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
+			return err
+		}
+		for _, topic := range lg.Topics {
+			if err := domains.IndexAdd(kv.TblLogTopicsIdx, topic[:]); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -238,17 +268,6 @@ func (rs *StateV3) ApplyLogsAndTraces(txTask *TxTask, agg *libstate.AggregatorV3
 	}
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	//for addrS, enc0 := range txTask.AccountPrevs {
-	//	if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
-	//		return err
-	//	}
-	//}
-	//for compositeS, val := range txTask.StoragePrevs {
-	//	composite := []byte(compositeS)
-	//	if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
-	//		return err
-	//	}
-	//}
 	for addr := range txTask.TraceFroms {
 		if err := agg.PutIdx(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
@@ -348,7 +367,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := ac.Unwind(ctx, txUnwindTo); err != nil {
+	if err := ac.Unwind(ctx, txUnwindTo, tx); err != nil {
 		return err
 	}
 

@@ -657,8 +657,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		}
 		defer agg.StartWrites().FinishWrites()
-		agg.SetTx(tx)
-		agg.SetTxNum(lastTxNum)
+
+		ac := agg.MakeContext()
+		defer ac.Close()
+
+		domains := agg.SharedDomains(ac)
+		domains.SetTx(tx)
+		domains.SetTxNum(lastTxNum)
 		return nil
 	}); err != nil {
 		return err
