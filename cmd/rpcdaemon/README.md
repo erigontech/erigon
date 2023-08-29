@@ -263,6 +263,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_submitHashrate                         | Yes     |                                      |
 | eth_getWork                                | Yes     |                                      |
 | eth_submitWork                             | Yes     |                                      |
+| eth_getVoteOnHash                          | Yes     | Relevant to bor consensus
 |                                            |         |                                      |
 | eth_subscribe                              | Limited | Websock Only - newHeads,             |
 |                                            |         | newPendingTransactionsWithBody,      |

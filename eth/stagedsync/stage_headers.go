@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -183,6 +184,24 @@ func HeadersPOW(
 Loop:
 	for !stopped {
 
+		// Only relevant to bor chain, called in case of milestone mismatch
+		if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
+			s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
+			err := s.state.RunUnwind(nil, tx)
+			if err != nil {
+				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind))
+				return err
+			}
+
+			var reset uint64 = 0
+			generics.BorMilestoneRewind.Store(&reset)
+
+			// Update highest in db field after the rewind
+			if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+				return err
+			}
+		}
+
 		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
@@ -236,8 +255,14 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+		borPenalties := make([]headerdownload.PenaltyItem, 0, 1)
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), &borPenalties, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
 			return err
+		}
+
+		// If the bor whitelisting service invalidates the block header
+		if len(borPenalties) > 0 {
+			cfg.penalize(ctx, borPenalties)
 		}
 
 		if test {

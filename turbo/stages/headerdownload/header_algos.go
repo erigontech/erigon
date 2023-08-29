@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -350,7 +351,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 					Hash:      types.RawRlpHash(v),
 					Number:    header.Number.Uint64(),
 				}
-				hd.addHeaderAsLink(h, true /* persisted */)
+				hd.addHeaderAsLink([64]byte{0x0}, h, true /* persisted */)
 			}
 
 			select {
@@ -515,7 +516,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties *[]PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var returnTd *big.Int
@@ -537,7 +538,15 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
-			if err := hd.VerifyHeader(link.header); err != nil {
+			// Whitelist service is called to check if the bor chain is
+			// on the cannonical chain according to milestones
+			borValidChain := validateReorg(hd.highestInDb, link.header)
+
+			if !borValidChain {
+				*borPenalties = append(*borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
+			}
+
+			if err := hd.VerifyHeader(link.header); err != nil || !borValidChain {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -626,14 +635,14 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, borPenalties *[]PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
 	var blocksToTTD uint64
 	var blockTime uint64
 	for more {
-		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, borPenalties, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
 		}
 		if force {
@@ -779,8 +788,9 @@ func (hd *HeaderDownload) getLink(linkHash libcommon.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
+func (hd *HeaderDownload) addHeaderAsLink(peerID [64]byte, h ChainSegmentHeader, persisted bool) *Link {
 	link := &Link{
+		peerID:      peerID,
 		blockHeight: h.Number,
 		hash:        h.Hash,
 		header:      h.Header,
@@ -994,7 +1004,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			return false
 		}
 	}
-	link := hd.addHeaderAsLink(sh, false /* persisted */)
+	link := hd.addHeaderAsLink(peerID, sh, false /* persisted */)
 	if foundAnchor {
 		// The new link is what anchor was pointing to, so the link takes over the child links of the anchor and the anchor is removed
 		link.fChild = anchor.fLink
@@ -1218,7 +1228,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockR
 			Hash:      header.Hash(),
 			Number:    header.Number.Uint64(),
 		}
-		link := hd.addHeaderAsLink(h, true /* persisted */)
+		link := hd.addHeaderAsLink([64]byte{0x0}, h, true /* persisted */)
 		link.verified = true
 	}
 	if hd.highestInDb < n {
@@ -1353,4 +1363,16 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 	}
 
 	return hardTips, nil
+}
+
+// ValidateReorg calls the chain validator service to check if the reorg is valid or not
+// This function is focussed at bor, in all other cases returns true without validation
+func validateReorg(current uint64, incoming *types.Header) bool {
+	service := whitelist.GetWhitelistingService()
+
+	if service != nil {
+		return service.IsValidChain(current, []*types.Header{incoming})
+	}
+
+	return true
 }

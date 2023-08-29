@@ -101,6 +101,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	borwhitelist "github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
@@ -191,6 +193,8 @@ type Ethereum struct {
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
+
+	closeCh chan struct{} // Channel to signal the background processes to exit
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -826,7 +830,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	if casted, ok := s.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	apiList = jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
@@ -840,8 +844,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	return nil
 }
 
+var apiList []rpc.API
+
 func (s *Ethereum) APIs() []rpc.API {
-	return []rpc.API{}
+	return apiList
 }
 
 func (s *Ethereum) Etherbase() (eb libcommon.Address, err error) {
@@ -1182,6 +1188,22 @@ func (s *Ethereum) Start() error {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
+	if s.chainConfig.Bor != nil {
+		borDB := s.engine.(*bor.Bor).DB
+
+		borwhitelist.RegisterService(borDB)
+
+		var borAPI borfinality.BorAPI
+		apiList := s.APIs()
+		for _, api := range apiList {
+			if api.Namespace == "bor" {
+				borAPI = api.Service.(borfinality.BorAPI)
+				break
+			}
+		}
+		borfinality.Whitelist(s.engine, borDB, s.chainDB, s.blockReader, s.logger, borAPI, s.closeCh)
+	}
+
 	return nil
 }
 
@@ -1209,6 +1231,9 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
+
+	// Close all bg processes
+	close(s.closeCh)
 
 	_ = s.engine.Close()
 	<-s.waitForStageLoopStop
