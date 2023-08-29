@@ -91,6 +91,7 @@ func (b *SignedBeaconBlock) EncodeForStorage(buf []byte) ([]byte, error) {
 }
 
 func (b *SignedBeaconBlock) DecodeForStorage(buf []byte, s int) error {
+	b.Block.Body.Version = clparams.StateVersion(s)
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}

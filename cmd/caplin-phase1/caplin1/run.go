@@ -102,7 +102,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 			}
 		}()
 	}
-	beaconDB := persistence.NewbeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig, db)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig, db)
 
 	if cfg.Active {
 		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db)

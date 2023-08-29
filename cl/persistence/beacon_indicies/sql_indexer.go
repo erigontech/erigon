@@ -75,7 +75,7 @@ func GenerateBlockIndicies(ctx context.Context, db SQLObject, block *cltypes.Bea
 			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
 		}
 	}
-	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, ?, 0);", block.Slot, block.ProposerIndex, blockRoot[:], block.StateRoot[:], block.ParentRoot[:])
+	_, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical)  VALUES (?, ?, ?, ?, ?, ?);", block.Slot, block.ProposerIndex, blockRoot[:], block.StateRoot[:], block.ParentRoot[:], forceCanonical)
 
 	if err != nil {
 		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
@@ -155,7 +155,7 @@ func IterateBeaconIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot u
 }
 
 func ReadBeaconBlockRootsInSlotRange(ctx context.Context, db SQLObject, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
-	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root FROM beacon_indicies WHERE slot >= fromSlot AND canonical > 0 LIMIT ?", fromSlot, count)
+	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root FROM beacon_indicies WHERE slot >= ? AND canonical > 0 LIMIT ?", fromSlot, count)
 	if err != nil {
 		return nil, nil, err
 	}

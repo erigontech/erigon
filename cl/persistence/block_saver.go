@@ -33,7 +33,7 @@ type beaconChainDatabaseFilesystem struct {
 	indiciesDB      *sql.DB
 }
 
-func NewbeaconChainDatabaseFilesystem(fs afero.Fs, executionEngine execution_client.ExecutionEngine, fullBlocks bool, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
+func NewBeaconChainDatabaseFilesystem(fs afero.Fs, executionEngine execution_client.ExecutionEngine, fullBlocks bool, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
 	return beaconChainDatabaseFilesystem{
 		fs:              fs,
 		cfg:             cfg,
@@ -93,6 +93,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 				}
 
 				executionPayloadLength := binary.BigEndian.Uint64(executionPayloadLengthBytes)
+
 				executionPayloadBytes := make([]byte, executionPayloadLength)
 				if _, err := fp.Read(executionPayloadBytes); err != nil {
 					return nil, err
@@ -113,6 +114,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 				return nil, err
 			}
 			beaconBlockLength := binary.BigEndian.Uint64(beaconBlockLengthBytes)
+
 			beaconBlockBytes := make([]byte, beaconBlockLength)
 			if _, err := fp.Read(beaconBlockBytes); err != nil {
 				return nil, err
@@ -147,6 +149,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 		blocks = append(blocks, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block})
 	}
 	if startELNumber != nil {
+		fmt.Println(*startELNumber, count)
 		bodies, err := b.executionEngine.GetBodiesByRange(*startELNumber, count)
 		if err != nil {
 			return nil, err
@@ -159,6 +162,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 			body := bodies[bodyIdx]
 			blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(bodies[bodyIdx].Transactions)
 			blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload.Withdrawals = solid.NewDynamicListSSZFromList[*types.Withdrawal](body.Withdrawals, int(b.cfg.MaxWithdrawalsPerPayload))
+			fmt.Println(blocks[beaconBlockIdx].Data.Block.Body.ExecutionPayload)
 		}
 	}
 	return blocks, nil
@@ -224,14 +228,13 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cl
 			if err != nil {
 				return err
 			}
+			fmt.Println(block.Block.Body.ExecutionPayload)
+
 			// Need to reference EL somehow on read.
 			if _, err := fp.Write(dbutils.EncodeBlockNumber(uint64(len(encodedPayloadHeader)))); err != nil {
 				return err
 			}
 			if _, err := fp.Write(encodedPayloadHeader); err != nil {
-				return err
-			}
-			if _, err := fp.Write(dbutils.EncodeBlockNumber(block.Block.Body.ExecutionPayload.BlockNumber)); err != nil {
 				return err
 			}
 		}
