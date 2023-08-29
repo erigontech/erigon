@@ -120,7 +120,7 @@ func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, executio
 	return NewBeaconChainDatabaseFilesystem(fs, engine, full, &clparams.MainnetBeaconConfig, db), db, engine
 }
 
-func TestBlockSaverStoreAndLoadFull(t *testing.T) {
+func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 	store, db, _ := setupStore(t, true)
 	defer db.Close()
 
@@ -139,6 +139,12 @@ func TestBlockSaverStoreAndLoadFull(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, expectedRoot, haveRoot)
+
+	require.NoError(t, store.PurgeRange(ctx, 0, 99999999999)) // THE PUURGE
+
+	newBlks, err := store.GetRange(context.Background(), block.Block.Slot, 1)
+	require.NoError(t, err)
+	require.Equal(t, len(newBlks), 0)
 }
 
 func TestBlockSaverStoreAndLoadPartial(t *testing.T) {
@@ -166,8 +172,4 @@ func TestBlockSaverStoreAndLoadPartial(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, expectedRoot, haveRoot)
-}
-
-func TestBlockSaverStoreAndPurge(t *testing.T) {
-
 }
