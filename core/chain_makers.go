@@ -367,9 +367,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
 				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
 			}
-			if daoBlock.Cmp(b.header.Number) == 0 {
-				misc.ApplyDAOHardFork(ibs)
-			}
 		}
 		if b.engine != nil {
 			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)

@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -292,7 +291,6 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 
 	var logger = log.New("recon-tx")
@@ -306,10 +304,6 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 		}
 		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &chain.Rules{}
-	} else if daoForkTx {
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
-		misc.ApplyDAOHardFork(ibs)
-		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -330,6 +324,11 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 		}
 
 		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, syscall, logger)
+		if err = ibs.FinalizeTx(rules, noop); err != nil {
+			if _, readError := rw.stateReader.ReadError(); !readError {
+				return err
+			}
+		}
 	} else {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddBlobGas(txTask.Tx.GetBlobGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
