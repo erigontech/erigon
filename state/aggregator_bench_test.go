@@ -107,7 +107,7 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
 		count := rnd.Intn(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true)
+		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))
 	}
@@ -135,7 +135,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
-		cur, err := bt.Seek(keys[p])
+		cur, err := bt.SeekDeprecated(keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
@@ -172,7 +172,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.SeekDeprecated(keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
@@ -183,7 +183,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.SeekDeprecated(keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)

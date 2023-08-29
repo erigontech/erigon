@@ -221,7 +221,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 		//}
 
 		for i := 0; i < len(words); i += 2 {
-			c, _ := sf.valuesBt.Seek([]byte(words[i]))
+			c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
 			require.Equal(t, words[i], string(c.Key()))
 			require.Equal(t, words[i+1], string(c.Value()))
 		}
@@ -244,7 +244,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 		// Check index
 		require.Equal(t, 1, int(sf.valuesBt.KeyCount()))
 		for i := 0; i < len(words); i += 2 {
-			c, _ := sf.valuesBt.Seek([]byte(words[i]))
+			c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
 			require.Equal(t, words[i], string(c.Key()))
 			require.Equal(t, words[i+1], string(c.Value()))
 		}
@@ -1144,7 +1144,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	// Check index
 	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		c, _ := sf.valuesBt.Seek([]byte(words[i]))
+		c, _ := sf.valuesBt.SeekDeprecated([]byte(words[i]))
 		require.Equal(t, words[i], string(c.Key()))
 		require.Equal(t, words[i+1], string(c.Value()))
 	}

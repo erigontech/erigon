@@ -1961,7 +1961,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 
 	for i, item := range dc.files {
 		if UseBtree || UseBpsTree {
-			cursor, err := dc.statelessBtree(i).SeekWithGetter(prefix, dc.statelessGetter(i))
+			cursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), prefix)
 			if err != nil {
 				return err
 			}
@@ -2276,7 +2276,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 	}
 
 	for i, item := range dc.files {
-		btCursor, err := dc.statelessBtree(i).SeekWithGetter(hi.from, dc.statelessGetter(i))
+		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
 		if err != nil {
 			return err
 		}
