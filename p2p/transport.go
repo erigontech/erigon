@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,7 +124,7 @@ func (t *rlpxTransport) close(err error) {
 			if err := t.conn.SetWriteDeadline(deadline); err == nil {
 				// Connection supports write deadline.
 				t.wbuf.Reset()
-				rlp.Encode(&t.wbuf, []DiscReason{r})  //nolint:errcheck
+				_ = DisconnectMessagePayloadEncode(&t.wbuf, r)
 				t.conn.Write(discMsg, t.wbuf.Bytes()) //nolint:errcheck
 			}
 		}
@@ -169,13 +170,8 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	if msg.Code == discMsg {
 		// Disconnect before protocol handshake is valid according to the
 		// spec and we send it ourself if the post-handshake checks fail.
-		// We can't return the reason directly, though, because it is echoed
-		// back otherwise. Wrap it in a string instead.
-		var reason [1]DiscReason
-		if err = rlp.Decode(msg.Payload, &reason); err != nil {
-			return nil, err
-		}
-		return nil, reason[0]
+		reason, _ := DisconnectMessagePayloadDecode(msg.Payload)
+		return nil, reason
 	}
 	if msg.Code != handshakeMsg {
 		return nil, fmt.Errorf("expected handshake, got %x", msg.Code)
@@ -188,4 +184,35 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 		return nil, DiscInvalidIdentity
 	}
 	return &hs, nil
+}
+
+func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
+	var buffer bytes.Buffer
+	_, err := buffer.ReadFrom(reader)
+	if err != nil {
+		return DiscRequested, err
+	}
+	data := buffer.Bytes()
+	if len(data) == 0 {
+		return DiscRequested, nil
+	}
+
+	var reasonList struct{ Reason DiscReason }
+	err = rlp.DecodeBytes(data, &reasonList)
+
+	// en empty list
+	if (err != nil) && strings.Contains(err.Error(), "rlp: too few elements") {
+		return DiscRequested, nil
+	}
+
+	// not a list, try to decode as a plain integer
+	if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
+		err = rlp.DecodeBytes(data, &reasonList.Reason)
+	}
+
+	return reasonList.Reason, err
+}
+
+func DisconnectMessagePayloadEncode(writer io.Writer, reason DiscReason) error {
+	return rlp.Encode(writer, []DiscReason{reason})
 }

@@ -343,6 +343,19 @@ func MainnetGenesisBlock() *types.Genesis {
 	}
 }
 
+// HoleskyGenesisBlock returns the Holesky main net genesis block.
+func HoleskyGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HoleskyChainConfig,
+		Nonce:      4660,
+		ExtraData:  hexutil.MustDecode("0x686f77206d7563682069732074686520666973683f"),
+		GasLimit:   25000000,
+		Difficulty: big.NewInt(1),
+		Timestamp:  1694786100,
+		Alloc:      readPrealloc("allocs/holesky.json"),
+	}
+}
+
 // SepoliaGenesisBlock returns the Sepolia network genesis block.
 func SepoliaGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -488,24 +501,35 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && (g.Config.IsLondon(0)) {
+	if g.Config != nil && g.Config.IsLondon(0) {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
-	if g.Config.IsCancun(g.Timestamp) {
-		if g.ParentBeaconBlockRoot == nil {
-			head.ParentBeaconBlockRoot = &libcommon.Hash{}
-		} else {
-			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
-		}
-	}
 
 	var withdrawals []*types.Withdrawal
-	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
 		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+		if g.BlobGasUsed != nil {
+			head.BlobGasUsed = g.BlobGasUsed
+		} else {
+			head.BlobGasUsed = new(uint64)
+		}
+		if g.ExcessBlobGas != nil {
+			head.ExcessBlobGas = g.ExcessBlobGas
+		} else {
+			head.ExcessBlobGas = new(uint64)
+		}
+		if g.ParentBeaconBlockRoot != nil {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		} else {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
 	}
 
 	var root libcommon.Hash
@@ -618,6 +642,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 	switch chain {
 	case networkname.MainnetChainName:
 		return MainnetGenesisBlock()
+	case networkname.HoleskyChainName:
+		return HoleskyGenesisBlock()
 	case networkname.SepoliaChainName:
 		return SepoliaGenesisBlock()
 	case networkname.GoerliChainName:

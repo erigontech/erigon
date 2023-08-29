@@ -79,6 +79,23 @@ func WithDevnet(ctx context.Context, cliCtx *cli.Context, devnet Devnet, logger 
 }
 
 func WithCurrentNetwork(ctx context.Context, selector interface{}) Context {
+	if current := CurrentNetwork(ctx); current != nil {
+		if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {
+			selected := devnet.SelectNetwork(ctx, selector)
+
+			if selected == current {
+				if ctx, ok := ctx.(devnetContext); ok {
+					return ctx
+				}
+				return devnetContext{ctx}
+			}
+		}
+	}
+
+	if current := CurrentNode(ctx); current != nil {
+		ctx = context.WithValue(ctx, ckNode, nil)
+	}
+
 	return devnetContext{context.WithValue(ctx, ckNetwork, &cnet{selector: selector})}
 }
 

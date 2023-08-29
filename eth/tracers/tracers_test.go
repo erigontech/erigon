@@ -70,14 +70,16 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
+	excessBlobGas := uint64(50000)
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		Coinbase:    libcommon.Address{},
-		BlockNumber: 8000000,
-		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
-		GasLimit:    uint64(6000000),
+		CanTransfer:   core.CanTransfer,
+		Transfer:      core.Transfer,
+		Coinbase:      libcommon.Address{},
+		BlockNumber:   8000000,
+		Time:          5,
+		Difficulty:    big.NewInt(0x30000),
+		GasLimit:      uint64(6000000),
+		ExcessBlobGas: &excessBlobGas,
 	}
 	context.BaseFee = uint256.NewInt(0)
 	alloc := types.GenesisAlloc{}

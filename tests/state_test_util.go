@@ -68,7 +68,7 @@ func (t *StateTest) UnmarshalJSON(in []byte) error {
 type stJSON struct {
 	Env  stEnv                    `json:"env"`
 	Pre  types.GenesisAlloc       `json:"pre"`
-	Tx   stTransactionMarshaling  `json:"transaction"`
+	Tx   stTransaction            `json:"transaction"`
 	Out  hexutility.Bytes         `json:"out"`
 	Post map[string][]stPostState `json:"post"`
 }
@@ -85,7 +85,7 @@ type stPostState struct {
 	}
 }
 
-type stTransactionMarshaling struct {
+type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
@@ -96,6 +96,7 @@ type stTransactionMarshaling struct {
 	Data                 []string              `json:"data"`
 	Value                []string              `json:"value"`
 	AccessLists          []*types2.AccessList  `json:"accessLists,omitempty"`
+	BlobGasFeeCap        *math.HexOrDecimal256 `json:"maxFeePerBlobGas,omitempty"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
@@ -375,7 +376,7 @@ func vmTestBlockHash(n uint64) libcommon.Hash {
 	return libcommon.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }
 
-func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (core.Message, error) {
+func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
 	// Derive sender from private key if present.
 	var from libcommon.Address
 	if len(tx.PrivateKey) > 0 {
@@ -458,6 +459,11 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
+	var blobFeeCap *big.Int
+	if tx.BlobGasFeeCap != nil {
+		blobFeeCap = (*big.Int)(tx.BlobGasFeeCap)
+	}
+
 	// TODO the conversion to int64 then uint64 then new int isn't working!
 	msg := types.NewMessage(
 		from,
@@ -466,13 +472,13 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		value,
 		uint64(gasLimit),
 		gasPriceInt,
-		uint256.NewInt(feeCap.Uint64()),
-		uint256.NewInt(tipCap.Uint64()),
+		uint256.MustFromBig(&feeCap),
+		uint256.MustFromBig(&tipCap),
 		data,
 		accessList,
 		false, /* checkNonce */
 		false, /* isFree */
-		uint256.NewInt(tipCap.Uint64()),
+		uint256.MustFromBig(blobFeeCap),
 	)
 
 	return msg, nil

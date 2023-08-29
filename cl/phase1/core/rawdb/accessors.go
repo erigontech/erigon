@@ -69,7 +69,7 @@ func ReadBeaconBlock(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64, version 
 	if encodedBeaconBlock, err = utils.DecompressSnappy(encodedBeaconBlock); err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}
-	signedBlock := new(cltypes.SignedBeaconBlock)
+	signedBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	if err := signedBlock.DecodeSSZ(encodedBeaconBlock, int(version)); err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}

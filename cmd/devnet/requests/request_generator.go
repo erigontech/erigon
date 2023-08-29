@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 )
@@ -51,23 +52,27 @@ func (e EthError) Error() string {
 
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
-	GetBalance(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
+	GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
-	GetBlockDetailsByNumber(blockNum string, withTxs bool) (map[string]interface{}, error)
-	GetBlockByNumber(blockNum uint64, withTxs bool) (*BlockResult, error)
+	GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
+	GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error)
+	GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error)
+	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
+	GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	BlockNumber() (uint64, error)
-	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
 	SendTransaction(signedTx types.Transaction) (libcommon.Hash, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
-	TxpoolContent() (int, int, int, error)
 	Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error)
-	TraceCall(blockRef string, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
-	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
+	TxpoolContent() (int, int, int, error)
+	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
+	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
-	GetCode(address libcommon.Address, blockNum BlockNumber) (hexutility.Bytes, error)
+	GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error)
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
+
+	GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error)
 }
 
 type requestGenerator struct {
@@ -75,6 +80,7 @@ type requestGenerator struct {
 	reqID              int
 	client             *http.Client
 	subscriptionClient *rpc.Client
+	requestClient      *rpc.Client
 	logger             log.Logger
 	target             string
 }
@@ -108,33 +114,41 @@ var Methods = struct {
 	// OTSGetBlockDetails represents the ots_getBlockDetails method
 	OTSGetBlockDetails RPCMethod
 	// ETHNewHeads represents the eth_newHeads sub method
-	ETHNewHeads      SubMethod
-	ETHLogs          SubMethod
-	TraceCall        RPCMethod
-	TraceTransaction RPCMethod
-	DebugAccountAt   RPCMethod
-	ETHGetCode       RPCMethod
-	ETHEstimateGas   RPCMethod
-	ETHGasPrice      RPCMethod
+	ETHNewHeads              SubMethod
+	ETHLogs                  SubMethod
+	TraceCall                RPCMethod
+	TraceTransaction         RPCMethod
+	DebugAccountAt           RPCMethod
+	ETHGetCode               RPCMethod
+	ETHEstimateGas           RPCMethod
+	ETHGasPrice              RPCMethod
+	ETHGetTransactionByHash  RPCMethod
+	ETHGetTransactionReceipt RPCMethod
+	BorGetRootHash           RPCMethod
+	ETHCall                  RPCMethod
 }{
-	ETHGetTransactionCount: "eth_getTransactionCount",
-	ETHGetBalance:          "eth_getBalance",
-	ETHSendRawTransaction:  "eth_sendRawTransaction",
-	ETHGetBlockByNumber:    "eth_getBlockByNumber",
-	ETHGetBlock:            "eth_getBlock",
-	ETHGetLogs:             "eth_getLogs",
-	ETHBlockNumber:         "eth_blockNumber",
-	AdminNodeInfo:          "admin_nodeInfo",
-	TxpoolContent:          "txpool_content",
-	OTSGetBlockDetails:     "ots_getBlockDetails",
-	ETHNewHeads:            "eth_newHeads",
-	ETHLogs:                "eth_logs",
-	TraceCall:              "trace_call",
-	TraceTransaction:       "trace_transaction",
-	DebugAccountAt:         "debug_accountAt",
-	ETHGetCode:             "eth_getCode",
-	ETHEstimateGas:         "eth_estimateGas",
-	ETHGasPrice:            "eth_gasPrice",
+	ETHGetTransactionCount:   "eth_getTransactionCount",
+	ETHGetBalance:            "eth_getBalance",
+	ETHSendRawTransaction:    "eth_sendRawTransaction",
+	ETHGetBlockByNumber:      "eth_getBlockByNumber",
+	ETHGetBlock:              "eth_getBlock",
+	ETHGetLogs:               "eth_getLogs",
+	ETHBlockNumber:           "eth_blockNumber",
+	AdminNodeInfo:            "admin_nodeInfo",
+	TxpoolContent:            "txpool_content",
+	OTSGetBlockDetails:       "ots_getBlockDetails",
+	ETHNewHeads:              "eth_newHeads",
+	ETHLogs:                  "eth_logs",
+	TraceCall:                "trace_call",
+	TraceTransaction:         "trace_transaction",
+	DebugAccountAt:           "debug_accountAt",
+	ETHGetCode:               "eth_getCode",
+	ETHEstimateGas:           "eth_estimateGas",
+	ETHGasPrice:              "eth_gasPrice",
+	ETHGetTransactionByHash:  "eth_getTransactionByHash",
+	ETHGetTransactionReceipt: "eth_getTransactionReceipt",
+	BorGetRootHash:           "bor_getRootHash",
+	ETHCall:                  "eth_call",
 }
 
 func (req *requestGenerator) call(method RPCMethod, body string, response interface{}) callResult {
@@ -151,6 +165,16 @@ func (req *requestGenerator) call(method RPCMethod, body string, response interf
 		Method:      string(method),
 		Err:         err,
 	}
+}
+
+func (req *requestGenerator) callCli(result interface{}, method RPCMethod, args ...interface{}) error {
+	cli, err := req.cli(context.Background())
+
+	if err != nil {
+		return err
+	}
+
+	return cli.Call(result, string(method), args...)
 }
 
 type PingResult callResult
@@ -211,6 +235,19 @@ func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 		logger: logger,
 		target: target,
 	}
+}
+
+func (req *requestGenerator) cli(ctx context.Context) (*rpc.Client, error) {
+	if req.requestClient == nil {
+		var err error
+		req.requestClient, err = rpc.DialContext(ctx, "http://"+req.target, req.logger)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return req.requestClient, nil
 }
 
 func post(client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {

@@ -59,16 +59,15 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 	return nil
 }
 
-func ProcessJustificationBitsAndFinality(s abstract.BeaconState) error {
+func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedParticipatingIndicies [][]bool) error {
 	currentEpoch := state.Epoch(s)
-	previousEpoch := state.PreviousEpoch(s)
 	beaconConfig := s.BeaconConfig()
 	// Skip for first 2 epochs
 	if currentEpoch <= beaconConfig.GenesisEpoch+1 {
 		return nil
 	}
 	var previousTargetBalance, currentTargetBalance uint64
-
+	previousEpoch := state.PreviousEpoch(s)
 	if s.Version() == clparams.Phase0Version {
 		var err error
 		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
@@ -99,18 +98,24 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState) error {
 		}
 	} else {
 		// Use bitlists to determine finality.
-		previousParticipation, currentParticipation := s.EpochParticipation(false), s.EpochParticipation(true)
+		currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
 		s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 			if validator.Slashed() {
 				return true
 			}
-			if validator.Active(previousEpoch) &&
+			effectiveBalance := validator.EffectiveBalance()
+			if unslashedParticipatingIndicies != nil {
+				if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][i] {
+					previousTargetBalance += effectiveBalance
+				}
+			} else if validator.Active(previousEpoch) &&
 				cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				previousTargetBalance += validator.EffectiveBalance()
+				previousTargetBalance += effectiveBalance
 			}
+
 			if validator.Active(currentEpoch) &&
 				cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				currentTargetBalance += validator.EffectiveBalance()
+				currentTargetBalance += effectiveBalance
 			}
 			return true
 		})

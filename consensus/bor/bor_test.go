@@ -107,7 +107,7 @@ func (h test_heimdall) Close() {}
 type test_genesisContract struct {
 }
 
-func (g test_genesisContract) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -179,13 +179,11 @@ func (v validator) generateChain(length int) (*core.ChainPack, error) {
 }
 
 func (v validator) IsProposer(block *types.Block) (bool, error) {
-	return v.Engine.(*bor.Bor).IsProposer(headerReader{v}, block)
+	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
 func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
-
-	sealResults := make(chan *types.Block)
 
 	hr := headerReader{v}
 
@@ -199,6 +197,8 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 		if parent := hr.GetHeaderByNumber(header.Number.Uint64() - 1); parent != nil {
 			header.ParentHash = parent.Hash()
 		}
+
+		sealResults := make(chan *types.Block, 1)
 
 		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
 			return nil, err
@@ -230,6 +230,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
+		nil, /* blockReader */
 		&spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
 		heimdall,
 		test_genesisContract{},
@@ -263,8 +264,9 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
+	checkStateRoot := true
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
+		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
 		heimdall,
 		blocks,
 	}

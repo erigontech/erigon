@@ -108,13 +108,13 @@ type btHeaderMarshaling struct {
 	BaseFee    *math.HexOrDecimal256
 }
 
-func (bt *BlockTest) Run(t *testing.T, _ bool) error {
+func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	config, ok := Forks[bt.json.Network]
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root

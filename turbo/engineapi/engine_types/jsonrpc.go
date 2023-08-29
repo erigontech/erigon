@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -47,7 +48,7 @@ type PayloadAttributes struct {
 	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
-	ParentBeaconBlockRoot common.Hash         `json:"parentBeaconBlockRoot"`
+	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -59,9 +60,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	Commitments []types.KZGCommitment `json:"commitments" gencodec:"required"`
-	Proofs      []types.KZGProof      `json:"proofs"      gencodec:"required"`
-	Blobs       []types.Blob          `json:"blobs"       gencodec:"required"`
+	Commitments []hexutility.Bytes `json:"commitments" gencodec:"required"`
+	Proofs      []hexutility.Bytes `json:"proofs"      gencodec:"required"`
+	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -82,9 +83,10 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue       *hexutil.Big      `json:"blockValue"      `
-	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle"`
+	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }
@@ -106,6 +108,47 @@ func (e StringifiedError) MarshalJSON() ([]byte, error) {
 
 func (e StringifiedError) Error() error {
 	return e.err
+}
+
+func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPayload {
+	header := payload.Header
+	body := payload.Body
+
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+
+	// Convert slice of hexutility.Bytes to a slice of slice of bytes
+	transactions := make([]hexutility.Bytes, len(body.Transactions))
+	for i, transaction := range body.Transactions {
+		transactions[i] = transaction
+	}
+
+	res := &ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(header.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(header.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
+		LogsBloom:     bloom[:],
+		PrevRandao:    gointerfaces.ConvertH256ToHash(header.PrevRandao),
+		BlockNumber:   hexutil.Uint64(header.BlockNumber),
+		GasLimit:      hexutil.Uint64(header.GasLimit),
+		GasUsed:       hexutil.Uint64(header.GasUsed),
+		Timestamp:     hexutil.Uint64(header.Timestamp),
+		ExtraData:     header.ExtraData,
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
+		Transactions:  transactions,
+	}
+	if header.WithdrawalHash != nil {
+		res.Withdrawals = ConvertWithdrawalsFromRpc(body.Withdrawals)
+	}
+	if header.BlobGasUsed != nil {
+		blobGasUsed := *header.BlobGasUsed
+		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
+		excessBlobGas := *header.ExcessBlobGas
+		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	return res
 }
 
 func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
@@ -151,18 +194,18 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 		return nil
 	}
 	res := &BlobsBundleV1{
-		Commitments: make([]types.KZGCommitment, len(bundle.Commitments)),
-		Proofs:      make([]types.KZGProof, len(bundle.Proofs)),
-		Blobs:       make([]types.Blob, len(bundle.Blobs)),
+		Commitments: make([]hexutility.Bytes, len(bundle.Commitments)),
+		Proofs:      make([]hexutility.Bytes, len(bundle.Proofs)),
+		Blobs:       make([]hexutility.Bytes, len(bundle.Blobs)),
 	}
 	for i, commitment := range bundle.Commitments {
-		copy(res.Commitments[i][:], commitment)
+		res.Commitments[i] = hexutility.Bytes(commitment)
 	}
 	for i, proof := range bundle.Proofs {
-		copy(res.Proofs[i][:], proof)
+		res.Proofs[i] = hexutility.Bytes(proof)
 	}
 	for i, blob := range bundle.Blobs {
-		copy(res.Blobs[i][:], blob)
+		res.Blobs[i] = hexutility.Bytes(blob)
 	}
 	return res
 }

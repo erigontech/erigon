@@ -66,6 +66,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	if err != nil {
 		return nil, err
 	}
+
 	return &ForkChoiceStore{
 		highestSeen:                   anchorState.Slot(),
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
@@ -87,6 +88,14 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.highestSeen
+}
+
+// AdvanceHighestSeen advances the highest seen block by n and returns the new slot after the change
+func (f *ForkChoiceStore) AdvanceHighestSeen(n uint64) uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.highestSeen += n
 	return f.highestSeen
 }
 

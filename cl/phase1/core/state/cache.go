@@ -3,6 +3,7 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
@@ -30,7 +31,6 @@ type CachingBeaconState struct {
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
 	previousStateRoot           common.Hash
-	// Configs
 }
 
 func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
@@ -215,6 +215,7 @@ func (b *CachingBeaconState) initBeaconState() error {
 
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
+
 		return true
 	})
 

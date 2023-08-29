@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/log/v3"
@@ -181,6 +182,41 @@ func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.In
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
 }
 
+func (c ChainReaderWriterEth1) GetBodiesByHases(hashes []libcommon.Hash) []*types.RawBody {
+	grpcHashes := make([]*types2.H256, len(hashes))
+	for i := range grpcHashes {
+		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
+	}
+	resp, err := c.executionModule.GetBodiesByHashes(c.ctx, &execution.GetBodiesByHashesRequest{
+		Hashes: grpcHashes,
+	})
+	if err != nil {
+		log.Error("GetBodiesByHases failed", "err", err)
+		return nil
+	}
+	ret := make([]*types.RawBody, len(resp.Bodies))
+	for i := range ret {
+		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+	}
+	return ret
+}
+
+func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) []*types.RawBody {
+	resp, err := c.executionModule.GetBodiesByRange(c.ctx, &execution.GetBodiesByRangeRequest{
+		Start: start,
+		Count: count,
+	})
+	if err != nil {
+		log.Error("GetBodiesByHases failed", "err", err)
+		return nil
+	}
+	ret := make([]*types.RawBody, len(resp.Bodies))
+	for i := range ret {
+		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+	}
+	return ret
+}
+
 func (c ChainReaderWriterEth1) Ready() (bool, error) {
 	resp, err := c.executionModule.Ready(c.ctx, &emptypb.Empty{})
 	if err != nil {
@@ -217,11 +253,11 @@ func (ChainReaderWriterEth1) FrozenBlocks() uint64 {
 
 const retryTimeout = 10 * time.Millisecond
 
-func (c ChainReaderWriterEth1) InsertHeadersAndWait(headers []*types.Header) error {
-	request := &execution.InsertHeadersRequest{
-		Headers: eth1_utils.HeadersToHeadersRPC(headers),
+func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error {
+	request := &execution.InsertBlocksRequest{
+		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
-	response, err := c.executionModule.InsertHeaders(c.ctx, request)
+	response, err := c.executionModule.InsertBlocks(c.ctx, request)
 	if err != nil {
 		return err
 	}
@@ -230,7 +266,7 @@ func (c ChainReaderWriterEth1) InsertHeadersAndWait(headers []*types.Header) err
 	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
-			response, err = c.executionModule.InsertHeaders(c.ctx, request)
+			response, err = c.executionModule.InsertBlocks(c.ctx, request)
 			if err != nil {
 				return err
 			}
@@ -244,46 +280,8 @@ func (c ChainReaderWriterEth1) InsertHeadersAndWait(headers []*types.Header) err
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBodiesAndWait(bodies []*types.RawBody, blockNumbers []uint64, blockHashes []libcommon.Hash) error {
-	request := &execution.InsertBodiesRequest{
-		Bodies: eth1_utils.ConvertRawBlockBodiesToRpc(bodies, blockNumbers, blockHashes),
-	}
-	response, err := c.executionModule.InsertBodies(c.ctx, request)
-	if err != nil {
-		return err
-	}
-	retryInterval := time.NewTicker(retryTimeout)
-	defer retryInterval.Stop()
-	for response.Result == execution.ExecutionStatus_Busy {
-		select {
-		case <-retryInterval.C:
-			response, err = c.executionModule.InsertBodies(c.ctx, request)
-			if err != nil {
-				return err
-			}
-		case <-c.ctx.Done():
-			return context.Canceled
-		}
-	}
-	if response.Result != execution.ExecutionStatus_Success {
-		return fmt.Errorf("InsertBodiesAndWait: invalid code recieved from execution module: %s", response.Result.String())
-	}
-	return nil
-}
-
-func (c ChainReaderWriterEth1) InsertHeaderAndWait(header *types.Header) error {
-	return c.InsertHeadersAndWait([]*types.Header{header})
-}
-
-func (c ChainReaderWriterEth1) InsertBodyAndWait(body *types.RawBody, blockNumber uint64, blockHash libcommon.Hash) error {
-	return c.InsertBodiesAndWait([]*types.RawBody{body}, []uint64{blockNumber}, []libcommon.Hash{blockHash})
-}
-
-func (c ChainReaderWriterEth1) InsertHeaderAndBodyAndWait(header *types.Header, body *types.RawBody) error {
-	if err := c.InsertHeaderAndWait(header); err != nil {
-		return err
-	}
-	return c.InsertBodyAndWait(body, header.Number.Uint64(), header.Hash())
+func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
+	return c.InsertBlocksAndWait([]*types.Block{block})
 }
 
 func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64) (execution.ExecutionStatus, libcommon.Hash, error) {
