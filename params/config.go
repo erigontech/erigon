@@ -286,6 +286,7 @@ func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bo
 func isChainIDPoS(chainID *big.Int) bool {
 	ids := []*big.Int{
 		MainnetChainConfig.ChainID,
+		HoleskyChainConfig.ChainID,
 		GoerliChainConfig.ChainID,
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
