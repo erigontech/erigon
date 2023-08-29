@@ -1167,7 +1167,6 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, ctx.String(ChainFlag.Name))
 	}
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
-	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
@@ -1462,6 +1461,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
 	cfg.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
+	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 
 	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(ctx.String(ChainFlag.Name))
 	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli

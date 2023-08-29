@@ -245,6 +245,8 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverrideCancunTime *big.Int `toml:",omitempty"`
+
+	ForcePartialCommit bool
 }
 
 type Sync struct {
