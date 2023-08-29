@@ -26,6 +26,7 @@ import (
 
 var (
 	typeGaugeTpl           = "# TYPE %s gauge\n"
+	typeCounterTpl         = "# TYPE %s counter\n"
 	typeSummaryTpl         = "# TYPE %s summary\n"
 	keyValueTpl            = "%s %v\n\n"
 	keyCounterTpl          = "%s %v\n"
@@ -46,15 +47,15 @@ func newCollector() *collector {
 }
 
 func (c *collector) addCounter(name string, m *metrics.Counter) {
-	c.writeGaugeCounter(name, m.Get())
+	c.writeCounter(name, m.Get())
 }
 
 func (c *collector) addGauge(name string, m *metrics.Gauge) {
-	c.writeGaugeCounter(name, m.Get())
+	c.writeGauge(name, m.Get())
 }
 
 func (c *collector) addFloatCounter(name string, m *metrics.FloatCounter) {
-	c.writeGaugeCounter(name, m.Get())
+	c.writeGauge(name, m.Get())
 }
 
 func (c *collector) addHistogram(name string, m *metrics.Histogram) {
@@ -82,8 +83,13 @@ func (c *collector) addTimer(name string, m *metrics.Summary) {
 	c.buff.WriteRune('\n')
 }
 
-func (c *collector) writeGaugeCounter(name string, value interface{}) {
+func (c *collector) writeGauge(name string, value interface{}) {
 	c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, name))
+	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
+}
+
+func (c *collector) writeCounter(name string, value interface{}) {
+	c.buff.WriteString(fmt.Sprintf(typeCounterTpl, name))
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }
 

@@ -13,7 +13,7 @@ import (
 
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
-func Setup(address string, logger log.Logger) {
+func Setup(address string, logger log.Logger) *http.ServeMux {
 	prometheusMux := http.NewServeMux()
 
 	prometheusMux.Handle("/debug/metrics/prometheus", prometheus.Handler(metrics.DefaultRegistry))
@@ -30,4 +30,6 @@ func Setup(address string, logger log.Logger) {
 	}()
 
 	log.Info("Enabling metrics export to prometheus", "path", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
+
+	return prometheusMux
 }
