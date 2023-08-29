@@ -19,9 +19,8 @@ func Setup(address string, logger log.Logger) {
 	prometheusMux.Handle("/debug/metrics/prometheus", prometheus.Handler(metrics.DefaultRegistry))
 
 	promServer := &http.Server{
-		Addr:              address,
-		Handler:           prometheusMux,
-		ReadHeaderTimeout: 10,
+		Addr:    address,
+		Handler: prometheusMux,
 	}
 
 	go func() {
