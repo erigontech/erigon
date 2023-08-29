@@ -14,9 +14,13 @@ var migrations = []string{
 		state_root BLOB NOT NULL CHECK(length(state_root) = 32),
 		parent_block_root BLOB NOT NULL CHECK(length(parent_block_root) = 32),
 		canonical INTEGER NOT NULL DEFAULT 0, -- 0 for false, 1 for true
+		body_root BLOB NOT NULL CHECK(length(state_root) = 32),
+		signature BLOB NOT NULL CHECK(length(signature) = 96),
 		PRIMARY KEY (beacon_block_root)
 	);`,
 	`CREATE INDEX idx_slot ON beacon_indicies (slot);`,
+	`CREATE INDEX idx_state_root ON beacon_indicies (state_root);`,
+	`CREATE INDEX idx_parent_block_root ON beacon_indicies (parent_block_root);`,
 	`CREATE TABLE IF NOT EXISTS data_config (
 		prune_depth INTEGER NOT NULL,
 		full_blocks BOOLEAN NOT NULL

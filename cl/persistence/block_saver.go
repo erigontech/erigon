@@ -259,7 +259,7 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cl
 		return err
 	}
 
-	if err := beacon_indicies.GenerateBlockIndicies(ctx, tx, block.Block, canonical); err != nil {
+	if err := beacon_indicies.GenerateBlockIndicies(ctx, tx, block, canonical); err != nil {
 		return err
 	}
 	return tx.Commit()
