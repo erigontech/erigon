@@ -31,10 +31,11 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -55,7 +56,6 @@ const (
 )
 
 type AggregatorV3 struct {
-	rwTx             kv.RwTx
 	db               kv.RoDB
 	domains          *SharedDomains
 	accounts         *Domain
@@ -69,7 +69,6 @@ type AggregatorV3 struct {
 	backgroundResult *BackgroundResult
 	dir              string
 	tmpdir           string
-	txNum            atomic.Uint64
 	aggregationStep  uint64
 	keepInDB         uint64
 
@@ -325,9 +324,9 @@ func (a *AggregatorV3) CloseSharedDomains() {
 func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
 	if a.domains == nil {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
+		a.domains.SetInvertedIndices(a.tracesTo, a.tracesFrom, a.logAddrs, a.logTopics)
 	}
 	a.domains.SetContext(ac)
-	a.domains.SetTx(a.rwTx)
 	return a.domains
 }
 
@@ -451,8 +450,8 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	return nil
 }
 
+// Deprecated
 func (a *AggregatorV3) SetTx(tx kv.RwTx) {
-	a.rwTx = tx
 	if a.domains != nil {
 		a.domains.SetTx(tx)
 	}
@@ -465,27 +464,6 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.logTopics.SetTx(tx)
 	a.tracesFrom.SetTx(tx)
 	a.tracesTo.SetTx(tx)
-}
-
-func (a *AggregatorV3) GetTxNum() uint64 {
-	return a.txNum.Load()
-}
-
-// SetTxNum sets aggregator's txNum and txNum for all domains
-// Requires for a.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
-func (a *AggregatorV3) SetTxNum(txNum uint64) {
-	a.txNum.Store(txNum)
-	if a.domains != nil {
-		a.domains.SetTxNum(txNum)
-	}
-	a.accounts.SetTxNum(txNum)
-	a.storage.SetTxNum(txNum)
-	a.code.SetTxNum(txNum)
-	a.commitment.SetTxNum(txNum)
-	a.logAddrs.SetTxNum(txNum)
-	a.logTopics.SetTxNum(txNum)
-	a.tracesFrom.SetTxNum(txNum)
-	a.tracesTo.SetTxNum(txNum)
 }
 
 type AggV3Collation struct {
@@ -672,11 +650,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 }
 
 func (a *AggregatorV3) BuildFiles(toTxNum uint64) (err error) {
-	txn := a.txNum.Load() + 1
-	if txn <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
-		return nil
-	}
-
 	finished := a.BuildFilesInBackground(toTxNum)
 	if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
 		return nil
@@ -820,70 +793,84 @@ func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *AggregatorV3) StartWrites() *AggregatorV3 {
-	a.walLock.Lock()
-	defer a.walLock.Unlock()
-	a.accounts.StartWrites()
-	a.storage.StartWrites()
-	a.code.StartWrites()
-	a.commitment.StartWrites()
-	a.logAddrs.StartWrites()
-	a.logTopics.StartWrites()
-	a.tracesFrom.StartWrites()
-	a.tracesTo.StartWrites()
+	if a.domains == nil {
+		a.SharedDomains(a.MakeContext())
+	}
+	//a.walLock.Lock()
+	//defer a.walLock.Unlock()
+	//a.accounts.StartWrites()
+	//a.storage.StartWrites()
+	//a.code.StartWrites()
+	//a.commitment.StartWrites()
+	//a.logAddrs.StartWrites()
+	//a.logTopics.StartWrites()
+	//a.tracesFrom.StartWrites()
+	//a.tracesTo.StartWrites()
+	//return a
+	a.domains.StartWrites()
 	return a
 }
+
 func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
-	a.walLock.Lock()
-	defer a.walLock.Unlock()
-	a.accounts.StartUnbufferedWrites()
-	a.storage.StartUnbufferedWrites()
-	a.code.StartUnbufferedWrites()
-	a.commitment.StartUnbufferedWrites()
-	a.logAddrs.StartUnbufferedWrites()
-	a.logTopics.StartUnbufferedWrites()
-	a.tracesFrom.StartUnbufferedWrites()
-	a.tracesTo.StartUnbufferedWrites()
+	if a.domains == nil {
+		a.SharedDomains(a.MakeContext())
+	}
+	//a.walLock.Lock()
+	//defer a.walLock.Unlock()
+	//a.accounts.StartUnbufferedWrites()
+	//a.storage.StartUnbufferedWrites()
+	//a.code.StartUnbufferedWrites()
+	//a.commitment.StartUnbufferedWrites()
+	//a.logAddrs.StartUnbufferedWrites()
+	//a.logTopics.StartUnbufferedWrites()
+	//a.tracesFrom.StartUnbufferedWrites()
+	//a.tracesTo.StartUnbufferedWrites()
+	//return a
+	a.domains.StartUnbufferedWrites()
 	return a
 }
 func (a *AggregatorV3) FinishWrites() {
-	a.walLock.Lock()
-	defer a.walLock.Unlock()
-	a.accounts.FinishWrites()
-	a.storage.FinishWrites()
-	a.code.FinishWrites()
-	a.commitment.FinishWrites()
-	a.logAddrs.FinishWrites()
-	a.logTopics.FinishWrites()
-	a.tracesFrom.FinishWrites()
-	a.tracesTo.FinishWrites()
+	//a.walLock.Lock()
+	//defer a.walLock.Unlock()
+	//a.accounts.FinishWrites()
+	//a.storage.FinishWrites()
+	//a.code.FinishWrites()
+	//a.commitment.FinishWrites()
+	//a.logAddrs.FinishWrites()
+	//a.logTopics.FinishWrites()
+	//a.tracesFrom.FinishWrites()
+	//a.tracesTo.FinishWrites()
+	a.domains.FinishWrites()
 }
 
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (a *AggregatorV3) rotate() []flusher {
-	a.walLock.Lock()
-	defer a.walLock.Unlock()
-	return []flusher{
-		a.accounts.Rotate(),
-		a.storage.Rotate(),
-		a.code.Rotate(),
-		a.commitment.Domain.Rotate(),
-		a.logAddrs.Rotate(),
-		a.logTopics.Rotate(),
-		a.tracesFrom.Rotate(),
-		a.tracesTo.Rotate(),
-	}
-}
+//	func (a *AggregatorV3) rotate() []flusher {
+//		a.walLock.Lock()
+//		defer a.walLock.Unlock()
+//		return []flusher{
+//			a.accounts.Rotate(),
+//			a.storage.Rotate(),
+//			a.code.Rotate(),
+//			a.commitment.Domain.Rotate(),
+//			a.logAddrs.Rotate(),
+//			a.logTopics.Rotate(),
+//			a.tracesFrom.Rotate(),
+//			a.tracesTo.Rotate(),
+//		}
+//	}
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	flushers := a.rotate()
-	for _, f := range flushers {
-		if err := f.Flush(ctx, tx); err != nil {
-			return err
-		}
-	}
-	return nil
+	//flushers := a.rotate()
+	//for _, f := range flushers {
+	//	if err := f.Flush(ctx, tx); err != nil {
+	//		return err
+	//	}
+	//}
+	//return nil
+
+	return a.domains.Flush(ctx, tx)
 }
 
 func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
@@ -996,39 +983,39 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 	return nil
 }
 
-func (ac *AggregatorV3Context) Unwind(ctx context.Context, txUnwindTo uint64) error {
+func (ac *AggregatorV3Context) Unwind(ctx context.Context, txUnwindTo uint64, rwTx kv.RwTx) error {
 	step := txUnwindTo / ac.a.aggregationStep
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ac.a.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
+		"txUnwindTo", txUnwindTo, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(rwTx))
 
-	if err := ac.accounts.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := ac.accounts.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := ac.storage.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := ac.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := ac.code.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := ac.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := ac.commitment.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := ac.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := ac.logAddrs.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := ac.logAddrs.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := ac.logTopics.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := ac.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := ac.a.domains.Unwind(ctx, ac.a.rwTx, txUnwindTo); err != nil {
+	if err := ac.a.domains.Unwind(ctx, rwTx, txUnwindTo); err != nil {
 		return err
 	}
 	return nil
@@ -1518,11 +1505,14 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 }
 
 func (a *AggregatorV3) BatchHistoryWriteStart() *AggregatorV3 {
-	a.walLock.RLock()
+	//a.walLock.RLock()
+	a.domains.BatchHistoryWriteStart()
 	return a
 }
+
 func (a *AggregatorV3) BatchHistoryWriteEnd() {
-	a.walLock.RUnlock()
+	//a.walLock.RUnlock()
+	a.domains.BatchHistoryWriteEnd()
 }
 
 func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {

@@ -38,11 +38,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
-	agg.SetTx(rwTx)
 	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
+	defer domains.Close()
+
+	domains.SetTx(rwTx)
 
 	txs := uint64(100000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -56,7 +58,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
@@ -170,11 +172,14 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 			tx.Rollback()
 		}
 	}()
-	agg.SetTx(tx)
 	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
+
 	domains := agg.SharedDomains(domCtx)
+	defer domains.Close()
+
+	domains.SetTx(tx)
 
 	var latestCommitTxNum uint64
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -188,7 +193,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	var maxWrite uint64
 	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(addr)
@@ -251,11 +256,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		}
 	}()
 
-	anotherAgg.SetTx(rwTx)
+	//anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
 	dom2 := anotherAgg.SharedDomains(ac2)
+	dom2.SetTx(rwTx)
 
 	_, sstartTx, err := dom2.SeekCommitment(0, 1<<63-1)
 
@@ -294,11 +300,13 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	agg.SetTx(tx)
+	//agg.SetTx(tx)
 	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
+	defer domains.Close()
+	domains.SetTx(tx)
 
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
@@ -307,7 +315,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -363,13 +371,14 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	newAgg.SetTx(newTx)
+	//newAgg.SetTx(newTx)
 	defer newAgg.StartWrites().FinishWrites()
 
 	ac := newAgg.MakeContext()
 	defer ac.Close()
 	newDoms := newAgg.SharedDomains(ac)
 	defer newDoms.Close()
+	newDoms.SetTx(newTx)
 
 	_, latestTx, err := newDoms.SeekCommitment(0, 1<<63-1)
 	require.NoError(t, err)
@@ -417,8 +426,13 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	agg.SetTx(tx)
 	defer agg.StartUnbufferedWrites().FinishWrites()
+
+	ct := agg.MakeContext()
+	defer ct.Close()
+	domains := agg.SharedDomains(ct)
+	defer domains.Close()
+	domains.SetTx(tx)
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
@@ -429,13 +443,9 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		t.Logf("commit to db txn=%d", txn)
 
 		atomic.StoreUint64(&latestCommitTxNum, txn)
-		agg.SetTx(tx)
+		domains.SetTx(tx)
 		return nil
 	}
-
-	ct := agg.MakeContext()
-	defer ct.Close()
-	domains := agg.SharedDomains(ct)
 
 	txs := (aggStep) * StepsInColdFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
@@ -445,7 +455,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -475,7 +485,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 	half := txs / 2
 	for txNum = txNum + 1; txNum <= txs; txNum++ {
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
@@ -691,7 +701,6 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer rwTx.Rollback()
 
 	domains.SetTx(rwTx)
-	agg.SetTx(rwTx)
 	agg.StartWrites()
 
 	//agg.StartUnbufferedWrites()
@@ -730,7 +739,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 
 	ac := agg.MakeContext()
-	err = ac.Unwind(context.Background(), pruneFrom)
+	err = ac.Unwind(context.Background(), pruneFrom, rwTx)
 	require.NoError(t, err)
 	ac.Close()
 
@@ -762,7 +771,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	ac.Close()
 
 	ac = agg.MakeContext()
-	err = ac.Unwind(context.Background(), pruneFrom)
+	err = ac.Unwind(context.Background(), pruneFrom, rwTx)
 	ac.Close()
 	require.NoError(t, err)
 

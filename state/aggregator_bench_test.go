@@ -55,7 +55,6 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		}
 	}()
 
-	agg.SetTx(tx)
 	defer agg.StartWrites().FinishWrites()
 	require.NoError(b, err)
 	ac := agg.MakeContext()
@@ -63,6 +62,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 
 	domains := agg.SharedDomains(ac)
 	defer domains.Close()
+	domains.SetTx(tx)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -72,7 +72,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		agg.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 		err := domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val, prev)
 		prev = val
 		require.NoError(b, err)

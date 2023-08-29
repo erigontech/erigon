@@ -393,6 +393,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
+
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -675,6 +676,24 @@ func (d *domainWAL) close() {
 	}
 	if d.values != nil {
 		d.values.Close()
+	}
+}
+
+func loadSkipFunc() etl.LoadFunc {
+	var preKey, preVal []byte
+	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if bytes.Equal(k, preKey) {
+			preVal = v
+			return nil
+		}
+		if err := next(nil, preKey, preVal); err != nil {
+			return err
+		}
+		if err := next(k, k, v); err != nil {
+			return err
+		}
+		preKey, preVal = k, v
+		return nil
 	}
 }
 
@@ -1124,7 +1143,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
 	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
 	if !UseBpsTree {
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1208,7 +1227,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
+			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1218,25 +1237,24 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
-	if err := buildIndex(ctx, d, compressed, idxPath, tmpdir, values, salt, ps, logger, noFsync); err != nil {
-		return nil, err
-	}
-	return recsplit.OpenIndex(idxPath)
-}
-
-func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
-	g := NewArchiveGetter(d.MakeGetter(), compressed)
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
 		count = d.Count() / 2
 	}
-
-	p := ps.AddNew(fileName, uint64(count/2))
+	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 	defer d.EnableReadAhead().DisableReadAhead()
 
+	g := NewArchiveGetter(d.MakeGetter(), compressed)
+	if err := buildIndex(ctx, g, idxPath, tmpdir, count, values, p, logger, noFsync); err != nil {
+		return nil, err
+	}
+	return recsplit.OpenIndex(idxPath)
+}
+
+func buildIndex(ctx context.Context, g ArchiveGetter, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1247,7 +1265,6 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 		TmpDir:      tmpdir,
 		IndexFile:   idxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
-		Salt:        salt,
 	}, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
@@ -1961,7 +1978,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 
 	for i, item := range dc.files {
 		if UseBtree || UseBpsTree {
-			cursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), prefix)
+			cursor, err := dc.statelessBtree(i).SeekWithGetter(prefix, dc.statelessGetter(i))
 			if err != nil {
 				return err
 			}
@@ -2276,7 +2293,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 	}
 
 	for i, item := range dc.files {
-		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
+		btCursor, err := dc.statelessBtree(i).SeekWithGetter(hi.from, dc.statelessGetter(i))
 		if err != nil {
 			return err
 		}

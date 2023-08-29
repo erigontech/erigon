@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -45,17 +44,6 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
-func splitKey(key []byte) (k1, k2 []byte) {
-	switch {
-	case len(key) <= length.Addr:
-		return key, nil
-	case len(key) >= length.Addr+length.Hash:
-		return key[:length.Addr], key[length.Addr:]
-	default:
-		panic(fmt.Sprintf("invalid key length %d", len(key)))
-	}
-}
-
 type SharedDomains struct {
 	aggCtx *AggregatorV3Context
 	roTx   kv.Tx
@@ -63,8 +51,10 @@ type SharedDomains struct {
 	txNum    atomic.Uint64
 	blockNum atomic.Uint64
 	estSize  atomic.Uint64
+	trace    bool
+	muMaps   sync.RWMutex
+	walLock  sync.RWMutex
 
-	muMaps     sync.RWMutex
 	account    map[string][]byte
 	code       map[string][]byte
 	storage    *btree2.Map[string, []byte]
@@ -73,11 +63,10 @@ type SharedDomains struct {
 	Storage    *Domain
 	Code       *Domain
 	Commitment *DomainCommitted
-	trace      bool
-	//TracesTo   *InvertedIndex
-	//LogAddrs   *InvertedIndex
-	//LogTopics  *InvertedIndex
-	//TracesFrom *InvertedIndex
+	TracesTo   *InvertedIndex
+	LogAddrs   *InvertedIndex
+	LogTopics  *InvertedIndex
+	TracesFrom *InvertedIndex
 }
 
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
@@ -92,11 +81,18 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 		commitment: btree2.NewMap[string, []byte](128),
 	}
 
-	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
+	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
 	return sd
 }
 
-// aggregator context should call Unwind before this one.
+func (sd *SharedDomains) SetInvertedIndices(tracesTo, tracesFrom, logAddrs, logTopics *InvertedIndex) {
+	sd.TracesTo = tracesTo
+	sd.TracesFrom = tracesFrom
+	sd.LogAddrs = logAddrs
+	sd.LogTopics = logTopics
+}
+
+// aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
 	sd.ClearRam(true)
 
@@ -171,6 +167,7 @@ func (sd *SharedDomains) puts(table kv.Domain, key []byte, val []byte) {
 	}
 }
 
+// Get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	sd.muMaps.RLock()
 	v, ok = sd.get(table, key)
@@ -311,7 +308,7 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
+func (sd *SharedDomains) branchFn(pref []byte) ([]byte, error) {
 	v, err := sd.LatestCommitment(pref)
 	if err != nil {
 		return nil, fmt.Errorf("branchFn failed: %w", err)
@@ -324,7 +321,7 @@ func (sd *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
 	return v[2:], nil
 }
 
-func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error {
+func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error {
 	encAccount, err := sd.LatestAccount(plainKey)
 	if err != nil {
 		return fmt.Errorf("accountFn failed: %w", err)
@@ -357,7 +354,7 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 	return nil
 }
 
-func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
+func (sd *SharedDomains) storageFn(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
 	//addr, loc := splitKey(plainKey)
 	enc, err := sd.LatestStorage(plainKey)
@@ -455,6 +452,22 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 	return sd.Storage.PutWithPrev(composite, nil, value, preVal)
 }
 
+func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
+	switch table {
+	case kv.LogAddrIdx, kv.TblLogAddressIdx:
+		err = sd.LogAddrs.Add(key)
+	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
+		err = sd.LogTopics.Add(key)
+	case kv.TblTracesToIdx:
+		err = sd.TracesTo.Add(key)
+	case kv.TblTracesFromIdx:
+		err = sd.TracesFrom.Add(key)
+	default:
+		panic(fmt.Errorf("unknown shared index %s", table))
+	}
+	return err
+}
+
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
 }
@@ -465,8 +478,14 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 	sd.Code.SetTx(tx)
 	sd.Account.SetTx(tx)
 	sd.Storage.SetTx(tx)
+	sd.TracesTo.SetTx(tx)
+	sd.TracesFrom.SetTx(tx)
+	sd.LogAddrs.SetTx(tx)
+	sd.LogTopics.SetTx(tx)
 }
 
+// SetTxNum sets txNum for all domains as well as common txNum for all domains
+// Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 1 {
 		_, err := sd.Commit(true, sd.trace)
@@ -480,6 +499,14 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.Code.SetTxNum(txNum)
 	sd.Storage.SetTxNum(txNum)
 	sd.Commitment.SetTxNum(txNum)
+	sd.TracesTo.SetTxNum(txNum)
+	sd.TracesFrom.SetTxNum(txNum)
+	sd.LogAddrs.SetTxNum(txNum)
+	sd.LogTopics.SetTxNum(txNum)
+}
+
+func (sd *SharedDomains) TxNum() uint64 {
+	return sd.txNum.Load()
 }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
@@ -665,4 +692,83 @@ func (sd *SharedDomains) Close() {
 	sd.code = nil
 	sd.storage = nil
 	sd.commitment = nil
+}
+
+// StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
+func (sd *SharedDomains) StartWrites() *SharedDomains {
+	sd.walLock.Lock()
+	defer sd.walLock.Unlock()
+
+	sd.Account.StartWrites()
+	sd.Storage.StartWrites()
+	sd.Code.StartWrites()
+	sd.Commitment.StartWrites()
+	sd.LogAddrs.StartWrites()
+	sd.LogTopics.StartWrites()
+	sd.TracesFrom.StartWrites()
+	sd.TracesTo.StartWrites()
+	return sd
+}
+
+func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
+	sd.walLock.Lock()
+	defer sd.walLock.Unlock()
+
+	sd.Account.StartUnbufferedWrites()
+	sd.Storage.StartUnbufferedWrites()
+	sd.Code.StartUnbufferedWrites()
+	sd.Commitment.StartUnbufferedWrites()
+	sd.LogAddrs.StartUnbufferedWrites()
+	sd.LogTopics.StartUnbufferedWrites()
+	sd.TracesFrom.StartUnbufferedWrites()
+	sd.TracesTo.StartUnbufferedWrites()
+	return sd
+}
+
+func (sd *SharedDomains) FinishWrites() {
+	sd.walLock.Lock()
+	defer sd.walLock.Unlock()
+
+	sd.Account.FinishWrites()
+	sd.Storage.FinishWrites()
+	sd.Code.FinishWrites()
+	sd.Commitment.FinishWrites()
+	sd.LogAddrs.FinishWrites()
+	sd.LogTopics.FinishWrites()
+	sd.TracesFrom.FinishWrites()
+	sd.TracesTo.FinishWrites()
+}
+
+func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {
+	sd.walLock.RLock()
+	return sd
+}
+
+func (sd *SharedDomains) BatchHistoryWriteEnd() {
+	sd.walLock.RUnlock()
+}
+
+func (sd *SharedDomains) rotate() []flusher {
+	sd.walLock.Lock()
+	defer sd.walLock.Unlock()
+	return []flusher{
+		sd.Account.Rotate(),
+		sd.Storage.Rotate(),
+		sd.Code.Rotate(),
+		sd.Commitment.Domain.Rotate(),
+		sd.LogAddrs.Rotate(),
+		sd.LogTopics.Rotate(),
+		sd.TracesFrom.Rotate(),
+		sd.TracesTo.Rotate(),
+	}
+}
+
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	flushers := sd.rotate()
+	for _, f := range flushers {
+		if err := f.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
