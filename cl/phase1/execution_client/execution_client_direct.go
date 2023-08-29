@@ -85,3 +85,14 @@ func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, err
 func (cc *ExecutionClientDirect) Ready() (bool, error) {
 	return cc.chainRW.Ready()
 }
+
+// GetBodiesByRange gets block bodies in given block range
+func (cc *ExecutionClientDirect) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByRange(start, count), nil
+
+}
+
+// GetBodiesByHashes gets block bodies with given hashes
+func (cc *ExecutionClientDirect) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByHases(hashes), nil
+}
