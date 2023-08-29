@@ -1,5 +1,3 @@
-// beacon_indexes_test.go
-
 package beacon_indicies
 
 import (

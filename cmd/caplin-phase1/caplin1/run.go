@@ -108,7 +108,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig, db)
 
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db)
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db, forkChoice)
 		go beacon.ListenAndServe(apiHandler, &cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
