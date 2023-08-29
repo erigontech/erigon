@@ -81,7 +81,8 @@ SILKWORM_EXPORT int silkworm_add_snapshot(SilkwormHandle* handle, struct Silkwor
 
 SILKWORM_EXPORT int silkworm_execute_blocks(
     SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block, uint64_t max_block,
-    uint64_t batch_size, bool write_receipts, uint64_t* last_executed_block, int* mdbx_error_code) SILKWORM_NOEXCEPT;
+    uint64_t batch_size, bool write_change_sets, bool write_receipts, bool write_call_traces,
+    uint64_t* last_executed_block, int* mdbx_error_code) SILKWORM_NOEXCEPT;
 
 SILKWORM_EXPORT int silkworm_fini(SilkwormHandle* handle) SILKWORM_NOEXCEPT;
 
@@ -108,12 +109,14 @@ int call_silkworm_add_snapshot_func(void* func_ptr, SilkwormHandle* handle, stru
 }
 
 typedef int (*silkworm_execute_blocks_func)(SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block,
-    uint64_t max_block, uint64_t batch_size, bool write_receipts, uint64_t* last_executed_block, int* mdbx_error_code);
+    uint64_t max_block, uint64_t batch_size, bool write_change_sets, bool write_receipts, bool write_call_traces,
+	uint64_t* last_executed_block, int* mdbx_error_code);
 
 int call_silkworm_execute_blocks_func(void* func_ptr, SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block,
-	uint64_t max_block, uint64_t batch_size, bool write_receipts, uint64_t* last_executed_block, int* mdbx_error_code) {
-    return ((silkworm_execute_blocks_func)func_ptr)(handle, txn, chain_id, start_block, max_block, batch_size, write_receipts,
-		last_executed_block, mdbx_error_code);
+	uint64_t max_block, uint64_t batch_size, bool write_change_sets, bool write_receipts, bool write_call_traces,
+	uint64_t* last_executed_block, int* mdbx_error_code) {
+    return ((silkworm_execute_blocks_func)func_ptr)(handle, txn, chain_id, start_block, max_block, batch_size, write_change_sets,
+		write_receipts, write_call_traces, last_executed_block, mdbx_error_code);
 }
 
 typedef int (*silkworm_fini_func)(SilkwormHandle* handle);
@@ -186,17 +189,19 @@ func (s *Silkworm) AddSnapshot(snapshot *C.struct_SilkwormChainSnapshot) {
 	C.call_silkworm_add_snapshot_func(s.addSnapshot, s.instance, snapshot)
 }
 
-func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeReceipts bool) (lastExecutedBlock uint64, err error) {
+func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (lastExecutedBlock uint64, err error) {
 	cTxn := (*C.MDBX_txn)(txn.CHandle())
 	cChainId := C.uint64_t(chainID.Uint64())
 	cStartBlock := C.uint64_t(startBlock)
 	cMaxBlock := C.uint64_t(maxBlock)
 	cBatchSize := C.uint64_t(batchSize)
+	cWriteChangeSets := C._Bool(writeChangeSets)
 	cWriteReceipts := C._Bool(writeReceipts)
+	cWriteCallTraces := C._Bool(writeCallTraces)
 	cLastExecutedBlock := C.uint64_t(startBlock - 1)
 	cMdbxErrorCode := C.int(0)
 	status := C.call_silkworm_execute_blocks_func(s.executeBlocks, s.instance, cTxn, cChainId, cStartBlock,
-		cMaxBlock, cBatchSize, cWriteReceipts, &cLastExecutedBlock, &cMdbxErrorCode)
+		cMaxBlock, cBatchSize, cWriteChangeSets, cWriteReceipts, cWriteCallTraces, &cLastExecutedBlock, &cMdbxErrorCode)
 	lastExecutedBlock = uint64(cLastExecutedBlock)
 	if status == 0 || status == 8 {
 		return lastExecutedBlock, nil
