@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -403,23 +402,19 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 
 	rw.blockNum = block.NumberU64()
 
-	daoFork := txNum >= startTxNum && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
-	if daoFork {
+	txNum++ // Pre-block transaction
+	ww.w.SetTxNum(txNum)
+	if txNum >= startTxNum {
 		ibs := state.New(rw)
-		// TODO Actually add tracing to the DAO related accounts
-		misc.ApplyDAOHardFork(ibs)
+		engine.Initialize(chainConfig, nil, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+			return core.SysCallContract(contract, data, chainConfig, ibState, header, engine, constCall)
+		}, logger)
 		if err := ibs.FinalizeTx(rules, ww); err != nil {
 			return 0, nil, err
 		}
 		if err := ww.w.FinishTx(); err != nil {
-			return 0, nil, fmt.Errorf("finish daoFork failed: %w", err)
+			return 0, nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
 		}
-	}
-
-	txNum++ // Pre-block transaction
-	ww.w.SetTxNum(txNum)
-	if err := ww.w.FinishTx(); err != nil {
-		return 0, nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
