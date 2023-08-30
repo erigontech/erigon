@@ -196,7 +196,7 @@ func getNextTransactions(
 	if err := cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
 		counter := 0
-		for !onTime && counter < 1000 {
+		for !onTime && counter < 500 {
 			remainingGas := header.GasLimit - header.GasUsed
 			remainingBlobGas := uint64(0)
 			if header.BlobGasUsed != nil {
