@@ -129,7 +129,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	cfg := domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
-			withLocalityIndex: true, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: AccDomainLargeValues,
 	}
@@ -139,7 +139,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
-			withLocalityIndex: true, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: StorageDomainLargeValues,
 	}
@@ -149,7 +149,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
-			withLocalityIndex: true, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 		domainLargeValues: CodeDomainLargeValues,
 	}
@@ -178,11 +178,11 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		return nil, err
 	}
 	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
-	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false,true, nil, logger); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
 	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
-	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false,true, nil, logger); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
 	a.recalcMaxTxNum()

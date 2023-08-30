@@ -883,10 +883,12 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	if efHistoryDecomp, err = compress.NewDecompressor(efHistoryPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
-	efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
-	efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
-	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
-		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
+	{
+		efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
+		efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
+		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
+			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
+		}
 	}
 	if h.InvertedIndex.withExistenceIndex {
 		existenceIdxFileName := fmt.Sprintf("%s.%d-%d.efei", h.filenameBase, step, step+1)
@@ -1352,6 +1354,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		if reader.Empty() {
 			return true
 		}
+		fmt.Printf("cnt: %s, %d\n", hc.ic.files[item.i].src.index.FileName(), hc.ic.files[item.i].src.index.KeyCount())
 		offset := reader.Lookup(key)
 
 		// TODO do we always compress inverted index?
@@ -1388,8 +1391,8 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	hasher.Write(key) //nolint
 	hi, _ := hasher.Sum128()
 	for i := len(hc.files) - 1; i >= 0; i-- {
-		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].endTxNum, hc.ic.files[i].endTxNum, txNum)
-		if hc.files[i].endTxNum < txNum {
+		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
+		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
 			continue
 		}
 		if hc.ic.ii.withExistenceIndex {

@@ -141,6 +141,9 @@ func (b *bloomFilter) Build() error {
 }
 
 func OpenBloom(filePath string) (*bloomFilter, error) {
+	if strings.HasSuffix(filePath, ".efi") {
+		panic(12)
+	}
 	_, fileName := filepath.Split(filePath)
 	f := &bloomFilter{filePath: filePath, fileName: fileName}
 	var err error
