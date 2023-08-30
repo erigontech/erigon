@@ -62,7 +62,7 @@ func Handler(reg metrics.Registry) http.Handler {
 				if m.IsGauge() {
 					c.writeGauge(name, m.Get())
 				} else {
-					c.addCounter(name, m)
+					c.writeCounter(name, m.Get())
 				}
 			case *metrics2.Gauge:
 				c.addGauge(name, m)

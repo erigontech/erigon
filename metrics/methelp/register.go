@@ -5,8 +5,8 @@ import (
 	metrics "github.com/ledgerwatch/erigon/metrics"
 )
 
-func GetOrCreateCounter(s string) *metrics2.Counter {
-	counter := metrics2.GetOrCreateCounter(s)
+func GetOrCreateCounter(s string, isGauge ...bool) *metrics2.Counter {
+	counter := metrics2.GetOrCreateCounter(s, isGauge...)
 	metrics.DefaultRegistry.Register(s, counter)
 	return counter
 }
