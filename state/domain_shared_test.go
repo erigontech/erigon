@@ -34,7 +34,8 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	hashes := make([][]byte, maxTx)
 	count := 10
 	rnd := rand.New(rand.NewSource(0))
-	rwTx.Commit()
+	err = rwTx.Commit()
+	require.NoError(t, err)
 
 Loop:
 	rwTx, err = db.BeginRw(ctx)
