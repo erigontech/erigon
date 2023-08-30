@@ -36,7 +36,6 @@ import (
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/holiman/uint256"
 	"github.com/pkg/errors"
-	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -67,25 +66,25 @@ var (
 	LatestStateReadDB            = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="yes"}`)    //nolint
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
-	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
-	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
-	mxPruneTookHistory        = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
-	mxPruneTookIndex          = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress         = metrics.GetOrCreateCounter("domain_pruning_progress")
-	mxCollationSize           = metrics.GetOrCreateCounter("domain_collation_size")
-	mxCollationSizeHist       = metrics.GetOrCreateCounter("domain_collation_hist_size")
+	mxRunningMerges           = metrics.GetOrCreateCounter(`domain_running_merges`)
+	mxRunningCollations       = metrics.GetOrCreateCounter(`domain_running_collations`)
+	mxCollateTook             = metrics.GetOrCreateSummary(`domain_collate_seconds`)
+	mxPruneTookDomain         = metrics.GetOrCreateSummary(`domain_prune_seconds{type="domain"}`)
+	mxPruneTookHistory        = metrics.GetOrCreateSummary(`domain_prune_seconds{type="history"}`)
+	mxPruneTookIndex          = metrics.GetOrCreateSummary(`domain_prune_seconds{type="index"}`)
+	mxPruneInProgress         = metrics.GetOrCreateCounter(`domain_pruning_progress`)
+	mxCollationSize           = metrics.GetOrCreateCounter(`domain_collation_size`)
+	mxCollationSizeHist       = metrics.GetOrCreateCounter(`domain_collation_hist_size`)
 	mxPruneSizeDomain         = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
 	mxPruneSizeHistory        = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
 	mxPruneSizeIndex          = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
-	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
-	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentRunning       = metrics.GetOrCreateCounter("domain_running_commitment")
-	mxCommitmentTook          = metrics.GetOrCreateSummary("domain_commitment_took")
-	mxCommitmentWriteTook     = metrics.GetOrCreateHistogram("domain_commitment_write_took")
-	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
+	mxBuildTook               = metrics.GetOrCreateSummary(`domain_build_files_seconds`)
+	mxStepTook                = metrics.GetOrCreateSummary(`domain_step_seconds`)
+	mxCommitmentKeys          = metrics.GetOrCreateCounter(`domain_commitment_keys`)
+	mxCommitmentRunning       = metrics.GetOrCreateCounter(`domain_running_commitment`)
+	mxCommitmentTook          = metrics.GetOrCreateSummary(`domain_commitment_seconds{phase="total"}`)
+	mxCommitmentWriteTook     = metrics.GetOrCreateSummary(`domain_commitment_seconds{phase="write"}`)
+	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter(`domain_commitment_updates_applied`)
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -834,7 +833,6 @@ type DomainContext struct {
 	keyBuf     [60]byte // 52b key and 8b for inverted step
 	valKeyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf     [8]byte
-	hasher     murmur3.Hash128
 }
 
 // getFromFile returns exact match for the given key from the given file
@@ -842,9 +840,10 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
 		if dc.files[i].src.bloom != nil {
-			dc.hasher.Reset()
-			dc.hasher.Write(filekey) //nolint:errcheck
-			hi, _ := dc.hasher.Sum128()
+			hasher := dc.hc.ic.hasher
+			hasher.Reset()
+			hasher.Write(filekey) //nolint:errcheck
+			hi, _ := hasher.Sum128()
 			if !dc.files[i].src.bloom.ContainsHash(hi) {
 				return nil, false, nil
 			}
@@ -941,10 +940,9 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 
 func (d *Domain) MakeContext() *DomainContext {
 	dc := &DomainContext{
-		d:      d,
-		hc:     d.History.MakeContext(),
-		hasher: murmur3.New128WithSeed(*d.salt), // TODO: agg can have pool of such
-		files:  *d.roFiles.Load(),
+		d:     d,
+		hc:    d.History.MakeContext(),
+		files: *d.roFiles.Load(),
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
@@ -1298,7 +1296,12 @@ func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compresse
 	}
 	return recsplit.OpenIndex(idxPath)
 }
-
+func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*bloomFilter, error) {
+	if err := buildIdxFilter(ctx, d, compressed, idxPath, tmpdir, salt, ps, logger, noFsync); err != nil {
+		return nil, err
+	}
+	return OpenBloom(idxPath)
+}
 func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
@@ -1715,9 +1718,10 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	//	}
 	//}
 
-	dc.hasher.Reset()
-	dc.hasher.Write(filekey) //nolint:errcheck
-	hi, _ := dc.hasher.Sum128()
+	hasher := dc.hc.ic.hasher
+	hasher.Reset()
+	hasher.Write(filekey) //nolint:errcheck
+	hi, _ := hasher.Sum128()
 
 	var ok, needMetric, filtered bool
 	needMetric = true
@@ -1836,6 +1840,7 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 // historical value based only on static files, roTx will not be used.
 func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
 	v, hOk, err := dc.historyBeforeTxNum(key, txNum, roTx)
+	fmt.Printf("a: %x, %d, %x, %t\n", key, txNum, v, hOk)
 	if err != nil {
 		return nil, err
 	}

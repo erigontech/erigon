@@ -82,7 +82,7 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 		domainLargeValues: AccDomainLargeValues,
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: &salt, dir: coldDir, tmpdir: coldDir},
-			withLocalityIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues,
+			withLocalityIndex: true, withExistenceIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues,
 		}}
 	d, err := NewDomain(cfg, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)

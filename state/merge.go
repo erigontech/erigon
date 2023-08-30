@@ -961,6 +961,12 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
+	if ii.withExistenceIndex {
+		if outItem.bloom, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
+			return nil, err
+		}
+	}
+
 	closeItem = false
 	return outItem, nil
 }

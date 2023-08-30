@@ -86,6 +86,7 @@ type histCfg struct {
 	compression        FileCompression
 	historyLargeValues bool
 	withLocalityIndex  bool
+	withExistenceIndex bool // move to iiCfg
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
@@ -99,7 +100,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, cfg.withExistenceIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -746,6 +747,7 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *compress.Decompressor
 	efHistoryIdx    *recsplit.Index
+	efExistence     *bloomFilter
 
 	warmLocality *LocalityIndexFiles
 	coldLocality *LocalityIndexFiles
@@ -780,6 +782,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var (
 		historyDecomp, efHistoryDecomp *compress.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
+		efExistence                    *bloomFilter
 		efHistoryComp                  *compress.Compressor
 		rs                             *recsplit.RecSplit
 	)
@@ -885,6 +888,14 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
+	if h.InvertedIndex.withExistenceIndex {
+		existenceIdxFileName := fmt.Sprintf("%s.%d-%d.efei", h.filenameBase, step, step+1)
+		existenceIdxPath := filepath.Join(h.dir, existenceIdxFileName)
+		if efExistence, err = buildIndexFilterThenOpen(ctx, efHistoryDecomp, h.compression, existenceIdxPath, h.tmpdir, h.salt, ps, h.logger, h.noFsync); err != nil {
+			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
+		}
+
+	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    collation.historyCount,
 		Enums:       false,
@@ -950,6 +961,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx:      historyIdx,
 		efHistoryDecomp: efHistoryDecomp,
 		efHistoryIdx:    efHistoryIdx,
+		efExistence:     efExistence,
 		warmLocality:    warmLocality,
 	}, nil
 }
@@ -958,6 +970,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	h.InvertedIndex.integrateFiles(InvertedFiles{
 		decomp:       sf.efHistoryDecomp,
 		index:        sf.efHistoryIdx,
+		existence:    sf.efExistence,
 		warmLocality: sf.warmLocality,
 		coldLocality: sf.coldLocality,
 	}, txNumFrom, txNumTo)
@@ -1329,6 +1342,90 @@ func (hc *HistoryContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
+	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
+	var foundTxNum uint64
+	var foundEndTxNum uint64
+	var foundStartTxNum uint64
+	var found bool
+	var findInFile = func(item ctxItem) bool {
+		reader := hc.ic.statelessIdxReader(item.i)
+		if reader.Empty() {
+			return true
+		}
+		offset := reader.Lookup(key)
+
+		// TODO do we always compress inverted index?
+		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compression)
+		g.Reset(offset)
+		k, _ := g.Next(nil)
+
+		if !bytes.Equal(k, key) {
+			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
+			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
+			//}
+			return true
+		}
+		eliasVal, _ := g.Next(nil)
+		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+		n, ok := ef.Search(txNum)
+		if hc.trace {
+			n2, _ := ef.Search(n + 1)
+			n3, _ := ef.Search(n - 1)
+			fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
+		}
+		if ok {
+			foundTxNum = n
+			foundEndTxNum = item.endTxNum
+			foundStartTxNum = item.startTxNum
+			found = true
+			return false
+		}
+		return true
+	}
+
+	hasher := hc.ic.hasher
+	hasher.Reset()
+	hasher.Write(key) //nolint
+	hi, _ := hasher.Sum128()
+	for i := len(hc.files) - 1; i >= 0; i-- {
+		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].endTxNum, hc.ic.files[i].endTxNum, txNum)
+		if hc.files[i].endTxNum < txNum {
+			continue
+		}
+		if hc.ic.ii.withExistenceIndex {
+			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
+				fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
+				continue
+			} else {
+				fmt.Printf("[dbg] bloom yes %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
+			}
+		}
+		findInFile(hc.files[i])
+		if found {
+			break
+		}
+	}
+
+	if found {
+		historyItem, ok := hc.getFile(foundStartTxNum, foundEndTxNum)
+		if !ok {
+			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
+		}
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
+		reader := hc.statelessIdxReader(historyItem.i)
+		offset := reader.Lookup2(txKey[:], key)
+		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
+		g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
+		g.Reset(offset)
+
+		v, _ := g.Next(nil)
+		return v, true, nil
+	}
+	return nil, false, nil
+}
+
+func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, error) {
 	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.ic.coldLocality.lookupIdxFiles(key, txNum)
 
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
