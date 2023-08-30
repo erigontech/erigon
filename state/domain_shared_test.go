@@ -15,8 +15,6 @@ import (
 func TestSharedDomain_Unwind(t *testing.T) {
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	defer db.Close()
-	defer agg.Close()
 
 	ctx := context.Background()
 	rwTx, err := db.BeginRw(ctx)
@@ -41,6 +39,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 Loop:
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	agg.SetTx(rwTx)
 

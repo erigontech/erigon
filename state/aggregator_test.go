@@ -29,7 +29,6 @@ import (
 
 func TestAggregatorV3_Merge(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 1000)
-	defer agg.Close()
 
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
@@ -408,7 +407,6 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	aggStep := uint64(500)
 
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	t.Cleanup(agg.Close)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -648,6 +646,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *AggregatorV3
 
 	agg, err := NewAggregatorV3(context.Background(), dir, filepath.Join(path, "e4", "tmp"), aggStep, db, logger)
 	require.NoError(t, err)
+	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	agg.DisableFsync()
 	require.NoError(t, err)
@@ -679,8 +678,6 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 20)
-	defer agg.Close()
-	defer db.Close()
 
 	mc2 := agg.MakeContext()
 	defer mc2.Close()
