@@ -68,7 +68,7 @@ func TestSendRawTransaction(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 		initialCycle := mock.MockInsertAsInitialCycle
-		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil); err != nil {
+		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil, false); err != nil {
 			t.Fatal(err)
 		}
 	}
