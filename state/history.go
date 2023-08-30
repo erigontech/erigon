@@ -1122,26 +1122,27 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 
 	switch {
 	case txNum <= beforeTxNum:
-		nk, nv, err := c.Next()
+		nk, nv, err := c.NextDup()
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("[dbg] a: %d, %t, %x\n", len(nk), nk == nil, nk)
 
 		res = append(res, HistoryRecord{beforeTxNum, val})
-		if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
+		if nk != nil {
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), nv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err
 			}
 		}
 	case txNum > beforeTxNum:
-		pk, pv, err := c.Prev()
+		pk, pv, err := c.PrevDup()
 		if err != nil {
 			return nil, err
 		}
 
-		if pk != nil && bytes.Equal(pk[:len(pk)-8], key) {
-			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[8:]), pv[8:]})
+		if pk != nil {
+			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[:8]), pv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err
 			}
