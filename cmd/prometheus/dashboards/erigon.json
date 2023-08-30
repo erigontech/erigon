@@ -358,6 +358,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisGridShow": true,
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
@@ -426,22 +427,68 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "8.0.6",
+      "pluginVersion": "9.3.6",
       "targets": [
         {
           "datasource": {
             "type": "prometheus"
           },
-          "exemplar": true,
-          "expr": "chain_execution_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "editorMode": "code",
+          "expr": "idelta(domain_collate_took_sum[30s])",
           "format": "time_series",
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "execution: {{instance}}",
+          "instant": false,
+          "legendFormat": "collation took",
+          "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "idelta(domain_step_took_sum[30s])",
+          "hide": false,
+          "legendFormat": "step took",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "idelta(domain_prune_took_sum[30s])",
+          "hide": false,
+          "legendFormat": "prune took [{{type}}]",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "idelta(domain_commitment_took_sum[30s])",
+          "hide": false,
+          "legendFormat": "commitment took",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "idelta(domain_commitment_write_took_sum[30s])",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "commitment update write took",
+          "range": true,
+          "refId": "F"
         }
       ],
-      "title": "Block Execution speed ",
+      "title": "Time took",
       "type": "timeseries"
     },
     {
@@ -560,6 +607,378 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "id": 112,
+      "links": [],
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "exemplar": true,
+          "expr": "chain_execution_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "format": "time_series",
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "execution: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Block Execution speed ",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 11
+      },
+      "id": 197,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.3.6",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_collation_size[$__interval])",
+          "hide": false,
+          "legendFormat": "collated [domain]",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_collation_hist_size[$__interval])",
+          "hide": false,
+          "legendFormat": "collated [history]",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_commitment_keys[$__interval])",
+          "hide": false,
+          "legendFormat": "keys committed",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_commitment_updates[$__interval])",
+          "hide": false,
+          "legendFormat": "commitment node updates",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_commitment_updates_applied[$__interval])",
+          "hide": false,
+          "legendFormat": "commitment trie node updates",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_prune_size[$__interval])",
+          "hide": false,
+          "legendFormat": "pruned keys [{{type}}]",
+          "range": true,
+          "refId": "G"
+        }
+      ],
+      "title": "Collate/Prune/Merge/Commitment",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "id": 198,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "domain_running_merges",
+          "legendFormat": "running merges",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "domain_running_collations",
+          "hide": false,
+          "legendFormat": "running collations",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "domain_pruning_progress",
+          "hide": false,
+          "legendFormat": "running prunes",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "domain_running_commitment",
+          "hide": false,
+          "legendFormat": "running commitment",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Running Collations / Merges / Prunes",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "datasource": {
         "type": "prometheus"
@@ -568,7 +987,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 16
       },
       "id": 17,
       "panels": [],
@@ -645,7 +1064,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 12
+        "y": 17
       },
       "id": 141,
       "options": {
@@ -740,7 +1159,7 @@
         "h": 9,
         "w": 16,
         "x": 8,
-        "y": 12
+        "y": 17
       },
       "id": 166,
       "options": {
@@ -992,7 +1411,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 17
+        "y": 22
       },
       "id": 159,
       "options": {
@@ -1095,7 +1514,7 @@
         "h": 7,
         "w": 16,
         "x": 8,
-        "y": 21
+        "y": 26
       },
       "id": 168,
       "options": {
@@ -1358,7 +1777,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 22
+        "y": 27
       },
       "id": 167,
       "options": {
@@ -1448,8 +1867,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1465,7 +1883,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 28
+        "y": 33
       },
       "id": 169,
       "options": {
@@ -1565,8 +1983,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1582,7 +1999,7 @@
         "h": 6,
         "w": 16,
         "x": 8,
-        "y": 28
+        "y": 33
       },
       "id": 150,
       "options": {
@@ -1668,8 +2085,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1684,7 +2100,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 34
+        "y": 39
       },
       "id": 191,
       "options": {
@@ -1883,7 +2299,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 47
       },
       "id": 134,
       "panels": [],
@@ -1920,7 +2336,7 @@
         "h": 18,
         "w": 8,
         "x": 0,
-        "y": 43
+        "y": 48
       },
       "id": 165,
       "options": {
@@ -1941,7 +2357,7 @@
         },
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.1",
+      "pluginVersion": "10.0.3",
       "targets": [
         {
           "datasource": {
@@ -2131,8 +2547,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2148,7 +2563,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 43
+        "y": 48
       },
       "id": 155,
       "links": [],
@@ -2243,8 +2658,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2260,7 +2674,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 43
+        "y": 48
       },
       "id": 153,
       "options": {
@@ -2339,8 +2753,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2356,7 +2769,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 49
+        "y": 54
       },
       "id": 85,
       "links": [],
@@ -2446,8 +2859,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2463,7 +2875,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 49
+        "y": 54
       },
       "id": 128,
       "options": {
@@ -2551,8 +2963,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2568,7 +2979,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 55
+        "y": 60
       },
       "id": 154,
       "links": [],
@@ -2723,8 +3134,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2740,7 +3150,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 55
+        "y": 60
       },
       "id": 124,
       "options": {
@@ -2818,8 +3228,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2835,7 +3244,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 66
       },
       "id": 148,
       "options": {
@@ -2976,8 +3385,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2993,7 +3401,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 66
+        "y": 71
       },
       "id": 86,
       "links": [],
@@ -3088,8 +3496,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3105,7 +3512,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 76
       },
       "id": 106,
       "links": [],
@@ -3160,7 +3567,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 81
       },
       "id": 82,
       "panels": [],
@@ -3220,8 +3627,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3237,7 +3643,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 77
+        "y": 82
       },
       "id": 157,
       "links": [],
@@ -3377,7 +3783,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 87
       },
       "id": 173,
       "panels": [],
@@ -3436,8 +3842,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3453,7 +3858,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 83
+        "y": 88
       },
       "id": 175,
       "options": {
@@ -3586,8 +3991,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3603,7 +4007,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 83
+        "y": 88
       },
       "id": 177,
       "options": {
@@ -3715,8 +4119,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3731,7 +4134,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 91
+        "y": 96
       },
       "id": 176,
       "options": {
@@ -3809,8 +4212,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3825,7 +4227,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 91
+        "y": 96
       },
       "id": 180,
       "options": {
@@ -3914,8 +4316,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3931,7 +4332,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 91
+        "y": 96
       },
       "id": 181,
       "options": {
@@ -4020,8 +4421,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4037,7 +4437,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 97
+        "y": 102
       },
       "id": 178,
       "options": {
@@ -4080,7 +4480,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 103
+        "y": 108
       },
       "id": 183,
       "panels": [],
@@ -4139,8 +4539,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4156,7 +4555,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 109
       },
       "id": 185,
       "options": {
@@ -4245,8 +4644,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4262,7 +4660,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 109
       },
       "id": 186,
       "options": {
@@ -4340,8 +4738,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4357,7 +4754,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 117
       },
       "id": 187,
       "options": {
@@ -4435,8 +4832,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4452,7 +4848,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 117
       },
       "id": 188,
       "options": {
@@ -4537,8 +4933,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4554,7 +4949,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 120
+        "y": 125
       },
       "id": 189,
       "options": {
@@ -4665,8 +5060,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4681,7 +5075,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 120
+        "y": 125
       },
       "id": 184,
       "options": {
@@ -4737,7 +5131,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 131
       },
       "id": 146,
       "panels": [],
@@ -4766,7 +5160,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 127
+        "y": 132
       },
       "hiddenSeries": false,
       "id": 122,
@@ -4868,7 +5262,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 127
+        "y": 132
       },
       "hiddenSeries": false,
       "id": 162,
@@ -5024,7 +5418,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 127
+        "y": 132
       },
       "hiddenSeries": false,
       "id": 156,
@@ -5110,7 +5504,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 132
+        "y": 137
       },
       "hiddenSeries": false,
       "id": 143,
@@ -5267,7 +5661,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 132
+        "y": 137
       },
       "hiddenSeries": false,
       "id": 142,
@@ -5512,7 +5906,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 137
+        "y": 142
       },
       "id": 75,
       "panels": [],
@@ -5571,8 +5965,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5588,7 +5981,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 138
+        "y": 143
       },
       "id": 96,
       "links": [],
@@ -5684,8 +6077,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5701,7 +6093,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 138
+        "y": 143
       },
       "id": 77,
       "links": [],
@@ -5770,7 +6162,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 144
+        "y": 149
       },
       "id": 4,
       "panels": [],
@@ -5806,8 +6198,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5823,7 +6214,7 @@
         "h": 3,
         "w": 5,
         "x": 0,
-        "y": 145
+        "y": 150
       },
       "id": 108,
       "links": [],
@@ -5886,8 +6277,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5903,7 +6293,7 @@
         "h": 3,
         "w": 5,
         "x": 5,
-        "y": 145
+        "y": 150
       },
       "id": 109,
       "links": [],
@@ -5967,8 +6357,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5984,7 +6373,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 145
+        "y": 150
       },
       "id": 113,
       "links": [],
@@ -6047,8 +6436,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6064,7 +6452,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 145
+        "y": 150
       },
       "id": 114,
       "links": [],
@@ -6127,8 +6515,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6144,7 +6531,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 145
+        "y": 150
       },
       "id": 115,
       "links": [],
@@ -6231,8 +6618,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6248,7 +6634,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 148
+        "y": 153
       },
       "id": 110,
       "links": [],
@@ -6347,8 +6733,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6364,7 +6749,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 148
+        "y": 153
       },
       "id": 116,
       "links": [],
@@ -6463,8 +6848,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6480,7 +6864,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 154
+        "y": 159
       },
       "id": 117,
       "links": [],
@@ -6643,7 +7027,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 161
+        "y": 166
       },
       "id": 138,
       "panels": [],
@@ -6672,7 +7056,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 162
+        "y": 167
       },
       "hiddenSeries": false,
       "id": 136,
@@ -6951,6 +7335,6 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 113,
+  "version": 114,
   "weekStart": ""
 }

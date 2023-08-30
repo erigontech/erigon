@@ -16,10 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -78,16 +79,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDBWithDefaultV3(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
-	db, err := openDBOnly(opts, applyMigrations, true, logger)
-	if err != nil {
-		return nil, err
-	}
-	db.Close()
-	return openDB(opts, false, logger)
-}
-
-func openDBOnly(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists bool, logger log.Logger) (kv.RwDB, error) {
+func openDBDefault(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists bool, logger log.Logger) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
@@ -107,30 +99,22 @@ func openDBOnly(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists bool, 
 				return nil, err
 			}
 
-			if enableV3IfDBNotExists {
-				logger.Info("history V3 is enabled")
-				err = db.Update(context.Background(), func(tx kv.RwTx) error {
-					return kvcfg.HistoryV3.ForceWrite(tx, true)
-				})
-				if err != nil {
-					return nil, err
-				}
-			}
-
 			db.Close()
 			db = opts.MustOpen()
 		}
 	}
-	return db, nil
-}
-
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
-	db, err := openDBOnly(opts, applyMigrations, false, logger)
-	if err != nil {
-		return nil, err
-	}
 
 	if opts.GetLabel() == kv.ChainDB {
+		if enableV3IfDBNotExists {
+			logger.Info("history V3 is forcibly enabled")
+			err := db.Update(context.Background(), func(tx kv.RwTx) error {
+				return kvcfg.HistoryV3.ForceWrite(tx, true)
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		var h3 bool
 		var err error
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -151,6 +135,13 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			db = tdb
 		}
 	}
-
 	return db, nil
+}
+
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+	return openDBDefault(opts, applyMigrations, ethconfig.EnableHistoryV3InTest, logger)
+}
+
+func openDBWithDefaultV3(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+	return openDBDefault(opts, applyMigrations, true, logger)
 }
