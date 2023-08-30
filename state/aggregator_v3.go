@@ -840,7 +840,9 @@ func (a *AggregatorV3) FinishWrites() {
 	//a.logTopics.FinishWrites()
 	//a.tracesFrom.FinishWrites()
 	//a.tracesTo.FinishWrites()
-	a.domains.FinishWrites()
+	if a.domains != nil {
+		a.domains.FinishWrites()
+	}
 }
 
 type flusher interface {
