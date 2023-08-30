@@ -699,9 +699,9 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	kl := len(key1) + len(key2)
+	d.aux = append(append(d.aux[:0], key1...), key2...)
 	fullkey := d.aux[:kl+8]
-	copy(fullkey, key1)
-	copy(fullkey[len(key1):], key2)
+	//TODO: we have ii.txNumBytes, need also have d.stepBytes. update it at d.SetTxNum()
 	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.d.txNum / d.d.aggregationStep))
 	// defer func() {
 	// 	fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
