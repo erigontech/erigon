@@ -615,7 +615,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 	initialCycle := MockInsertAsInitialCycle
 	hook := stages2.NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook, false); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -696,7 +696,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 	rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Hash())
 
-	return stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.posStagedSync, MockInsertAsInitialCycle, ms.Log, ms.BlockReader, hook)
+	return stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.posStagedSync, MockInsertAsInitialCycle, ms.Log, ms.BlockReader, hook, false)
 
 }
 
