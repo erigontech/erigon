@@ -557,12 +557,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 
 	if h.largeValues {
 		lk := len(key1) + len(key2)
+
+		h.historyKey = append(append(append(h.historyKey[:0], key1...), key2...), h.h.InvertedIndex.txNumBytes[:]...)
 		historyKey := h.historyKey[:lk+8]
-		copy(historyKey, key1)
-		if len(key2) > 0 {
-			copy(historyKey[len(key1):], key2)
-		}
-		copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
 
 		if !h.buffered {
 			if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
@@ -581,17 +578,14 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		}
 		return nil
 	}
-	if len(original) > len(h.historyKey)-8-len(key1)-len(key2) {
+	if len(original) > 2048 {
 		log.Error("History value is too large while largeValues=false", "h", h.h.historyValsTable, "histo", string(h.historyKey[:len(key1)+len(key2)]), "len", len(original), "max", len(h.historyKey)-8-len(key1)-len(key2))
 		panic("History value is too large while largeValues=false")
 	}
 
 	lk := len(key1) + len(key2)
+	h.historyKey = append(append(append(append(h.historyKey[:0], key1...), key2...), h.h.InvertedIndex.txNumBytes[:]...), original...)
 	historyKey := h.historyKey[:lk+8+len(original)]
-	copy(historyKey, key1)
-	copy(historyKey[len(key1):], key2)
-	copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
-	copy(historyKey[lk+8:], original)
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
