@@ -13,16 +13,11 @@ func newBeaconMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if accept == "application/json" {
-
-		} else if accept == "application/octet-stream" {
-
-		} else {
+		if accept != "application/json" && accept != "application/octet-stream" {
 			http.Error(w, "Unsupported Accept header value", http.StatusNotAcceptable)
 			return
 		}
 
-		// Our middleware logic goes here...
 		next.ServeHTTP(w, r)
 	})
 }
