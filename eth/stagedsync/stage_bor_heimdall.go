@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -27,6 +28,7 @@ const (
 
 type BorHeimdallCfg struct {
 	db               kv.RwDB
+	miningState      MiningState
 	chainConfig      chain.Config
 	heimdallClient   bor.IHeimdallClient
 	blockReader      services.FullBlockReader
@@ -35,12 +37,14 @@ type BorHeimdallCfg struct {
 
 func StageBorHeimdallCfg(
 	db kv.RwDB,
+	miningState MiningState,
 	chainConfig chain.Config,
 	heimdallClient bor.IHeimdallClient,
 	blockReader services.FullBlockReader,
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
+		miningState:      miningState,
 		chainConfig:      chainConfig,
 		heimdallClient:   heimdallClient,
 		blockReader:      blockReader,
@@ -54,6 +58,7 @@ func BorHeimdallForward(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
+	mine bool,
 	logger log.Logger,
 ) (err error) {
 	if cfg.chainConfig.Bor == nil {
@@ -71,13 +76,31 @@ func BorHeimdallForward(
 		}
 		defer tx.Rollback()
 	}
-	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return fmt.Errorf("getting headers progress: %w", err)
+
+	var header *types.Header
+	var headNumber uint64
+
+	if mine {
+		header = cfg.miningState.MiningBlock.Header
+		headNumber = header.Number.Uint64()
+	} else {
+		headNumber, err = stages.GetStageProgress(tx, stages.Headers)
+
+		if err != nil {
+			return fmt.Errorf("getting headers progress: %w", err)
+		}
+
+		header, err = cfg.blockReader.HeaderByNumber(ctx, tx, headNumber)
+
+		if err != nil {
+			return err
+		}
 	}
+
 	if s.BlockNumber == headNumber {
 		return nil
 	}
+
 	// Find out the latest event Id
 	cursor, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
@@ -88,6 +111,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
+
 	var lastEventId uint64
 	if k != nil {
 		lastEventId = binary.BigEndian.Uint64(k)
@@ -105,7 +129,7 @@ func BorHeimdallForward(
 	}
 	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
-			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
+			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
@@ -130,7 +154,7 @@ func fetchAndWriteBorEvents(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
-	blockNum uint64,
+	header *types.Header,
 	lastEventId uint64,
 	chainID string,
 	tx kv.RwTx,
@@ -140,15 +164,14 @@ func fetchAndWriteBorEvents(
 	logger log.Logger,
 ) (uint64, error) {
 	fetchStart := time.Now()
-	header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return lastEventId, err
-	}
+
 	// Find out the latest eventId
 	var (
 		from uint64
 		to   time.Time
 	)
+
+	blockNum := header.Number.Uint64()
 
 	if config.IsIndore(blockNum) {
 		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
