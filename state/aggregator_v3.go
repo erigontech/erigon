@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -32,7 +33,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
@@ -713,8 +713,8 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 }
 
 func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
-	log.Warn("[dbg] MergeLoop start")
-	defer log.Warn("[dbg] MergeLoop done")
+	a.logger.Warn("[dbg] MergeLoop start")
+	defer a.logger.Warn("[dbg] MergeLoop done")
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
