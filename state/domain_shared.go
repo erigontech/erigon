@@ -708,6 +708,19 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	sd.LogTopics.StartWrites()
 	sd.TracesFrom.StartWrites()
 	sd.TracesTo.StartWrites()
+
+	if sd.account == nil {
+		sd.account = map[string][]byte{}
+	}
+	if sd.commitment == nil {
+		sd.commitment = btree2.NewMap[string, []byte](128)
+	}
+	if sd.code == nil {
+		sd.code = map[string][]byte{}
+	}
+	if sd.storage == nil {
+		sd.storage = btree2.NewMap[string, []byte](128)
+	}
 	return sd
 }
 
@@ -723,6 +736,20 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 	sd.LogTopics.StartUnbufferedWrites()
 	sd.TracesFrom.StartUnbufferedWrites()
 	sd.TracesTo.StartUnbufferedWrites()
+
+	if sd.account == nil {
+		sd.account = map[string][]byte{}
+	}
+	if sd.commitment == nil {
+		sd.commitment = btree2.NewMap[string, []byte](128)
+	}
+	if sd.code == nil {
+		sd.code = map[string][]byte{}
+	}
+	if sd.storage == nil {
+		sd.storage = btree2.NewMap[string, []byte](128)
+	}
+
 	return sd
 }
 

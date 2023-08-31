@@ -317,6 +317,8 @@ func (a *AggregatorV3) Close() {
 
 func (a *AggregatorV3) CloseSharedDomains() {
 	if a.domains != nil {
+		a.domains.FinishWrites()
+		a.domains.SetTx(nil)
 		a.domains.Close()
 		a.domains = nil
 	}
