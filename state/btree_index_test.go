@@ -58,6 +58,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 120, 30
 	compressFlags := FileCompression(CompressKeys | CompressVals)
+	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
@@ -95,23 +96,24 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.SeekDeprecated(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 	})
 
-	c, err := bt.Seek(nil)
+	c, err := bt.SeekDeprecated(nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		if !bytes.Equal(keys[i], k) {
-			fmt.Printf("\tinvalid, want %x\n", keys[i])
-		}
+		//if !bytes.Equal(keys[i], k) {
+		//	fmt.Printf("\tinvalid, want %x, got %x\n", keys[i], k)
+		//}
+		require.EqualValues(t, keys[i], k)
 		c.Next()
 	}
 
 	for i := 0; i < len(keys); i++ {
-		cur, err := bt.Seek(keys[i])
+		cur, err := bt.SeekDeprecated(keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValues(t, keys[i], cur.key)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
@@ -125,7 +127,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 				break
 			}
 		}
-		cur, err := bt.Seek(keys[i])
+		cur, err := bt.SeekDeprecated(keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
 	}
@@ -151,7 +153,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
-	c, err := bt.Seek(nil)
+	c, err := bt.SeekDeprecated(nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -161,7 +163,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		c.Next()
 	}
 	for i := 0; i < 10000; i++ {
-		c, err := bt.Seek(keys[i])
+		c, err := bt.SeekDeprecated(keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], c.Key())
 	}
@@ -201,12 +203,12 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.SeekDeprecated(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 	})
 
-	c, err := bt.Seek(nil)
+	c, err := bt.SeekDeprecated(nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -217,7 +219,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	}
 
 	for i := 0; i < len(keys); i++ {
-		cur, err := bt.Seek(keys[i])
+		cur, err := bt.SeekDeprecated(keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValues(t, keys[i], cur.key)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
@@ -231,7 +233,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 				break
 			}
 		}
-		cur, err := bt.Seek(keys[i])
+		cur, err := bt.SeekDeprecated(keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
 	}
@@ -279,17 +281,68 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
 
-	bp := NewBpsTree(g, efi, uint64(M))
+	ir := NewMockIndexReader(efi)
+	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
 	bp.trace = true
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		it, err := bp.SeekWithGetter(g, sk[:len(sk)/2])
+		k, di, found, err := bp.Seek(g, sk[:len(sk)/2])
+		_ = di
+		_ = found
 		require.NoError(t, err)
-		require.NotNil(t, it)
+		require.NotNil(t, k)
+		require.False(t, found) // we are looking up by half of key, while FOUND=true when exact match found.
 
-		k, _, err := it.KVFromGetter(g)
-		require.NoError(t, err)
+		//k, _, err := it.KVFromGetter(g)
+		//require.NoError(t, err)
 		require.EqualValues(t, keys[i], k)
 	}
+}
+
+func NewMockIndexReader(ef *eliasfano32.EliasFano) *mockIndexReader {
+	return &mockIndexReader{ef: ef}
+}
+
+type mockIndexReader struct {
+	ef *eliasfano32.EliasFano
+}
+
+func (b *mockIndexReader) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
+	if di >= b.ef.Count() {
+		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
+	}
+
+	offset := b.ef.Get(di)
+	g.Reset(offset)
+	if !g.HasNext() {
+		return nil, nil, fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
+	}
+
+	k, _ := g.Next(nil)
+	if !g.HasNext() {
+		return nil, nil, fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
+	}
+	v, _ := g.Next(nil)
+	return k, v, nil
+}
+
+// comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
+func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
+	if di >= b.ef.Count() {
+		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
+	}
+
+	offset := b.ef.Get(di)
+	g.Reset(offset)
+	if !g.HasNext() {
+		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
+	}
+
+	var res []byte
+	res, _ = g.Next(res[:0])
+
+	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	return bytes.Compare(res, k), res, nil
+	//return b.getter.Match(k), result, nil
 }

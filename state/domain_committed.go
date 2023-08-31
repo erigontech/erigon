@@ -351,7 +351,7 @@ func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, type
 		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		//index := recsplit.NewIndexReader(item.index)
 
-		cur, err := item.bindex.SeekWithGetter(fullKey, g)
+		cur, err := item.bindex.Seek(g, fullKey)
 		if err != nil {
 			continue
 		}
@@ -361,10 +361,10 @@ func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, type
 		step := uint16(item.endTxNum / d.aggregationStep)
 		binary.BigEndian.PutUint16(numBuf[:], step)
 
-		shortKey = encodeU64(cur.Ordinal(), numBuf[:])
+		shortKey = encodeU64(cur.Di(), numBuf[:])
 
 		if d.trace {
-			fmt.Printf("replacing %s [%x] => {%x} [step=%d, offset=%d, file=%s.%d-%d]\n", typeAS, fullKey, shortKey, step, cur.Ordinal(), typeAS, item.startTxNum, item.endTxNum)
+			fmt.Printf("replacing %s [%x] => {%x} [step=%d, offset=%d, file=%s.%d-%d]\n", typeAS, fullKey, shortKey, step, cur.Di(), typeAS, item.startTxNum, item.endTxNum)
 		}
 		found = true
 		break

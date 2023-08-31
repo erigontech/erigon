@@ -65,47 +65,31 @@ type node struct {
 }
 
 type Cursor struct {
+	btt    *BtIndex
 	ctx    context.Context
 	getter ArchiveGetter
-	ix     *btAlloc
-	bt     *BpsTreeIterator
-
-	key   []byte
-	value []byte
-	d     uint64
+	key    []byte
+	value  []byte
+	d      uint64
 }
 
-// getter should be alive all the tinme of cursor usage
-// Key and value is valid until next successful is called Cursor.Next
-func (a *btAlloc) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
-	return &Cursor{
-		ctx:    ctx,
-		getter: g,
-		ix:     a,
-		bt:     &BpsTreeIterator{},
-		key:    common.Copy(k),
-		value:  common.Copy(v),
-		d:      d,
-	}
-}
-
-func NewCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
-	return &Cursor{
-		ctx:    ctx,
-		getter: g,
-		ix:     nil,
-		bt:     &BpsTreeIterator{},
-		key:    common.Copy(k),
-		value:  common.Copy(v),
-		d:      d,
-	}
-}
+//getter should be alive all the time of cursor usage
+//Key and value is valid until cursor.Next is called
+//func NewCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
+//	return &Cursor{
+//		ctx:    ctx,
+//		getter: g,
+//		key:    common.Copy(k),
+//		value:  common.Copy(v),
+//		d:      d,
+//	}
+//}
 
 func (c *Cursor) Key() []byte {
 	return c.key
 }
 
-func (c *Cursor) Ordinal() uint64 {
+func (c *Cursor) Di() uint64 {
 	return c.d
 }
 
@@ -114,31 +98,24 @@ func (c *Cursor) Value() []byte {
 }
 
 func (c *Cursor) Next() bool {
-	var key, value []byte
-	if UseBpsTree {
-		n := c.bt.Next()
-		if !n {
-			return false
-		}
-		var err error
-		key, value, err = c.bt.KVFromGetter(c.getter)
-		if err != nil {
-			log.Warn("BpsTreeIterator.Next error", "err", err)
-			return false
-		}
-		c.key, c.value = common.Copy(key), common.Copy(value)
-		c.d++
-		return n
-	}
-	if c.d > c.ix.K-1 {
+	if !c.next() {
 		return false
 	}
-	var err error
-	key, value, err = c.ix.dataLookup(c.d+1, c.getter)
+
+	key, value, err := c.btt.dataLookup(c.d, c.getter)
 	if err != nil {
 		return false
 	}
 	c.key, c.value = common.Copy(key), common.Copy(value)
+	return true
+}
+
+// next returns if another key/value pair is available int that index.
+// moves pointer d to next element if successful
+func (c *Cursor) next() bool {
+	if c.d+1 == c.btt.ef.Count() {
+		return false
+	}
 	c.d++
 	return true
 }
@@ -155,26 +132,29 @@ type btAlloc struct {
 	naccess uint64
 	trace   bool
 
-	dataLookup func(di uint64, g ArchiveGetter) ([]byte, []byte, error)
-	keyCmp     func(k []byte, di uint64, g ArchiveGetter) (cmp int, kResult []byte, err error)
+	dataLookup dataLookupFunc
+	keyCmp     keyCmpFunc
 }
 
-func newBtAlloc(k, M uint64, trace bool) *btAlloc {
+func newBtAlloc(k, M uint64, trace bool, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *btAlloc {
 	if k == 0 {
 		return nil
 	}
 
 	d := logBase(k, M)
 	a := &btAlloc{
-		vx:      make([]uint64, d+1),
-		sons:    make([][]uint64, d+1),
-		cursors: make([]markupCursor, d),
-		nodes:   make([][]node, d),
-		M:       M,
-		K:       k,
-		d:       d,
-		trace:   trace,
+		vx:         make([]uint64, d+1),
+		sons:       make([][]uint64, d+1),
+		cursors:    make([]markupCursor, d),
+		nodes:      make([][]node, d),
+		M:          M,
+		K:          k,
+		d:          d,
+		trace:      trace,
+		dataLookup: dataLookup,
+		keyCmp:     keyCmp,
 	}
+
 	if trace {
 		fmt.Printf("k=%d d=%d, M=%d\n", k, d, M)
 	}
@@ -437,32 +417,20 @@ func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
 	}))
 }
 
-func (a *btAlloc) Seek(ik []byte, g ArchiveGetter) (*Cursor, error) {
-	k, di, found, err := a.seek(ik, g)
+// Get returns value if found exact match of key
+// TODO k as return is useless(almost)
+func (a *btAlloc) Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uint64, err error) {
+	k, di, found, err = a.Seek(g, key)
 	if err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
-	if !found {
-		return nil, nil
+	if !found || !bytes.Equal(k, key) {
+		return nil, false, 0, nil
 	}
-
-	k1, v, err := a.dataLookup(di, g)
-	if err != nil {
-		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil
-		}
-		if a.trace {
-			fmt.Printf("finally found key %x v=%x naccess_disk=%d\n", k, v, a.naccess)
-		}
-		return nil, err
-	}
-	// if !bytes.Equal(k, k1) {
-	// 	panic(fmt.Errorf("key mismatch found1 %x != lookup2 %x seek %x", k, k1, ik))
-	// }
-	return a.newCursor(context.TODO(), k1, v, di, g), nil
+	return k, found, di, nil
 }
 
-func (a *btAlloc) seek(seek []byte, g ArchiveGetter) (k []byte, di uint64, found bool, err error) {
+func (a *btAlloc) Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error) {
 	if a.trace {
 		fmt.Printf("seek key %x\n", seek)
 	}
@@ -539,12 +507,14 @@ func (a *btAlloc) seek(seek []byte, g ArchiveGetter) (k []byte, di uint64, found
 		if a.trace {
 			fmt.Printf("key %x not found\n", seek)
 		}
-		return k, 0, false, err
+		return nil, 0, false, err
 	}
 	return k, di, found, nil
 }
 
-func (a *btAlloc) fillSearchMx(gr ArchiveGetter) {
+func (a *btAlloc) WarmUp(gr ArchiveGetter) error {
+	a.traverseDfs()
+
 	for i, n := range a.nodes {
 		if a.trace {
 			fmt.Printf("D%d |%d| ", i, len(n))
@@ -568,6 +538,7 @@ func (a *btAlloc) fillSearchMx(gr ArchiveGetter) {
 			fmt.Printf("\n")
 		}
 	}
+	return nil
 }
 
 type BtIndexWriter struct {
@@ -907,14 +878,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		idx.bplus = NewBpsTree(getter, idx.ef, M)
+		idx.bplus = NewBpsTree(getter, idx.ef, M, idx.dataLookup, idx.keyCmp)
 	default:
-		idx.alloc = newBtAlloc(idx.ef.Count(), M, false)
+		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
 		if idx.alloc != nil {
-			idx.alloc.dataLookup = idx.dataLookup
-			idx.alloc.keyCmp = idx.keyCmp
-			idx.alloc.traverseDfs()
-			idx.alloc.fillSearchMx(getter)
+			idx.alloc.WarmUp(getter)
 		}
 	}
 
@@ -924,42 +892,34 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 // dataLookup fetches key and value from data file by di (data index)
 // di starts from 0 so di is never >= keyCount
 func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
-	if UseBpsTree {
-		return b.dataLookupBplus(di, g)
-	}
-
 	if di >= b.ef.Count() {
-		return nil, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
+		return nil, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, b.FileName())
 	}
 
 	offset := b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair 1 %d not found. keyCount=%d. file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+		return nil, nil, fmt.Errorf("pair %d/%d key not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
 
 	k, _ := g.Next(nil)
 	if !g.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+		return nil, nil, fmt.Errorf("pair %d/%d value not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
 	}
 	v, _ := g.Next(nil)
 	return k, v, nil
 }
 
-func (b *BtIndex) dataLookupBplus(di uint64, g ArchiveGetter) ([]byte, []byte, error) {
-	return b.bplus.lookupWithGetter(g, di)
-}
-
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
 func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
 	if di >= b.ef.Count() {
-		return 0, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
+		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
 	}
 
 	offset := b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return 0, nil, fmt.Errorf("pair 3 %d not found. keyCount=%d. file: %s", di, b.ef.Count(), b.FileName())
+		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), b.FileName())
 	}
 
 	var res []byte
@@ -968,6 +928,19 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
 	//return b.getter.Match(k), result, nil
+}
+
+// getter should be alive all the time of cursor usage
+// Key and value is valid until cursor.Next is called
+func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
+	return &Cursor{
+		btt:    b,
+		ctx:    ctx,
+		getter: g,
+		key:    common.Copy(k),
+		value:  common.Copy(v),
+		d:      d,
+	}
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
@@ -1029,40 +1002,44 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 		if b.bplus == nil {
 			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 		}
-		it, err := b.bplus.SeekWithGetter(gr, lookup)
-		if err != nil {
-			return k, v, false, err
-		}
-		k, v, err := it.KVFromGetter(gr)
-		if err != nil {
-			return nil, nil, false, fmt.Errorf("kv from getter: %w", err)
-		}
-		if !bytes.Equal(k, lookup) {
-			return nil, nil, false, nil
-		}
-		index = it.i
+		//it, err := b.bplus.Seek(gr, lookup)
+		//if err != nil {
+		//	return k, v, false, err
+		//}
+		//k, v, err := it.KVFromGetter(gr)
+		//if err != nil {
+		//	return nil, nil, false, fmt.Errorf("kv from getter: %w", err)
+		//}
+		//if !bytes.Equal(k, lookup) {
+		//	return nil, nil, false, nil
+		//}
+		//index = it.i
 		// v is actual value, not offset.
 
 		// weak assumption that k will be ignored and used lookup instead.
 		// since fetching k and v from data file is required to use Getter.
 		// Why to do Getter.Reset twice when we can get kv right there.
-		return k, v, true, nil
+
+		k, found, index, err = b.bplus.Get(gr, lookup)
+	} else {
+		if b.alloc == nil {
+			panic(fmt.Errorf("Get: `b.alloc` is nil: %s", gr.FileName()))
+			return k, v, false, err
+		}
+		k, found, index, err = b.alloc.Get(gr, lookup)
+	}
+	if err != nil || !found {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return k, v, false, nil
+		}
+		return nil, nil, false, err
 	}
 
-	if b.alloc == nil {
-		return k, v, false, err
-	}
-	k, index, found, err = b.alloc.seek(lookup, gr)
-	if err != nil {
-		return k, v, false, err
-	}
-	if !found {
-		return k, v, false, nil
-	}
-	if !bytes.Equal(k, lookup) {
-		return k, v, false, nil
-	}
-	k, v, err = b.alloc.dataLookup(index, gr)
+	// this comparation should be done by index get method, and in case of mismatch, key is not found
+	//if !bytes.Equal(k, lookup) {
+	//	return k, v, false, nil
+	//}
+	k, v, err = b.dataLookup(index, gr)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return k, v, false, nil
@@ -1076,68 +1053,59 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 // Then if x == nil - first key returned
 //
 //	if x is larger than any other key in index, nil cursor is returned.
-func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
+func (b *BtIndex) SeekDeprecated(x []byte) (*Cursor, error) {
 	g := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
-	return b.SeekWithGetter(x, g)
+	return b.Seek(g, x)
 }
 
 // Seek moves cursor to position where key >= x.
 // Then if x == nil - first key returned
 //
 //	if x is larger than any other key in index, nil cursor is returned.
-func (b *BtIndex) SeekWithGetter(x []byte, g ArchiveGetter) (*Cursor, error) {
+func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-	var cursor *Cursor
+
 	// defer func() {
 	// 	fmt.Printf("[Bindex][%s] Seek '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
 	// }()
+	var (
+		k     []byte
+		dt    uint64
+		found bool
+		err   error
+	)
+
 	if UseBpsTree {
-		it, err := b.bplus.SeekWithGetter(g, x)
-		if err != nil {
-			return nil, err
-		}
-		if it == nil {
+		k, dt, found, err = b.bplus.Seek(g, x)
+	} else {
+		k, dt, found, err = b.alloc.Seek(g, x)
+	}
+	_ = found
+	if err != nil /*|| !found*/ {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
-		k, v, err := it.KVFromGetter(g)
-		if err != nil {
-			return nil, err
-		}
-		cursor = b.alloc.newCursor(context.Background(), k, v, it.i, g)
-		cursor.bt = it
-		return cursor, nil
+		return nil, err
 	}
-	cursor, err := b.alloc.Seek(x, g)
+
+	k, v, err := b.dataLookup(dt, g)
 	if err != nil {
-		return nil, fmt.Errorf("seek key %x: %w", x, err)
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	// cursor could be nil along with err if nothing found
-	return cursor, nil
+	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
 	getter := NewArchiveGetter(b.decompressor.MakeGetter(), b.compressed)
-	if UseBpsTree {
-		k, v, err := b.dataLookupBplus(i, getter)
-		if err != nil {
-			return nil
-		}
-		cur := b.alloc.newCursor(context.Background(), k, v, i, getter)
-		cur.bt = &BpsTreeIterator{i: i, t: b.bplus}
-		return cur
-	}
-	if b.alloc == nil {
-		return nil
-	}
-	if i > b.alloc.K {
-		return nil
-	}
 	k, v, err := b.dataLookup(i, getter)
 	if err != nil {
 		return nil
 	}
 
-	return b.alloc.newCursor(context.Background(), k, v, i, getter)
+	return b.newCursor(context.Background(), k, v, i, getter)
 }
