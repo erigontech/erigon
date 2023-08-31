@@ -3605,223 +3605,6 @@
         "x": 0,
         "y": 81
       },
-      "id": 82,
-      "panels": [],
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "refId": "A"
-        }
-      ],
-      "title": "System",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "decbytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 0,
-        "y": 82
-      },
-      "id": 157,
-      "links": [],
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "8.0.6",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_total{instance=~\"$instance\"}",
-          "format": "time_series",
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "total: {{instance}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_available{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "available: {{instance}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_used{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "used: {{instance}}",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_buffers{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "buffers: {{instance}}",
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_cached{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "cached: {{instance}}",
-          "refId": "E"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_writeback{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "writeback: {{instance}}",
-          "refId": "F"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_dirty{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "dirty: {{instance}}",
-          "refId": "G"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_shared{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "shared: {{instance}}",
-          "refId": "H"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "expr": "vmem_mapped{instance=~\"$instance\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "mapped: {{instance}}",
-          "refId": "I"
-        }
-      ],
-      "title": "Host VMem",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "datasource": {
-        "type": "prometheus"
-      },
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 87
-      },
       "id": 173,
       "panels": [],
       "targets": [
@@ -3832,7 +3615,7 @@
           "refId": "A"
         }
       ],
-      "title": "TxPool v2",
+      "title": "TxPool",
       "type": "row"
     },
     {
@@ -3896,7 +3679,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 82
       },
       "id": 175,
       "options": {
@@ -4046,7 +3829,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 82
       },
       "id": 177,
       "options": {
@@ -4174,7 +3957,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 96
+        "y": 90
       },
       "id": 176,
       "options": {
@@ -4268,7 +4051,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 96
+        "y": 90
       },
       "id": 180,
       "options": {
@@ -4374,7 +4157,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 96
+        "y": 90
       },
       "id": 181,
       "options": {
@@ -4480,7 +4263,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 102
+        "y": 96
       },
       "id": 178,
       "options": {
@@ -4523,7 +4306,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 108
+        "y": 102
       },
       "id": 183,
       "panels": [],
@@ -4599,7 +4382,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 109
+        "y": 103
       },
       "id": 185,
       "options": {
@@ -4705,7 +4488,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 109
+        "y": 103
       },
       "id": 186,
       "options": {
@@ -4800,7 +4583,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 117
+        "y": 111
       },
       "id": 187,
       "options": {
@@ -4895,7 +4678,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 117
+        "y": 111
       },
       "id": 188,
       "options": {
@@ -4997,7 +4780,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 125
+        "y": 119
       },
       "id": 189,
       "options": {
@@ -5124,7 +4907,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 125
+        "y": 119
       },
       "id": 184,
       "options": {
@@ -5180,7 +4963,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 131
+        "y": 125
       },
       "id": 75,
       "panels": [],
@@ -5256,7 +5039,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 126
       },
       "id": 96,
       "links": [],
@@ -5369,7 +5152,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 126
       },
       "id": 77,
       "links": [],
@@ -5500,8 +5283,7 @@
           ]
         },
         "datasource": {
-          "type": "prometheus",
-          "uid": "PBFA97CFB590B2093"
+          "type": "prometheus"
         },
         "definition": "go_goroutines",
         "hide": 0,
@@ -5631,6 +5413,6 @@
   "timezone": "",
   "title": "Erigon Internals",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 2,
+  "version": 4,
   "weekStart": ""
 }
