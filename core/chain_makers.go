@@ -327,11 +327,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx))
 		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
-		ac := agg.MakeContext()
-		defer ac.Close()
-		defer agg.Close()
-
-		domains = agg.SharedDomains(agg.MakeContext())
+		domains = agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
 		defer domains.Close()
 
 		oldTxNum := domains.TxNum()
