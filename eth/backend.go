@@ -1179,7 +1179,7 @@ func (s *Ethereum) Start() error {
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
-		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
 
 	return nil

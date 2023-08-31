@@ -8,20 +8,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 )
 
 type ApiHandler struct {
 	o   sync.Once
 	mux chi.Router
 
-	blockSource    persistence.BlockSource
-	indiciesDB     *sql.DB
-	genesisCfg     *clparams.GenesisConfig
-	beaconChainCfg *clparams.BeaconChainConfig
+	blockSource     persistence.BlockSource
+	indiciesDB      *sql.DB
+	genesisCfg      *clparams.GenesisConfig
+	beaconChainCfg  *clparams.BeaconChainConfig
+	forkchoiceStore forkchoice.ForkChoiceStorage
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.BlockSource, indiciesDB *sql.DB) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source}
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.BlockSource, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore}
 }
 
 func (a *ApiHandler) init() {
