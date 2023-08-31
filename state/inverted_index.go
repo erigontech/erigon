@@ -379,7 +379,6 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 		key, _ = g.Next(key[:0])
 		hasher.Reset()
 		hasher.Write(key) //nolint:errcheck
-		fmt.Printf("add to bloom: %x, %s\n", key, idxFilter.fileName)
 		hi, _ := hasher.Sum128()
 		idxFilter.AddHash(hi)
 
