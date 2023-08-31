@@ -105,8 +105,6 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	//libstate.CompareRecsplitBtreeIndexes = true
-
 	sn, bsn, agg := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
 	defer bsn.Close()
@@ -116,16 +114,14 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	defer ac.Close()
 
 	domains := agg.SharedDomains(ac)
-
-	histTx, err := chainDb.BeginRo(ctx)
-	must(err)
-	defer histTx.Rollback()
+	defer domains.Close()
 
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
 
-	agg.SetTx(stateTx)
+	domains.SetTx(stateTx)
+
 	//defer agg.StartWrites().FinishWrites()
 
 	r := state.NewReaderV4(stateTx.(*temporal.Tx))

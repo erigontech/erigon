@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -321,19 +322,28 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	var stateReader state.StateReader
 	var stateWriter state.StateWriter
+	var domains *state2.SharedDomains
 	if ethconfig.EnableHistoryV4InTest {
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx))
 		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
-		oldTxNum := agg.GetTxNum()
+		ac := agg.MakeContext()
+		defer ac.Close()
+		defer agg.Close()
+
+		domains = agg.SharedDomains(agg.MakeContext())
+		defer domains.Close()
+
+		oldTxNum := domains.TxNum()
 		defer func() {
-			agg.SetTxNum(oldTxNum)
+			domains.SetTxNum(oldTxNum)
 		}()
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
 		if ethconfig.EnableHistoryV4InTest {
-			tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx()).SetBlockNum(blockNum)
+			//tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx()).SetBlockNum(blockNum)
+			domains.SetBlockNum(blockNum)
 		} else {
 			stateReader = state.NewPlainStateReader(tx)
 			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
@@ -342,7 +352,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	txNumIncrement := func() {
 		txNum++
 		if ethconfig.EnableHistoryV4InTest {
-			tx.(*temporal.Tx).Agg().SetTxNum(uint64(txNum))
+			domains.SetTxNum(uint64(txNum))
 		}
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
@@ -407,10 +417,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 
 	if ethconfig.EnableHistoryV4InTest {
-		agg := tx.(*temporal.Tx).Agg()
-		agg.SharedDomains(agg.MakeContext()).ClearRam(true)
+		domains.ClearRam(true)
 	}
-
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil

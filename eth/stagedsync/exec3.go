@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -264,7 +265,6 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 	}
-	agg.SetTxNum(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
@@ -287,7 +287,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	agg.SetTxNum(inputTxNum)
+	doms.SetTxNum(inputTxNum)
 	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -377,7 +377,7 @@ func ExecV3(ctx context.Context,
 			}
 			defer tx.Rollback()
 
-			agg.SetTx(tx)
+			doms.SetTx(tx)
 			if dbg.DiscardHistory() {
 				agg.DiscardHistory()
 			} else {
@@ -496,7 +496,7 @@ func ExecV3(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					agg.SetTx(tx)
+					doms.SetTx(tx)
 
 					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 					defer cancelApplyCtx()
@@ -740,11 +740,9 @@ Loop:
 
 				// MA applystate
 				if err := rs.ApplyState4(txTask, agg); err != nil {
-					return fmt.Errorf("StateV3.ApplyState: %w", err)
+					return err
 				}
-				if err := rs.ApplyLogsAndTraces(txTask, agg); err != nil {
-					return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
-				}
+
 				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 			}
@@ -834,9 +832,9 @@ Loop:
 						}
 						agg.StartWrites()
 						applyWorker.ResetTx(applyTx)
-						agg.SetTx(applyTx)
 
 						nc := applyTx.(*temporal.Tx).AggCtx()
+						doms.SetTx(applyTx)
 						doms.SetContext(nc)
 					}
 
@@ -1003,7 +1001,7 @@ func processResultQueue(in *state.QueueWithRetry, rws *state.ResultsQueue, outpu
 			default:
 			}
 		}
-		if err := rs.ApplyLogsAndTraces(txTask, agg); err != nil {
+		if err := rs.ApplyLogsAndTraces4(txTask, rs.Domains()); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)

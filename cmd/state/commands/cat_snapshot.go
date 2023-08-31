@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -22,7 +24,7 @@ func init() {
 
 var (
 	fpath      string
-	compressed bool
+	compressed string
 	pick       string // print value only for keys with such prefix
 )
 
@@ -32,7 +34,7 @@ func withFpath(cmd *cobra.Command) {
 }
 
 func withCompressed(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&compressed, "compressed", false, "compressed")
+	cmd.Flags().StringVar(&compressed, "compress", "", "hint if we need to decompress keys or values or both (k|v|kv). Empty argument means no compression used")
 }
 
 func withPick(cmd *cobra.Command) {
@@ -41,7 +43,7 @@ func withPick(cmd *cobra.Command) {
 
 var catSnapshot = &cobra.Command{
 	Use:   "cat_snapshot",
-	Short: "priint kv pairs from snapshot",
+	Short: "print kv pairs from snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if fpath == "" {
 			return errors.New("fpath is required")
@@ -54,7 +56,21 @@ var catSnapshot = &cobra.Command{
 
 		fmt.Printf("File %s modtime %s (%s ago) size %v pairs %d \n", fpath, d.ModTime(), time.Since(d.ModTime()), (datasize.B * datasize.ByteSize(d.Size())).HR(), d.Count()/2)
 
-		rd := state.NewArchiveGetter(d.MakeGetter(), compressed)
+		compFlags := state.CompressNone
+		switch strings.ToLower(compressed) {
+		case "k":
+			compFlags = state.CompressKeys
+		case "v":
+			compFlags = state.CompressVals
+		case "kv":
+			compFlags = state.CompressKeys | state.CompressVals
+		case "":
+			break
+		default:
+			return fmt.Errorf("unknown compression flags %s", compressed)
+		}
+
+		rd := state.NewArchiveGetter(d.MakeGetter(), compFlags)
 
 		pbytes := []byte{}
 		if pick != "" {
