@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -410,8 +409,8 @@ type Ethash struct {
 	datasets *lru // In memory datasets to avoid regenerating too often
 
 	// Mining related fields
-	rand     *rand.Rand    // Properly seeded random source for nonces
-	hashrate metrics.Meter // Meter tracking the average hashrate
+	rand     *rand.Rand     // Properly seeded random source for nonces
+	hashrate *hashRateMeter // Meter tracking the average hashrate
 	remote   *remoteSealer
 
 	// The fields below are hooks for testing
@@ -439,7 +438,7 @@ func New(config ethashcfg.Config, notify []string, noverify bool) *Ethash {
 		config:   config,
 		caches:   newlru("cache", config.CachesInMem, newCache),
 		datasets: newlru("dataset", config.DatasetsInMem, newDataset),
-		hashrate: metrics.NewMeterForced(),
+		hashrate: newHashRateMeter(),
 	}
 	if config.PowMode == ethashcfg.ModeShared {
 		ethash.shared = GetSharedEthash()
@@ -534,7 +533,7 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 func (ethash *Ethash) Hashrate() float64 {
 	// Short circuit if we are run the ethash in normal/test mode.
 	if (ethash.config.PowMode != ethashcfg.ModeNormal && ethash.config.PowMode != ethashcfg.ModeTest) || ethash.remote == nil {
-		return ethash.hashrate.Rate1()
+		return ethash.hashrate.Rate()
 	}
 	var res = make(chan uint64, 1)
 
@@ -542,11 +541,11 @@ func (ethash *Ethash) Hashrate() float64 {
 	case ethash.remote.fetchRateCh <- res:
 	case <-ethash.remote.exitCh:
 		// Return local hashrate only if ethash is stopped.
-		return ethash.hashrate.Rate1()
+		return ethash.hashrate.Rate()
 	}
 
 	// Gather total submitted hash rate of remote sealers.
-	return ethash.hashrate.Rate1() + float64(<-res)
+	return ethash.hashrate.Rate() + float64(<-res)
 }
 
 // APIs implements consensus.Engine, returning the user facing RPC APIs.
