@@ -112,7 +112,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 	return count
 }
 
-const Assert = false
+const AssertReads = false
 
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
@@ -127,7 +127,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 					return fmt.Errorf("latest account %x: %w", kb, err)
 				}
 				if list.Vals[i] == nil {
-					if Assert {
+					if AssertReads {
 						original := txTask.AccountDels[key]
 						var originalBytes []byte
 						if original != nil {
@@ -255,35 +255,6 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 		}
 		for _, topic := range lg.Topics {
 			if err := domains.IndexAdd(kv.TblLogTopicsIdx, topic[:]); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (rs *StateV3) ApplyLogsAndTraces(txTask *TxTask, agg *libstate.AggregatorV3) error {
-	if dbg.DiscardHistory() {
-		return nil
-	}
-	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
-
-	for addr := range txTask.TraceFroms {
-		if err := agg.PutIdx(kv.TblTracesFromIdx, addr[:]); err != nil {
-			return err
-		}
-	}
-	for addr := range txTask.TraceTos {
-		if err := agg.PutIdx(kv.TblTracesToIdx, addr[:]); err != nil {
-			return err
-		}
-	}
-	for _, log := range txTask.Logs {
-		if err := agg.PutIdx(kv.TblLogAddressIdx, log.Address[:]); err != nil {
-			return err
-		}
-		for _, topic := range log.Topics {
-			if err := agg.PutIdx(kv.LogTopicIndex, topic[:]); err != nil {
 				return err
 			}
 		}
