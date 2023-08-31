@@ -156,7 +156,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
 		},
 		domainLargeValues: CommitmentDomainLargeValues,
 		compress:          CompressNone,
