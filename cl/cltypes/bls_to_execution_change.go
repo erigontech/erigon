@@ -44,7 +44,7 @@ func (*BLSToExecutionChange) Static() bool {
 
 type SignedBLSToExecutionChange struct {
 	Message   *BLSToExecutionChange
-	Signature [96]byte
+	Signature Bytes96
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {

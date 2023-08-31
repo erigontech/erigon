@@ -85,6 +85,8 @@ func (a *ApiHandler) init() {
 	})
 }
 
+func decodeChainId(r *http.Request)
+
 func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.o.Do(func() {
 		a.init()

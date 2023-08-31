@@ -17,9 +17,9 @@ const (
 
 type DepositData struct {
 	PubKey                [48]byte
-	WithdrawalCredentials [32]byte // 32 byte
+	WithdrawalCredentials libcommon.Hash
 	Amount                uint64
-	Signature             [96]byte
+	Signature             Bytes96
 	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
@@ -103,7 +103,7 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 
 type SignedVoluntaryExit struct {
 	VolunaryExit *VoluntaryExit
-	Signature    [96]byte
+	Signature    Bytes96
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {

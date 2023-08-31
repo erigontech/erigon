@@ -12,7 +12,7 @@ import (
 type IndexedAttestation struct {
 	AttestingIndices solid.Uint64ListSSZ
 	Data             solid.AttestationData
-	Signature        [96]byte
+	Signature        Bytes96
 }
 
 func (i *IndexedAttestation) Static() bool {
