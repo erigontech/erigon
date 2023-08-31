@@ -324,15 +324,15 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if ethconfig.EnableHistoryV4InTest {
-		stateWriter = state.NewWriterV4(tx.(*temporal.Tx))
 		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
-		ac := agg.MakeContext()
-		defer ac.Close()
-		defer agg.Close()
+		ac := tx.(*temporal.Tx).AggCtx()
 
-		domains = agg.SharedDomains(agg.MakeContext())
+		domains = agg.SharedDomains(ac)
 		defer domains.Close()
+		domains.StartUnbufferedWrites()
+		defer domains.FinishWrites()
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 
 		oldTxNum := domains.TxNum()
 		defer func() {

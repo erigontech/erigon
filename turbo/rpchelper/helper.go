@@ -3,6 +3,7 @@ package rpchelper
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -138,7 +139,12 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 }
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		return state.NewWriterV4(tx.(kv.TemporalTx))
+		ac := tx.(*temporal.Tx).AggCtx()
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		defer domains.Close()
+		domains.StartUnbufferedWrites()
+		defer domains.FinishWrites()
+		return state.NewWriterV4(tx.(*temporal.Tx), domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }

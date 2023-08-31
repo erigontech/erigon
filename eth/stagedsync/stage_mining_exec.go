@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -94,14 +95,13 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		stateWriter state.WriterWithChangeSets
 	)
 	if histV3 {
-		//agg := tx.(*temporal.Tx).Agg()
-		//defer agg.StartWrites().FinishWrites()
+		ac := tx.(*temporal.Tx).AggCtx()
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		defer domains.Close()
+		domains.StartUnbufferedWrites()
+		defer domains.FinishWrites()
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
-		//ca := agg.MakeContext()
-		//defer ca.Close()
-		//
-		//domains := agg.SharedDomains(ca)
-		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
 		stateReader = state.NewPlainStateReader(tx)
 		stateWriter = state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	}
