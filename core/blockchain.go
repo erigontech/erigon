@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -41,7 +41,7 @@ import (
 )
 
 var (
-	BlockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	BlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string

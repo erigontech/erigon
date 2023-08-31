@@ -25,12 +25,12 @@ import (
 	"sync"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -341,8 +341,8 @@ func (p *Peer) handle(msg Msg) error {
 		}
 		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics2.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
-			metrics2.GetOrCreateCounter(m + "_packets").Set(1)
+			metrics.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
+			metrics.GetOrCreateCounter(m + "_packets").Set(1)
 		}
 		select {
 		case proto.in <- msg:

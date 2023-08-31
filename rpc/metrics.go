@@ -19,7 +19,8 @@ package rpc
 import (
 	"fmt"
 
-	"github.com/VictoriaMetrics/metrics"
+	metrics2 "github.com/VictoriaMetrics/metrics"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 var (
@@ -27,7 +28,7 @@ var (
 	failedReqeustGauge = metrics.GetOrCreateCounter("rpc_failure")
 )
 
-func newRPCServingTimerMS(method string, valid bool) *metrics.Summary {
+func newRPCServingTimerMS(method string, valid bool) *metrics2.Summary {
 	if valid {
 		return metrics.GetOrCreateSummary(fmt.Sprintf(`rpc_duration_seconds{method="%s",success="success"}`, method))
 	}
