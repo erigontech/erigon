@@ -688,6 +688,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 }
 
 func (sd *SharedDomains) Close() {
+	sd.FinishWrites()
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
