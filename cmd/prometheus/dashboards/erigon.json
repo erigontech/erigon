@@ -415,8 +415,7 @@
       "options": {
         "legend": {
           "calcs": [
-            "mean",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "list",
           "placement": "bottom",
@@ -434,10 +433,10 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "idelta(domain_collate_took_sum[30s])",
+          "expr": "idelta(domain_collate_took_sum{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "instant": false,
-          "legendFormat": "collation took",
+          "legendFormat": "collation took: {{instance}}",
           "range": true,
           "refId": "A"
         },
@@ -446,9 +445,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "idelta(domain_step_took_sum[30s])",
+          "expr": "idelta(domain_step_took_sum{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "step took",
+          "legendFormat": "step took: {{instance}}",
           "range": true,
           "refId": "C"
         },
@@ -457,9 +456,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "idelta(domain_prune_took_sum[30s])",
+          "expr": "idelta(domain_prune_took_sum{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "prune took [{{type}}]",
+          "legendFormat": "prune took [{{type}}]: {{instance}}",
           "range": true,
           "refId": "B"
         },
@@ -468,9 +467,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "idelta(domain_commitment_took_sum[30s])",
+          "expr": "idelta(domain_commitment_took_sum{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "commitment took",
+          "legendFormat": "commitment took: {{instance}}",
           "range": true,
           "refId": "D"
         },
@@ -480,10 +479,10 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "idelta(domain_commitment_write_took_sum[30s])",
+          "expr": "idelta(domain_commitment_write_took_sum{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "instant": false,
-          "legendFormat": "commitment update write took",
+          "legendFormat": "commitment update write took: {{instance}}",
           "range": true,
           "refId": "F"
         }
@@ -669,7 +668,7 @@
         "x": 0,
         "y": 11
       },
-      "id": 112,
+      "id": 199,
       "links": [],
       "options": {
         "legend": {
@@ -790,9 +789,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_collation_size[$__interval])",
+          "expr": "irate(domain_collation_size{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "collated [domain]",
+          "legendFormat": "collated [domain]: {{instance}}",
           "range": true,
           "refId": "D"
         },
@@ -801,9 +800,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_collation_hist_size[$__interval])",
+          "expr": "irate(domain_collation_hist_size{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "collated [history]",
+          "legendFormat": "collated [history]: {{instance}}",
           "range": true,
           "refId": "E"
         },
@@ -812,9 +811,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_commitment_keys[$__interval])",
+          "expr": "irate(domain_commitment_keys{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "keys committed",
+          "legendFormat": "keys committed: {{instance}}",
           "range": true,
           "refId": "A"
         },
@@ -823,9 +822,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_commitment_updates[$__interval])",
+          "expr": "irate(domain_commitment_updates{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "commitment node updates",
+          "legendFormat": "commitment node updates: {{instance}}",
           "range": true,
           "refId": "C"
         },
@@ -834,9 +833,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_commitment_updates_applied[$__interval])",
+          "expr": "irate(domain_commitment_updates_applied{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "commitment trie node updates",
+          "legendFormat": "commitment trie node updates: {{instance}}",
           "range": true,
           "refId": "F"
         },
@@ -845,9 +844,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(domain_prune_size[$__interval])",
+          "expr": "irate(domain_prune_size{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
-          "legendFormat": "pruned keys [{{type}}]",
+          "legendFormat": "pruned keys [{{type}}]: {{instance}}",
           "range": true,
           "refId": "G"
         }
@@ -936,8 +935,8 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "domain_running_merges",
-          "legendFormat": "running merges",
+          "expr": "domain_running_merges{instance=~\"$instance\"}",
+          "legendFormat": "running merges: {{instance}}",
           "range": true,
           "refId": "A"
         },
@@ -946,9 +945,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "domain_running_collations",
+          "expr": "domain_running_collations{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "running collations",
+          "legendFormat": "running collations: {{instance}}",
           "range": true,
           "refId": "B"
         },
@@ -957,9 +956,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "domain_pruning_progress",
+          "expr": "domain_pruning_progress{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "running prunes",
+          "legendFormat": "running prunes: {{instance}}",
           "range": true,
           "refId": "C"
         },
@@ -968,9 +967,9 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "domain_running_commitment",
+          "expr": "domain_running_commitment{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "running commitment",
+          "legendFormat": "running commitment: {{instance}}",
           "range": true,
           "refId": "D"
         }
@@ -1017,8 +1016,8 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
-            "drawStyle": "points",
-            "fillOpacity": 10,
+            "drawStyle": "line",
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -1867,7 +1866,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1877,7 +1877,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "gc_overflow: mainnet2-1:6061"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 6,
@@ -1983,7 +2008,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7196,7 +7222,7 @@
       },
       {
         "current": {
-          "selected": true,
+          "selected": false,
           "text": [
             "All"
           ],
@@ -7232,7 +7258,7 @@
         "auto_count": 30,
         "auto_min": "10s",
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "10m",
           "value": "10m"
         },
@@ -7305,7 +7331,7 @@
     ]
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -7335,6 +7361,6 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 114,
+  "version": 154,
   "weekStart": ""
 }
