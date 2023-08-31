@@ -487,7 +487,7 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
-	if txNum%sd.Account.aggregationStep == 1 {
+	if txNum%sd.Account.aggregationStep == 0 { //
 		_, err := sd.Commit(true, sd.trace)
 		if err != nil {
 			panic(err)
@@ -688,7 +688,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 }
 
 func (sd *SharedDomains) Close() {
-	sd.FinishWrites()
+	//sd.FinishWrites()
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
