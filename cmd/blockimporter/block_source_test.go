@@ -40,6 +40,10 @@ func (blockSource *MockBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 	return blockOrErr.blocks, blockOrErr.err
 }
 
+func (blockSource *MockBlockSource) GetInitialBalances() ([]BalanceEntry, error) {
+	return nil, nil
+}
+
 func TestRetry(t *testing.T) {
 	blockSource := MockBlockSource{
 		results: []BlocksOrError{

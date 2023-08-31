@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/hex"
 	"io/ioutil"
+	"math/big"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/stretchr/testify/require"
@@ -40,6 +42,25 @@ func (blockSource FileBasedBlockSource) PollBlocks(fromBlock uint64) ([]types.Bl
 	}
 
 	return readBlocksFromRlp(hex.NewDecoder(bytes.NewReader(blocksData)))
+}
+
+const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
+
+func (blockSource FileBasedBlockSource) GetInitialBalances() ([]BalanceEntry, error) {
+	return []BalanceEntry{BalanceEntry{Address: common.HexToAddress(ownerAccount), Balance: *maxBalance()}}, nil
+}
+
+// Returns the max ETH balance to init a owner account
+func maxBalance() *big.Int {
+	var bytes [32]uint8
+	for i := range bytes {
+		bytes[i] = 255
+	}
+
+	val := &big.Int{}
+	val.SetBytes(bytes[:])
+
+	return val
 }
 
 func TestImport(t *testing.T) {

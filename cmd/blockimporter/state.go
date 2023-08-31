@@ -28,10 +28,9 @@ type State struct {
 }
 
 // Account that is used to perform withdraws/deposits
-const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
 const chainID int64 = 355113
 
-func NewState(db *DB) (*State, error) {
+func NewState(db *DB, initialBalances []BalanceEntry) (*State, error) {
 	tx, err := db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return nil, err
@@ -47,8 +46,10 @@ func NewState(db *DB) (*State, error) {
 		// Add genesis block
 		genesis := core.Genesis{}
 		initState := make(core.GenesisAlloc)
-		initState[common.HexToAddress(ownerAccount)] = core.GenesisAccount{
-			Balance: maxBalance(),
+		for _, balanceRecord := range initialBalances {
+			initState[balanceRecord.Address] = core.GenesisAccount{
+				Balance: &balanceRecord.Balance,
+			}
 		}
 		genesis.Alloc = initState
 		chainConfig := chain.Config{
@@ -203,17 +204,4 @@ func (state *State) ProcessBlock(block types.Block) error {
 
 func (state *State) BlockNum() uint64 {
 	return state.blockNum.Uint64()
-}
-
-// Returns the max ETH balance to init a owner account
-func maxBalance() *big.Int {
-	var bytes [32]uint8
-	for i := range bytes {
-		bytes[i] = 255
-	}
-
-	val := &big.Int{}
-	val.SetBytes(bytes[:])
-
-	return val
 }
