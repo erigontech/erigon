@@ -111,6 +111,10 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 	}
 }
 
+func (t *UpdateTree) Size() uint64 {
+	return uint64(t.keys.Len())
+}
+
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
@@ -273,6 +277,10 @@ func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *commitmentIt
 		return
 	}
 	d.updates.TouchPlainKey(key, val, fn)
+}
+
+func (d *DomainCommitted) Size() uint64 {
+	return d.updates.Size()
 }
 
 func (d *DomainCommitted) TouchAccount(c *commitmentItem, val []byte) {

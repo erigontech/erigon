@@ -1065,6 +1065,17 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 
 }
 
+func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
+	min := a.accounts.endTxNumMinimax()
+	if txNum := a.storage.endTxNumMinimax(); txNum < min {
+		min = txNum
+	}
+	if txNum := a.code.endTxNumMinimax(); txNum < min {
+		min = txNum
+	}
+	return min
+}
+
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
 func (a *AggregatorV3) EndTxNumFrozenAndIndexed() uint64 {
 	return cmp.Min(
@@ -1517,22 +1528,6 @@ func (a *AggregatorV3) BatchHistoryWriteStart() *AggregatorV3 {
 func (a *AggregatorV3) BatchHistoryWriteEnd() {
 	//a.walLock.RUnlock()
 	a.domains.BatchHistoryWriteEnd()
-}
-
-func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
-	switch idx {
-	case kv.TblTracesFromIdx:
-		return a.tracesFrom.Add(key)
-	case kv.TblTracesToIdx:
-		return a.tracesTo.Add(key)
-	case kv.TblLogAddressIdx:
-		return a.logAddrs.Add(key)
-	case kv.LogTopicIndex:
-		return a.logTopics.Add(key)
-		//default:
-		//	panic(idx)
-	}
-	return nil
 }
 
 // ComputeCommitment evaluates commitment for processed state.
