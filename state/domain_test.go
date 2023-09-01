@@ -502,34 +502,6 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	}
 }
 
-func collateDomainAndPrune(t testing.TB, tx kv.RwTx, d *Domain, txs, stepsToLeaveInDb uint64) {
-	t.Helper()
-	ctx := context.Background()
-	maxStep := txs / d.aggregationStep
-	if maxStep > stepsToLeaveInDb {
-		maxStep -= stepsToLeaveInDb
-	}
-
-	for step := uint64(0); step <= maxStep; step++ {
-		func() {
-			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
-			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-
-			require.NoError(t, err)
-		}()
-	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	dc := d.MakeContext()
-
-	err := dc.Prune(ctx, tx, maxStep, maxStep*d.aggregationStep, (maxStep+1)*d.aggregationStep, math.MaxUint64, logEvery)
-	require.NoError(t, err)
-	dc.Close()
-}
-
 func TestHistory(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
