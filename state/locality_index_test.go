@@ -246,7 +246,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(uint64(2), fst)
 		require.Zero(snd)
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(0, 1)
+		_, _, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(0, 1)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)

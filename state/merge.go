@@ -299,9 +299,6 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 func (dc *DomainContext) maxColdStep() uint64 {
 	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
 }
-func (hc *HistoryContext) maxColdStep() uint64 {
-	return hc.maxTxNumInFiles(true) / hc.h.aggregationStep
-}
 func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }
@@ -1265,6 +1262,7 @@ func (dc *DomainContext) frozenTo() uint64 {
 	return 0
 }
 
+// nolint
 func (hc *HistoryContext) frozenTo() uint64 {
 	if len(hc.files) == 0 {
 		return 0

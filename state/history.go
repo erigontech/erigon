@@ -1705,11 +1705,10 @@ type StateAsOfIterF struct {
 	nextVal  []byte
 	nextKey  []byte
 
-	h            ReconHeap
-	startTxNum   uint64
-	startTxKey   [8]byte
-	txnKey       [8]byte
-	compressVals bool
+	h          ReconHeap
+	startTxNum uint64
+	startTxKey [8]byte
+	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
 }

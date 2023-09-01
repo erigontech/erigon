@@ -1457,22 +1457,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	return nil
 }
 
-func (d *Domain) canPrune(tx kv.Tx) bool {
-	dc := d.MakeContext()
-	defer dc.Close()
-	return d.canPruneFrom(tx) < dc.maxTxNumInFiles(false)
-}
-func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, d.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, d.keysTable)
-	if len(fst) > 0 && len(fst2) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		fstInDb2 := binary.BigEndian.Uint64(fst2)
-		return cmp.Min(fstInDb, fstInDb2)
-	}
-	return math.MaxUint64
-}
-
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, d.keysTable)
 	if err != nil {
