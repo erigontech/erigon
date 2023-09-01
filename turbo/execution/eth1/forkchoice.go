@@ -172,7 +172,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 	// Find such point, and collect all hashes
-	newCanonicals := make([]*canonicalEntry, 0, 2048)
+	newCanonicals := make([]*canonicalEntry, 0, 64)
 	newCanonicals = append(newCanonicals, &canonicalEntry{
 		hash:   fcuHeader.Hash(),
 		number: fcuHeader.Number.Uint64(),
@@ -306,6 +306,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			})
 			return
 		}
+		if err := truncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
