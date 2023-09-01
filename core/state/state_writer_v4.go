@@ -6,8 +6,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -18,8 +16,8 @@ type WriterV4 struct {
 	domains *state.SharedDomains
 }
 
-func NewWriterV4(tx kv.TemporalTx) *WriterV4 {
-	return &WriterV4{tx: tx, domains: tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx())}
+func NewWriterV4(tx kv.TemporalTx, domains *state.SharedDomains) *WriterV4 {
+	return &WriterV4{tx: tx, domains: domains}
 }
 
 func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {

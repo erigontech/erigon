@@ -3,8 +3,8 @@ package lru
 import (
 	"fmt"
 
-	"github.com/VictoriaMetrics/metrics"
 	lru "github.com/hashicorp/golang-lru/v2"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 // Cache is a wrapper around hashicorp lru but with metric for Get

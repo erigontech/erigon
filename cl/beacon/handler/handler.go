@@ -35,12 +35,17 @@ func (a *ApiHandler) init() {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/events", nil)
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/headers/{tag}", nil)                     // otterscan
-				r.Get("/blocks/{block_id}", a.getBlock)          //otterscan
-				r.Get("/blocks/{block_id}/root", a.getBlockRoot) //otterscan
-				r.Get("/genesis", a.getGenesis)
+				r.Route("/headers", func(r chi.Router) {
+					r.Get("/", nil)
+					r.Get("/{block_id}", nil)
+				})
+				r.Route("/blocks", func(r chi.Router) {
+					r.Post("/", nil)
+					r.Get("/{block_id}", a.getBlock)
+					r.Get("/block_id}/root", a.getBlockRoot)
+				})
+				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis))
 				r.Post("/binded_blocks", nil)
-				r.Post("/blocks", nil)
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
 					r.Post("/sync_committees", nil)

@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
@@ -324,21 +323,17 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if ethconfig.EnableHistoryV4InTest {
-		stateWriter = state.NewWriterV4(tx.(*temporal.Tx))
 		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
-		domains = agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
-		defer domains.Close()
+		ac := tx.(*temporal.Tx).AggCtx()
 
-		oldTxNum := domains.TxNum()
-		defer func() {
-			domains.SetTxNum(oldTxNum)
-		}()
+		domains = agg.SharedDomains(ac)
+		defer agg.CloseSharedDomains()
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
 		if ethconfig.EnableHistoryV4InTest {
-			//tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx()).SetBlockNum(blockNum)
 			domains.SetBlockNum(blockNum)
 		} else {
 			stateReader = state.NewPlainStateReader(tx)
@@ -367,11 +362,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
 				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
 			}
-			if daoBlock.Cmp(b.header.Number) == 0 {
-				misc.ApplyDAOHardFork(ibs)
-			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs, logger)
+		if b.engine != nil {
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)

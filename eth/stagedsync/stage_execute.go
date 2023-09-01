@@ -291,7 +291,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	//}()
 
 	parallel := tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix, to, logger, initialCycle); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, to, logger, initialCycle); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
@@ -321,7 +321,11 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	agg := tx.(*temporal.Tx).Agg()
 	ac := tx.(*temporal.Tx).AggCtx()
 
-	rs := state.NewStateV3(agg.SharedDomains(ac), logger)
+	domains := agg.SharedDomains(ac)
+	rs := state.NewStateV3(domains, logger)
+	defer agg.CloseSharedDomains()
+	domains.StartWrites()
+	domains.SetTx(tx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)

@@ -144,14 +144,14 @@ test:
 	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e4
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e4
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -165,7 +165,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.54.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.54.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

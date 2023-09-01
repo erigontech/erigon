@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -22,11 +23,9 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -94,26 +93,19 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		stateWriter state.WriterWithChangeSets
 	)
 	if histV3 {
-		//agg := tx.(*temporal.Tx).Agg()
-		//defer agg.StartWrites().FinishWrites()
+		ac := tx.(*temporal.Tx).AggCtx()
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
-		//ca := agg.MakeContext()
-		//defer ca.Close()
-		//
-		//domains := agg.SharedDomains(ca)
-		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
+	} else {
 		stateReader = state.NewPlainStateReader(tx)
 		stateWriter = state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	}
 	ibs := state.New(stateReader)
 
-	if cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	systemcontracts.UpgradeBuildInSystemContract(&cfg.chainConfig, current.Header.Number, ibs, logger)
-
 	chainReader := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
-	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, &cfg.chainConfig, ibs)
+	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, &cfg.chainConfig, ibs, logger)
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
@@ -220,7 +212,7 @@ func getNextTransactions(
 	if err := cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
 		counter := 0
-		for !onTime && counter < 1000 {
+		for !onTime && counter < 500 {
 			remainingGas := header.GasLimit - header.GasUsed
 			remainingBlobGas := uint64(0)
 			if header.BlobGasUsed != nil {

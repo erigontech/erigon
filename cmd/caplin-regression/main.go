@@ -2,16 +2,17 @@ package main
 
 import (
 	"flag"
-	_ "net/http/pprof" //nolint:gosec
 
+	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
+	_ "net/http/pprof" //nolint:gosec
 )
 
 var nameTestsMap = map[string]func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error{
@@ -42,7 +43,7 @@ func main() {
 	)
 	if *pprof {
 		// Server for pprof
-		debug.StartPProf("localhost:6060", true)
+		debug.StartPProf("localhost:6060", exp.Setup("localhost:6060", log.Root()))
 	}
 
 	if err != nil {

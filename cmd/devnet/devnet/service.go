@@ -1,6 +1,6 @@
 package devnet
 
-import "context"
+import context "context"
 
 type Service interface {
 	Start(context context.Context) error

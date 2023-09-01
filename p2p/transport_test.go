@@ -19,6 +19,7 @@ package p2p
 import (
 	"bytes"
 	"errors"
+	"github.com/ledgerwatch/erigon/rlp"
 	"reflect"
 	"sync"
 	"testing"
@@ -129,7 +130,7 @@ func TestProtocolHandshakeErrors(t *testing.T) {
 		{
 			code: handshakeMsg,
 			msg:  []byte{1, 2, 3},
-			err:  newPeerError(errInvalidMsg, "(code 0) (size 4) rlp: expected input list for p2p.protoHandshake"),
+			err:  NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, rlp.WrapStreamError(rlp.ErrExpectedList, reflect.TypeOf(protoHandshake{})), "(code 0) (size 4)"),
 		},
 		{
 			code: handshakeMsg,

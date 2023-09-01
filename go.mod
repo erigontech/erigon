@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/erigontech/mdbx-go v0.33.0
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230831074956-47eb6d51782e
+	github.com/erigontech/mdbx-go v0.33.1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230901055244-58d6420fd33a
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230818153427-cc16b83a89be
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -45,7 +45,6 @@ require (
 	github.com/google/gofuzz v1.2.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.4
 	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/uint256 v1.2.3
@@ -274,4 +273,4 @@ require (
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
-replace github.com/VictoriaMetrics/metrics => github.com/greyireland/metrics v0.0.5
+replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4

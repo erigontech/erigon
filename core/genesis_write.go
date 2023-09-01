@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"math/big"
 	"sync"
 
@@ -195,7 +196,10 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
-		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
+		ac := tx.(*temporal.Tx).AggCtx()
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {

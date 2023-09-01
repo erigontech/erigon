@@ -21,7 +21,7 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 
 	acc := domains.Account.MakeContext()
 	stc := domains.Storage.MakeContext()
@@ -160,5 +160,5 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 			return trie.EmptyRoot, err
 		}
 	}
-	return libcommon.BytesToHash(rh[:]), err
+	return libcommon.BytesToHash(rh), err
 }

@@ -3,7 +3,6 @@ package machine
 import (
 	"errors"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"

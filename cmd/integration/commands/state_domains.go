@@ -114,7 +114,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	defer ac.Close()
 
 	domains := agg.SharedDomains(ac)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)

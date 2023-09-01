@@ -151,12 +151,14 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
-	parallel bool, logPrefix string,
+	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
 ) error {
-	parallel = false // TODO: e35 doesn't support it yet
+	// TODO: e35 doesn't support parallel-exec yet
+	parallel = false //nolint
+
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
 	blockReader := cfg.blockReader
@@ -183,23 +185,17 @@ func ExecV3(ctx context.Context,
 	}
 	if !useExternalTx && !parallel {
 		var err error
-		applyTx, err = chainDb.BeginRw(ctx)
+		applyTx, err = chainDb.BeginRw(ctx) //nolint
 		if err != nil {
 			return err
 		}
+		defer func() { // need callback - because tx may be committed
+			applyTx.Rollback()
+		}()
 
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
-
-		//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
-		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
-		//	return histBlockNumProgress
-		//})
-
-		defer func() { // need callback - because tx may be committed
-			applyTx.Rollback()
-		}()
 	}
 
 	var blockNum, stageProgress uint64
@@ -212,7 +208,7 @@ func ExecV3(ctx context.Context,
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		blockNum = execStage.BlockNumber + 1
-	} else if !useExternalTx {
+	} else if !useExternalTx { //nolint
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
 		//if err != nil {
 		//	return err
@@ -281,9 +277,12 @@ func ExecV3(ctx context.Context,
 	// MA setio
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
+	defer doms.StartWrites().FinishWrites()
+	doms.SetTx(applyTx)
+
 	rs := state.NewStateV3(doms, logger)
 	fmt.Printf("input tx %d\n", inputTxNum)
-	blockNum, inputTxNum, err = doms.SeekCommitment(0, inputTxNum)
+	blockNum, inputTxNum, err = doms.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return err
 	}
@@ -398,7 +397,7 @@ func ExecV3(ctx context.Context,
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
-						logger.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
+						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
@@ -726,7 +725,7 @@ Loop:
 					return nil
 				}(); err != nil {
 					if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
+						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
@@ -826,7 +825,7 @@ Loop:
 						t6 = time.Since(tt)
 
 						doms.ClearRam(false)
-						applyTx, err = cfg.db.BeginRw(context.Background())
+						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
 						}
