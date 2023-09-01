@@ -502,14 +502,14 @@ func (d *Domain) openFiles() (err error) {
 				}
 				//totalKeys += item.bindex.KeyCount()
 			}
-			if item.bloom == nil {
-				//idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
-				//if dir.FileExist(idxPath) {
-				//	if item.bloom, err = OpenBloom(idxPath); err != nil {
-				//		return false
-				//	}
-				//}
-			}
+			//if item.bloom == nil {
+			//idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
+			//if dir.FileExist(idxPath) {
+			//	if item.bloom, err = OpenBloom(idxPath); err != nil {
+			//		return false
+			//	}
+			//}
+			//}
 		}
 		return true
 	})
