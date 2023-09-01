@@ -1523,7 +1523,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		idxFileName2 := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, step, step+1)
 		idxPath2 := filepath.Join(ii.dir, idxFileName2)
 		if existence, err = buildIndexFilterThenOpen(ctx, decomp, ii.compression, idxPath2, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
-			return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
+			return InvertedFiles{}, fmt.Errorf("build %s efei: %w", ii.filenameBase, err)
 		}
 	}
 

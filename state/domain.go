@@ -1316,6 +1316,9 @@ func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, com
 	if err := buildIdxFilter(ctx, d, compressed, idxPath, tmpdir, salt, ps, logger, noFsync); err != nil {
 		return nil, err
 	}
+	if !dir.FileExist(idxPath) {
+		return nil, nil
+	}
 	return OpenBloom(idxPath)
 }
 func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
