@@ -1274,6 +1274,8 @@ func (hc *HistoryContext) frozenTo() uint64 {
 	}
 	return 0
 }
+
+// nolint
 func (ic *InvertedIndexContext) frozenTo() uint64 {
 	if len(ic.files) == 0 {
 		return 0

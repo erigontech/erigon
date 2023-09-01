@@ -1187,18 +1187,19 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bl", d.filenameBase, fromStep, toStep))) {
-				l = append(l, item)
-			}
-		}
-		return true
-	})
-	return l
-}
+
+//func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
+//	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+//		for _, item := range items {
+//			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+//			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bl", d.filenameBase, fromStep, toStep))) {
+//				l = append(l, item)
+//			}
+//		}
+//		return true
+//	})
+//	return l
+//}
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
