@@ -361,6 +361,9 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count() / 2
+	if count < 2 {
+		return nil
+	}
 
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
