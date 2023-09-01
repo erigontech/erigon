@@ -2214,6 +2214,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			if bytes.HasPrefix(sv, v) {
 				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 				err = valsDup.DeleteCurrent()
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if err != nil {
