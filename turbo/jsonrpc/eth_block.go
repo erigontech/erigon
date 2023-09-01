@@ -93,7 +93,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	ibs := state.New(stateReader)
 
-	parent := rawdb.ReadHeader(tx, hash, stateBlockNumber)
+	parent, _ := api.headerByRPCNumber(rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
 	}
