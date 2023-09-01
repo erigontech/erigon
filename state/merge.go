@@ -588,7 +588,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 			})
 		}
 	}
-	keyCount := 0
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -615,7 +614,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				keyCount++ // Only counting keys, not values
 				if err = comp.AddWord(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
@@ -628,7 +626,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		if err = comp.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		keyCount++ // Only counting keys, not values
 		if err = comp.AddWord(valBuf); err != nil {
 			return nil, nil, nil, err
 		}
