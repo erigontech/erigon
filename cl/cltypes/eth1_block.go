@@ -27,7 +27,7 @@ type Eth1Block struct {
 	GasUsed       uint64
 	Time          uint64
 	Extra         *solid.ExtraData
-	BaseFeePerGas [32]byte
+	BaseFeePerGas libcommon.Hash
 	// Extra fields
 	BlockHash     libcommon.Hash
 	Transactions  *solid.TransactionsSSZ

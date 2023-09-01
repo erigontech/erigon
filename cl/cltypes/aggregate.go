@@ -13,7 +13,7 @@ import (
 type AggregateAndProof struct {
 	AggregatorIndex uint64
 	Aggregate       *solid.Attestation
-	SelectionProof  [96]byte
+	SelectionProof  Bytes96
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {

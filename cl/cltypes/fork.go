@@ -7,8 +7,8 @@ import (
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Fork struct {
-	PreviousVersion [4]byte
-	CurrentVersion  [4]byte
+	PreviousVersion Bytes4
+	CurrentVersion  Bytes4
 	Epoch           uint64
 }
 

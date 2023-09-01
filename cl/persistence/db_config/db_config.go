@@ -11,7 +11,7 @@ type DatabaseConfiguration struct {
 }
 
 var DefaultDatabaseConfiguration = DatabaseConfiguration{
-	PruneDepth: 10, // should be 1_000_000
+	PruneDepth: 1000, // should be 1_000_000
 	FullBlocks: false,
 }
 

@@ -13,11 +13,11 @@ import (
  * It contains the hash of the block body, and state root data.
  */
 type BeaconBlockHeader struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    libcommon.Hash
-	Root          libcommon.Hash
-	BodyRoot      libcommon.Hash
+	Slot          uint64         `json:"slot"`
+	ProposerIndex uint64         `json:"proposer_index"`
+	ParentRoot    libcommon.Hash `json:"parent_root"`
+	Root          libcommon.Hash `json:"state_root"`
+	BodyRoot      libcommon.Hash `json:"body_root"`
 }
 
 func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
@@ -49,8 +49,8 @@ func (*BeaconBlockHeader) Static() bool {
  * SignedBeaconBlockHeader is a beacon block header + validator signature.
  */
 type SignedBeaconBlockHeader struct {
-	Header    *BeaconBlockHeader
-	Signature [96]byte
+	Header    *BeaconBlockHeader `json:"message"`
+	Signature Bytes96            `json:"signature"`
 }
 
 func (b *SignedBeaconBlockHeader) Static() bool {

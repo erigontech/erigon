@@ -36,8 +36,8 @@ func (a *ApiHandler) init() {
 			r.Get("/events", nil)
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/headers", func(r chi.Router) {
-					r.Get("/", nil)
-					r.Get("/{block_id}", nil)
+					r.Get("/", beaconHandlerWrapper(a.getHeaders))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getHeader))
 				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
