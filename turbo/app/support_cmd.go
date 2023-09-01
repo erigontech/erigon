@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,13 +25,21 @@ var (
 		Name:  "diagnostics.url",
 		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
 	}
+
 	metricsURLsFlag = cli.StringSliceFlag{
 		Name:  "metrics.urls",
 		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
 	}
+
 	insecureFlag = cli.BoolFlag{
 		Name:  "insecure",
 		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
+
+	sessionsFlag = cli.StringFlag{
+		Name:  "diagnostics.ids",
+		Usage: "Comma separated list of support session ids to connect to",
+		Value: "",
 	}
 )
 
@@ -38,16 +47,15 @@ var supportCommand = cli.Command{
 	Action:    MigrateFlags(connectDiagnostics),
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
-	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --metrics.urls <http://erigon_host:metrics_port>",
+	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Flags: []cli.Flag{
 		&metricsURLsFlag,
 		&diagnosticsURLFlag,
+		&sessionsFlag,
 		&insecureFlag,
 	},
 	//Category: "SUPPORT COMMANDS",
-	Description: `
-The support command connects a running Erigon instances to a diagnostics system specified
-by the URL.`,
+	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
 }
 
 const Version = 1
@@ -74,9 +82,11 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
+	sessionIds := strings.Split(cliCtx.String(sessionsFlag.Name), ",")
+
 	// Perform the requests in a loop (reconnect)
 	for {
-		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, metricsURL, logger); err != nil {
+		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, sessionIds, metricsURL, logger); err != nil {
 			return err
 		}
 		select {
@@ -95,7 +105,7 @@ var successLine = []byte("SUCCESS")
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
-func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, metricsURL string, logger log.Logger) error {
+func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, sessionIds []string, metricsURL string, logger log.Logger) error {
 	diagnosticsClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
 	defer diagnosticsClient.CloseIdleConnections()
 	metricsClient := &http.Client{}
@@ -113,6 +123,11 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		reader.Close()
 		writer.Close()
 	}()
+
+	if len(sessionIds) > 0 {
+		diagnosticsUrl = diagnosticsUrl + "?sessions=" + strings.Join(sessionIds, ",")
+	}
+
 	req, err := http.NewRequestWithContext(ctx1, http.MethodPost, diagnosticsUrl, reader)
 	if err != nil {
 		return err
