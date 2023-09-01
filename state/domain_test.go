@@ -1653,8 +1653,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
 
-	tx.Commit()
-	tx = nil
+	require.NoError(t, tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
