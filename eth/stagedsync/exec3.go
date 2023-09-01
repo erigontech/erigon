@@ -281,6 +281,9 @@ func ExecV3(ctx context.Context,
 	// MA setio
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
+	defer doms.StartWrites().FinishWrites()
+	doms.SetTx(applyTx)
+
 	rs := state.NewStateV3(doms, logger)
 	fmt.Printf("input tx %d\n", inputTxNum)
 	blockNum, inputTxNum, err = doms.SeekCommitment(0, math.MaxUint64)
