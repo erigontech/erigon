@@ -1439,13 +1439,13 @@ type upd struct {
 	value []byte
 }
 
-func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
-	t.Helper()
+func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
+	tb.Helper()
 
 	data := make(map[string][]upd)
 	//seed := time.Now().Unix()
 	seed := 31
-	defer t.Logf("generated data with seed %d, keys %d", seed, keyLimit)
+	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
 
 	r := rand.New(rand.NewSource(0))
 	if keyLimit == 1 {
