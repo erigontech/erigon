@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -2335,4 +2336,23 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range tmpFiles {
 		_ = os.Remove(f)
 	}
+}
+
+func (sn *HeaderSegment) MappedSnapshot() *silkworm.MappedHeaderSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxHeaderHash.FilePath(), sn.idxHeaderHash.DataHandle(), sn.idxHeaderHash.Size())
+	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
+}
+
+func (sn *BodySegment) MappedSnapshot() *silkworm.MappedBodySnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxBodyNumber.FilePath(), sn.idxBodyNumber.DataHandle(), sn.idxBodyNumber.Size())
+	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
+}
+
+func (sn *TxnSegment) MappedSnapshot() *silkworm.MappedTxnSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.Seg.FilePath(), sn.Seg.DataHandle(), sn.Seg.Size())
+	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash.FilePath(), sn.IdxTxnHash.DataHandle(), sn.IdxTxnHash.Size())
+	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash2BlockNum.FilePath(), sn.IdxTxnHash2BlockNum.DataHandle(), sn.IdxTxnHash2BlockNum.Size()) 
+	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
 }
