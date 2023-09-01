@@ -1023,7 +1023,6 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 		k, found, index, err = b.bplus.Get(gr, lookup)
 	} else {
 		if b.alloc == nil {
-			panic(fmt.Errorf("Get: `b.alloc` is nil: %s", gr.FileName()))
 			return k, v, false, err
 		}
 		k, found, index, err = b.alloc.Get(gr, lookup)

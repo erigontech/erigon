@@ -163,7 +163,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	roots := make([][]byte, 0)
 	fmt.Printf("1. Trie sequential update generated following branch updates\n")
 
-	ra, rb := []byte{}, []byte{}
+	var ra, rb []byte
 	{
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)

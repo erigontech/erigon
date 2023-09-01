@@ -66,25 +66,25 @@ var (
 	LatestStateReadDB            = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="yes"}`)    //nolint
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
-	mxRunningMerges           = metrics.GetOrCreateCounter(`domain_running_merges`)
-	mxRunningCollations       = metrics.GetOrCreateCounter(`domain_running_collations`)
-	mxCollateTook             = metrics.GetOrCreateSummary(`domain_collate_seconds`)
-	mxPruneTookDomain         = metrics.GetOrCreateSummary(`domain_prune_seconds{type="domain"}`)
-	mxPruneTookHistory        = metrics.GetOrCreateSummary(`domain_prune_seconds{type="history"}`)
-	mxPruneTookIndex          = metrics.GetOrCreateSummary(`domain_prune_seconds{type="index"}`)
-	mxPruneInProgress         = metrics.GetOrCreateCounter(`domain_pruning_progress`)
-	mxCollationSize           = metrics.GetOrCreateCounter(`domain_collation_size`)
-	mxCollationSizeHist       = metrics.GetOrCreateCounter(`domain_collation_hist_size`)
+	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
+	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
+	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
+	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
+	mxPruneTookHistory        = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
+	mxPruneTookIndex          = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
+	mxPruneInProgress         = metrics.GetOrCreateCounter("domain_pruning_progress")
+	mxCollationSize           = metrics.GetOrCreateCounter("domain_collation_size")
+	mxCollationSizeHist       = metrics.GetOrCreateCounter("domain_collation_hist_size")
 	mxPruneSizeDomain         = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
 	mxPruneSizeHistory        = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
 	mxPruneSizeIndex          = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
-	mxBuildTook               = metrics.GetOrCreateSummary(`domain_build_files_seconds`)
-	mxStepTook                = metrics.GetOrCreateSummary(`domain_step_seconds`)
-	mxCommitmentKeys          = metrics.GetOrCreateCounter(`domain_commitment_keys`)
-	mxCommitmentRunning       = metrics.GetOrCreateCounter(`domain_running_commitment`)
-	mxCommitmentTook          = metrics.GetOrCreateSummary(`domain_commitment_seconds{phase="total"}`)
-	mxCommitmentWriteTook     = metrics.GetOrCreateSummary(`domain_commitment_seconds{phase="write"}`)
-	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter(`domain_commitment_updates_applied`)
+	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
+	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
+	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
+	mxCommitmentRunning       = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentTook          = metrics.GetOrCreateSummary("domain_commitment_took")
+	mxCommitmentWriteTook     = metrics.GetOrCreateHistogram("domain_commitment_write_took")
+	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -505,14 +505,14 @@ func (d *Domain) openFiles() (err error) {
 				}
 				//totalKeys += item.bindex.KeyCount()
 			}
-			if item.bloom == nil {
-				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))
-				if dir.FileExist(idxPath) {
-					if item.bloom, err = OpenBloom(idxPath); err != nil {
-						return false
-					}
+			//if item.bloom == nil {
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))
+			if dir.FileExist(idxPath) {
+				if item.bloom, err = OpenBloom(idxPath); err != nil {
+					return false
 				}
 			}
+			//}
 		}
 		return true
 	})
@@ -682,6 +682,7 @@ func (d *domainWAL) close() {
 	}
 }
 
+// nolint
 func loadSkipFunc() etl.LoadFunc {
 	var preKey, preVal []byte
 	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -834,8 +835,8 @@ type ctxItem struct {
 	src *filesItem
 }
 
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
+func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
@@ -988,10 +989,6 @@ func (c Collation) Close() {
 	if c.historyComp != nil {
 		c.HistoryCollation.Close()
 	}
-}
-
-type kvpair struct {
-	k, v []byte
 }
 
 // collate gathers domain changes over the specified step, using read-only transaction,
@@ -1248,18 +1245,19 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))) {
-				l = append(l, item)
-			}
-		}
-		return true
-	})
-	return l
-}
+
+//func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
+//	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+//		for _, item := range items {
+//			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+//			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))) {
+//				l = append(l, item)
+//			}
+//		}
+//		return true
+//	})
+//	return l
+//}
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -1427,9 +1425,15 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 
 	if d.domainLargeValues {
 		valsC, err = rwTx.RwCursor(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsC.Close()
 	} else {
 		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsCDup.Close()
 	}
 	if err != nil {
@@ -1533,22 +1537,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil
-}
-
-func (d *Domain) canPrune(tx kv.Tx) bool {
-	dc := d.MakeContext()
-	defer dc.Close()
-	return d.canPruneFrom(tx) < dc.maxTxNumInFiles(false)
-}
-func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, d.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, d.keysTable)
-	if len(fst) > 0 && len(fst2) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		fstInDb2 := binary.BigEndian.Uint64(fst2)
-		return cmp.Min(fstInDb, fstInDb2)
-	}
-	return math.MaxUint64
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
@@ -2300,6 +2288,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			if bytes.HasPrefix(sv, v) {
 				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 				err = valsDup.DeleteCurrent()
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if err != nil {

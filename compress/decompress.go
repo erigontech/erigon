@@ -434,7 +434,7 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 		return table.pos[0]
 	}
 	for l := byte(0); l == 0; {
-		//g.touch()
+		g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)

@@ -91,7 +91,6 @@ type AggregatorV3 struct {
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFreeze OnFreezeFunc
-	walLock  sync.RWMutex // TODO transfer it to the shareddomain
 
 	ps *background.ProgressSet
 
@@ -316,6 +315,8 @@ func (a *AggregatorV3) Close() {
 
 func (a *AggregatorV3) CloseSharedDomains() {
 	if a.domains != nil {
+		a.domains.FinishWrites()
+		a.domains.SetTx(nil)
 		a.domains.Close()
 		a.domains = nil
 	}
@@ -923,8 +924,8 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 		}
 		return err
 	}
-	if cc.Err() != nil {
-		return nil
+	if cc.Err() != nil { //nolint
+		return nil //nolint
 	}
 	//}
 	return nil

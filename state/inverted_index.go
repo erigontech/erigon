@@ -86,9 +86,8 @@ type InvertedIndex struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	compressInvertedIndex bool
-	compression           FileCompression
-	compressWorkers       int
+	compression     FileCompression
+	compressWorkers int
 }
 
 type iiCfg struct {

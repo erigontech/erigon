@@ -744,12 +744,18 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
+func processSuperstring(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	var lcp, sa, inv []int32
 	for superstring := range superstringCh {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		if cap(sa) < len(superstring) {
 			sa = make([]int32, len(superstring))
 		} else {

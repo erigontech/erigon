@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -298,9 +297,6 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 
 func (dc *DomainContext) maxColdStep() uint64 {
 	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
-}
-func (hc *HistoryContext) maxColdStep() uint64 {
-	return hc.maxTxNumInFiles(true) / hc.h.aggregationStep
 }
 func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
@@ -588,7 +584,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 			})
 		}
 	}
-	keyCount := 0
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -615,7 +610,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				keyCount++ // Only counting keys, not values
 				if err = comp.AddWord(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
@@ -628,7 +622,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		if err = comp.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		keyCount++ // Only counting keys, not values
 		if err = comp.AddWord(valBuf); err != nil {
 			return nil, nil, nil, err
 		}
@@ -753,7 +746,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			})
 		}
 	}
-	keyCount := 0
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -782,7 +774,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 				if err = comp.AddWord(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				keyCount++ // Only counting keys, not values
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
@@ -792,7 +783,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		if err = comp.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		keyCount++ // Only counting keys, not values
 		//fmt.Printf("last heap key %x\n", keyBuf)
 		valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
 		if err != nil {
@@ -892,7 +882,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			})
 		}
 	}
-	keyCount := 0
 
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
@@ -927,7 +916,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			if err = write.AddWord(keyBuf); err != nil {
 				return nil, err
 			}
-			keyCount++ // Only counting keys, not values
 			if err = write.AddWord(valBuf); err != nil {
 				return nil, err
 			}
@@ -939,7 +927,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 		if err = write.AddWord(keyBuf); err != nil {
 			return nil, err
 		}
-		keyCount++ // Only counting keys, not values
 		if err = write.AddWord(valBuf); err != nil {
 			return nil, err
 		}
@@ -1294,6 +1281,7 @@ func (dc *DomainContext) frozenTo() uint64 {
 	return 0
 }
 
+// nolint
 func (hc *HistoryContext) frozenTo() uint64 {
 	if len(hc.files) == 0 {
 		return 0
@@ -1305,6 +1293,8 @@ func (hc *HistoryContext) frozenTo() uint64 {
 	}
 	return 0
 }
+
+// nolint
 func (ic *InvertedIndexContext) frozenTo() uint64 {
 	if len(ic.files) == 0 {
 		return 0
@@ -1435,148 +1425,4 @@ func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
 		}
 		ii.files.Delete(out)
 	}
-}
-
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (h *History) cleanAfterFreeze2(mergedHist, mergedIdx *filesItem) {
-	h.InvertedIndex.cleanAfterFreeze2(mergedIdx)
-	if mergedHist == nil {
-		return
-	}
-	mergedFrom, mergedTo := mergedHist.startTxNum, mergedHist.endTxNum
-	if mergedTo == 0 {
-		return
-	}
-	//if h.filenameBase == "accounts" {
-	//	log.Warn("[history] History.cleanAfterFreeze", "mergedTo", mergedTo/h.aggregationStep, "stack", dbg.Stack())
-	//}
-	var outs []*filesItem
-	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
-			if item.startTxNum == mergedFrom && item.endTxNum == mergedTo {
-				continue
-			}
-			if item.startTxNum >= mergedTo {
-				continue
-			}
-			outs = append(outs, item)
-		}
-		return true
-	})
-
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + h.filenameBase)
-		}
-		out.canDelete.Store(true)
-
-		// if it has no readers (invisible even for us) - it's safe to remove file right here
-		if out.refcount.Load() == 0 {
-			out.closeFilesAndRemove()
-		}
-		h.files.Delete(out)
-	}
-}
-
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (ii *InvertedIndex) cleanAfterFreeze2(mergedIdx *filesItem) {
-	if mergedIdx == nil {
-		return
-	}
-	mergedFrom, mergedTo := mergedIdx.startTxNum, mergedIdx.endTxNum
-	if mergedTo == 0 {
-		return
-	}
-	var outs []*filesItem
-	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
-			if item.startTxNum == mergedFrom && item.endTxNum == mergedTo {
-				continue
-			}
-			if item.startTxNum >= mergedTo {
-				continue
-			}
-			outs = append(outs, item)
-		}
-		return true
-	})
-
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + ii.filenameBase)
-		}
-		out.canDelete.Store(true)
-		if out.refcount.Load() == 0 {
-			// if it has no readers (invisible even for us) - it's safe to remove file right here
-			if ii.filenameBase == AggTraceFileLife && out.decompressor != nil {
-				ii.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s", out.decompressor.FileName()))
-			}
-			out.closeFilesAndRemove()
-		} else {
-			if ii.filenameBase == AggTraceFileLife && out.decompressor != nil {
-				ii.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
-			}
-		}
-		ii.files.Delete(out)
-	}
-}
-
-// nolint
-func (d *Domain) deleteGarbageFiles() {
-	for _, item := range d.garbageFiles {
-		// paranoic-mode: don't delete frozen files
-		steps := item.endTxNum/d.aggregationStep - item.startTxNum/d.aggregationStep
-		if steps%StepsInColdFile == 0 {
-			continue
-		}
-		f1 := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
-		os.Remove(filepath.Join(d.dir, f1))
-		log.Debug("[snapshots] delete garbage", f1)
-		f2 := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
-		os.Remove(filepath.Join(d.dir, f2))
-		log.Debug("[snapshots] delete garbage", f2)
-	}
-	d.garbageFiles = nil
-	d.History.deleteGarbageFiles()
-}
-func (h *History) deleteGarbageFiles() {
-	for _, item := range h.garbageFiles {
-		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInColdFile {
-			continue
-		}
-		f1 := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
-		os.Remove(filepath.Join(h.dir, f1))
-		log.Debug("[snapshots] delete garbage", f1)
-		f2 := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
-		os.Remove(filepath.Join(h.dir, f2))
-		log.Debug("[snapshots] delete garbage", f2)
-	}
-	h.garbageFiles = nil
-	h.InvertedIndex.deleteGarbageFiles()
-}
-func (ii *InvertedIndex) deleteGarbageFiles() {
-	for _, item := range ii.garbageFiles {
-		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInColdFile {
-			continue
-		}
-		f1 := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		os.Remove(filepath.Join(ii.dir, f1))
-		log.Debug("[snapshots] delete garbage", f1)
-		f2 := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		os.Remove(filepath.Join(ii.dir, f2))
-		log.Debug("[snapshots] delete garbage", f2)
-	}
-	ii.garbageFiles = nil
 }

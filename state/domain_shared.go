@@ -487,7 +487,7 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
-	if txNum%sd.Account.aggregationStep == 1 {
+	if txNum%sd.Account.aggregationStep == 0 { //
 		_, err := sd.Commit(true, sd.trace)
 		if err != nil {
 			panic(err)
@@ -688,7 +688,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 }
 
 func (sd *SharedDomains) Close() {
-	sd.FinishWrites()
+	//sd.FinishWrites()
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
@@ -708,6 +708,19 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	sd.LogTopics.StartWrites()
 	sd.TracesFrom.StartWrites()
 	sd.TracesTo.StartWrites()
+
+	if sd.account == nil {
+		sd.account = map[string][]byte{}
+	}
+	if sd.commitment == nil {
+		sd.commitment = btree2.NewMap[string, []byte](128)
+	}
+	if sd.code == nil {
+		sd.code = map[string][]byte{}
+	}
+	if sd.storage == nil {
+		sd.storage = btree2.NewMap[string, []byte](128)
+	}
 	return sd
 }
 
@@ -723,6 +736,20 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 	sd.LogTopics.StartUnbufferedWrites()
 	sd.TracesFrom.StartUnbufferedWrites()
 	sd.TracesTo.StartUnbufferedWrites()
+
+	if sd.account == nil {
+		sd.account = map[string][]byte{}
+	}
+	if sd.commitment == nil {
+		sd.commitment = btree2.NewMap[string, []byte](128)
+	}
+	if sd.code == nil {
+		sd.code = map[string][]byte{}
+	}
+	if sd.storage == nil {
+		sd.storage = btree2.NewMap[string, []byte](128)
+	}
+
 	return sd
 }
 

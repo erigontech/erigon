@@ -325,23 +325,6 @@ func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
 	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep))) &&
 		dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep)))
 }
-func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
-	if len(ii.files) == 0 {
-		return 0, true
-	}
-	var item *ctxItem
-	for i := len(ii.files) - 1; i >= 0; i-- {
-		if ii.files[i].src.frozen {
-			item = &ii.files[i]
-			break
-		}
-	}
-	if item != nil {
-		toStep = item.endTxNum / li.aggregationStep
-	}
-	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
-	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
-}
 
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	if li == nil {
@@ -542,7 +525,7 @@ func (sf LocalityIndexFiles) Close() {
 		sf.bm.Close()
 	}
 	if sf.bloom != nil {
-		sf.bloom = nil
+		sf.bloom.Close()
 	}
 }
 

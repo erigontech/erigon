@@ -57,7 +57,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 120, 30
-	compressFlags := FileCompression(CompressKeys | CompressVals)
+	compressFlags := CompressKeys | CompressVals
 	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
@@ -140,7 +140,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 20000, 510
 
-	compressFlags := FileCompression(CompressKeys | CompressVals)
+	compressFlags := CompressKeys | CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keyCount, M := 1_200_000, 1024
 	UseBpsTree = false
 
-	compressFlags := FileCompression(CompressKeys | CompressVals)
+	compressFlags := CompressKeys | CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")

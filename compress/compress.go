@@ -98,7 +98,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go processSuperstring(superstrings, collector, minPatternScore, wg, logger)
+		go processSuperstring(ctx, superstrings, collector, minPatternScore, wg, logger)
 	}
 
 	return &Compressor{
