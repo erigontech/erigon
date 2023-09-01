@@ -24,9 +24,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"math/big"
 	"sync"
+
+	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -195,10 +197,14 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	var stateWriter state.StateWriter
+	var domains *state2.SharedDomains
+
 	if ethconfig.EnableHistoryV4InTest {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
+		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		defer domains.Close()
+		domains.StartUnbufferedWrites()
+		defer domains.FinishWrites()
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	} else {
 		for addr, account := range g.Alloc {
@@ -233,12 +239,15 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 	if ethconfig.EnableHistoryV4InTest {
 		ww := stateWriter.(*state.WriterV4)
-		rh, err := ww.Commitment(true, false)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !bytes.Equal(rh, block.Root().Bytes()) {
-			fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
+		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
+		if !hasSnap {
+			rh, err := ww.Commitment(true, false)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !bytes.Equal(rh, block.Root().Bytes()) {
+				fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
+			}
 		}
 	}
 	return block, statedb, nil

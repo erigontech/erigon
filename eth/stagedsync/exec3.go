@@ -286,7 +286,11 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	outputTxNum.Store(inputTxNum)
 	doms.SetTxNum(inputTxNum)
+	if blockNum == 0 && inputTxNum != 0 {
+		// commitment has been rebuilt?
+	}
 	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -915,7 +919,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 		if oldAlogNonIncrementalHahs != header.Root {
 			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is NOT correct): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		}
 	} else {
 		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))

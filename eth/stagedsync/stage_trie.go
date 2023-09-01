@@ -3,11 +3,14 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -17,17 +20,22 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg) ([]byte, error) {
+func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg, bn uint64) ([]byte, error) {
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
 	defer agg.CloseSharedDomains()
 
 	acc := domains.Account.MakeContext()
+	ccc := domains.Code.MakeContext()
 	stc := domains.Storage.MakeContext()
 
 	defer acc.Close()
+	defer ccc.Close()
 	defer stc.Close()
+
+	domains.SetTxNum(agg.EndTxNumNoCommitment())
+	domains.SetBlockNum(bn)
 
 	logger := log.New("stage", "patricia_trie", "block", s.BlockNumber)
 	logger.Info("Collecting account keys")
@@ -35,7 +43,7 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	defer collector.Close()
 
 	var totalKeys atomic.Uint64
-	for _, dc := range []*state.DomainContext{acc, stc} {
+	for _, dc := range []*state.DomainContext{acc, ccc, stc} {
 		logger.Info("Collecting keys")
 		err := dc.IteratePrefix(tx, nil, func(k []byte, _ []byte) {
 			if err := collector.Collect(k, nil); err != nil {
@@ -53,13 +61,12 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	}
 
 	var (
-		batchSize = 10_000_000
-		batch     = make([][]byte, 0, batchSize)
+		batchSize = uint64(10_000_000)
 		processed atomic.Uint64
 	)
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(batch) >= batchSize {
+		if domains.Commitment.Size() >= batchSize {
 			rh, err := domains.Commit(true, false)
 			if err != nil {
 				return err
@@ -70,7 +77,7 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 				"intermediate root", rh)
 		}
 		processed.Add(1)
-		domains.Commitment.TouchPlainKey(k, nil, nil) // will panic if CommitmentModeUpdates is used. which is OK.
+		domains.Commitment.TouchPlainKey(k, nil, nil)
 
 		return nil
 	}
@@ -84,13 +91,12 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("Commitment has been reevaluated", "block", s.BlockNumber, "root", rh, "processed", processed.Load(), "total", totalKeys.Load())
+	logger.Info("Commitment has been reevaluated", "tx", domains.TxNum(), "root", hex.EncodeToString(rh), "processed", processed.Load(), "total", totalKeys.Load())
 
 	if err := cfg.agg.Flush(ctx, tx); err != nil {
 		return nil, err
 	}
 
-	//acc.DomainRangeLatest()
 	return rh, nil
 }
 
@@ -109,15 +115,22 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
-		return trie.EmptyRoot, nil
+	//if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
+	//	return trie.EmptyRoot, nil
+	//}
+	agg := tx.(*temporal.Tx).Agg()
+	toTx := agg.EndTxNumNoCommitment()
+	_ = toTx
+	if to == 0 {
+		cfg.checkRoot = false
 	}
 
-	if s.BlockNumber == to {
-		// we already did hash check for this block
-		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		return trie.EmptyRoot, nil
-	}
+	//var err error
+	//if s.BlockNumber == to {
+	//	// we already did hash check for this block
+	//	// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
+	//	return trie.EmptyRoot, nil
+	//}
 
 	var expectedRootHash libcommon.Hash
 	var headerHash libcommon.Hash
@@ -134,11 +147,67 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 		headerHash = syncHeadHeader.Hash()
 	}
 	logPrefix := s.LogPrefix()
-	rh, err := collectAndComputeCommitment(s, ctx, tx, cfg)
+	var foundHash bool
+	var txCounter uint64 = 0 // genesis?
+	var blockNum uint64
+	latestTxInFiles := agg.EndTxNumNoCommitment()
+
+	for i := uint64(0); i < math.MaxUint64; i++ {
+		if i%100000 == 0 {
+			fmt.Printf("\r [%s] Counting block for tx %d: cur block %d cur tx %d\n", logPrefix, latestTxInFiles, i, txCounter)
+		}
+
+		h, err := cfg.blockReader.HeaderByNumber(ctx, tx, uint64(i))
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+
+		txCounter++
+		b, err := cfg.blockReader.BodyWithTransactions(ctx, tx, h.Hash(), uint64(i))
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		txCounter += uint64(len(b.Transactions))
+		txCounter++
+		blockNum = uint64(i)
+
+		if txCounter == latestTxInFiles {
+			//if bytes.Equal(h.Root.Bytes(), rh) {
+			foundHash = true
+			expectedRootHash = h.Root
+			to = h.Number.Uint64()
+			headerHash = h.Hash()
+			//} else {
+			//	logger.Error(fmt.Sprintf("[%s]1 Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, h.Number.Uint64(), rh, h.Root.Bytes(), h.Hash().Bytes()))
+			//}
+		}
+
+		if txCounter > latestTxInFiles {
+			break
+		}
+	}
+	if err != nil /*&& !errors.Is(err, errExitRange) */ {
+		return trie.EmptyRoot, err
+	}
+	fmt.Printf("counted to block %d, tx=%d, fileTx=%d\n", blockNum, txCounter, latestTxInFiles)
+	rh, err := collectAndComputeCommitment(s, ctx, tx, cfg, blockNum)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	if cfg.checkRoot && bytes.Equal(rh, expectedRootHash[:]) {
+	//doms := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
+	//doms.StartWrites()
+	//doms.SetBlockNum(blockNum) // NEED TO WRITE BLOCK NUM TO SEEK COMM ON RESTART
+	//rh, err = doms.Commit(true, false)
+	//if err != nil {
+	//	return trie.EmptyRoot, err
+	//}
+	//doms.
+
+	//if !foundHash { // tx could be in the middle of block so no header match will be found
+	//	return trie.EmptyRoot, fmt.Errorf("no header found with root %x", rh)
+	//}
+
+	if (foundHash || cfg.checkRoot) && !bytes.Equal(rh, expectedRootHash[:]) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, rh, expectedRootHash, headerHash))
 		if cfg.badBlockHalt {
 			return trie.EmptyRoot, fmt.Errorf("wrong trie root")

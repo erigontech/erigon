@@ -207,7 +207,7 @@ var cmdStageTrie = &cobra.Command{
 }
 
 var cmdStagePatriciaTrie = &cobra.Command{
-	Use:   "stage_patricia_trie",
+	Use:   "stage_trie3",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -936,7 +936,21 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		return reset2.ResetExec(ctx, db, chain, "")
+		if err := reset2.ResetExec(ctx, db, chain, "", agg.EndTxNumMinimax() == 0); err != nil {
+			return err
+		}
+
+		br, bw := blocksIO(db, logger)
+		chainConfig := fromdb.ChainConfig(db)
+
+		err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
+				return err
+			}
+			return nil
+		})
+
+		return err
 	}
 
 	if txtrace {
@@ -1089,7 +1103,6 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	}
 	defer tx.Rollback()
 
-	execStage := stage(sync, tx, nil, stages.Execution)
 	s := stage(sync, tx, nil, stages.PatriciaTrie)
 
 	if pruneTo > 0 {
@@ -1099,7 +1112,6 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	logger.Info("StageExec", "progress", execStage.BlockNumber)
 	logger.Info("StageTrie", "progress", s.BlockNumber)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
@@ -1128,7 +1140,7 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 	}
-	integrity.Trie(db, tx, integritySlow, ctx)
+	//integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }
 

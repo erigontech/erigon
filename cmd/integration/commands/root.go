@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -64,7 +65,7 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const (
 		ThreadsLimit = 9_000
-		DBSizeLimit  = 8 * datasize.TB
+		DBSizeLimit  = 4 * datasize.TB
 		DBPageSize   = 8 * datasize.KB
 	)
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
@@ -72,6 +73,8 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	if label == kv.ChainDB {
 		opts = opts.MapSize(DBSizeLimit)
 		opts = opts.PageSize(DBPageSize.Bytes())
+	} else {
+		opts = opts.GrowthStep(16 * datasize.MB)
 	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
@@ -108,6 +111,9 @@ func openDBDefault(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists boo
 		if enableV3IfDBNotExists {
 			logger.Info("history V3 is forcibly enabled")
 			err := db.Update(context.Background(), func(tx kv.RwTx) error {
+				if err := snap.ForceSetFlags(tx, ethconfig.BlocksFreezing{Enabled: true}); err != nil {
+					return err
+				}
 				return kvcfg.HistoryV3.ForceWrite(tx, true)
 			})
 			if err != nil {
