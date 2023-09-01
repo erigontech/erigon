@@ -141,9 +141,6 @@ func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateW
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
 		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		defer domains.Close()
-		domains.StartUnbufferedWrites()
-		defer domains.FinishWrites()
 		return state.NewWriterV4(tx.(*temporal.Tx), domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
