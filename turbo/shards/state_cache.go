@@ -10,7 +10,7 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

@@ -19,10 +19,11 @@ package p2p
 import (
 	"bytes"
 	"errors"
-	"github.com/ledgerwatch/erigon/rlp"
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/rlp"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/crypto"

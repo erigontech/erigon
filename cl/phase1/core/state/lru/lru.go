@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 // Cache is a wrapper around hashicorp lru but with metric for Get

@@ -7,7 +7,7 @@ import (
 	"github.com/huandu/xstrings"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var syncMetrics = map[stages.SyncStage]*metrics2.Counter{}

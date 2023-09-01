@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 

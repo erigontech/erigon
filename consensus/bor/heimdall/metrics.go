@@ -4,9 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon/metrics/methelp"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 type (
@@ -56,7 +55,7 @@ var (
 				true:  metrics.GetOrCreateCounter("client_requests_checkpoint_valid"),
 				false: metrics.GetOrCreateCounter("client_requests_checkpoint_invalid"),
 			},
-			timer: methelp.GetOrCreateSummary("client_requests_checkpoint_duration"),
+			timer: metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
 		checkpointCountRequest: {
 			request: map[bool]*metrics2.Counter{
