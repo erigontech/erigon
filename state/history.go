@@ -226,17 +226,17 @@ func (h *History) openFiles() error {
 				return false
 			}
 
-			if item.index != nil {
-				continue
-			}
-			idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
-			if dir.FileExist(idxPath) {
-				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
-					return false
+			if item.index == nil {
+				idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+				if dir.FileExist(idxPath) {
+					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+						h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
+						return false
+					}
+					totalKeys += item.index.KeyCount()
 				}
-				totalKeys += item.index.KeyCount()
 			}
+
 		}
 		return true
 	})
@@ -1141,7 +1141,6 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("[dbg] a: %d, %t, %x\n", len(nk), nk == nil, nk)
 
 		res = append(res, HistoryRecord{beforeTxNum, val})
 		if nk != nil {
@@ -1354,7 +1353,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		if reader.Empty() {
 			return true
 		}
-		fmt.Printf("cnt: %s, %d\n", hc.ic.files[item.i].src.index.FileName(), hc.ic.files[item.i].src.index.KeyCount())
 		offset := reader.Lookup(key)
 
 		// TODO do we always compress inverted index?
@@ -1391,16 +1389,16 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	hasher.Write(key) //nolint
 	hi, _ := hasher.Sum128()
 	for i := len(hc.files) - 1; i >= 0; i-- {
-		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
+		//fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
 		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
 			continue
 		}
 		if hc.ic.ii.withExistenceIndex {
 			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
-				fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
+				//fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 				continue
 			} else {
-				fmt.Printf("[dbg] bloom yes %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
+				//fmt.Printf("[dbg] bloom yes %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 			}
 		}
 		findInFile(hc.files[i])

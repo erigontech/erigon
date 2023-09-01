@@ -136,14 +136,10 @@ func (b *bloomFilter) Build() error {
 	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
 		return err
 	}
-
 	return nil
 }
 
 func OpenBloom(filePath string) (*bloomFilter, error) {
-	if strings.HasSuffix(filePath, ".efi") {
-		panic(12)
-	}
 	_, fileName := filepath.Split(filePath)
 	f := &bloomFilter{filePath: filePath, fileName: fileName}
 	var err error
@@ -397,6 +393,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
+
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -505,14 +502,14 @@ func (d *Domain) openFiles() (err error) {
 				}
 				//totalKeys += item.bindex.KeyCount()
 			}
-			//if item.bloom == nil {
-			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
-			if dir.FileExist(idxPath) {
-				if item.bloom, err = OpenBloom(idxPath); err != nil {
-					return false
+			if item.bloom == nil {
+				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+				if dir.FileExist(idxPath) {
+					if item.bloom, err = OpenBloom(idxPath); err != nil {
+						return false
+					}
 				}
 			}
-			//}
 		}
 		return true
 	})

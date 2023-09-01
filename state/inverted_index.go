@@ -1559,8 +1559,7 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
-	fi.
-		bloom = sf.existence
+	fi.bloom = sf.existence
 	ii.files.Set(fi)
 
 	ii.reCalcRoFiles()
