@@ -26,7 +26,7 @@ import (
 
 // initialFlatDBTrieBuild leverages the stagedsync code to perform the initial
 // trie computation while also collecting the assorted hashes and loading them
-// into the TrieOfAccounts and TrieOfStorage tables
+// into theeth/stagedsync/stage_execute.go:294 TrieOfAccounts and TrieOfStorage tables
 func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	t.Helper()
 	//startTime := time.Now()
