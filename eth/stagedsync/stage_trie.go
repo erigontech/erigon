@@ -160,5 +160,5 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 			return trie.EmptyRoot, err
 		}
 	}
-	return libcommon.BytesToHash(rh[:]), err
+	return libcommon.BytesToHash(rh), err
 }

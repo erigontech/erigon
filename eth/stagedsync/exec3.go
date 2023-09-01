@@ -189,14 +189,13 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+		defer func() { // need callback - because tx may be committed
+			applyTx.Rollback()
+		}()
 
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
-
-		defer func() { // need callback - because tx may be committed
-			applyTx.Rollback()
-		}()
 	}
 
 	var blockNum, stageProgress uint64
@@ -826,7 +825,7 @@ Loop:
 						t6 = time.Since(tt)
 
 						doms.ClearRam(false)
-						applyTx, err = cfg.db.BeginRw(context.Background())
+						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
 						}
