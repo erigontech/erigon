@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli/v2"

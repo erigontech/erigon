@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+
+	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // DuplicateMetric is the error returned by Registry.Register when a metric
@@ -195,8 +198,10 @@ func (r *StandardRegistry) register(name string, i interface{}) error {
 		return DuplicateMetric(name)
 	}
 	switch i.(type) {
-	case Counter, Gauge, GaugeFloat64, Healthcheck, Histogram, Meter, Timer, ResettingTimer:
+	case Counter, Gauge, GaugeFloat64, Healthcheck, Histogram, Meter, Timer, ResettingTimer, *metrics2.Counter, *metrics2.Gauge, *metrics2.FloatCounter, *metrics2.Histogram, *metrics2.Summary:
 		r.metrics[name] = i
+	default:
+		log.Info("Type not registered(metrics won't show): ", reflect.TypeOf(i))
 	}
 	return nil
 }
