@@ -145,7 +145,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
-	log.Info("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
+	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
 		extendingFork := memdb.NewMemoryBatch(tx, fv.tmpDir)
 		fv.extendingForkNotifications = &shards.Notifications{
@@ -182,7 +182,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
-	log.Info("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
+	log.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
 
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
