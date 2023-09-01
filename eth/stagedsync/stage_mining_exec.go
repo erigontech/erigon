@@ -98,6 +98,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+	} else {
 		stateReader = state.NewPlainStateReader(tx)
 		stateWriter = state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	}
