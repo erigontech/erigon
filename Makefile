@@ -71,7 +71,7 @@ mocks: $(GOBINREL)/moq
 	rm -f gointerfaces/sentry/mocks.go
 	PATH="$(GOBIN):$(PATH)" go generate ./...
 
-lint: $(GOBINREL)/golangci-lint
+lintci: $(GOBINREL)/golangci-lint
 	@"$(GOBIN)/golangci-lint" run --config ./.golangci.yml
 
 # force re-make golangci-lint
@@ -80,10 +80,18 @@ lintci-deps-clean: golangci-lint-clean
 
 # download and build golangci-lint (https://golangci-lint.run)
 $(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.54.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.54.2
 
 golangci-lint-clean:
 	rm -f "$(GOBIN)/golangci-lint"
+
+lint-licenses-deps:
+	@./tools/licenses_check.sh --install-deps
+lint-licenses:
+	@./tools/licenses_check.sh
+
+lint-deps: lintci-deps lint-licenses-deps
+lint: lintci lint-licenses
 
 test:
 	$(GOTEST) --count 1 -p 2 ./...

@@ -296,9 +296,8 @@ func (d *DomainCommitted) TouchCode(c *commitmentItem, val []byte) {
 }
 
 type commitmentItem struct {
-	plainKey  []byte
-	hashedKey []byte
-	update    commitment.Update
+	plainKey []byte
+	update   commitment.Update
 }
 
 func commitmentItemLessPlain(i, j *commitmentItem) bool {

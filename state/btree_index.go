@@ -1024,7 +1024,6 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 		k, found, index, err = b.bplus.Get(gr, lookup)
 	} else {
 		if b.alloc == nil {
-			panic(fmt.Errorf("Get: `b.alloc` is nil: %s", gr.FileName()))
 			return k, v, false, err
 		}
 		k, found, index, err = b.alloc.Get(gr, lookup)
@@ -1079,9 +1078,9 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	)
 
 	if UseBpsTree {
-		k, dt, found, err = b.bplus.Seek(g, x)
+		_, dt, found, err = b.bplus.Seek(g, x)
 	} else {
-		k, dt, found, err = b.alloc.Seek(g, x)
+		_, dt, found, err = b.alloc.Seek(g, x)
 	}
 	_ = found
 	if err != nil /*|| !found*/ {

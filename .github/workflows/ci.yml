@@ -51,6 +51,10 @@ jobs:
         with:
           version: v1.54
 
+      - name: Lint source code licenses
+        if: matrix.os == 'ubuntu-20.04'
+        run: make lint-licenses-deps lint-licenses
+
       - name: Test win
         if: matrix.os == 'windows-2022'
         run: make test-no-fuzz

@@ -246,7 +246,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(uint64(2), fst)
 		require.Zero(snd)
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(0, 1)
+		_, _, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(0, 1)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
@@ -284,13 +284,13 @@ func TestLocalityDomain(t *testing.T) {
 		to := dc.hc.ic.coldLocality.indexedTo()
 		require.Equal(coldFiles*txsInColdFile, int(to))
 
-		v1, v2, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(0), 0)
+		v1, _, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(0), 0)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(0*StepsInColdFile), v1)
 		require.Equal(txsInColdFile*coldFiles, int(from))
 
-		v1, v2, from, ok1, ok2 = dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(1), 0)
+		v1, v2, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(1), 0)
 		require.True(ok1)
 		require.True(ok2)
 		require.Equal(uint64(1*StepsInColdFile), v1)

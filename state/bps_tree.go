@@ -161,7 +161,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 	dr = b.offt.Count()
 	for d, row := range b.mx {
-		m, l, r := 0, 0, len(row)
+		m, l, r := 0, 0, len(row) //nolint
 		for l < r {
 			m = (l + r) >> 1
 			n = row[m]
@@ -219,7 +219,8 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 	}
 	l, r = dl, dr
 
-	m, cmp := uint64(0), int(0)
+	var m uint64
+	var cmp int
 	for l < r {
 		m = (l + r) >> 1
 		cmp, skey, err = b.keyCmpFunc(key, m, g)
@@ -282,7 +283,7 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 	}
 	l, r = dl, dr
 
-	m := uint64(0)
+	var m uint64
 	for l < r {
 		m = (l + r) >> 1
 		cmp, k, err := b.keyCmpFunc(key, m, g)

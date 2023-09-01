@@ -44,9 +44,11 @@ import (
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
+	t.Helper()
 	return testDbAndDomainOfStep(t, 16, logger)
 }
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+	t.Helper()
 	return testDbAndDomainOfStepValsDup(t, aggStep, logger, false)
 }
 
@@ -456,6 +458,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 }
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	t.Helper()
 	fmt.Printf("txs: %d\n", txs)
 	t.Helper()
 	require := require.New(t)
@@ -498,34 +501,6 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			}
 		}
 	}
-}
-
-func collateDomainAndPrune(t testing.TB, tx kv.RwTx, d *Domain, txs, stepsToLeaveInDb uint64) {
-	t.Helper()
-	ctx := context.Background()
-	maxStep := txs / d.aggregationStep
-	if maxStep > stepsToLeaveInDb {
-		maxStep -= stepsToLeaveInDb
-	}
-
-	for step := uint64(0); step <= maxStep; step++ {
-		func() {
-			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
-			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-
-			require.NoError(t, err)
-		}()
-	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	dc := d.MakeContext()
-
-	err := dc.Prune(ctx, tx, maxStep, maxStep*d.aggregationStep, (maxStep+1)*d.aggregationStep, math.MaxUint64, logEvery)
-	require.NoError(t, err)
-	dc.Close()
 }
 
 func TestHistory(t *testing.T) {
@@ -1179,7 +1154,7 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 	key := make([]byte, 20)
-	loc := make([]byte, 32)
+	var loc []byte
 	value := make([]byte, 32)
 	first := []byte{0xab, 0xff}
 	other := []byte{0xcc, 0xfe}
@@ -1464,13 +1439,13 @@ type upd struct {
 	value []byte
 }
 
-func generateTestData(t testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
-	t.Helper()
+func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
+	tb.Helper()
 
 	data := make(map[string][]upd)
 	//seed := time.Now().Unix()
 	seed := 31
-	defer t.Logf("generated data with seed %d, keys %d", seed, keyLimit)
+	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
 
 	r := rand.New(rand.NewSource(0))
 	if keyLimit == 1 {
@@ -1572,8 +1547,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx)
-	tx.Commit()
-	tx = nil
+	require.NoError(t, tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -1653,8 +1627,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
 
-	tx.Commit()
-	tx = nil
+	require.NoError(t, tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)

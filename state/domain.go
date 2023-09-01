@@ -502,14 +502,14 @@ func (d *Domain) openFiles() (err error) {
 				}
 				//totalKeys += item.bindex.KeyCount()
 			}
-			if item.bloom == nil {
-				//idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
-				//if dir.FileExist(idxPath) {
-				//	if item.bloom, err = OpenBloom(idxPath); err != nil {
-				//		return false
-				//	}
-				//}
-			}
+			//if item.bloom == nil {
+			//idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
+			//if dir.FileExist(idxPath) {
+			//	if item.bloom, err = OpenBloom(idxPath); err != nil {
+			//		return false
+			//	}
+			//}
+			//}
 		}
 		return true
 	})
@@ -679,6 +679,7 @@ func (d *domainWAL) close() {
 	}
 }
 
+// nolint
 func loadSkipFunc() etl.LoadFunc {
 	var preKey, preVal []byte
 	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -831,8 +832,8 @@ type ctxItem struct {
 	src *filesItem
 }
 
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
+func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
@@ -943,10 +944,6 @@ func (c Collation) Close() {
 	if c.historyComp != nil {
 		c.HistoryCollation.Close()
 	}
-}
-
-type kvpair struct {
-	k, v []byte
 }
 
 // collate gathers domain changes over the specified step, using read-only transaction,
@@ -1191,18 +1188,19 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bl", d.filenameBase, fromStep, toStep))) {
-				l = append(l, item)
-			}
-		}
-		return true
-	})
-	return l
-}
+
+//func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
+//	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+//		for _, item := range items {
+//			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+//			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bl", d.filenameBase, fromStep, toStep))) {
+//				l = append(l, item)
+//			}
+//		}
+//		return true
+//	})
+//	return l
+//}
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -1347,9 +1345,15 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 
 	if d.domainLargeValues {
 		valsC, err = rwTx.RwCursor(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsC.Close()
 	} else {
 		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsCDup.Close()
 	}
 	if err != nil {
@@ -1453,22 +1457,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil
-}
-
-func (d *Domain) canPrune(tx kv.Tx) bool {
-	dc := d.MakeContext()
-	defer dc.Close()
-	return d.canPruneFrom(tx) < dc.maxTxNumInFiles(false)
-}
-func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, d.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, d.keysTable)
-	if len(fst) > 0 && len(fst2) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		fstInDb2 := binary.BigEndian.Uint64(fst2)
-		return cmp.Min(fstInDb, fstInDb2)
-	}
-	return math.MaxUint64
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
@@ -2212,6 +2200,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			if bytes.HasPrefix(sv, v) {
 				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 				err = valsDup.DeleteCurrent()
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if err != nil {

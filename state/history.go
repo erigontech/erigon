@@ -1705,11 +1705,10 @@ type StateAsOfIterF struct {
 	nextVal  []byte
 	nextKey  []byte
 
-	h            ReconHeap
-	startTxNum   uint64
-	startTxKey   [8]byte
-	txnKey       [8]byte
-	compressVals bool
+	h          ReconHeap
+	startTxNum uint64
+	startTxKey [8]byte
+	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
 }
@@ -2008,15 +2007,14 @@ func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, lim
 }
 
 type HistoryChangesIterFiles struct {
-	hc           *HistoryContext
-	nextVal      []byte
-	nextKey      []byte
-	h            ReconHeap
-	startTxNum   uint64
-	endTxNum     int
-	startTxKey   [8]byte
-	txnKey       [8]byte
-	compressVals bool
+	hc         *HistoryContext
+	nextVal    []byte
+	nextKey    []byte
+	h          ReconHeap
+	startTxNum uint64
+	endTxNum   int
+	startTxKey [8]byte
+	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
 	err                    error

@@ -52,6 +52,7 @@ Loop:
 			v := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
 			pv, err := d.LatestAccount(k0)
+			require.NoError(t, err)
 
 			err = d.UpdateAccountData(k0, v, pv)
 			require.NoError(t, err)
