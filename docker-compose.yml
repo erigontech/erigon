@@ -41,6 +41,7 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
     restart: unless-stopped
     mem_swappiness: 0
+    user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
 
   sentry:
     <<: *default-erigon-service

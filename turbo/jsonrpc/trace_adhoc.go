@@ -476,7 +476,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			// Set the "mem" of the last operation
 			var setMem bool
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -540,6 +540,11 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			if st.Len() > 2 {
 				ot.lastMemOff = st.Back(0).Uint64()
 				ot.lastMemLen = st.Back(2).Uint64()
+			}
+		case vm.EXTCODECOPY:
+			if st.Len() > 3 {
+				ot.lastMemOff = st.Back(1).Uint64()
+				ot.lastMemLen = st.Back(3).Uint64()
 			}
 		case vm.STATICCALL, vm.DELEGATECALL:
 			if st.Len() > 5 {

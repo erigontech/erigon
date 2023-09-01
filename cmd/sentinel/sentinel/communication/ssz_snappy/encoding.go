@@ -36,11 +36,18 @@ var writerPool = sync.Pool{
 }
 
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
+	enc := make([]byte, 0, val.EncodingSizeSSZ())
+	var err error
+	enc, err = val.EncodeSSZ(enc)
+	if err != nil {
+		return err
+	}
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
-	vin := binary.PutUvarint(lengthBuf, uint64(val.EncodingSizeSSZ()))
+	vin := binary.PutUvarint(lengthBuf, uint64(len(enc)))
+
 	// Create writer size
-	wr := bufio.NewWriterSize(w, 10+val.EncodingSizeSSZ())
+	wr := bufio.NewWriterSize(w, 10+len(enc))
 	defer wr.Flush()
 	// Write length of packet
 	wr.Write(prefix)
@@ -53,12 +60,6 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 		writerPool.Put(sw)
 	}()
 	// Marshall and snap it
-	enc := make([]byte, 0, val.EncodingSizeSSZ())
-	var err error
-	enc, err = val.EncodeSSZ(enc)
-	if err != nil {
-		return err
-	}
 	_, err = sw.Write(enc)
 	return err
 }

@@ -4,6 +4,7 @@ import (
 	"flag"
 	_ "net/http/pprof" //nolint:gosec
 
+	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	"golang.org/x/exp/slices"
@@ -42,7 +43,7 @@ func main() {
 	)
 	if *pprof {
 		// Server for pprof
-		debug.StartPProf("localhost:6060", true)
+		debug.StartPProf("localhost:6060", exp.Setup("localhost:6060", log.Root()))
 	}
 
 	if err != nil {

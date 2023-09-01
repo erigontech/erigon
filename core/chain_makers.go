@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
@@ -363,11 +362,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
 				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
 			}
-			if daoBlock.Cmp(b.header.Number) == 0 {
-				misc.ApplyDAOHardFork(ibs)
-			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs, logger)
+		if b.engine != nil {
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
