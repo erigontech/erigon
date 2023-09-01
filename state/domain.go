@@ -945,10 +945,6 @@ func (c Collation) Close() {
 	}
 }
 
-type kvpair struct {
-	k, v []byte
-}
-
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)

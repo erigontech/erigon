@@ -882,7 +882,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			})
 		}
 	}
-	keyCount := 0
 
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
@@ -917,7 +916,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			if err = write.AddWord(keyBuf); err != nil {
 				return nil, err
 			}
-			keyCount++ // Only counting keys, not values
 			if err = write.AddWord(valBuf); err != nil {
 				return nil, err
 			}
@@ -929,7 +927,6 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 		if err = write.AddWord(keyBuf); err != nil {
 			return nil, err
 		}
-		keyCount++ // Only counting keys, not values
 		if err = write.AddWord(valBuf); err != nil {
 			return nil, err
 		}
