@@ -506,7 +506,7 @@ func (d *Domain) openFiles() (err error) {
 				//totalKeys += item.bindex.KeyCount()
 			}
 			//if item.bloom == nil {
-			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.bloom, err = OpenBloom(idxPath); err != nil {
 					return false
@@ -1202,11 +1202,11 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	var bloom *bloomFilter
 	{
-		fileName := fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, step, step+1)
+		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, step, step+1)
 		if dir.FileExist(filepath.Join(d.dir, fileName)) {
 			bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
 			if err != nil {
-				return StaticFiles{}, fmt.Errorf("build %s .ibl: %w", d.filenameBase, err)
+				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
 		}
 	}
@@ -1250,7 +1250,7 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 //	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 //		for _, item := range items {
 //			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-//			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, fromStep, toStep))) {
+//			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))) {
 //				l = append(l, item)
 //			}
 //		}

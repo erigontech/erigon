@@ -774,7 +774,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
-	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".ibl"
+	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 	var bloom *bloomFilter
 	var err error
 	if kv.Count() >= 2 {

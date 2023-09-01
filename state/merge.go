@@ -656,7 +656,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	}
 
 	{
-		fileName := fmt.Sprintf("%s.%d-%d.ibl", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
+		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(filepath.Join(d.dir, fileName)) {
 			valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
 			if err != nil {
