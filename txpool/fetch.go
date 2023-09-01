@@ -122,7 +122,7 @@ func (f *Fetch) ConnectCore() {
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				f.logger.Debug("[txpool.handleStateChanges]", "err", err)
+				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
 	}()
@@ -141,7 +141,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				continue
 			}
 			// Report error and wait more
-			f.logger.Debug("[txpool.recvMessage] sentry not ready yet", "err", err)
+			f.logger.Warn("[txpool.recvMessage] sentry not ready yet", "err", err)
 			continue
 		}
 
@@ -150,7 +150,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			f.logger.Debug("[txpool.recvMessage]", "err", err)
+			f.logger.Warn("[txpool.recvMessage]", "err", err)
 		}
 	}
 }
@@ -192,12 +192,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 				time.Sleep(3 * time.Second)
 				continue
 			}
-
-			if rlp.IsRLPError(err) {
-				f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
-			} else {
-				f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
-			}
+			f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -402,7 +397,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				continue
 			}
 
-			f.logger.Debug("[txpool.recvPeers]", "err", err)
+			f.logger.Warn("[txpool.recvPeers]", "err", err)
 		}
 	}
 }
