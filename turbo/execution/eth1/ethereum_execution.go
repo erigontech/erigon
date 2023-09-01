@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/log/v3"
@@ -189,6 +190,12 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		currentNumber--
 	}
 	return nil
+}
+
+func truncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
+	return db.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(k, _ []byte) error {
+		return db.Delete(kv.Receipts, k)
+	})
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
