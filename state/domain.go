@@ -1347,9 +1347,15 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 
 	if d.domainLargeValues {
 		valsC, err = rwTx.RwCursor(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsC.Close()
 	} else {
 		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
+		if err != nil {
+			return err
+		}
 		defer valsCDup.Close()
 	}
 	if err != nil {

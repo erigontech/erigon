@@ -156,6 +156,7 @@ type runCfg struct {
 // - we could close first aggregator and open another with previous data still available
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
 func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
+	t.Helper()
 	logger := log.New()
 	db, agg := testDbAndAggregatorv3(t, rc.aggStep)
 	if rc.useBplus {

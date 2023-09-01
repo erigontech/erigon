@@ -21,11 +21,11 @@ func TestArchiveWriter(t *testing.T) {
 
 	td := generateTestData(t, 20, 52, 1, 1, 100000)
 
-	openWriter := func(t testing.TB, tmp, name string, compFlags FileCompression) ArchiveWriter {
-		t.Helper()
+	openWriter := func(tb testing.TB, tmp, name string, compFlags FileCompression) ArchiveWriter {
+		tb.Helper()
 		file := filepath.Join(tmp, name)
 		comp, err := compress.NewCompressor(context.Background(), "", file, tmp, 8, 1, log.LvlDebug, logger)
-		require.NoError(t, err)
+		require.NoError(tb, err)
 		return NewArchiveWriter(comp, compFlags)
 	}
 	keys := make([][]byte, 0, len(td))
@@ -34,31 +34,31 @@ func TestArchiveWriter(t *testing.T) {
 	}
 	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
 
-	writeLatest := func(t testing.TB, w ArchiveWriter, td map[string][]upd) {
-		t.Helper()
+	writeLatest := func(tb testing.TB, w ArchiveWriter, td map[string][]upd) {
+		tb.Helper()
 
 		for _, k := range keys {
 			upd := td[string(k)]
 
 			err := w.AddWord(k)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			err = w.AddWord(upd[0].value)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 		}
 		err := w.Compress()
-		require.NoError(t, err)
+		require.NoError(tb, err)
 	}
 
-	checkLatest := func(t testing.TB, g ArchiveGetter, td map[string][]upd) {
-		t.Helper()
+	checkLatest := func(tb testing.TB, g ArchiveGetter, td map[string][]upd) {
+		tb.Helper()
 
 		for _, k := range keys {
 			upd := td[string(k)]
 
 			fk, _ := g.Next(nil)
 			fv, _ := g.Next(nil)
-			require.EqualValues(t, k, fk)
-			require.EqualValues(t, upd[0].value, fv)
+			require.EqualValues(tb, k, fk)
+			require.EqualValues(tb, upd[0].value, fv)
 		}
 	}
 
