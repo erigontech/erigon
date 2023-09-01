@@ -1676,7 +1676,7 @@ func (c *Cell) Decode(buf []byte) error {
 		c.extLen = int(buf[pos])
 		pos++
 		copy(c.extension[:], buf[pos:pos+c.extLen])
-		pos += c.extLen //nolin
+		pos += c.extLen //nolint
 	}
 	if flags&cellFlagDelete != 0 {
 		c.Delete = true
