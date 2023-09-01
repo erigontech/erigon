@@ -18,8 +18,8 @@ type headerResponse struct {
 }
 
 type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot, omitempty"`
-	ParentRoot *libcommon.Hash `json:"root, omitempty"`
+	Slot       *uint64         `json:"slot,omitempty"`
+	ParentRoot *libcommon.Hash `json:"root,omitempty"`
 }
 
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
