@@ -151,7 +151,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
-	parallel bool,
+	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
@@ -185,7 +185,7 @@ func ExecV3(ctx context.Context,
 	}
 	if !useExternalTx && !parallel {
 		var err error
-		applyTx, err = chainDb.BeginRw(ctx)
+		applyTx, err = chainDb.BeginRw(ctx) //nolint
 		if err != nil {
 			return err
 		}
@@ -209,6 +209,8 @@ func ExecV3(ctx context.Context,
 		stageProgress = execStage.BlockNumber
 		blockNum = execStage.BlockNumber + 1
 	} else if !useExternalTx {
+		//nolint
+
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
 		//if err != nil {
 		//	return err
