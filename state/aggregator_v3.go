@@ -92,7 +92,6 @@ type AggregatorV3 struct {
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFreeze OnFreezeFunc
-	walLock  sync.RWMutex // TODO transfer it to the shareddomain
 
 	ps *background.ProgressSet
 

@@ -381,7 +381,7 @@ func (cell *Cell) setStorage(value []byte) {
 
 func (cell *Cell) setAccountFields(codeHash []byte, balance *uint256.Int, nonce uint64) {
 	if len(codeHash) == 0 {
-		codeHash = common.Copy(EmptyCodeHash[:])
+		codeHash = common.Copy(EmptyCodeHash)
 	}
 	copy(cell.CodeHash[:], codeHash)
 
