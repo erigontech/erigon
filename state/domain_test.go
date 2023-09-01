@@ -44,9 +44,11 @@ import (
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
+	t.Helper()
 	return testDbAndDomainOfStep(t, 16, logger)
 }
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+	t.Helper()
 	return testDbAndDomainOfStepValsDup(t, aggStep, logger, false)
 }
 
@@ -1572,8 +1574,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx)
-	tx.Commit()
-	tx = nil
+	require.NoError(t, tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
