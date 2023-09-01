@@ -120,12 +120,12 @@ type bloomFilter struct {
 func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
+	_, fileName := filepath.Split(filePath)
 	bloom, err := bloomfilter.New(m, 4)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, %s", err, fileName)
 	}
 
-	_, fileName := filepath.Split(filePath)
 	return &bloomFilter{filePath: filePath, fileName: fileName, Filter: bloom}, nil
 }
 func (b *bloomFilter) FileName() string { return b.fileName }
