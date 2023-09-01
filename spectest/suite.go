@@ -1,11 +1,10 @@
 package spectest
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"path/filepath"
 	"testing"
-
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
 
 	"gfx.cafe/util/go/generic"
 	"github.com/stretchr/testify/require"

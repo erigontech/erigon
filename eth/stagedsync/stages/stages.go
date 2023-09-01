@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// SyncStage represents the stages of synchronisation in the Mode.StagedSync mode
+// SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
 // It is used to persist the information about the stage state into the database.
 // It should not be empty and should be unique.
 type SyncStage string

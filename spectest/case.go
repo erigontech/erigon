@@ -1,11 +1,10 @@
 package spectest
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"os"
 	"strings"
-
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
 
 	"gfx.cafe/util/go/generic"
 	"github.com/ledgerwatch/erigon/cl/clparams"
