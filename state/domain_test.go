@@ -1154,7 +1154,7 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 	key := make([]byte, 20)
-	loc := make([]byte, 32)
+	var loc []byte
 	value := make([]byte, 32)
 	first := []byte{0xab, 0xff}
 	other := []byte{0xcc, 0xfe}
