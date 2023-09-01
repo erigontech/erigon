@@ -677,7 +677,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		defer ac.Close()
 
 		domains := agg.SharedDomains(ac)
-		defer domains.Close()
+		defer agg.CloseSharedDomains()
 		domains.SetTx(tx)
 
 		blockNum, txnUm, err := domains.SeekCommitment(0, math.MaxUint64)

@@ -156,7 +156,9 @@ func ExecV3(ctx context.Context,
 	logger log.Logger,
 	initialCycle bool,
 ) error {
-	parallel = false // TODO: e35 doesn't support it yet
+	// TODO: e35 doesn't support parallel-exec yet
+	parallel = false //nolint
+
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
 	blockReader := cfg.blockReader
@@ -191,11 +193,6 @@ func ExecV3(ctx context.Context,
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
-
-		//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
-		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
-		//	return histBlockNumProgress
-		//})
 
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
