@@ -679,6 +679,7 @@ func (d *domainWAL) close() {
 	}
 }
 
+// nolint
 func loadSkipFunc() etl.LoadFunc {
 	var preKey, preVal []byte
 	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -831,8 +832,8 @@ type ctxItem struct {
 	src *filesItem
 }
 
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
+func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
