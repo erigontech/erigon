@@ -527,7 +527,7 @@ func (sf LocalityIndexFiles) Close() {
 		sf.bm.Close()
 	}
 	if sf.bloom != nil {
-		sf.bloom = nil
+		sf.bloom.Close()
 	}
 }
 
