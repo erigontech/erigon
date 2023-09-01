@@ -151,7 +151,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
-	parallel bool, logPrefix string,
+	parallel bool,
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
@@ -398,7 +398,7 @@ func ExecV3(ctx context.Context,
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
-						logger.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
+						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
@@ -726,7 +726,7 @@ Loop:
 					return nil
 				}(); err != nil {
 					if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
+						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
