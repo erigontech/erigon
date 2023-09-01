@@ -347,7 +347,6 @@ func (w *FixedSizeBitmapsWriter) Build() error {
 
 	_ = os.Remove(w.indexFile)
 	if err := os.Rename(w.tmpIdxFilePath, w.indexFile); err != nil {
-		panic(err)
 		return err
 	}
 	return nil
