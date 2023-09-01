@@ -926,7 +926,7 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 		return err
 	}
 	if cc.Err() != nil { //nolint
-		return nil
+		return nil //nolint
 	}
 	//}
 	return nil
