@@ -388,8 +388,6 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 }
 
 func doUncompress(cliCtx *cli.Context) error {
-	var valLenDistibution [10_000_000]uint64
-
 	var logger log.Logger
 	var err error
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
@@ -422,7 +420,6 @@ func doUncompress(cliCtx *cli.Context) error {
 	buf := make([]byte, 0, 1*datasize.MB)
 	for g.HasNext() {
 		buf, _ = g.Next(buf[:0])
-		valLenDistibution[len(buf)]++
 		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
 		if _, err := wr.Write(numBuf[:n]); err != nil {
 			return err
@@ -442,27 +439,6 @@ func doUncompress(cliCtx *cli.Context) error {
 		}
 	}
 
-	reduced := map[uint64]uint64{}
-	for i, v := range valLenDistibution {
-		if v == 0 {
-			continue
-		}
-		if _, ok := reduced[uint64(i/4096)]; !ok {
-			reduced[uint64(i/4096)] = 0
-		}
-		reduced[uint64(i/4096)] += v
-	}
-	reduced2 := map[uint64]string{}
-	for pagesAmount, keysAmount := range reduced {
-		if keysAmount == 0 {
-			continue
-		}
-		if pagesAmount == 1 && keysAmount < 1000 {
-			continue
-		}
-		reduced2[pagesAmount+1] = fmt.Sprintf("%d", keysAmount)
-	}
-	logger.Warn(fmt.Sprintf("distribution pagesAmount->keysAmount: %v", reduced2))
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
