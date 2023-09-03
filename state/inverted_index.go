@@ -762,26 +762,22 @@ func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 }
 
 func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
-	var hi uint64
-	if ic.ii.withExistenceIndex {
-		hi, _ = ic.hashKey(key)
-	}
+	hi, lo := ic.hashKey(key)
 
 	for i := 0; i < len(ic.files); i++ {
 		if ic.files[i].endTxNum <= txNum {
 			continue
 		}
-		_ = hi
-		//if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
-		//	if !ic.files[i].src.bloom.ContainsHash(hi) {
-		//		continue
-		//	}
-		//}
+		if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
+			if !ic.files[i].src.bloom.ContainsHash(hi) {
+				continue
+			}
+		}
 		reader := ic.statelessIdxReader(i)
 		if reader.Empty() {
 			continue
 		}
-		offset := reader.Lookup(key)
+		offset := reader.LookupHash(hi, lo)
 
 		// TODO do we always compress inverted index?
 		g := ic.statelessGetter(i)
@@ -793,7 +789,7 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		eliasVal, _ := g.Next(nil)
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		equalOrHigherTxNum, found = ef.Search(txNum)
-		if found && equalOrHigherTxNum >= txNum {
+		if found {
 			return true, equalOrHigherTxNum
 		}
 	}

@@ -223,9 +223,6 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 
 // Search returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
-	if ef.count == 0 {
-		return 0, 0, false
-	}
 	if v == 0 {
 		return ef.Min(), 0, true
 	}
