@@ -768,17 +768,18 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 	}
 
 	for i := 0; i < len(ic.files); i++ {
-		if ic.files[i].startTxNum > txNum || ic.files[i].endTxNum <= txNum {
+		if ic.files[i].endTxNum <= txNum {
 			continue
 		}
-		if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
-			if !ic.files[i].src.bloom.ContainsHash(hi) {
-				continue
-			}
-		}
+		_ = hi
+		//if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
+		//	if !ic.files[i].src.bloom.ContainsHash(hi) {
+		//		continue
+		//	}
+		//}
 		reader := ic.statelessIdxReader(i)
 		if reader.Empty() {
-			return false, 0
+			continue
 		}
 		offset := reader.Lookup(key)
 
@@ -787,18 +788,19 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 		if !bytes.Equal(k, key) {
-			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
-			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
-			//}
-			return false, 0
+			continue
 		}
 		eliasVal, _ := g.Next(nil)
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		equalOrHigherTxNum, found = ef.Search(txNum)
+		//if found && equalOrHigherTxNum < txNum {
+		//fmt.Printf("to arr: %d, %d, %d, cnt=%d\n", txNum, equalOrHigherTxNum, iter.ToArrU64Must(ef.Iterator()), ef.Count())
+		//}
 		if 487 == txNum {
-			fmt.Printf("hist seek: %x, %d -> %d, %t, %s\n", key, txNum, equalOrHigherTxNum, found, ic.files[i].src.decompressor.FileName())
+			fmt.Printf("hist seek9: %x, %d -> %d, %t, %s\n", key, txNum, equalOrHigherTxNum, found, ic.files[i].src.decompressor.FileName())
+			fmt.Printf("to arr: %d, %d, %d, cnt=%d\n", txNum, equalOrHigherTxNum, iter.ToArrU64Must(ef.Iterator()), ef.Count())
 		}
-		if found {
+		if found && equalOrHigherTxNum >= txNum {
 			return true, equalOrHigherTxNum
 		}
 	}
