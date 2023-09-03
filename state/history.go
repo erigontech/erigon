@@ -1179,6 +1179,8 @@ type HistoryContext struct {
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
+
+	_bufTs []byte
 }
 
 func (h *History) MakeContext() *HistoryContext {
@@ -1365,13 +1367,11 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	if !ok {
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, histTxNum/hc.h.aggregationStep, histTxNum/hc.h.aggregationStep)
 	}
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], histTxNum)
 	reader := hc.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset := reader.Lookup2(txKey[:], key)
+	offset := reader.Lookup2(hc.encodeTs(histTxNum), key)
 	g := hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 
@@ -1537,6 +1537,14 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	return true, eliasfano32.Max(eliasVal)
 }
 
+func (hc *HistoryContext) encodeTs(txNum uint64) []byte {
+	if hc._bufTs == nil {
+		hc._bufTs = make([]byte, 8)
+	}
+	binary.BigEndian.PutUint64(hc._bufTs, txNum)
+	return hc._bufTs
+}
+
 // GetNoStateWithRecent searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -1596,9 +1604,7 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	if err != nil {
 		return nil, false, err
 	}
-	txNumBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(txNumBytes, txNum)
-	val, err := c.SeekBothRange(key, txNumBytes)
+	val, err := c.SeekBothRange(key, hc.encodeTs(txNum))
 	if err != nil {
 		return nil, false, err
 	}
