@@ -1361,6 +1361,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	if !ok {
 		return nil, false, nil
 	}
+	fmt.Printf("hist seek: %x, %d -> %d\n", key, txNum, histTxNum)
 
 	historyItem, ok := hc.getFile(histTxNum)
 	if !ok {
