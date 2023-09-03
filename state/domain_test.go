@@ -486,7 +486,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 			label := fmt.Sprintf("key %x txNum=%d, keyNum=%d", k, txNum, keyNum)
 
-			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
+			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
 				require.Equal(v[:], val, label)
@@ -764,7 +764,7 @@ func TestDomain_Delete(t *testing.T) {
 		//	require.Nil(val, label)
 		//}
 		//if txNum == 976 {
-		val, err := dc.GetBeforeTxNum([]byte("key2"), txNum+1, tx)
+		val, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
 		require.NoError(err)
 		//require.False(ok, label)
 		require.Nil(val, label)
@@ -882,7 +882,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 
-			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
+			val, err := dc.GetAsOf(k[:], txNum+1, roTx)
 			// during generation such keys are skipped so value should be nil for this call
 			require.NoError(t, err, label)
 			if !data[keyNum][txNum] {
@@ -974,7 +974,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 
-			val, err := dc.GetBeforeTxNum(k[:], txNum+1, tx)
+			val, err := dc.GetAsOf(k[:], txNum+1, tx)
 			require.NoError(t, err)
 			if keyNum == txNum%d.aggregationStep {
 				if txNum > 1 {
@@ -1364,7 +1364,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		beforeTx := d.aggregationStep
 		for i = 0; i < len(bufs); i++ {
 			ks, _ := hex.DecodeString(key)
-			val, err := mc.GetBeforeTxNum(ks, beforeTx, tx)
+			val, err := mc.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, bufs[i], val, "key %s, tx %d", key, beforeTx)
 			beforeTx += d.aggregationStep
@@ -1561,7 +1561,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
+			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
@@ -1666,7 +1666,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, err := dc.GetBeforeTxNum([]byte(key), updates[i].txNum, tx)
+			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}

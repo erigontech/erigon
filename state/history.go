@@ -1176,6 +1176,9 @@ type HistoryContext struct {
 	readers []*recsplit.IndexReader
 
 	trace bool
+
+	valsC    kv.Cursor
+	valsCDup kv.CursorDupSort
 }
 
 func (h *History) MakeContext() *HistoryContext {
@@ -1394,10 +1397,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	var checked int
 
 	for i := 0; i < len(hc.files); i++ {
-		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
 		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
 			continue
 		}
+		fmt.Printf("[dbg] hist iter: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
 		if hc.ic.ii.withExistenceIndex && hc.ic.files[i].src.bloom != nil {
 			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
 				//fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
@@ -1611,14 +1614,33 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 	}
 	return hc.getNoStateFromDB(key, txNum, roTx)
 }
+func (hc *HistoryContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	if hc.valsC != nil {
+		return hc.valsC, nil
+	}
+	hc.valsC, err = tx.Cursor(hc.h.historyValsTable)
+	if err != nil {
+		return nil, err
+	}
+	return hc.valsC, nil
+}
+func (hc *HistoryContext) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
+	if hc.valsCDup != nil {
+		return hc.valsCDup, nil
+	}
+	hc.valsCDup, err = tx.CursorDupSort(hc.h.historyValsTable)
+	if err != nil {
+		return nil, err
+	}
+	return hc.valsCDup, nil
+}
 
 func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if hc.h.historyLargeValues {
-		c, err := tx.Cursor(hc.h.historyValsTable)
+		c, err := hc.valsCursor(tx)
 		if err != nil {
 			return nil, false, err
 		}
-		defer c.Close()
 		seek := make([]byte, len(key)+8)
 		copy(seek, key)
 		binary.BigEndian.PutUint64(seek[len(key):], txNum)
@@ -1633,16 +1655,13 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		// val == []byte{},m eans key was created in this txNum and doesn't exists before.
 		return val, true, nil
 	}
-	c, err := tx.CursorDupSort(hc.h.historyValsTable)
+	c, err := hc.valsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
 	}
-	defer c.Close()
-	txNumBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(txNumBytes, txNum)
-
-	val, err := c.SeekBothRange(key, txNumBytes)
-	fmt.Printf("txNumBytes: %x, %x -> %x\n", key, txNumBytes, val)
+	var txNumBytes [8]byte
+	binary.BigEndian.PutUint64(txNumBytes[:], txNum)
+	val, err := c.SeekBothRange(key, txNumBytes[:])
 	if err != nil {
 		return nil, false, err
 	}

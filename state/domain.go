@@ -852,6 +852,9 @@ type DomainContext struct {
 	keyBuf     [60]byte // 52b key and 8b for inverted step
 	valKeyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf     [8]byte
+
+	keysC kv.CursorDupSort
+	valsC kv.Cursor
 }
 
 // getFromFile returns exact match for the given key from the given file
@@ -1795,69 +1798,10 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	return nil, false, nil
 }
 
-// historyBeforeTxNum searches history for a value of specified key before txNum
-// second return value is true if the value is found in the history (even if it is nil)
-func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) (v []byte, found bool, err error) {
-	//dc.d.stats.FilesQueries.Add(1)
-
-	{
-		v, found, err = dc.hc.GetNoStateWithRecent(key, txNum, roTx)
-		if err != nil {
-			return nil, false, err
-		}
-		if found {
-			return v, true, nil
-		}
-	}
-
-	//var anyItem bool
-	//var topState ctxItem
-	//for _, item := range dc.hc.ic.files {
-	//	if item.endTxNum < txNum {
-	//		continue
-	//	}
-	//	anyItem = true
-	//	topState = item
-	//	break
-	//}
-	//if anyItem {
-	//	// If there were no changes but there were history files, the value can be obtained from value files
-	//	var ok bool
-	//	for i := len(dc.files) - 1; i >= 0; i-- {
-	//		if dc.files[i].startTxNum > topState.startTxNum {
-	//			continue
-	//		}
-	//		fmt.Printf("getFromFile: %d, top=%d\n", i, topState.startTxNum)
-	//		v, ok, err = dc.getFromFile(i, key)
-	//		//fmt.Printf("getFromFile: %d,%t\n", i, ok)
-	//		if err != nil {
-	//			return nil, false, err
-	//		}
-	//		if !ok {
-	//			continue
-	//		}
-	//		found = true
-	//		break
-	//	}
-	//	return v, found, nil
-	//}
-	//// Value not found in history files, look in the recent history
-	//if roTx == nil {
-	//	return nil, false, fmt.Errorf("roTx is nil")
-	//}
-	v, found, err = dc.hc.getNoStateFromDB(key, txNum, roTx)
-	if err != nil {
-		return nil, false, err
-	}
-	fmt.Printf("getNoStateFromDB: %t\n", found)
-	return v, found, nil
-}
-
-// GetBeforeTxNum does not always require usage of roTx. If it is possible to determine
+// GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
-func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
 	v, hOk, err := dc.hc.GetNoStateWithRecent(key, txNum, roTx)
-	fmt.Printf("historyBeforeTxNum: %x, %d, %x, %t\n", key, txNum, v, hOk)
 	if err != nil {
 		return nil, err
 	}
@@ -1869,18 +1813,11 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		}
 		return v, nil
 	}
-	v, ok, err := dc.GetLatest(key, nil, roTx)
-	fmt.Printf("dbg latest state: %t\n", ok)
-
-	//v, ok, err := dc.getBeforeTxNum(key, txNum, roTx)
-	//fmt.Printf("dbg latest state: %t\n", ok)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if !ok {
-	//	return nil, nil
-	//}
-	return v, err
+	v, _, err = dc.GetLatest(key, nil, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (dc *DomainContext) Close() {
@@ -1941,47 +1878,26 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 	return r
 }
 
-func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	//dc.d.stats.TotalQueries.Add(1)
-
-	//if roTx == nil {
-	v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
+func (dc *DomainContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	if dc.valsC != nil {
+		return dc.valsC, nil
+	}
+	dc.valsC, err = tx.Cursor(dc.d.valsTable)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	fmt.Printf("dbg getBeforeTxNumFromFiles: %t\n", found)
-	if found {
-		return v, found, nil
-	}
-	//}
+	return dc.valsC, nil
+}
 
-	invertedStep := dc.numBuf[:]
-	binary.BigEndian.PutUint64(invertedStep, ^(fromTxNum / dc.d.aggregationStep))
-
-	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
+	if dc.keysC != nil {
+		return dc.keysC, nil
+	}
+	dc.keysC, err = tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	defer keyCursor.Close()
-
-	foundInvStep, err := keyCursor.SeekBothRange(key, invertedStep)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(foundInvStep) == 0 {
-		v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
-		if err != nil {
-			return nil, false, err
-		}
-		return v, found, nil
-	}
-	copy(dc.valKeyBuf[:], key)
-	copy(dc.valKeyBuf[len(key):], foundInvStep)
-	v, err = roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
-	if err != nil {
-		return nil, false, err
-	}
-	return v, true, nil
+	return dc.keysC, nil
 }
 
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
@@ -1994,20 +1910,15 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	}
 
 	var (
-		v       []byte
-		err     error
-		valsDup kv.CursorDupSort
+		v   []byte
+		err error
 	)
 
-	if !dc.d.domainLargeValues {
-		valsDup, err = roTx.CursorDupSort(dc.d.valsTable)
-		if err != nil {
-			return nil, false, err
-		}
-		defer valsDup.Close()
+	keysC, err := dc.keysCursor(roTx)
+	if err != nil {
+		return nil, false, err
 	}
-
-	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
+	_, foundInvStep, err := keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
@@ -2017,13 +1928,25 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 
 		switch dc.d.domainLargeValues {
 		case true:
-			v, err = roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
+			valsC, err := dc.valsCursor(roTx)
+			if err != nil {
+				return nil, false, err
+			}
+			_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
+			if err != nil {
+				return nil, false, fmt.Errorf("GetLatest value: %w", err)
+			}
 		default:
+			valsDup, err := roTx.CursorDupSort(dc.d.valsTable)
+			if err != nil {
+				return nil, false, err
+			}
 			v, err = valsDup.SeekBothRange(dc.valKeyBuf[:len(key)], dc.valKeyBuf[len(key):len(key)+8])
+			if err != nil {
+				return nil, false, fmt.Errorf("GetLatest value: %w", err)
+			}
 		}
-		if err != nil {
-			return nil, false, fmt.Errorf("GetLatest value: %w", err)
-		}
+
 		LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	}
