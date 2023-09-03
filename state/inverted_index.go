@@ -796,7 +796,7 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		//if found && equalOrHigherTxNum < txNum {
 		//fmt.Printf("to arr: %d, %d, %d, cnt=%d\n", txNum, equalOrHigherTxNum, iter.ToArrU64Must(ef.Iterator()), ef.Count())
 		//}
-		if 487 == txNum {
+		if 953 == txNum {
 			fmt.Printf("hist seek9: %x, %d -> %d, %t, %s\n", key, txNum, equalOrHigherTxNum, found, ic.files[i].src.decompressor.FileName())
 			fmt.Printf("to arr: %d, %d, %d, cnt=%d\n", txNum, equalOrHigherTxNum, iter.ToArrU64Must(ef.Iterator()), ef.Count())
 		}

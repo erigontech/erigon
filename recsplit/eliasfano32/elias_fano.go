@@ -245,13 +245,13 @@ func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	for j := uint64(i); j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
-			if v == 487 {
+			if v == 953 {
 				fmt.Printf("alex4: %d -> %d, %t\n", v, val, val >= v)
 			}
 			return val, j, true
 		}
 	}
-	if v == 487 {
+	if v == 953 {
 		fmt.Printf("alex3\n")
 	}
 	return 0, 0, false
