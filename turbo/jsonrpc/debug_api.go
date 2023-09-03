@@ -75,6 +75,9 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 	if api.historyV3(tx) {
 		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		if number == nil {
+			return StorageRangeResult{}, fmt.Errorf("block not found")
+		}
 		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
 		if err != nil {
 			return StorageRangeResult{}, err
