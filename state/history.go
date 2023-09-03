@@ -1369,6 +1369,8 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		eliasVal, _ := g.Next(nil)
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		n, ok := ef.Search(txNum)
+
+		//fmt.Printf("searh: %x, %d -> %d, %t\n", key, txNum, n, ok)
 		if hc.trace {
 			n2, _ := ef.Search(n + 1)
 			n3, _ := ef.Search(n - 1)
@@ -1388,12 +1390,15 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	hasher.Reset()
 	hasher.Write(key) //nolint
 	hi, _ := hasher.Sum128()
-	for i := len(hc.files) - 1; i >= 0; i-- {
-		//fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
+
+	var checked int
+
+	for i := 0; i < len(hc.files); i++ {
+		fmt.Printf("[dbg] b: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
 		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
 			continue
 		}
-		if hc.ic.ii.withExistenceIndex {
+		if hc.ic.ii.withExistenceIndex && hc.ic.files[i].src.bloom != nil {
 			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
 				//fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 				continue
@@ -1401,8 +1406,13 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 				//fmt.Printf("[dbg] bloom yes %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 			}
 		}
+		checked++
 		findInFile(hc.files[i])
+		fmt.Printf("found1: %d,%t\n", checked, found)
 		if found {
+			break
+		}
+		if checked == 2 {
 			break
 		}
 	}
@@ -1628,11 +1638,11 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		return nil, false, err
 	}
 	defer c.Close()
-	seek := make([]byte, len(key)+8)
-	copy(seek, key)
-	binary.BigEndian.PutUint64(seek[len(key):], txNum)
+	txNumBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(txNumBytes, txNum)
 
-	val, err := c.SeekBothRange(key, seek[len(key):])
+	val, err := c.SeekBothRange(key, txNumBytes)
+	fmt.Printf("txNumBytes: %x, %x -> %x\n", key, txNumBytes, val)
 	if err != nil {
 		return nil, false, err
 	}

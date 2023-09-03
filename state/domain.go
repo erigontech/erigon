@@ -1633,10 +1633,12 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	dc.d.stats.FilesQueries.Add(1)
 	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].endTxNum < fromTxNum {
-			break
+		fmt.Printf("iter22: %d-%d < %d, %s\n", dc.files[i].startTxNum, dc.files[i].endTxNum, fromTxNum, dc.files[i].src.decompressor.FileName())
+		if dc.files[i].endTxNum >= fromTxNum {
+			continue
 		}
 		v, ok, err = dc.getFromFile(i, filekey)
+		fmt.Printf("found dd : %d-%d < %d, %t\n", dc.files[i].startTxNum, dc.files[i].endTxNum, fromTxNum, ok)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1796,10 +1798,10 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
+	//dc.d.stats.FilesQueries.Add(1)
 
 	{
-		v, found, err = dc.hc.GetNoState(key, txNum)
+		v, found, err = dc.hc.GetNoStateWithRecent(key, txNum, roTx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1808,48 +1810,54 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 		}
 	}
 
-	var anyItem bool
-	var topState ctxItem
-	for _, item := range dc.hc.ic.files {
-		if item.endTxNum < txNum {
-			continue
-		}
-		anyItem = true
-		topState = item
-		break
+	//var anyItem bool
+	//var topState ctxItem
+	//for _, item := range dc.hc.ic.files {
+	//	if item.endTxNum < txNum {
+	//		continue
+	//	}
+	//	anyItem = true
+	//	topState = item
+	//	break
+	//}
+	//if anyItem {
+	//	// If there were no changes but there were history files, the value can be obtained from value files
+	//	var ok bool
+	//	for i := len(dc.files) - 1; i >= 0; i-- {
+	//		if dc.files[i].startTxNum > topState.startTxNum {
+	//			continue
+	//		}
+	//		fmt.Printf("getFromFile: %d, top=%d\n", i, topState.startTxNum)
+	//		v, ok, err = dc.getFromFile(i, key)
+	//		//fmt.Printf("getFromFile: %d,%t\n", i, ok)
+	//		if err != nil {
+	//			return nil, false, err
+	//		}
+	//		if !ok {
+	//			continue
+	//		}
+	//		found = true
+	//		break
+	//	}
+	//	return v, found, nil
+	//}
+	//// Value not found in history files, look in the recent history
+	//if roTx == nil {
+	//	return nil, false, fmt.Errorf("roTx is nil")
+	//}
+	v, found, err = dc.hc.getNoStateFromDB(key, txNum, roTx)
+	if err != nil {
+		return nil, false, err
 	}
-	if anyItem {
-		// If there were no changes but there were history files, the value can be obtained from value files
-		var ok bool
-		for i := len(dc.files) - 1; i >= 0; i-- {
-			if dc.files[i].startTxNum > topState.startTxNum {
-				continue
-			}
-			// _, v, ok, err = dc.statelessBtree(i).Get(key, dc.statelessGetter(i))
-			v, ok, err = dc.getFromFile(i, key)
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok {
-				continue
-			}
-			found = true
-			break
-		}
-		return v, found, nil
-	}
-	// Value not found in history files, look in the recent history
-	if roTx == nil {
-		return nil, false, fmt.Errorf("roTx is nil")
-	}
-	return dc.hc.getNoStateFromDB(key, txNum, roTx)
+	fmt.Printf("getNoStateFromDB: %t\n", found)
+	return v, found, nil
 }
 
 // GetBeforeTxNum does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := dc.historyBeforeTxNum(key, txNum, roTx)
-	fmt.Printf("a: %x, %d, %x, %t\n", key, txNum, v, hOk)
+	v, hOk, err := dc.hc.GetNoStateWithRecent(key, txNum, roTx)
+	fmt.Printf("historyBeforeTxNum: %x, %d, %x, %t\n", key, txNum, v, hOk)
 	if err != nil {
 		return nil, err
 	}
@@ -1861,10 +1869,18 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		}
 		return v, nil
 	}
-	if v, _, err = dc.getBeforeTxNum(key, txNum, roTx); err != nil {
-		return nil, err
-	}
-	return v, nil
+	v, ok, err := dc.GetLatest(key, nil, roTx)
+	fmt.Printf("dbg latest state: %t\n", ok)
+
+	//v, ok, err := dc.getBeforeTxNum(key, txNum, roTx)
+	//fmt.Printf("dbg latest state: %t\n", ok)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if !ok {
+	//	return nil, nil
+	//}
+	return v, err
 }
 
 func (dc *DomainContext) Close() {
@@ -1928,13 +1944,16 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	//dc.d.stats.TotalQueries.Add(1)
 
-	if roTx == nil {
-		v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
-		if err != nil {
-			return nil, false, err
-		}
+	//if roTx == nil {
+	v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
+	if err != nil {
+		return nil, false, err
+	}
+	fmt.Printf("dbg getBeforeTxNumFromFiles: %t\n", found)
+	if found {
 		return v, found, nil
 	}
+	//}
 
 	invertedStep := dc.numBuf[:]
 	binary.BigEndian.PutUint64(invertedStep, ^(fromTxNum / dc.d.aggregationStep))
@@ -1958,7 +1977,7 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 	}
 	copy(dc.valKeyBuf[:], key)
 	copy(dc.valKeyBuf[len(key):], foundInvStep)
-	v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
+	v, err = roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
 	}
