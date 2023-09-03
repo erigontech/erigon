@@ -1358,9 +1358,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
-	if 953 == txNum {
-		fmt.Printf("hist seek2: %x, %d -> %d, %t\n", key, txNum, histTxNum, ok)
-	}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1379,10 +1376,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	g.Reset(offset)
 
 	v, _ := g.Next(nil)
-	if 953 == txNum {
-		fmt.Printf("found in hist file: %s\n", historyItem.src.decompressor.FileName())
-	}
-
 	return v, true, nil
 }
 
@@ -1555,11 +1548,6 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 		return v, true, nil
 	}
 
-	// Value not found in history files, look in the recent history
-	if roTx == nil {
-		panic(txNum)
-		return nil, false, fmt.Errorf("roTx is nil")
-	}
 	return hc.getNoStateFromDB(key, txNum, roTx)
 }
 

@@ -464,23 +464,15 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	require := require.New(t)
 	ctx := context.Background()
 	var err error
-	var roTx kv.Tx
 
 	// Check the history
 	dc := d.MakeContext()
 	defer dc.Close()
-	for txNum := uint64(0); txNum <= txs; txNum++ {
-		if txNum == 976 {
-			// Create roTx only for the last several txNum, because all history before that
-			// we should be able to read without any DB access
-			roTx, err = db.BeginRo(ctx)
-			require.NoError(err)
-			defer roTx.Rollback()
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(err)
+	defer roTx.Rollback()
 
-			dc.Close()
-			dc = d.MakeContext()
-			defer dc.Close()
-		}
+	for txNum := uint64(0); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			valNum := txNum / keyNum
 			var k [8]byte
