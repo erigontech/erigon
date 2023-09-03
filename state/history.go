@@ -1400,13 +1400,9 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
 			continue
 		}
-		fmt.Printf("[dbg] hist iter: %d, %d, %d\n", hc.files[i].startTxNum, hc.ic.files[i].startTxNum, txNum)
 		if hc.ic.ii.withExistenceIndex && hc.ic.files[i].src.bloom != nil {
 			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
-				//fmt.Printf("[dbg] bloom no %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 				continue
-			} else {
-				//fmt.Printf("[dbg] bloom yes %x %s\n", key, hc.ic.files[i].src.bloom.FileName())
 			}
 		}
 		checked++
