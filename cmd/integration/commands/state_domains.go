@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 

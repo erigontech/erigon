@@ -3,12 +3,13 @@ package machine
 import (
 	"errors"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/metrics"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 // ProcessBlock processes a block with the block processor
@@ -19,7 +20,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *clty
 	if signedBlock.Version() != version {
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d", block.Slot)
 	}
-	h := methelp.NewHistTimer("beacon_process_block")
+	h := metrics.NewHistTimer("beacon_process_block")
 	// Process the block header.
 	if err := impl.ProcessBlockHeader(s, block); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
