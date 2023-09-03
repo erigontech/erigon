@@ -49,7 +49,7 @@ func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (lib
 
 func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
 	// First, reset the Canonical status for all other block roots with the same slot
-	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot != ?", slot); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot = ?", slot); err != nil {
 		return fmt.Errorf("failed to reset canonical status for other block roots: %v", err)
 	}
 
