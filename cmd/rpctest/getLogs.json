@@ -3,8 +3,11 @@
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x24AD00",
-      "toBlock": "0x24AE01"
+      "address": "0xa3e7317e591d5a0f1c605be1b3ac4d2ae56104d6",
+      "topics": [
+        "0x5038a30b900118d4e513ba62ebd647a96726a6f81b8fda73c21e9da45df5423d",
+        "0x0000000000000000000000002a7c311516266934d9acd76cf4ca1035d139adaa"
+      ]
     }
   ],
   "id": 537758
