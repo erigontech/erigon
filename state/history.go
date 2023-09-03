@@ -1373,11 +1373,11 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		return nil, false, nil
 	}
 	offset := reader.Lookup2(txKey[:], key)
-	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 	g := hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 
 	v, _ := g.Next(nil)
+	fmt.Printf("found in hist file: %s\n", historyItem.src.decompressor.FileName())
 	return v, true, nil
 }
 
@@ -1556,6 +1556,7 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 	}
 	return hc.getNoStateFromDB(key, txNum, roTx)
 }
+
 func (hc *HistoryContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if hc.valsC != nil {
 		return hc.valsC, nil
@@ -1612,25 +1613,6 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
-}
-
-// Iwant to know
-// - key, value, txNum when value was added
-// - is it last presence of key in history
-func (hc *HistoryContext) GetRecent(key []byte, txNum uint64, roTx kv.Tx) (uint64, bool, []byte, []byte, error) {
-	//v, ok, err := hc.GetNoState(key, txNum)
-	//if err != nil {
-	//	return 0, nil, nil, err
-	//}
-	//if ok {
-	//	return 0, key, v, nil
-	//}
-
-	// Value not found in history files, look in the recent history
-	if roTx == nil {
-		return 0, false, nil, nil, fmt.Errorf("roTx is nil")
-	}
-	return hc.getRecentFromDB(key, txNum, roTx)
 }
 
 // key[NewTxNum] -> value

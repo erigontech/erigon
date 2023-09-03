@@ -476,6 +476,10 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			roTx, err = db.BeginRo(ctx)
 			require.NoError(err)
 			defer roTx.Rollback()
+
+			dc.Close()
+			dc = d.MakeContext()
+			defer dc.Close()
 		}
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			valNum := txNum / keyNum
