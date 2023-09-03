@@ -232,6 +232,8 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 	if err != nil {
 		return nil, nil, err
 	}
+
+	genesisBlock, err = api.blockByRPCNumber(context.Background(), 0, tx)
 	if err != nil {
 		return nil, nil, err
 	}
