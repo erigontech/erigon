@@ -58,7 +58,7 @@ type SharedDomains struct {
 	account    map[string][]byte
 	code       map[string][]byte
 	storage    *btree2.Map[string, []byte]
-	commitment *btree2.Map[string, []byte]
+	commitment map[string][]byte
 	Account    *Domain
 	Storage    *Domain
 	Code       *Domain
@@ -78,7 +78,7 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 		Storage:    s,
 		storage:    btree2.NewMap[string, []byte](128),
 		Commitment: comm,
-		commitment: btree2.NewMap[string, []byte](128),
+		commitment: map[string][]byte{},
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
@@ -117,7 +117,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	log.Debug("ClearRam", "commitment", resetCommitment, "tx", sd.txNum.Load(), "block", sd.blockNum.Load())
 	sd.account = map[string][]byte{}
 	sd.code = map[string][]byte{}
-	sd.commitment = btree2.NewMap[string, []byte](128)
+	sd.commitment = map[string][]byte{}
 	if resetCommitment {
 		sd.Commitment.updates.List(true)
 		sd.Commitment.patriciaTrie.Reset()
@@ -157,11 +157,12 @@ func (sd *SharedDomains) puts(table kv.Domain, key []byte, val []byte) {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
 	case kv.CommitmentDomain:
-		if old, ok := sd.commitment.Set(keyS, val); ok {
+		if old, ok := sd.commitment[keyS]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
+		sd.commitment[keyS] = val
 	default:
 		panic(fmt.Errorf("sharedDomains put to invalid table %s", table))
 	}
@@ -186,7 +187,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	case kv.StorageDomain:
 		v, ok = sd.storage.Get(keyS)
 	case kv.CommitmentDomain:
-		v, ok = sd.commitment.Get(keyS)
+		v, ok = sd.commitment[keyS]
 	default:
 		panic(table)
 	}
@@ -713,7 +714,7 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 		sd.account = map[string][]byte{}
 	}
 	if sd.commitment == nil {
-		sd.commitment = btree2.NewMap[string, []byte](128)
+		sd.commitment = map[string][]byte{}
 	}
 	if sd.code == nil {
 		sd.code = map[string][]byte{}
@@ -741,7 +742,7 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 		sd.account = map[string][]byte{}
 	}
 	if sd.commitment == nil {
-		sd.commitment = btree2.NewMap[string, []byte](128)
+		sd.commitment = map[string][]byte{}
 	}
 	if sd.code == nil {
 		sd.code = map[string][]byte{}
