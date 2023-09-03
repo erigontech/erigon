@@ -197,12 +197,7 @@ Content-Type: application/json
 {
   "jsonrpc": "2.0",
   "method": "eth_getLogs",
-  "params": [
-    {
-      "fromBlock": "0x24AD00",
-      "toBlock": "0x24AD01"
-    }
-  ],
+  "params": [    {      "fromBlock": "0x24AD00",      "toBlock": "0x24AE01"    }  ],
   "id": 537758
 }
 
@@ -216,7 +211,7 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x24AF8A",
+      "fromBlock": "0x24AF7A",
       "toBlock": "0x24AF8A"
     }
   ],
