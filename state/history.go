@@ -1358,11 +1358,12 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
+	if 487 == txNum {
+		fmt.Printf("hist seek: %x, %d -> %d, %t\n", key, txNum, histTxNum, ok)
+	}
 	if !ok {
 		return nil, false, nil
 	}
-	fmt.Printf("hist seek: %x, %d -> %d\n", key, txNum, histTxNum)
-
 	historyItem, ok := hc.getFile(histTxNum)
 	if !ok {
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, histTxNum/hc.h.aggregationStep, histTxNum/hc.h.aggregationStep)
@@ -1378,7 +1379,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	g.Reset(offset)
 
 	v, _ := g.Next(nil)
-	fmt.Printf("found in hist file: %s\n", historyItem.src.decompressor.FileName())
+	if 487 == txNum {
+		fmt.Printf("found in hist file: %s\n", historyItem.src.decompressor.FileName())
+	}
+
 	return v, true, nil
 }
 
