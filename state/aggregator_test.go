@@ -430,17 +430,19 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	ct := agg.MakeContext()
 	defer ct.Close()
 	domains := agg.SharedDomains(ct)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 	domains.SetTx(tx)
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
+		ct.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
+
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
-		t.Logf("commit to db txn=%d", txn)
-
+		ct = agg.MakeContext()
+		domains = agg.SharedDomains(ct)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		domains.SetTx(tx)
 		return nil
@@ -494,6 +496,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	ct.Close()
 	err = tx.Commit()
 	tx = nil
 

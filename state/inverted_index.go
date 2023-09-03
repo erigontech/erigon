@@ -667,7 +667,6 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 		files:        *ii.roFiles.Load(),
 		warmLocality: ii.warmLocalityIdx.MakeContext(),
 		coldLocality: ii.coldLocalityIdx.MakeContext(),
-		hasher:       murmur3.New128WithSeed(*ii.salt), // TODO: agg can have pool of such
 	}
 	for _, item := range ic.files {
 		if !item.src.frozen {
@@ -707,22 +706,35 @@ func (ic *InvertedIndexContext) Close() {
 type InvertedIndexContext struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)
-	getters []*compress.Getter
+	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-	hasher  murmur3.Hash128
 
 	warmLocality *ctxLocalityIdx
 	coldLocality *ctxLocalityIdx
+
+	_hasher murmur3.Hash128
 }
 
-func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {
+func (ic *InvertedIndexContext) statelessHasher() murmur3.Hash128 {
+	if ic._hasher == nil {
+		ic._hasher = murmur3.New128WithSeed(*ic.ii.salt)
+	}
+	ic._hasher.Reset()
+	return ic._hasher
+}
+func (ic *InvertedIndexContext) hashKey(k []byte) (hi, lo uint64) {
+	hasher := ic.statelessHasher()
+	_, _ = hasher.Write(k) //nolint:errcheck
+	return hasher.Sum128()
+}
+
+func (ic *InvertedIndexContext) statelessGetter(i int) ArchiveGetter {
 	if ic.getters == nil {
-		ic.getters = make([]*compress.Getter, len(ic.files))
+		ic.getters = make([]ArchiveGetter, len(ic.files))
 	}
 	r := ic.getters[i]
 	if r == nil {
-		r = ic.files[i].src.decompressor.MakeGetter()
-		ic.getters[i] = r
+		ic.getters[i] = NewArchiveGetter(ic.files[i].src.decompressor.MakeGetter(), ic.ii.compression)
 	}
 	return r
 }
@@ -745,6 +757,65 @@ func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 		}
 	}
 	return it, false
+}
+
+func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
+	var findInFile = func(item ctxItem) (ok bool, n uint64) {
+		reader := ic.statelessIdxReader(item.i)
+		if reader.Empty() {
+			return false, 0
+		}
+		offset := reader.Lookup(key)
+
+		// TODO do we always compress inverted index?
+		g := ic.statelessGetter(item.i)
+		g.Reset(offset)
+		k, _ := g.Next(nil)
+		if !bytes.Equal(k, key) {
+			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
+			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
+			//}
+			return false, 0
+		}
+		eliasVal, _ := g.Next(nil)
+		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+		n, ok = ef.Search(txNum)
+
+		//fmt.Printf("searh: %x, %d -> %d, %t\n", key, txNum, n, ok)
+		//if ic.trace {
+		//	n2, _ := ef.Search(n + 1)
+		//	n3, _ := ef.Search(n - 1)
+		//	fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
+		//}
+		if ok {
+			return true, n
+		}
+		return false, 0
+	}
+
+	var hi uint64
+	if ic.ii.withExistenceIndex {
+		hi, _ = ic.hashKey(key)
+	}
+
+	var checked int
+
+	for i := 0; i < len(ic.files); i++ {
+		if ic.files[i].startTxNum > txNum || ic.files[i].endTxNum <= txNum {
+			continue
+		}
+		if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
+			if !ic.files[i].src.bloom.ContainsHash(hi) {
+				continue
+			}
+		}
+		checked++
+		found, equalOrHigherTxNum = findInFile(ic.files[i])
+		if found {
+			return found, equalOrHigherTxNum
+		}
+	}
+	return false, 0
 }
 
 // IdxRange - return range of txNums for given `key`

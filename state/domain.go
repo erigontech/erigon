@@ -861,11 +861,8 @@ type DomainContext struct {
 func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
-		if dc.files[i].src.bloom != nil {
-			hasher := dc.hc.ic.hasher
-			hasher.Reset()
-			hasher.Write(filekey) //nolint:errcheck
-			hi, _ := hasher.Sum128()
+		if dc.d.withExistenceIndex && dc.files[i].src.bloom != nil {
+			hi, _ := dc.hc.ic.hashKey(filekey)
 			if !dc.files[i].src.bloom.ContainsHash(hi) {
 				return nil, false, nil
 			}
@@ -1632,40 +1629,54 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
-	var ok bool
+func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v []byte, found bool, err error) {
+	hi, _ := dc.hc.ic.hashKey(filekey)
+
+	var ok, needMetric, filtered bool
+	needMetric = true
+	t := time.Now()
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		fmt.Printf("iter22: %d-%d < %d, %s\n", dc.files[i].startTxNum, dc.files[i].endTxNum, fromTxNum, dc.files[i].src.decompressor.FileName())
-		if dc.files[i].endTxNum >= fromTxNum {
-			continue
-		}
-		v, ok, err = dc.getFromFile(i, filekey)
-		fmt.Printf("found dd : %d-%d < %d, %t\n", dc.files[i].startTxNum, dc.files[i].endTxNum, fromTxNum, ok)
+		//isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
+		//if !isUseful {
+		//	continue
+		//}
+		v, ok, filtered, err = dc.getFromFile2(i, filekey, hi)
 		if err != nil {
 			return nil, false, err
 		}
 		if !ok {
+			if !filtered {
+				needMetric = false
+			}
 			continue
 		}
-		found = true
-		break
-
+		LatestStateReadGrind.UpdateDuration(t)
+		return v, true, nil
 	}
-	return v, found, nil
+	if !needMetric {
+		LatestStateReadGrindNotFound.UpdateDuration(t)
+	}
+	return nil, false, nil
 }
-
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	//if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
-	//	return nil, false, err
-	//} else if found {
-	//	return v, true, nil
-	//}
+	if dc.d.withExistenceIndex {
+		return dc.getLatestFromFilesWithExistenceIndex(filekey)
+	}
 
-	return dc.getLatestFromColdFilesGrind(filekey)
+	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
+		return nil, false, err
+	} else if found {
+		return v, true, nil
+	}
+
+	if v, found, err = dc.getLatestFromColdFilesGrind(filekey); err != nil {
+		return nil, false, err
+	} else if found {
+		return v, true, nil
+	}
 
 	// still not found, search in indexed cold shards
-	//return dc.getLatestFromColdFiles(filekey)
+	return dc.getLatestFromColdFiles(filekey)
 }
 
 func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
@@ -1673,7 +1684,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	_ = ok
+	// _ = ok
 	if !ok {
 		return nil, false, nil
 	}
@@ -1710,16 +1721,17 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	// - cold locality index is "lazy"-built
 	// corner cases:
 	// - cold and warm segments can overlap
-	//lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
-	//firstWarmIndexedTxNum, haveWarmIdx := dc.hc.ic.warmLocality.indexedFrom()
-	//if !haveWarmIdx && len(dc.files) > 0 {
-	//	firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
-	//}
-	//
-	//if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
-	//	return nil, false, nil
-	//}
+	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
+	firstWarmIndexedTxNum, haveWarmIdx := dc.hc.ic.warmLocality.indexedFrom()
+	if !haveWarmIdx && len(dc.files) > 0 {
+		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
+	}
 
+	if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
+		return nil, false, nil
+	}
+
+	t := time.Now()
 	//if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
 	//	if dc.d.filenameBase != "commitment" {
 	//		log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
@@ -1732,34 +1744,22 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	//	}
 	//}
 
-	hasher := dc.hc.ic.hasher
-	hasher.Reset()
-	hasher.Write(filekey) //nolint:errcheck
-	hi, _ := hasher.Sum128()
-
-	var ok, needMetric, filtered bool
-	needMetric = true
-	t := time.Now()
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		//isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
-		//if !isUseful {
-		//	continue
-		//}
-		v, ok, filtered, err = dc.getFromFile2(i, filekey, hi)
+		isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
+		if !isUseful {
+			continue
+		}
+		v, ok, err := dc.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, err
 		}
 		if !ok {
-			if !filtered {
-				needMetric = false
-			}
+			LatestStateReadGrindNotFound.UpdateDuration(t)
+			t = time.Now()
 			continue
 		}
 		LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
-	}
-	if !needMetric {
-		LatestStateReadGrindNotFound.UpdateDuration(t)
 	}
 	return nil, false, nil
 }

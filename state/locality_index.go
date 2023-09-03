@@ -375,7 +375,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		rs.DisableFsync()
 	}
 
-	//hasher := murmur3.New128WithSeed(rs.Salt())
+	//statelessHasher := murmur3.New128WithSeed(rs.Salt())
 	var bloom *bloomFilter
 	for {
 		p.Processed.Store(0)
@@ -419,9 +419,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
-			//hasher.Reset()
-			//hasher.Write(k) //nolint:errcheck
-			//hi, _ := hasher.Sum128()
+			//statelessHasher.Reset()
+			//statelessHasher.Write(k) //nolint:errcheck
+			//hi, _ := statelessHasher.Sum128()
 			//bloom.AddHash(hi)
 
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)

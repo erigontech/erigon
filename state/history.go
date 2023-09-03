@@ -1336,102 +1336,45 @@ func (hc *HistoryContext) Close() {
 	hc.ic.Close()
 }
 
-func (hc *HistoryContext) getFile(from, to uint64) (it ctxItem, ok bool) {
-	for _, item := range hc.files {
-		if item.startTxNum == from && item.endTxNum == to {
-			return item, true
+func (hc *HistoryContext) getFileDeprecated(from, to uint64) (it ctxItem, ok bool) {
+	for i := 0; i < len(hc.files); i++ {
+		if hc.files[i].startTxNum == from && hc.files[i].endTxNum == to {
+			return hc.files[i], true
+		}
+	}
+	return it, false
+}
+func (hc *HistoryContext) getFile(txNum uint64) (it ctxItem, ok bool) {
+	for i := 0; i < len(hc.files); i++ {
+		if hc.files[i].startTxNum <= txNum && hc.files[i].endTxNum > txNum {
+			return hc.files[i], true
 		}
 	}
 	return it, false
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
-	var foundTxNum uint64
-	var foundEndTxNum uint64
-	var foundStartTxNum uint64
-	var found bool
-	var findInFile = func(item ctxItem) bool {
-		reader := hc.ic.statelessIdxReader(item.i)
-		if reader.Empty() {
-			return true
-		}
-		offset := reader.Lookup(key)
-
-		// TODO do we always compress inverted index?
-		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compression)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-
-		if !bytes.Equal(k, key) {
-			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
-			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
-			//}
-			return true
-		}
-		eliasVal, _ := g.Next(nil)
-		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-		n, ok := ef.Search(txNum)
-
-		//fmt.Printf("searh: %x, %d -> %d, %t\n", key, txNum, n, ok)
-		if hc.trace {
-			n2, _ := ef.Search(n + 1)
-			n3, _ := ef.Search(n - 1)
-			fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
-		}
-		if ok {
-			foundTxNum = n
-			foundEndTxNum = item.endTxNum
-			foundStartTxNum = item.startTxNum
-			found = true
-			return false
-		}
-		return true
+	// Files list of II and History is different
+	// it means II can't return index of file, but can return TxNum which History will use to find own file
+	ok, histTxNum := hc.ic.Seek(key, txNum)
+	if !ok {
+		return nil, false, nil
 	}
 
-	hasher := hc.ic.hasher
-	hasher.Reset()
-	hasher.Write(key) //nolint
-	hi, _ := hasher.Sum128()
-
-	var checked int
-
-	for i := 0; i < len(hc.files); i++ {
-		if hc.files[i].startTxNum > txNum || hc.files[i].endTxNum <= txNum {
-			continue
-		}
-		if hc.ic.ii.withExistenceIndex && hc.ic.files[i].src.bloom != nil {
-			if !hc.ic.files[i].src.bloom.ContainsHash(hi) {
-				continue
-			}
-		}
-		checked++
-		findInFile(hc.files[i])
-		if found {
-			break
-		}
-		if checked == 2 {
-			break
-		}
+	historyItem, ok := hc.getFile(histTxNum)
+	if !ok {
+		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, histTxNum/hc.h.aggregationStep, histTxNum/hc.h.aggregationStep)
 	}
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], histTxNum)
+	reader := hc.statelessIdxReader(historyItem.i)
+	offset := reader.Lookup2(txKey[:], key)
+	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
+	g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
+	g.Reset(offset)
 
-	if found {
-		historyItem, ok := hc.getFile(foundStartTxNum, foundEndTxNum)
-		if !ok {
-			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
-		}
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		reader := hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(txKey[:], key)
-		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
-		g.Reset(offset)
-
-		v, _ := g.Next(nil)
-		return v, true, nil
-	}
-	return nil, false, nil
+	v, _ := g.Next(nil)
+	return v, true, nil
 }
 
 func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, error) {
@@ -1450,7 +1393,7 @@ func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, e
 		offset := reader.Lookup(key)
 
 		// TODO do we always compress inverted index?
-		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compression)
+		g := hc.ic.statelessGetter(item.i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 
@@ -1525,7 +1468,7 @@ func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, e
 	}
 
 	if found {
-		historyItem, ok := hc.getFile(foundStartTxNum, foundEndTxNum)
+		historyItem, ok := hc.getFileDeprecated(foundStartTxNum, foundEndTxNum)
 		if !ok {
 			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
 		}
@@ -1647,7 +1590,7 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
-		// val == []byte{},m eans key was created in this txNum and doesn't exists before.
+		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
 	c, err := hc.valsCursorDup(tx)
@@ -1663,7 +1606,7 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	if val == nil {
 		return nil, false, nil
 	}
-	// `val == []byte{}` means key was created in this txNum and doesn't exists before.
+	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
 }
 
@@ -1869,7 +1812,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], n)
-		historyItem, ok := hi.hc.getFile(top.startTxNum, top.endTxNum)
+		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
@@ -2174,7 +2117,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], n)
-		historyItem, ok := hi.hc.getFile(top.startTxNum, top.endTxNum)
+		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
