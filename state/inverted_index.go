@@ -328,7 +328,7 @@ func (ii *InvertedIndex) missedIdxFilterFiles() (l []*filesItem) {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if !dir.FileExist(filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efif", ii.filenameBase, fromStep, toStep))) {
+			if !dir.FileExist(filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))) {
 				l = append(l, item)
 			}
 		}
