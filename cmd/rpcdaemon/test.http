@@ -219,8 +219,11 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x24AF7A",
-      "toBlock": "0x24AF8A"
+      "address": "0xe8b0a865e4663636bf4d6b159c57333210b0c229",
+      "topics": [
+        "0x803c5a12f6bde629cea32e63d4b92d1b560816a6fb72e939d3c89e1cab650417",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+      ]
     }
   ],
   "id": 537758
@@ -234,11 +237,16 @@ Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
-  "method": "eth_getWork",
-  "params": [],
-  "id": 537758
+  "method": "debug_storageRangeAt",
+  "params": [
+    "0x4b8e94adcdca6352858499654606def91bad8978ad70028fd629ba770e76e304",
+    1,
+    "0xe8b0a865e4663636bf4d6b159c57333210b0c229",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    1024
+  ],
+  "id": 1377
 }
-
 
 
 ###
