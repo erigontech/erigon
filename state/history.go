@@ -1172,7 +1172,7 @@ type HistoryContext struct {
 	ic *InvertedIndexContext
 
 	files   []ctxItem // have no garbage (canDelete=true, overlaps, etc...)
-	getters []*compress.Getter
+	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
 	trace bool
@@ -1199,13 +1199,14 @@ func (h *History) MakeContext() *HistoryContext {
 	return &hc
 }
 
-func (hc *HistoryContext) statelessGetter(i int) *compress.Getter {
+func (hc *HistoryContext) statelessGetter(i int) ArchiveGetter {
 	if hc.getters == nil {
-		hc.getters = make([]*compress.Getter, len(hc.files))
+		hc.getters = make([]ArchiveGetter, len(hc.files))
 	}
 	r := hc.getters[i]
 	if r == nil {
-		r = hc.files[i].src.decompressor.MakeGetter()
+		g := hc.files[i].src.decompressor.MakeGetter()
+		r = NewArchiveGetter(g, hc.h.compression)
 		hc.getters[i] = r
 	}
 	return r
@@ -1368,9 +1369,12 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], histTxNum)
 	reader := hc.statelessIdxReader(historyItem.i)
+	if reader.Empty() {
+		return nil, false, nil
+	}
 	offset := reader.Lookup2(txKey[:], key)
 	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-	g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
+	g := hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 
 	v, _ := g.Next(nil)
@@ -1477,7 +1481,7 @@ func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, e
 		reader := hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(txKey[:], key)
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
+		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 
 		v, _ := g.Next(nil)
@@ -1819,7 +1823,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 
-		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.hc.h.compression)
+		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil
@@ -2123,7 +2127,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.hc.h.compression)
+		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil

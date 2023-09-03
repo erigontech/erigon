@@ -734,7 +734,9 @@ func (ic *InvertedIndexContext) statelessGetter(i int) ArchiveGetter {
 	}
 	r := ic.getters[i]
 	if r == nil {
-		ic.getters[i] = NewArchiveGetter(ic.files[i].src.decompressor.MakeGetter(), ic.ii.compression)
+		g := ic.files[i].src.decompressor.MakeGetter()
+		r = NewArchiveGetter(g, ic.ii.compression)
+		ic.getters[i] = r
 	}
 	return r
 }
@@ -760,45 +762,10 @@ func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 }
 
 func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
-	var findInFile = func(item ctxItem) (ok bool, n uint64) {
-		reader := ic.statelessIdxReader(item.i)
-		if reader.Empty() {
-			return false, 0
-		}
-		offset := reader.Lookup(key)
-
-		// TODO do we always compress inverted index?
-		g := ic.statelessGetter(item.i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
-			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
-			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
-			//}
-			return false, 0
-		}
-		eliasVal, _ := g.Next(nil)
-		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-		n, ok = ef.Search(txNum)
-
-		//fmt.Printf("searh: %x, %d -> %d, %t\n", key, txNum, n, ok)
-		//if ic.trace {
-		//	n2, _ := ef.Search(n + 1)
-		//	n3, _ := ef.Search(n - 1)
-		//	fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
-		//}
-		if ok {
-			return true, n
-		}
-		return false, 0
-	}
-
 	var hi uint64
 	if ic.ii.withExistenceIndex {
 		hi, _ = ic.hashKey(key)
 	}
-
-	var checked int
 
 	for i := 0; i < len(ic.files); i++ {
 		if ic.files[i].startTxNum > txNum || ic.files[i].endTxNum <= txNum {
@@ -809,10 +776,27 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 				continue
 			}
 		}
-		checked++
-		found, equalOrHigherTxNum = findInFile(ic.files[i])
+		reader := ic.statelessIdxReader(i)
+		if reader.Empty() {
+			return false, 0
+		}
+		offset := reader.Lookup(key)
+
+		// TODO do we always compress inverted index?
+		g := ic.statelessGetter(i)
+		g.Reset(offset)
+		k, _ := g.Next(nil)
+		if !bytes.Equal(k, key) {
+			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
+			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
+			//}
+			return false, 0
+		}
+		eliasVal, _ := g.Next(nil)
+		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+		equalOrHigherTxNum, found = ef.Search(txNum)
 		if found {
-			return found, equalOrHigherTxNum
+			return true, equalOrHigherTxNum
 		}
 	}
 	return false, 0
