@@ -795,6 +795,9 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		eliasVal, _ := g.Next(nil)
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		equalOrHigherTxNum, found = ef.Search(txNum)
+		if 487 == txNum {
+			fmt.Printf("hist seek: %x, %d -> %d, %t, %s\n", key, txNum, equalOrHigherTxNum, found, ic.files[i].src.decompressor.FileName())
+		}
 		if found {
 			return true, equalOrHigherTxNum
 		}
