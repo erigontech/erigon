@@ -471,7 +471,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	defer dc.Close()
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		if txNum == 976 {
-			// Create roTx obnly for the last several txNum, because all history before that
+			// Create roTx only for the last several txNum, because all history before that
 			// we should be able to read without any DB access
 			roTx, err = db.BeginRo(ctx)
 			require.NoError(err)
