@@ -1407,7 +1407,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		}
 		checked++
 		findInFile(hc.files[i])
-		fmt.Printf("found1: %d,%t\n", checked, found)
 		if found {
 			break
 		}
