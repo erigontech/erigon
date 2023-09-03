@@ -2335,8 +2335,8 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 
 func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
-		lastKey := common.Copy((*hi.h)[0].key)
-		lastVal := common.Copy((*hi.h)[0].val)
+		lastKey := (*hi.h)[0].key
+		lastVal := (*hi.h)[0].val
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {

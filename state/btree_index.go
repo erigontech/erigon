@@ -106,7 +106,7 @@ func (c *Cursor) Next() bool {
 	if err != nil {
 		return false
 	}
-	c.key, c.value = common.Copy(key), common.Copy(value)
+	c.key, c.value = key, value
 	return true
 }
 
