@@ -446,7 +446,7 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 			pos = table.pos[code]
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pos
 }
