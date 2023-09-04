@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -73,7 +74,7 @@ type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type UpdateTree struct {
 	tree   *btree.BTreeG[*commitmentItem]
-	keccak hash.Hash
+	keccak cryptozerocopy.KeccakState
 	keys   etl.Buffer
 	mode   CommitmentMode
 }
@@ -81,7 +82,7 @@ type UpdateTree struct {
 func NewUpdateTree(m CommitmentMode) *UpdateTree {
 	return &UpdateTree{
 		tree:   btree.NewG[*commitmentItem](64, commitmentItemLessPlain),
-		keccak: sha3.NewLegacyKeccak256(),
+		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 		keys:   etl.NewOldestEntryBuffer(datasize.MB * 32),
 		mode:   m,
 	}
@@ -163,7 +164,7 @@ func (t *UpdateTree) TouchStorage(c *commitmentItem, val []byte) {
 func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	t.keccak.Reset()
 	t.keccak.Write(val)
-	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+	t.keccak.Read(c.update.CodeHashOrStorage[:])
 	if c.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 		c.update.ValLength = 0

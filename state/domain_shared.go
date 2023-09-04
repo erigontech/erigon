@@ -347,9 +347,9 @@ func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error
 		//fmt.Printf("accountFn[sd]: code %x - %x\n", plainKey, code)
 		sd.Commitment.updates.keccak.Reset()
 		sd.Commitment.updates.keccak.Write(code)
-		copy(cell.CodeHash[:], sd.Commitment.updates.keccak.Sum(nil))
+		sd.Commitment.updates.keccak.Read(cell.CodeHash[:])
 	} else {
-		copy(cell.CodeHash[:], commitment.EmptyCodeHash)
+		cell.CodeHash = commitment.EmptyCodeHashArray
 	}
 	cell.Delete = len(encAccount) == 0 && len(code) == 0
 	return nil

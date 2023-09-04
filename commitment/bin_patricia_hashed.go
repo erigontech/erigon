@@ -1620,13 +1620,13 @@ func (bph *BinPatriciaHashed) hashAndNibblizeKey2(key []byte) []byte { //nolint
 
 	bph.keccak.Reset()
 	bph.keccak.Write(key[:length.Addr])
-	copy(hashedKey[:length.Hash], bph.keccak.Sum(nil))
+	bph.keccak.Read(hashedKey[:length.Hash])
 
 	if len(key[length.Addr:]) > 0 {
 		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
 		bph.keccak.Reset()
 		bph.keccak.Write(key[length.Addr:])
-		copy(hashedKey[length.Hash:], bph.keccak.Sum(nil))
+		bph.keccak.Read(hashedKey[length.Hash:])
 	}
 
 	nibblized := make([]byte, len(hashedKey)*2)

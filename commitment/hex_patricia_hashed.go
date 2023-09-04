@@ -1864,13 +1864,13 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 		fp = len(key)
 	}
 	hph.keccak.Write(key[:fp])
-	copy(hashedKey[:length.Hash], hph.keccak.Sum(nil))
+	hph.keccak.Read(hashedKey[:length.Hash])
 
 	if len(key[fp:]) > 0 {
 		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
 		hph.keccak.Reset()
 		hph.keccak.Write(key[fp:])
-		copy(hashedKey[length.Hash:], hph.keccak.Sum(nil))
+		hph.keccak.Read(hashedKey[length.Hash:])
 	}
 
 	nibblized := make([]byte, len(hashedKey)*2)
