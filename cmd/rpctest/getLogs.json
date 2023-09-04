@@ -4,11 +4,8 @@
   "method": "eth_getLogs",
   "params": [
     {
-      "address": "0xe8b0a865e4663636bf4d6b159c57333210b0c229",
-      "topics": [
-        "0x803c5a12f6bde629cea32e63d4b92d1b560816a6fb72e939d3c89e1cab650417",
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-      ]
+      "fromBlock": "0x17ADC0",
+      "toBlock": "0x17BEC0"
     }
    ],
   "id": 537758

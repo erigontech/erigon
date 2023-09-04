@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/erigontech/mdbx-go v0.33.1
-	github.com/ledgerwatch/erigon-lib 0540385ed19987f41088027d1d7cbe5aaacc9f29
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230904074922-0540385ed199
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230818153427-cc16b83a89be
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0

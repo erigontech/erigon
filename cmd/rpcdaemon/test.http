@@ -159,7 +159,7 @@ Content-Type: application/json
 
 ###
 
-POST 192.168.255.138:8545
+POST 127.0.0.1:8545
 Content-Type: application/json
 
 {
@@ -219,11 +219,8 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "address": "0xe8b0a865e4663636bf4d6b159c57333210b0c229",
-      "topics": [
-        "0x803c5a12f6bde629cea32e63d4b92d1b560816a6fb72e939d3c89e1cab650417",
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-      ]
+      "fromBlock": "0x14ADC0",
+      "toBlock": "0x14AEC0"
     }
   ],
   "id": 537758
