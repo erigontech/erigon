@@ -1163,7 +1163,7 @@ type HistoryContext struct {
 	ic *InvertedIndexContext
 
 	files   []ctxItem // have no garbage (canDelete=true, overlaps, etc...)
-	getters []*compress.Getter
+	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
 	trace bool
@@ -1187,13 +1187,14 @@ func (h *History) MakeContext() *HistoryContext {
 	return &hc
 }
 
-func (hc *HistoryContext) statelessGetter(i int) *compress.Getter {
+func (hc *HistoryContext) statelessGetter(i int) ArchiveGetter {
 	if hc.getters == nil {
-		hc.getters = make([]*compress.Getter, len(hc.files))
+		hc.getters = make([]ArchiveGetter, len(hc.files))
 	}
 	r := hc.getters[i]
 	if r == nil {
-		r = hc.files[i].src.decompressor.MakeGetter()
+		g := hc.files[i].src.decompressor.MakeGetter()
+		r = NewArchiveGetter(g, hc.h.compression)
 		hc.getters[i] = r
 	}
 	return r
@@ -1348,8 +1349,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		}
 		offset := reader.Lookup(key)
 
-		// TODO do we always compress inverted index?
-		g := NewArchiveGetter(hc.ic.statelessGetter(item.i), hc.h.InvertedIndex.compression)
+		g := hc.ic.statelessGetter(item.i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 
@@ -1360,13 +1360,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 			return true
 		}
 		eliasVal, _ := g.Next(nil)
-		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-		n, ok := ef.Search(txNum)
-		if hc.trace {
-			n2, _ := ef.Search(n + 1)
-			n3, _ := ef.Search(n - 1)
-			fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
-		}
+		n, ok := eliasfano32.Seek(eliasVal, txNum)
 		if ok {
 			foundTxNum = n
 			foundEndTxNum = item.endTxNum
@@ -1433,7 +1427,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		reader := hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(txKey[:], key)
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := NewArchiveGetter(hc.statelessGetter(historyItem.i), hc.h.compression)
+		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 
 		v, _ := g.Next(nil)
@@ -1744,8 +1738,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		ef, _ := eliasfano32.ReadEliasFano(idxVal)
-		n, ok := ef.Search(hi.startTxNum)
+		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -1759,7 +1752,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 
-		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.hc.h.compression)
+		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil
@@ -2046,8 +2039,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		ef, _ := eliasfano32.ReadEliasFano(idxVal)
-		n, ok := ef.Search(hi.startTxNum) //TODO: if startTxNum==0, can do ef.Get(0)
+		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -2063,7 +2055,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-		g := NewArchiveGetter(hi.hc.statelessGetter(historyItem.i), hi.hc.h.compression)
+		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil

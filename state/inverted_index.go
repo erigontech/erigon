@@ -32,6 +32,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
@@ -625,20 +626,36 @@ func (ic *InvertedIndexContext) Close() {
 type InvertedIndexContext struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)
-	getters []*compress.Getter
+	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
 	warmLocality *ctxLocalityIdx
 	coldLocality *ctxLocalityIdx
+
+	_hasher murmur3.Hash128
 }
 
-func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {
+func (ic *InvertedIndexContext) statelessHasher() murmur3.Hash128 {
+	if ic._hasher == nil {
+		ic._hasher = murmur3.New128WithSeed(*ic.ii.salt)
+	}
+	ic._hasher.Reset()
+	return ic._hasher
+}
+func (ic *InvertedIndexContext) hashKey(k []byte) (hi, lo uint64) {
+	hasher := ic.statelessHasher()
+	_, _ = hasher.Write(k) //nolint:errcheck
+	return hasher.Sum128()
+}
+
+func (ic *InvertedIndexContext) statelessGetter(i int) ArchiveGetter {
 	if ic.getters == nil {
-		ic.getters = make([]*compress.Getter, len(ic.files))
+		ic.getters = make([]ArchiveGetter, len(ic.files))
 	}
 	r := ic.getters[i]
 	if r == nil {
-		r = ic.files[i].src.decompressor.MakeGetter()
+		g := ic.files[i].src.decompressor.MakeGetter()
+		r = NewArchiveGetter(g, ic.ii.compression)
 		ic.getters[i] = r
 	}
 	return r

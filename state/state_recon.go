@@ -181,8 +181,8 @@ func (hii *HistoryIteratorInc) advance() {
 	hii.nextKey = nil
 	for hii.nextKey == nil && hii.key != nil {
 		val, _ := hii.indexG.NextUncompressed()
-		ef, _ := eliasfano32.ReadEliasFano(val)
-		if n, ok := ef.Search(hii.uptoTxNum); ok {
+		n, ok := eliasfano32.Seek(val, hii.uptoTxNum)
+		if ok {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], n)
 			offset := hii.r.Lookup2(txKey[:], hii.key)
