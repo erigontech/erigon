@@ -52,9 +52,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		hashOk   bool
 	)
 	if number, numberOk = blockNrOrHash.Number(); numberOk {
-		block, err = api.blockByRPCNumber(ctx, number, tx)
+		block, err = api.blockByRPCNumber(number, tx)
 	} else if hash, hashOk = blockNrOrHash.Hash(); hashOk {
-		block, err = api.blockByHashWithSenders(ctx, tx, hash)
+		block, err = api.blockByHashWithSenders(tx, hash)
 	} else {
 		return fmt.Errorf("invalid arguments; neither block nor hash specified")
 	}
@@ -181,7 +181,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -211,7 +211,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 		blockNum = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -371,7 +371,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err

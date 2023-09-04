@@ -33,7 +33,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +381,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, cannonicalBlockHash, blockNum)
+	block, err := api.blockWithSenders(tx, cannonicalBlockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
