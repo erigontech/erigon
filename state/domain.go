@@ -1855,9 +1855,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	t := time.Now()
 	key := key1
 	if len(key2) > 0 {
-		key = dc.keyBuf[:len(key1)+len(key2)]
-		copy(key, key1)
-		copy(key[len(key1):], key2)
+		key = append(append(dc.keyBuf[:0], key1...), key2...)
 	}
 
 	var (
