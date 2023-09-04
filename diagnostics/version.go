@@ -11,7 +11,7 @@ import (
 const Version = 3
 
 func SetupVersionAccess(metricsMux *http.ServeMux) {
-	metricsMux.HandleFunc("/debug/metrics/version", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeVersion(w)
 	})

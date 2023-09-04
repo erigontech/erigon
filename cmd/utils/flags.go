@@ -802,10 +802,9 @@ var (
 		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
 	}
 
-	DiagnosticsSessionsFlag = cli.StringFlag{
+	DiagnosticsSessionsFlag = cli.StringSliceFlag{
 		Name:  "diagnostics.ids",
 		Usage: "Comma separated list of support session ids to connect to",
-		Value: "",
 	}
 )
 
