@@ -90,8 +90,9 @@ func NewUpdateTree(m CommitmentMode) *UpdateTree {
 func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 	c := &commitmentItem{plainKey: key, update: commitment.Update{}}
 	copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
-	if t.tree.Has(c) {
-		return t.tree.Get(c)
+	el, ok := t.tree.Get(c)
+	if ok {
+		return el, true
 	}
 	c.plainKey = common.Copy(c.plainKey)
 	return c, false
