@@ -48,7 +48,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 		blockNumber = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+	block, err := api.blockByNumberWithSenders(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
-		block, bErr := api.blockByNumberWithSenders(ctx, dbtx, b)
+		block, bErr := api.blockByNumberWithSenders(dbtx, b)
 		if bErr != nil {
 			if first {
 				first = false

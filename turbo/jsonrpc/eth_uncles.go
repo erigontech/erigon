@@ -26,7 +26,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(tx, hash)
 	if err != nil {
 		return nil, err
 	}
