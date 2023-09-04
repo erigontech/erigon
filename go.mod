@@ -271,6 +271,9 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-
-replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+replace (
+	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.3
+	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
+)
