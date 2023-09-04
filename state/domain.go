@@ -891,14 +891,14 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 }
 
 func (dc *DomainContext) getFromFile2(i int, filekey []byte, hi uint64) ([]byte, bool, bool, error) {
+	if dc.d.withExistenceIndex && dc.files[i].src.bloom != nil {
+		if !dc.files[i].src.bloom.ContainsHash(hi) {
+			return nil, false, true, nil
+		}
+	}
+
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
-		if dc.files[i].src.bloom != nil {
-			if !dc.files[i].src.bloom.ContainsHash(hi) {
-				return nil, false, true, nil
-			}
-		}
-
 		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
 			return nil, false, false, err
@@ -1635,10 +1635,6 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 	needMetric = true
 	t := time.Now()
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		//isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
-		//if !isUseful {
-		//	continue
-		//}
 		v, ok, filtered, err = dc.getFromFile2(i, filekey, hi)
 		if err != nil {
 			return nil, false, err
