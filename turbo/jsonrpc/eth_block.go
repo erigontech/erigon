@@ -53,7 +53,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if !ok {
 			return nil, nil
 		}
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		block, err := api.blockByNumberWithSenders(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}

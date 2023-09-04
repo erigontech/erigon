@@ -821,7 +821,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
+	block, bErr := api.blockWithSenders(tx, blockHash, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -903,7 +903,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	ibs := state.New(stateReader)
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1065,7 +1065,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 
 	// TODO: can read here only parent header
-	parentBlock, err := api.blockWithSenders(ctx, dbtx, hash, blockNumber)
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1119,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	ibs := state.New(cachedReader)
 
 	// TODO: can read here only parent header
-	parentBlock, err := api.blockWithSenders(ctx, dbtx, hash, blockNumber)
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}

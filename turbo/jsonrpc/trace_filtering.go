@@ -168,7 +168,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, bErr := api.blockWithSenders(tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
