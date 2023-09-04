@@ -103,10 +103,3 @@ func Select64(x uint64, k int) (place int) {
 	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
 	return place + int(kSelectInByte[((x>>place)&0xFF)|(byteRank<<8)])
 }
-
-/*
-
-func Select64(x uint64, k int) int {
-
-}
-*/
