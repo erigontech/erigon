@@ -477,7 +477,7 @@ func (g *Getter) nextPattern() []byte {
 			pattern = *cw.pattern
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pattern
 }
