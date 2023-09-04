@@ -779,7 +779,6 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		}
 		offset := reader.LookupHash(hi, lo)
 
-		// TODO do we always compress inverted index?
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
@@ -787,8 +786,8 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 			continue
 		}
 		eliasVal, _ := g.Next(nil)
-		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-		equalOrHigherTxNum, found = ef.Search(txNum)
+		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
+
 		if found {
 			return true, equalOrHigherTxNum
 		}

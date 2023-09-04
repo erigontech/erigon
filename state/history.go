@@ -1357,6 +1357,9 @@ func (hc *HistoryContext) getFile(txNum uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
+	if !hc.h.withExistenceIndex {
+		return hc.getNoStateByLocalityIndex(key, txNum)
+	}
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
@@ -1378,8 +1381,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	v, _ := g.Next(nil)
 	return v, true, nil
 }
-
-func (hc *HistoryContext) GetNoState2(key []byte, txNum uint64) ([]byte, bool, error) {
+func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([]byte, bool, error) {
 	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.ic.coldLocality.lookupIdxFiles(key, txNum)
 
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
