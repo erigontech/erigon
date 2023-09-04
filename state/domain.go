@@ -890,36 +890,30 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 	return v, true, nil
 }
 
-func (dc *DomainContext) getFromFile2(i int, filekey []byte, hi uint64) ([]byte, bool, bool, error) {
-	if dc.d.withExistenceIndex && dc.files[i].src.bloom != nil {
-		if !dc.files[i].src.bloom.ContainsHash(hi) {
-			return nil, false, true, nil
-		}
-	}
-
+func (dc *DomainContext) getFromFile2(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
 		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
-			return nil, false, false, err
+			return nil, false, err
 		}
 		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-		return v, true, false, nil
+		return v, true, nil
 	}
 
 	reader := dc.statelessIdxReader(i)
 	if reader.Empty() {
-		return nil, false, false, nil
+		return nil, false, nil
 	}
 	offset := reader.Lookup(filekey)
 	g.Reset(offset)
 
 	k, _ := g.Next(nil)
 	if !bytes.Equal(filekey, k) {
-		return nil, false, false, nil
+		return nil, false, nil
 	}
 	v, _ := g.Next(nil)
-	return v, true, false, nil
+	return v, true, nil
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -1631,25 +1625,24 @@ var (
 func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v []byte, found bool, err error) {
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
-	var ok, needMetric, filtered bool
-	needMetric = true
-	t := time.Now()
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		v, ok, filtered, err = dc.getFromFile2(i, filekey, hi)
+		if dc.d.withExistenceIndex && dc.files[i].src.bloom != nil {
+			if !dc.files[i].src.bloom.ContainsHash(hi) {
+				continue
+			}
+		}
+
+		t := time.Now()
+		v, found, err = dc.getFromFile2(i, filekey)
 		if err != nil {
 			return nil, false, err
 		}
-		if !ok {
-			if !filtered {
-				needMetric = false
-			}
+		if !found {
+			LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
 		LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
-	}
-	if !needMetric {
-		LatestStateReadGrindNotFound.UpdateDuration(t)
 	}
 	return nil, false, nil
 }
