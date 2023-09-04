@@ -1128,26 +1128,26 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 
 	switch {
 	case txNum <= beforeTxNum:
-		nk, nv, err := c.Next()
+		nk, nv, err := c.NextDup()
 		if err != nil {
 			return nil, err
 		}
 
 		res = append(res, HistoryRecord{beforeTxNum, val})
-		if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
+		if nk != nil {
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), nv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err
 			}
 		}
 	case txNum > beforeTxNum:
-		pk, pv, err := c.Prev()
+		pk, pv, err := c.PrevDup()
 		if err != nil {
 			return nil, err
 		}
 
-		if pk != nil && bytes.Equal(pk[:len(pk)-8], key) {
-			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[8:]), pv[8:]})
+		if pk != nil {
+			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[:8]), pv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err
 			}
@@ -1167,6 +1167,11 @@ type HistoryContext struct {
 	readers []*recsplit.IndexReader
 
 	trace bool
+
+	valsC    kv.Cursor
+	valsCDup kv.CursorDupSort
+
+	_bufTs []byte
 }
 
 func (h *History) MakeContext() *HistoryContext {
@@ -1485,6 +1490,14 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	return true, eliasfano32.Max(eliasVal)
 }
 
+func (hc *HistoryContext) encodeTs(txNum uint64) []byte {
+	if hc._bufTs == nil {
+		hc._bufTs = make([]byte, 8)
+	}
+	binary.BigEndian.PutUint64(hc._bufTs, txNum)
+	return hc._bufTs
+}
+
 // GetNoStateWithRecent searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -1496,20 +1509,36 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 		return v, true, nil
 	}
 
-	// Value not found in history files, look in the recent history
-	if roTx == nil {
-		return nil, false, fmt.Errorf("roTx is nil")
-	}
 	return hc.getNoStateFromDB(key, txNum, roTx)
+}
+
+func (hc *HistoryContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	if hc.valsC != nil {
+		return hc.valsC, nil
+	}
+	hc.valsC, err = tx.Cursor(hc.h.historyValsTable)
+	if err != nil {
+		return nil, err
+	}
+	return hc.valsC, nil
+}
+func (hc *HistoryContext) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
+	if hc.valsCDup != nil {
+		return hc.valsCDup, nil
+	}
+	hc.valsCDup, err = tx.CursorDupSort(hc.h.historyValsTable)
+	if err != nil {
+		return nil, err
+	}
+	return hc.valsCDup, nil
 }
 
 func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if hc.h.historyLargeValues {
-		c, err := tx.Cursor(hc.h.historyValsTable)
+		c, err := hc.valsCursor(tx)
 		if err != nil {
 			return nil, false, err
 		}
-		defer c.Close()
 		seek := make([]byte, len(key)+8)
 		copy(seek, key)
 		binary.BigEndian.PutUint64(seek[len(key):], txNum)
@@ -1521,46 +1550,22 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
-		// val == []byte{},m eans key was created in this txNum and doesn't exists before.
+		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
-	c, err := tx.CursorDupSort(hc.h.historyValsTable)
+	c, err := hc.valsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
 	}
-	defer c.Close()
-	seek := make([]byte, len(key)+8)
-	copy(seek, key)
-	binary.BigEndian.PutUint64(seek[len(key):], txNum)
-
-	val, err := c.SeekBothRange(key, seek[len(key):])
+	val, err := c.SeekBothRange(key, hc.encodeTs(txNum))
 	if err != nil {
 		return nil, false, err
 	}
 	if val == nil {
 		return nil, false, nil
 	}
-	// `val == []byte{}` means key was created in this txNum and doesn't exists before.
+	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
-}
-
-// Iwant to know
-// - key, value, txNum when value was added
-// - is it last presence of key in history
-func (hc *HistoryContext) GetRecent(key []byte, txNum uint64, roTx kv.Tx) (uint64, bool, []byte, []byte, error) {
-	//v, ok, err := hc.GetNoState(key, txNum)
-	//if err != nil {
-	//	return 0, nil, nil, err
-	//}
-	//if ok {
-	//	return 0, key, v, nil
-	//}
-
-	// Value not found in history files, look in the recent history
-	if roTx == nil {
-		return 0, false, nil, nil, fmt.Errorf("roTx is nil")
-	}
-	return hc.getRecentFromDB(key, txNum, roTx)
 }
 
 // key[NewTxNum] -> value

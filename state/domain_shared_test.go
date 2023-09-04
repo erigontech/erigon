@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -27,19 +26,26 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 	d := agg.SharedDomains(ac)
+	defer agg.CloseSharedDomains()
 	d.SetTx(rwTx)
 
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
 	rnd := rand.New(rand.NewSource(0))
-	rwTx.Commit()
+	ac.Close()
+	err = rwTx.Commit()
+	require.NoError(t, err)
 
 Loop:
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
+	ac = agg.MakeContext()
+	defer ac.Close()
+	d = agg.SharedDomains(ac)
+	defer agg.CloseSharedDomains()
 	d.SetTx(rwTx)
 
 	i := 0
@@ -61,7 +67,6 @@ Loop:
 		if i%commitStep == 0 {
 			rh, err := d.Commit(true, false)
 			require.NoError(t, err)
-			fmt.Printf("Commit %d %x\n", i, rh)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
 			}

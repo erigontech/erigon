@@ -715,8 +715,8 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 }
 
 func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
-	log.Warn("[dbg] MergeLoop start")
-	defer log.Warn("[dbg] MergeLoop done")
+	a.logger.Warn("[dbg] MergeLoop start")
+	defer a.logger.Warn("[dbg] MergeLoop done")
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
@@ -1723,16 +1723,16 @@ func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(ke
 func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsDomain:
-		v, err := ac.accounts.GetBeforeTxNum(key, ts, tx)
+		v, err := ac.accounts.GetAsOf(key, ts, tx)
 		return v, v != nil, err
 	case kv.StorageDomain:
-		v, err := ac.storage.GetBeforeTxNum(key, ts, tx)
+		v, err := ac.storage.GetAsOf(key, ts, tx)
 		return v, v != nil, err
 	case kv.CodeDomain:
-		v, err := ac.code.GetBeforeTxNum(key, ts, tx)
+		v, err := ac.code.GetAsOf(key, ts, tx)
 		return v, v != nil, err
 	case kv.CommitmentDomain:
-		v, err := ac.commitment.GetBeforeTxNum(key, ts, tx)
+		v, err := ac.commitment.GetAsOf(key, ts, tx)
 		return v, v != nil, err
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))

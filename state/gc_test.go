@@ -33,9 +33,11 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - open new view
 			// - make sure there is no canDelete file
 			hc := h.MakeContext()
-			//require.Nil(hc.ic.coldLocality.file) // optimization: don't create LocalityIndex for 1 file
-			require.NotNil(hc.ic.coldLocality.file)
-			require.NotNil(hc.ic.warmLocality.file)
+			if h.withLocalityIndex {
+				//require.Nil(hc.ic.coldLocality.file) // optimization: don't create LocalityIndex for 1 file
+				require.NotNil(hc.ic.coldLocality.file)
+				require.NotNil(hc.ic.warmLocality.file)
+			}
 
 			lastOnFs, _ := h.files.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
@@ -55,11 +57,15 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			require.NotNil(lastOnFs.decompressor)
 			//replace of locality index must not affect current HistoryContext, but expect to be closed after last reader
-			h.warmLocalityIdx.integrateFiles(&LocalityIndexFiles{})
-			require.NotNil(h.warmLocalityIdx.file)
+			if h.withLocalityIndex {
+				h.warmLocalityIdx.integrateFiles(&LocalityIndexFiles{})
+				require.NotNil(h.warmLocalityIdx.file)
+			}
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
-			require.NotNil(h.warmLocalityIdx.file)
+			if h.withLocalityIndex {
+				require.NotNil(h.warmLocalityIdx.file)
+			}
 
 			nonDeletedOnFs, _ := h.files.Max()
 			require.False(nonDeletedOnFs.frozen)
