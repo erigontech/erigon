@@ -218,14 +218,14 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	if li == nil {
 		return nil
 	}
-	x := &ctxLocalityIdx{
-		file:            li.roFiles.Load(),
+	file := li.roFiles.Load()
+	if file != nil && file.src != nil {
+		file.src.refcount.Add(1)
+	}
+	return &ctxLocalityIdx{
+		file:            file,
 		aggregationStep: li.aggregationStep,
 	}
-	if x.file != nil && x.file.src != nil {
-		x.file.src.refcount.Add(1)
-	}
-	return x
 }
 
 func (lc *ctxLocalityIdx) Close() {

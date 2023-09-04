@@ -662,18 +662,18 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
-	var ic = InvertedIndexContext{
+	files := *ii.roFiles.Load()
+	for i := 0; i < len(files); i++ {
+		if !files[i].src.frozen {
+			files[i].src.refcount.Add(1)
+		}
+	}
+	return &InvertedIndexContext{
 		ii:           ii,
-		files:        *ii.roFiles.Load(),
+		files:        files,
 		warmLocality: ii.warmLocalityIdx.MakeContext(),
 		coldLocality: ii.coldLocalityIdx.MakeContext(),
 	}
-	for _, item := range ic.files {
-		if !item.src.frozen {
-			item.src.refcount.Add(1)
-		}
-	}
-	return &ic
 }
 func (ic *InvertedIndexContext) Close() {
 	if ic.files == nil { // invariant: it's safe to call Close multiple times
@@ -681,17 +681,17 @@ func (ic *InvertedIndexContext) Close() {
 	}
 	files := ic.files
 	ic.files = nil
-	for _, item := range files {
-		if item.src.frozen {
+	for i := 0; i < len(files); i++ {
+		if files[i].src.frozen {
 			continue
 		}
-		refCnt := item.src.refcount.Add(-1)
+		refCnt := files[i].src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && item.src.canDelete.Load() {
+		if refCnt == 0 && files[i].src.canDelete.Load() {
 			if ic.ii.filenameBase == AggTraceFileLife {
-				ic.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", item.src.decompressor.FileName()))
+				ic.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
 			}
-			item.src.closeFilesAndRemove()
+			files[i].src.closeFilesAndRemove()
 		}
 	}
 
