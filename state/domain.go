@@ -1900,7 +1900,7 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 }
 
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	t := time.Now()
+	//t := time.Now()
 	key := key1
 	if len(key2) > 0 {
 		key = dc.keyBuf[:len(key1)+len(key2)]
@@ -1946,10 +1946,10 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 			}
 		}
 
-		LatestStateReadDB.UpdateDuration(t)
+		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadDBNotFound.UpdateDuration(t)
+	//LatestStateReadDBNotFound.UpdateDuration(t)
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
