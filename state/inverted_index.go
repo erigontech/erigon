@@ -109,7 +109,7 @@ func NewInvertedIndex(
 	ii := InvertedIndex{
 		iiCfg:                   cfg,
 		warmDir:                 filepath.Join(baseDir, "warm"),
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
 		indexKeysTable:          indexKeysTable,
