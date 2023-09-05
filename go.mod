@@ -114,5 +114,5 @@ require (
 
 replace (
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.3
-	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.3
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.4
 )
