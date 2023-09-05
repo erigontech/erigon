@@ -12,7 +12,7 @@ import (
 // Change to EL engine
 type BLSToExecutionChange struct {
 	ValidatorIndex uint64
-	From           [48]byte
+	From           libcommon.Bytes48
 	To             libcommon.Address
 }
 
@@ -44,7 +44,7 @@ func (*BLSToExecutionChange) Static() bool {
 
 type SignedBLSToExecutionChange struct {
 	Message   *BLSToExecutionChange
-	Signature Bytes96
+	Signature libcommon.Bytes96
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {

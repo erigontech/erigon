@@ -50,7 +50,7 @@ func (*BeaconBlockHeader) Static() bool {
  */
 type SignedBeaconBlockHeader struct {
 	Header    *BeaconBlockHeader `json:"message"`
-	Signature Bytes96            `json:"signature"`
+	Signature libcommon.Bytes96  `json:"signature"`
 }
 
 func (b *SignedBeaconBlockHeader) Static() bool {
