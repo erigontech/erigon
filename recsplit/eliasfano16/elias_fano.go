@@ -442,8 +442,7 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
-	idx64 := posLower / 64
-	shift := posLower % 64
+	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -504,11 +503,10 @@ func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
 }
 
 func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
-	var windowCumKeys uint64
-	var selectCumKeys int
-	var currWordCumKeys uint64
-	var lower uint64
-	var cumDelta uint64
+	var (
+		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
+		selectCumKeys                                   int
+	)
 	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i)
 	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
 	for windowCumKeys == 0 {

@@ -212,8 +212,8 @@ func (rs *RecSplit) SetTrace(trace bool) {
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
 // distributed over the range [0..n)
-func remap(x uint64, n uint64) uint64 {
-	hi, _ := bits.Mul64(x, n)
+func remap(x uint64, n uint64) (hi uint64) {
+	hi, _ = bits.Mul64(x, n)
 	return hi
 }
 
@@ -262,6 +262,8 @@ func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fano
 	return
 }
 
+var golombBaseLog2 = -math.Log((math.Sqrt(5) + 1.0) / 2.0)
+
 func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, secondaryAggrBound uint16) {
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
@@ -275,7 +277,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
-	golombRiceLength := uint32(math.Ceil(math.Log2(-math.Log((math.Sqrt(5)+1.0)/2.0) / math.Log1p(-p)))) // log2 Golomb modulus
+	golombRiceLength := uint32(math.Ceil(math.Log2(golombBaseLog2 / math.Log1p(-p)))) // log2 Golomb modulus
 	if golombRiceLength > 0x1F {
 		panic("golombRiceLength > 0x1F")
 	}
@@ -301,8 +303,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	s := uint16(len(rs.golombRice))
-	for m >= s {
+	for s := uint16(len(rs.golombRice)); m >= s; s++ {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
 		if s == 0 {
@@ -312,7 +313,6 @@ func (rs *RecSplit) golombParam(m uint16) int {
 		} else {
 			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
-		s++
 	}
 	return int(rs.golombRice[m] >> 27)
 }
