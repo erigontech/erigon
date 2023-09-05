@@ -206,6 +206,10 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 		e.logger.Error("Could not start execution service", "err", err)
 		return
 	}
+	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
 }
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
