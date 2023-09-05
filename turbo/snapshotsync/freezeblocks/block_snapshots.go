@@ -888,10 +888,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	finish := make(chan struct{})
-	go func() {
-		defer close(finish)
-		g.Wait()
-	}()
+
 	go func() {
 		for {
 			select {
@@ -913,7 +910,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			if segment.T != t {
 				continue
 			}
-			if hasIdxFile(segment, logger.New()) {
+			if hasIdxFile(segment, logger) {
 				continue
 			}
 			sn := segment
@@ -925,6 +922,10 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			})
 		}
 	}
+	go func() {
+		defer close(finish)
+		g.Wait()
+	}()
 
 	// Block main thread
 	select {
