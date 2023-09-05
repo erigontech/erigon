@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
@@ -12,7 +13,7 @@ import (
 type IndexedAttestation struct {
 	AttestingIndices solid.Uint64ListSSZ
 	Data             solid.AttestationData
-	Signature        Bytes96
+	Signature        libcommon.Bytes96
 }
 
 func (i *IndexedAttestation) Static() bool {

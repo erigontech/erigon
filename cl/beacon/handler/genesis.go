@@ -5,15 +5,15 @@ import (
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
 type genesisReponse struct {
-	GenesisTime          uint64         `json:"genesis_time,omitempty"`
-	GenesisValidatorRoot common.Hash    `json:"genesis_validator_root,omitempty"`
-	GenesisForkVersion   cltypes.Bytes4 `json:"genesis_fork_version,omitempty"`
+	GenesisTime          uint64           `json:"genesis_time,omitempty"`
+	GenesisValidatorRoot common.Hash      `json:"genesis_validator_root,omitempty"`
+	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
 }
 
 func (a *ApiHandler) getGenesis(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {

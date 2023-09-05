@@ -23,7 +23,7 @@ const (
 )
 
 type SignedBeaconBlock struct {
-	Signature Bytes96
+	Signature libcommon.Bytes96
 	Block     *BeaconBlock
 }
 
@@ -37,7 +37,7 @@ type BeaconBlock struct {
 
 type BeaconBody struct {
 	// A byte array used for randomness in the beacon chain
-	RandaoReveal Bytes96
+	RandaoReveal libcommon.Bytes96
 	// Data related to the Ethereum 1.0 chain
 	Eth1Data *Eth1Data
 	// A byte array used to customize validators' behavior
