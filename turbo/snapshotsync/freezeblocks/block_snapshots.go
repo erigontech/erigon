@@ -882,15 +882,38 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	go func () {
+		for {
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			case <-finish:
+				return
+			case <-ctx.Done():
+				return 
+			}
+		}
+	}()
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
+	finish := make(chan struct{})
+	go func() {
+		defer close(finish)
+		g.Wait()
+	}()
 	for _, t := range snaptype.AllSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
 			if segment.T != t {
 				continue
 			}
-			if hasIdxFile(segment, logger) {
+			if hasIdxFile(segment, logger.New()) {
 				continue
 			}
 			sn := segment
@@ -898,30 +921,19 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				p := &background.Progress{}
 				ps.Add(p)
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, log.)
 			})
 		}
 	}
-	finish := make(chan struct{})
-	go func() {
-		defer close(finish)
-		g.Wait()
-	}()
 
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	for {
-		select {
-		case <-finish:
-			return g.Wait()
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		}
+	// Block main thread
+	select {
+	case <-finish:
+		return g.Wait()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+
 }
 
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
