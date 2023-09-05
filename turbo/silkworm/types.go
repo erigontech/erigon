@@ -14,7 +14,7 @@ type MappedHeaderSnapshot struct {
 }
 
 type MappedBodySnapshot struct {
-	Segment		  *MemoryMappedRegion
+	Segment       *MemoryMappedRegion
 	IdxBodyNumber *MemoryMappedRegion
 }
 
