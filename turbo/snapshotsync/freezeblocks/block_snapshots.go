@@ -885,7 +885,14 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	go func () {
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	finish := make(chan struct{})
+	go func() {
+		defer close(finish)
+		g.Wait()
+	}()
+	go func() {
 		for {
 			select {
 			case <-logEvery.C:
@@ -895,18 +902,11 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			case <-finish:
 				return
 			case <-ctx.Done():
-				return 
+				return
 			}
 		}
 	}()
 
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
-	finish := make(chan struct{})
-	go func() {
-		defer close(finish)
-		g.Wait()
-	}()
 	for _, t := range snaptype.AllSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
@@ -921,7 +921,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				p := &background.Progress{}
 				ps.Add(p)
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, log.)
+				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
 		}
 	}
