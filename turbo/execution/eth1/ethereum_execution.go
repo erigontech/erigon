@@ -117,7 +117,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
 	if err != nil {

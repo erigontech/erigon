@@ -243,7 +243,7 @@ func (fv *ForkValidator) clear() {
 }
 
 // Clear wipes out current extending fork data.
-func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
+func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()
