@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/erigontech/mdbx-go v0.33.1
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230905040903-a8cc33d75b55
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230905045132-60ec6bb4f299
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230818153427-cc16b83a89be
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -275,5 +275,5 @@ replace (
 	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.3
 	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.3
 )
