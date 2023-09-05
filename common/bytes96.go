@@ -13,26 +13,26 @@ import (
 )
 
 var (
-	blsSignatureT = reflect.TypeOf(BLSSignature{})
+	blsSignatureT = reflect.TypeOf(Bytes96{})
 )
 
-type BLSSignature [96]byte
+type Bytes96 [length.Bytes96]byte
 
 // Hex converts a hash to a hex string.
-func (b BLSSignature) Hex() string { return hexutility.Encode(b[:]) }
+func (b Bytes96) Hex() string { return hexutility.Encode(b[:]) }
 
 // UnmarshalJSON parses a hash in hex syntax.
-func (b *BLSSignature) UnmarshalJSON(input []byte) error {
+func (b *Bytes96) UnmarshalJSON(input []byte) error {
 	return hexutility.UnmarshalFixedJSON(blsSignatureT, input, b[:])
 }
 
 // UnmarshalText parses a hash in hex syntax.
-func (b *BLSSignature) UnmarshalText(input []byte) error {
+func (b *Bytes96) UnmarshalText(input []byte) error {
 	return hexutility.UnmarshalFixedText("BLSSignature", input, b[:])
 }
 
 // MarshalText returns the hex representation of a.
-func (b BLSSignature) MarshalText() ([]byte, error) {
+func (b Bytes96) MarshalText() ([]byte, error) {
 	bl := b[:]
 	result := make([]byte, len(b)*2+2)
 	copy(result, hexPrefix)
@@ -42,7 +42,7 @@ func (b BLSSignature) MarshalText() ([]byte, error) {
 
 // Format implements fmt.Formatter.
 // Hash supports the %v, %s, %v, %x, %X and %d format verbs.
-func (b BLSSignature) Format(s fmt.State, c rune) {
+func (b Bytes96) Format(s fmt.State, c rune) {
 	hexb := make([]byte, 2+len(b)*2)
 	copy(hexb, "0x")
 	hex.Encode(hexb[2:], b[:])
@@ -72,13 +72,13 @@ func (b BLSSignature) Format(s fmt.State, c rune) {
 
 // String implements the stringer interface and is used also by the logger when
 // doing full logging into a file.
-func (b BLSSignature) String() string {
+func (b Bytes96) String() string {
 	return b.Hex()
 }
 
 // SetBytes sets the hash to the value of i.
 // If b is larger than len(h), b will be cropped from the left.
-func (b *BLSSignature) SetBytes(i []byte) {
+func (b *Bytes96) SetBytes(i []byte) {
 	if len(i) > len(b) {
 		i = i[len(i)-length.Hash:]
 	}
@@ -87,7 +87,7 @@ func (b *BLSSignature) SetBytes(i []byte) {
 }
 
 // Generate implements testing/quick.Generator.
-func (b BLSSignature) Generate(rand *rand.Rand, size int) reflect.Value {
+func (b Bytes96) Generate(rand *rand.Rand, size int) reflect.Value {
 	m := rand.Intn(len(b))
 	for i := len(b) - 1; i > m; i-- {
 		b[i] = byte(rand.Uint32())
@@ -96,12 +96,12 @@ func (b BLSSignature) Generate(rand *rand.Rand, size int) reflect.Value {
 }
 
 // Value implements valuer for database/sql.
-func (b BLSSignature) Value() (driver.Value, error) {
+func (b Bytes96) Value() (driver.Value, error) {
 	return b[:], nil
 }
 
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
-func (b BLSSignature) TerminalString() string {
+func (b Bytes96) TerminalString() string {
 	return fmt.Sprintf("%x…%x", b[:3], b[len(b)-3:])
 }

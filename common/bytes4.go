@@ -16,7 +16,7 @@ var (
 	bytes4T = reflect.TypeOf(Bytes4{})
 )
 
-type Bytes4 [4]byte
+type Bytes4 [length.Bytes4]byte
 
 // Hex converts a hash to a hex string.
 func (b Bytes4) Hex() string { return hexutility.Encode(b[:]) }

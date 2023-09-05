@@ -21,6 +21,12 @@ const (
 	PeerID = 64
 	// Hash is the expected length of the hash (in bytes)
 	Hash = 32
+	// expected length of Bytes96 (signature)
+	Bytes96 = 96
+	// expected length of Bytes48 (bls public key and such)
+	Bytes48 = 48
+	// expected length of Bytes48 (beacon domain and such)
+	Bytes4 = 4
 	// Addr is the expected length of the address (in bytes)
 	Addr = 20
 	// BlockNumberLen length of uint64 big endian
