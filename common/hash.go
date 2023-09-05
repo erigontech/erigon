@@ -168,12 +168,12 @@ func (h Hash) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
+func FromHex(in string) []byte {
+	return hexutility.MustDecodeHex(in)
+}
+
 type CodeRecord struct {
 	BlockNumber uint64
 	TxNumber    uint64
 	CodeHash    Hash
-}
-
-func FromHex(in string) []byte {
-	return hexutility.MustDecodeHex(in)
 }
