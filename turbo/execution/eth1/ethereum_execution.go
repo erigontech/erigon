@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -201,20 +202,22 @@ func truncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
-	}
-	defer tx.Rollback()
+	//tx, err := e.db.BeginRw(ctx)
+	//if err != nil {
+	//	e.logger.Error("Could not start execution service", "err", err)
+	//	return
+	//}
+	//defer tx.Rollback()
+	fmt.Printf("alex2??\n")
+
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, true); err != nil {
+	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
 		e.logger.Error("Could not start execution service", "err", err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-	}
+	//if err := tx.Commit(); err != nil {
+	//	e.logger.Error("Could not start execution service", "err", err)
+	//}
 }
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {

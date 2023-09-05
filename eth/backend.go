@@ -1182,7 +1182,6 @@ func (s *Ethereum) Start() error {
 		}
 		return currentTD
 	}
-
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
