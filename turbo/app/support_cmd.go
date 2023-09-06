@@ -280,7 +280,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			continue
 		}
 
-		type error struct {
+		type responseError struct {
 			Code    int64            `json:"code"`
 			Message string           `json:"message"`
 			Data    *json.RawMessage `json:"data,omitempty"`
@@ -289,42 +289,59 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		type nodeResponse struct {
 			Id     string          `json:"id"`
 			Result json.RawMessage `json:"result,omitempty"`
-			Error  *error          `json:"error,omitempty"`
+			Error  *responseError  `json:"error,omitempty"`
 			Last   bool            `json:"last,omitempty"`
 		}
 
 		if node, ok := nodes[nodeRequest.NodeId]; ok {
-			debugResponse, err := metricsClient.Get(node.debugURL + "/" + requests[0].Method)
+			err := func() error {
+				debugURL := node.debugURL + "/" + requests[0].Method
 
-			if err != nil {
-				//TODO send error
-				//fmt.Fprintf(&metricsBuf, "ERROR: Requesting metrics url [%s], query [%s], err: %v", debugURL, line, err)
-				continue
-			}
+				debugResponse, err := metricsClient.Get(debugURL)
+				defer debugResponse.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
-				//TODO send error
-				//return fmt.Errorf("Support request to %s failed: %s", diagnosticsUrl, resp.Status)
-				continue
-			}
+				if err != nil {
+					return json.NewEncoder(writer).Encode(&nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    http.StatusFailedDependency,
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+						},
+						Last: true,
+					})
+				}
 
-			buffer := bytes.Buffer{}
+				if resp.StatusCode != http.StatusOK {
+					return json.NewEncoder(writer).Encode(&nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    int64(resp.StatusCode),
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+						},
+						Last: true,
+					})
+				}
 
-			if _, err := io.Copy(&buffer, debugResponse.Body); err != nil {
-				//	metricsBuf.Reset()
-				//	fmt.Fprintf(&metricsBuf, "ERROR: Extracting metrics url [%s], query [%s], err: %v", debugURL, line, err)
-				continue
-			}
+				buffer := bytes.Buffer{}
 
-			fmt.Println(buffer.String())
+				if _, err := io.Copy(&buffer, debugResponse.Body); err != nil {
+					return json.NewEncoder(writer).Encode(&nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    http.StatusInternalServerError,
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+						},
+						Last: true,
+					})
+					return nil
+				}
 
-			debugResponse.Body.Close()
-
-			err = json.NewEncoder(writer).Encode(&nodeResponse{
-				Id:     requestId,
-				Result: json.RawMessage("\"v2\""),
-				Last:   true,
-			})
+				return json.NewEncoder(writer).Encode(&nodeResponse{
+					Id:     requestId,
+					Result: json.RawMessage(buffer.Bytes()),
+					Last:   true,
+				})
+			}()
 
 			if err != nil {
 				return err
