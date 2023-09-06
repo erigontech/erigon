@@ -27,34 +27,34 @@ type HeapElem struct {
 }
 
 type Heap struct {
-	elems []HeapElem
+	elems []*HeapElem
 }
 
-func (h Heap) Len() int {
+func (h *Heap) Len() int {
 	return len(h.elems)
 }
 
-func (h Heap) Less(i, j int) bool {
+func (h *Heap) Less(i, j int) bool {
 	if c := bytes.Compare(h.elems[i].Key, h.elems[j].Key); c != 0 {
 		return c < 0
 	}
 	return h.elems[i].TimeIdx < h.elems[j].TimeIdx
 }
 
-func (h Heap) Swap(i, j int) {
+func (h *Heap) Swap(i, j int) {
 	h.elems[i], h.elems[j] = h.elems[j], h.elems[i]
 }
 
-func (h *Heap) Push(x HeapElem) {
+func (h *Heap) Push(x *HeapElem) {
 	h.elems = append(h.elems, x)
 }
 
-func (h *Heap) Pop() HeapElem {
+func (h *Heap) Pop() *HeapElem {
 	old := h.elems
 	n := len(old) - 1
 	x := old[n]
-	old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
-	//old[n] = HeapElem{}
+	//old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
+	old[n] = nil
 	h.elems = old[0:n]
 	return x
 }
@@ -75,7 +75,7 @@ func heapInit(h *Heap) {
 
 // Push pushes the element x onto the heap.
 // The complexity is O(log n) where n = h.Len().
-func heapPush(h *Heap, x HeapElem) {
+func heapPush(h *Heap, x *HeapElem) {
 	h.Push(x)
 	up(h, h.Len()-1)
 }
@@ -83,7 +83,7 @@ func heapPush(h *Heap, x HeapElem) {
 // Pop removes and returns the minimum element (according to Less) from the heap.
 // The complexity is O(log n) where n = h.Len().
 // Pop is equivalent to Remove(h, 0).
-func heapPop(h *Heap) HeapElem {
+func heapPop(h *Heap) *HeapElem {
 	n := h.Len() - 1
 	h.Swap(0, n)
 	down(h, 0, n)
