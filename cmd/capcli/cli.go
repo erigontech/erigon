@@ -103,7 +103,7 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 
-	sqlDB, err := sql.Open("sqlite3", "caplin/db")
+	sqlDB, err := sql.Open("sqlite", "caplin/db")
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	if err != nil {
 		return err
 	}
-	sqlDB, err := sql.Open("sqlite3", "caplin/db")
+	sqlDB, err := sql.Open("sqlite", "caplin/db")
 	if err != nil {
 		return err
 	}
