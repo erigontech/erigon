@@ -315,6 +315,14 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 	return ret, nil
 }
 
+func (back *RemoteBackend) AddPeer(ctx context.Context, request *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
+	result, err := back.remoteEthBackend.AddPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.AddPeer() error: %w", err)
+	}
+	return result, nil
+}
+
 func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	rpcPeers, err := back.remoteEthBackend.Peers(ctx, &emptypb.Empty{})
 	if err != nil {

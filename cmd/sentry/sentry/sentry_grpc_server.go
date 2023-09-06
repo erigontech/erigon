@@ -1209,6 +1209,15 @@ func (ss *GrpcServer) PeerEvents(req *proto_sentry.PeerEventsRequest, server pro
 	}
 }
 
+func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerRequest) (*proto_sentry.AddPeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+	ss.P2pServer.AddPeer(node)
+	return &proto_sentry.AddPeerReply{Success: true}, nil
+}
+
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
 	if ss.P2pServer == nil {
 		return nil, errors.New("p2p server was not started")
