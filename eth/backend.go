@@ -835,6 +835,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 			return
 		}
 	}()
+
 	go s.engineBackendRPC.Start(httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
@@ -1183,6 +1184,7 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
+		s.waitForStageLoopStop = nil
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
@@ -1199,11 +1201,9 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
-	fmt.Printf("stop2\n")
 	if s.downloader != nil {
 		s.downloader.Close()
 	}
-	fmt.Printf("stop3\n")
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
@@ -1217,12 +1217,10 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
-
-	fmt.Printf("stop4\n")
 	_ = s.engine.Close()
-	fmt.Printf("stop5\n")
-	<-s.waitForStageLoopStop
-	fmt.Printf("stop6\n")
+	if s.waitForStageLoopStop != nil {
+		<-s.waitForStageLoopStop
+	}
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
 	}
