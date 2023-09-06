@@ -288,7 +288,7 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
 	if stateObject.deleted {
 		return false
 	}
-	if stateObject.created {
+	if stateObject.createdContract {
 		return false
 	}
 	return stateObject.selfdestructed
@@ -415,10 +415,21 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 		prevbalance: *stateObject.Balance(),
 	})
 	stateObject.markSelfdestructed()
-	stateObject.created = false
+	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
 	return true
+}
+
+func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
+	stateObject := sdb.getStateObject(addr)
+	if stateObject == nil {
+		return
+	}
+
+	if stateObject.newlyCreated {
+		sdb.Selfdestruct(addr)
+	}
 }
 
 // SetTransientState sets transient storage for a given account. It
@@ -518,6 +529,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	} else {
 		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
 	}
+	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
 	return newobj
 }
@@ -554,7 +566,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 	newObj.data.Initialised = true
 
 	if contractCreation {
-		newObj.created = true
+		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
 	} else {
 		newObj.selfdestructed = false
@@ -598,7 +610,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		}
 		stateObject.deleted = true
 	}
-	if isDirty && (stateObject.created || !stateObject.selfdestructed) && !emptyRemoval {
+	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
@@ -606,7 +618,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		if stateObject.created {
+		if stateObject.createdContract {
 			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}
@@ -626,12 +638,12 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
-	if isDirty && (stateObject.created || !stateObject.selfdestructed) && !emptyRemoval {
+	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
 			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
 		}
-		if stateObject.created {
+		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)
 		}
 		stateObject.printTrie()
@@ -666,30 +678,12 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}
-
+		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
-}
-
-func (sdb *IntraBlockState) SoftFinalise() {
-	for addr := range sdb.journal.dirties {
-		_, exist := sdb.stateObjects[addr]
-		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
-			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
-			// it will persist in the journal even though the journal is reverted. In this special circumstance,
-			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
-			// Thus, we can safely ignore it here
-			continue
-		}
-		sdb.stateObjectsDirty[addr] = struct{}{}
-	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	sdb.clearJournalAndRefund()
 }
 
 // CommitBlock finalizes the state by removing the self destructed objects

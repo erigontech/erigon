@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"runtime"
 	"unicode"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -74,10 +77,11 @@ func StepHandler(handler interface{}, matchExpressions ...string) stepHandler {
 }
 
 type Scenario struct {
-	Id          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description,omitempty"`
-	Steps       []*Step `json:"steps"`
+	Context     devnet.Context `json:"-"`
+	Id          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Steps       []*Step        `json:"steps"`
 }
 
 type Step struct {
@@ -99,7 +103,7 @@ var typeOfBytes = reflect.TypeOf([]byte(nil))
 
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
 
-func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Context, interface{}) {
+func (c *stepRunner) Run(ctx context.Context, text string, args []interface{}, logger log.Logger) (context.Context, interface{}) {
 	var values = make([]reflect.Value, 0, len(args))
 
 	typ := c.Handler.Type()
@@ -118,6 +122,9 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 	for _, arg := range args {
 		values = append(values, reflect.ValueOf(arg))
 	}
+
+	handler := c.Handler.String()
+	logger.Info("Calling step: "+text, "handler", handler[1:len(handler)-7], "args", args)
 
 	res := c.Handler.Call(values)
 
@@ -147,4 +154,26 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 	}
 
 	return ctx, results
+}
+
+type Scenarios map[string]*Scenario
+
+func (s Scenarios) Run(ctx context.Context, scenarioNames ...string) error {
+	var scenarios []*Scenario
+
+	if len(scenarioNames) == 0 {
+		for name, scenario := range s {
+			scenario.Name = name
+			scenarios = append(scenarios, scenario)
+		}
+	} else {
+		for _, name := range scenarioNames {
+			if scenario, ok := s[name]; ok {
+				scenario.Name = name
+				scenarios = append(scenarios, scenario)
+			}
+		}
+	}
+
+	return Run(ctx, scenarios...)
 }

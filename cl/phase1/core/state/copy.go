@@ -5,7 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 )
 
-func (b *BeaconState) CopyInto(bs *BeaconState) (err error) {
+func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if bs.BeaconState == nil {
 		bs.BeaconState = raw.New(b.BeaconConfig())
 	}
@@ -20,7 +20,7 @@ func (b *BeaconState) CopyInto(bs *BeaconState) (err error) {
 	return nil
 }
 
-func (b *BeaconState) copyCachesInto(bs *BeaconState) error {
+func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	if b.Version() == clparams.Phase0Version {
 		return bs.initBeaconState()
 	}
@@ -45,7 +45,7 @@ func (b *BeaconState) copyCachesInto(bs *BeaconState) error {
 	return nil
 }
 
-func (b *BeaconState) Copy() (bs *BeaconState, err error) {
+func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
 	copied := New(b.BeaconConfig())
 	err = b.CopyInto(copied)
 	if err != nil {

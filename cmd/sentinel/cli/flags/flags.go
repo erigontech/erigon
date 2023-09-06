@@ -80,6 +80,11 @@ var (
 		Usage: "turn off or on the lightclient finding peers",
 		Value: false,
 	}
+	LocalDiscovery = cli.BoolFlag{
+		Name:  "local-discovery",
+		Usage: "enable to also attempt to find peers over private ips. turning this on may cause issues with hosts such as hetzner",
+		Value: false,
+	}
 	ChaindataFlag = cli.StringFlag{
 		Name:  "chaindata",
 		Usage: "chaindata of database",
@@ -98,6 +103,26 @@ var (
 	ErigonPrivateApiFlag = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "connect to existing erigon instance",
+		Value: "",
+	}
+	RunEngineAPI = cli.BoolFlag{
+		Name:  "engine.api",
+		Usage: "Turns on engine communication (Needed for none Erigon ELs)",
+		Value: false,
+	}
+	EngineApiPortFlag = cli.UintFlag{
+		Name:  "engine.api.port",
+		Usage: "Sets engine API port",
+		Value: 8551,
+	}
+	EngineApiHostFlag = cli.StringFlag{
+		Name:  "engine.api.host",
+		Usage: "Sets the engine API host",
+		Value: "http://localhost",
+	}
+	JwtSecret = cli.StringFlag{
+		Name:  "engine.api.jwtsecret",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
 		Value: "",
 	}
 	SentinelStaticPeersFlag = cli.StringFlag{

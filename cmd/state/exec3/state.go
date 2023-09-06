@@ -14,13 +14,13 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -133,15 +133,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
 
+	var logger = log.New("worker-tx")
+
 	switch {
-	case daoForkTx:
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
-		misc.ApplyDAOHardFork(ibs)
-		ibs.SoftFinalise()
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
@@ -159,7 +156,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, logger)
+		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break
@@ -171,7 +169,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
+		if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger); err != nil {
 			//fmt.Printf("error=%v\n", err)
 			txTask.Error = err
 		} else {
@@ -208,7 +206,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		} else {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
-			ibs.SoftFinalise()
+			txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
@@ -275,6 +273,18 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 		return nil
 	}
 	return td
+}
+func (cr ChainReader) FrozenBlocks() uint64 {
+	return cr.blockReader.FrozenBlocks()
+}
+func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	panic("")
+}
+func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
+	panic("")
+}
+func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	panic("")
 }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {

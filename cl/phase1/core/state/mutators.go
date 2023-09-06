@@ -1,10 +1,8 @@
 package state
 
-import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
-)
+import "github.com/ledgerwatch/erigon/cl/abstract"
 
-func IncreaseBalance(b *raw.BeaconState, index, delta uint64) error {
+func IncreaseBalance(b abstract.BeaconState, index, delta uint64) error {
 	currentBalance, err := b.ValidatorBalance(int(index))
 	if err != nil {
 		return err
@@ -12,7 +10,7 @@ func IncreaseBalance(b *raw.BeaconState, index, delta uint64) error {
 	return b.SetValidatorBalance(int(index), currentBalance+delta)
 }
 
-func DecreaseBalance(b *raw.BeaconState, index, delta uint64) error {
+func DecreaseBalance(b abstract.BeaconState, index, delta uint64) error {
 	currentBalance, err := b.ValidatorBalance(int(index))
 	if err != nil {
 		return err

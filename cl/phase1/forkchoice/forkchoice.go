@@ -49,7 +49,7 @@ type LatestMessage struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -66,6 +66,7 @@ func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client
 	if err != nil {
 		return nil, err
 	}
+
 	return &ForkChoiceStore{
 		highestSeen:                   anchorState.Slot(),
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
@@ -87,6 +88,14 @@ func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.highestSeen
+}
+
+// AdvanceHighestSeen advances the highest seen block by n and returns the new slot after the change
+func (f *ForkChoiceStore) AdvanceHighestSeen(n uint64) uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.highestSeen += n
 	return f.highestSeen
 }
 

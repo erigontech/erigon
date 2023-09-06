@@ -1,11 +1,11 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func ProcessParticipationRecordUpdates(s *state.BeaconState) error {
+func ProcessParticipationRecordUpdates(s abstract.BeaconState) error {
 	s.SetPreviousEpochAttestations(s.CurrentEpochAttestations())
 	s.ResetCurrentEpochAttestations()
 	var err error

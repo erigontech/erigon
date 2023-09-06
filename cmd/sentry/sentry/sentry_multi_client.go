@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -251,7 +251,6 @@ type MultiClient struct {
 	Hd                                *headerdownload.HeaderDownload
 	Bd                                *bodydownload.BodyDownload
 	IsMock                            bool
-	forkValidator                     *engineapi.ForkValidator
 	nodeName                          string
 	sentries                          []direct.SentryClient
 	headHeight                        uint64
@@ -268,10 +267,10 @@ type MultiClient struct {
 	blockReader                       services.FullBlockReader
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
+	maxBlockBroadcastPeers            func(*types.Header) uint
 
-	historyV3        bool
-	dropUselessPeers bool
-	logger           log.Logger
+	historyV3 bool
+	logger    log.Logger
 }
 
 func NewMultiClient(
@@ -279,14 +278,16 @@ func NewMultiClient(
 	nodeName string,
 	chainConfig *chain.Config,
 	genesisHash libcommon.Hash,
+	genesisTime uint64,
 	engine consensus.Engine,
 	networkID uint64,
 	sentries []direct.SentryClient,
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
+	blockBufferSize int,
 	logPeerInfo bool,
-	forkValidator *engineapi.ForkValidator,
-	dropUselessPeers bool,
+	forkValidator *engine_helpers.ForkValidator,
+	maxBlockBroadcastPeers func(*types.Header) uint,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
@@ -305,7 +306,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit), blockReader)
+	bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader)
 
 	cs := &MultiClient{
 		nodeName:                          nodeName,
@@ -316,14 +317,13 @@ func NewMultiClient(
 		Engine:                            engine,
 		blockReader:                       blockReader,
 		logPeerInfo:                       logPeerInfo,
-		forkValidator:                     forkValidator,
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
-		dropUselessPeers:                  dropUselessPeers,
+		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		logger:                            logger,
 	}
 	cs.ChainConfig = chainConfig
-	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
+	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig, genesisTime)
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
@@ -402,14 +402,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
-	if cs.dropUselessPeers && len(pkt) == 0 {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId: peerID,
-		}
-		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
+	if len(pkt) == 0 {
 		// No point processing empty response
 		return nil
 	}
@@ -519,9 +512,6 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 				propagate = *firstPosSeen >= segments[0].Number
 			}
 			if !cs.IsMock && propagate {
-				if cs.forkValidator != nil {
-					cs.forkValidator.TryAddingPoWBlock(request.Block)
-				}
 				cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: segments[0].Number,
@@ -566,14 +556,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
-	if cs.dropUselessPeers && len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId: inreq.PeerId,
-		}
-		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		cs.logger.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
 		// No point processing empty response
 		return nil
 	}
@@ -601,6 +584,15 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	}); err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
+
+	// This is a hack to make us work with erigon 2.48 peers that have --sentry.drop-useless-peers
+	// If we reply with an empty list, we're going to be considered useless and kicked.
+	// Once enough of erigon nodes are updated in the network past this commit, this check should be removed,
+	// because it is totally acceptable to return an empty list.
+	if len(headers) == 0 {
+		return nil
+	}
+
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          query.RequestId,
 		BlockHeadersPacket: headers,

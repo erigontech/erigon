@@ -49,9 +49,31 @@ func TestBlockchain(t *testing.T) {
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 	}
 
+	checkStateRoot := true
+
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func TestBlockchainEIP(t *testing.T) {
+	t.Skip("TODO(yperbasis): fix me")
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	// EOF is not supported yet
+	bt.skipLoad(`^StateTests/stEOF/`)
+
+	checkStateRoot := true
+
+	bt.walk(t, blockEipTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
 		}
 	})

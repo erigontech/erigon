@@ -276,6 +276,14 @@ func New(
 		}
 		opts = append(opts, libp2p.ResourceManager(rmgr))
 	}
+
+	gater, err := NewGater(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	opts = append(opts, libp2p.ConnectionGater(gater))
+
 	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
@@ -339,7 +347,13 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
+	// sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
+
+	// if sub == nil {
 	return len(s.host.Network().Peers())
+	// }
+
+	// return len(sub.topic.ListPeers())
 }
 
 func (s *Sentinel) Host() host.Host {

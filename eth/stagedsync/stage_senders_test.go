@@ -6,7 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -23,7 +23,7 @@ import (
 func TestSenders(t *testing.T) {
 	require := require.New(t)
 
-	m := stages2.Mock(t)
+	m := mock.Mock(t)
 	db := m.DB
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)

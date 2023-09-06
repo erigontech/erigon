@@ -86,13 +86,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "txpool"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
-
+		logger := debug.SetupCobra(cmd, "integration")
 		if err := doTxpool(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -22,6 +22,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -31,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -91,12 +91,7 @@ var readDomains = &cobra.Command{
 	ValidArgs: []string{"account", "storage", "code", "commitment"},
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -226,12 +221,7 @@ var stateDomains = &cobra.Command{
 	Short:   `Run block execution and commitment with Domains.`,
 	Example: "go run ./cmd/integration state_domains --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -510,33 +500,30 @@ func (b *blockProcessor) applyBlock(
 
 	header := block.Header()
 	b.vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(chain2.MaxDataGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
 	usedGas := new(uint64)
-	usedDataGas := new(uint64)
+	usedBlobGas := new(uint64)
 	var receipts types.Receipts
 	rules := b.chainConfig.Rules(block.NumberU64(), block.Time())
 
 	b.blockNum = block.NumberU64()
 	b.writer.w.SetTxNum(b.txNum)
 
-	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
-	if daoFork {
+	// Pre-block transaction
+	if b.txNum >= b.startTxNum {
 		ibs := state.New(b.reader)
-		// TODO Actually add tracing to the DAO related accounts
-		misc.ApplyDAOHardFork(ibs)
+		b.engine.Initialize(b.chainConfig, nil, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+			return core.SysCallContract(contract, data, b.chainConfig, ibState, header, b.engine, constCall)
+		}, b.logger)
 		if err := ibs.FinalizeTx(rules, b.writer); err != nil {
 			return nil, err
 		}
 		if err := b.writer.w.FinishTx(); err != nil {
-			return nil, fmt.Errorf("finish daoFork failed: %w", err)
+			return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
 		}
 	}
-
-	b.txNum++ // Pre-block transaction
+	b.txNum++
 	b.writer.w.SetTxNum(b.txNum)
-	if err := b.writer.w.FinishTx(); err != nil {
-		return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
-	}
 
 	getHashFn := core.GetHashFn(header, b.getHeader)
 	for i, tx := range block.Transactions() {
@@ -545,7 +532,7 @@ func (b *blockProcessor) applyBlock(
 			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, usedDataGas, b.vmConfig)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, usedBlobGas, b.vmConfig)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
@@ -602,7 +589,7 @@ func (b *blockProcessor) applyBlock(
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := b.engine.Finalize(b.chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
+		if _, _, err := b.engine.Finalize(b.chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, b.logger); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 

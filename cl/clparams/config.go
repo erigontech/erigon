@@ -68,6 +68,11 @@ var (
 		"enr:-LK4QA8FfhaAjlb_BXsXxSfiysR7R52Nhi9JBt4F8SPssu8hdE1BXQQEtVDC3qStCW60LSO7hEsVHv5zm8_6Vnjhcn0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAN4aBKJc2VjcDI1NmsxoQJerDhsJ-KxZ8sHySMOCmTO6sHM3iCFQ6VMvLTe948MyYN0Y3CCI4yDdWRwgiOM",
 		"enr:-LK4QKWrXTpV9T78hNG6s8AM6IO4XH9kFT91uZtFg1GcsJ6dKovDOr1jtAAFPnS2lvNltkOGA9k29BUN7lFh_sjuc9QBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhANAdd-Jc2VjcDI1NmsxoQLQa6ai7y9PMN5hpLe5HmiJSlYzMuzP7ZhwRiwHvqNXdoN0Y3CCI4yDdWRwgiOM",
 	}
+	SepoliaBootstrapNodes = append(MainnetBootstrapNodes,
+		"enr:-Iq4QMCTfIMXnow27baRUb35Q8iiFHSIDBJh6hQM5Axohhf4b6Kr_cOCu0htQ5WvVqKvFgY28893DHAg8gnBAXsAVqmGAX53x8JggmlkgnY0gmlwhLKAlv6Jc2VjcDI1NmsxoQK6S-Cii_KmfFdUJL2TANL3ksaKUnNXvTCv1tLwXs0QgIN1ZHCCIyk",
+		"enr:-Ly4QFoZTWR8ulxGVsWydTNGdwEESueIdj-wB6UmmjUcm-AOPxnQi7wprzwcdo7-1jBW_JxELlUKJdJES8TDsbl1EdNlh2F0dG5ldHOI__78_v2bsV-EZXRoMpA2-lATkAAAcf__________gmlkgnY0gmlwhBLYJjGJc2VjcDI1NmsxoQI0gujXac9rMAb48NtMqtSTyHIeNYlpjkbYpWJw46PmYYhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
+		"enr:-L64QC9Hhov4DhQ7mRukTOz4_jHm4DHlGL726NWH4ojH1wFgEwSin_6H95Gs6nW2fktTWbPachHJ6rUFu0iJNgA0SB2CARqHYXR0bmV0c4j__________4RldGgykDb6UBOQAABx__________-CaWSCdjSCaXCEA-2vzolzZWNwMjU2azGhA17lsUg60R776rauYMdrAz383UUgESoaHEzMkvm4K6k6iHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo")
 
 	GnosisBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-Ly4QMU1y81COwm1VZgxGF4_eZ21ub9-GHF6dXZ29aEJ0oZpcV2Rysw-viaEKfpcpu9ZarILJLxFZjcKOjE0Sybs3MQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANLnx-Jc2VjcDI1NmsxoQKoaYT8I-wf2I_f_ii6EgoSSXj5T3bhiDyW-7ZLsY3T64hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
@@ -95,7 +100,6 @@ type NetworkConfig struct {
 	GossipMaxSize                   uint64        `json:"gossip_max_size"`                    // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64        `json:"gossip_max_size_bellatrix"`          // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxRequestBlocks                uint64        `json:"max_request_blocks"`                 // Maximum number of blocks in a single request
-	MinEpochsForBlockRequests       uint64        `json:"min_epochs_for_block_requests"`      // The minimum epoch range over which a node must serve blocks
 	MaxChunkSize                    uint64        `json:"max_chunk_size"`                     // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64        `json:"attestation_subnet_count"`           // The number of attestation subnets used in the gossipsub protocol.
 	TtfbTimeout                     time.Duration `json:"ttfbt_timeout"`                      // The maximum time to wait for first byte of request response (time-to-first-byte).
@@ -159,7 +163,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         1273020,
-		BootNodes:                       MainnetBootstrapNodes,
+		BootNodes:                       SepoliaBootstrapNodes,
 	},
 
 	GoerliNetwork: {
@@ -262,8 +266,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
-		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		// "https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		// "https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
@@ -272,6 +277,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
+}
+
+// MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
+func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
+	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
+
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -308,9 +319,9 @@ type BeaconChainConfig struct {
 	EffectiveBalanceIncrement uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true"` // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
 
 	// Initial value constants.
-	BLSWithdrawalPrefixByte         byte     `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true"`          // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
-	ETH1AddressWithdrawalPrefixByte byte     `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
-	ZeroHash                        [32]byte // ZeroHash is used to represent a zeroed out 32 byte array.
+	BLSWithdrawalPrefixByte         byte           `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true"`          // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
+	ETH1AddressWithdrawalPrefixByte byte           `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
+	ZeroHash                        libcommon.Hash // ZeroHash is used to represent a zeroed out 32 byte array.
 
 	// Time parameters constants.
 	GenesisDelay                              uint64 `yaml:"GENESIS_DELAY" spec:"true"`                   // GenesisDelay is the minimum number of seconds to delay starting the Ethereum Beacon Chain genesis. Must be at least 1 second.
@@ -368,37 +379,37 @@ type BeaconChainConfig struct {
 	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
-	DomainBeaconProposer              [4]byte `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
-	DomainRandao                      [4]byte `yaml:"DOMAIN_RANDAO" spec:"true"`                         // DomainRandao defines the BLS signature domain for randao verification.
-	DomainBeaconAttester              [4]byte `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true"`                // DomainBeaconAttester defines the BLS signature domain for attestation verification.
-	DomainDeposit                     [4]byte `yaml:"DOMAIN_DEPOSIT" spec:"true"`                        // DomainDeposit defines the BLS signature domain for deposit verification.
-	DomainVoluntaryExit               [4]byte `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
-	DomainSelectionProof              [4]byte `yaml:"DOMAIN_SELECTION_PROOF" spec:"true"`                // DomainSelectionProof defines the BLS signature domain for selection proof.
-	DomainAggregateAndProof           [4]byte `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true"`            // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
-	DomainSyncCommittee               [4]byte `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
-	DomainSyncCommitteeSelectionProof [4]byte `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
-	DomainContributionAndProof        [4]byte `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true"`         // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
-	DomainApplicationMask             [4]byte `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
-	DomainApplicationBuilder          [4]byte // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        [4]byte // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
-	DomainBlobSideCar                 [4]byte `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
+	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true"`                         // DomainRandao defines the BLS signature domain for randao verification.
+	DomainBeaconAttester              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_ATTESTER" spec:"true"`                // DomainBeaconAttester defines the BLS signature domain for attestation verification.
+	DomainDeposit                     libcommon.Bytes4 `yaml:"DOMAIN_DEPOSIT" spec:"true"`                        // DomainDeposit defines the BLS signature domain for deposit verification.
+	DomainVoluntaryExit               libcommon.Bytes4 `yaml:"DOMAIN_VOLUNTARY_EXIT" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for exit verification.
+	DomainSelectionProof              libcommon.Bytes4 `yaml:"DOMAIN_SELECTION_PROOF" spec:"true"`                // DomainSelectionProof defines the BLS signature domain for selection proof.
+	DomainAggregateAndProof           libcommon.Bytes4 `yaml:"DOMAIN_AGGREGATE_AND_PROOF" spec:"true"`            // DomainAggregateAndProof defines the BLS signature domain for aggregate and proof.
+	DomainSyncCommittee               libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE" spec:"true"`                 // DomainVoluntaryExit defines the BLS signature domain for sync committee.
+	DomainSyncCommitteeSelectionProof libcommon.Bytes4 `yaml:"DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF" spec:"true"` // DomainSelectionProof defines the BLS signature domain for sync committee selection proof.
+	DomainContributionAndProof        libcommon.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true"`         // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
+	DomainApplicationMask             libcommon.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
+	DomainApplicationBuilder          libcommon.Bytes4 // DomainApplicationBuilder defines the BLS signature domain for application builder.
+	DomainBLSToExecutionChange        libcommon.Bytes4 // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBlobSideCar                 libcommon.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
 
 	// Prysm constants.
-	GweiPerEth                     uint64        // GweiPerEth is the amount of gwei corresponding to 1 eth.
-	BLSSecretKeyLength             int           // BLSSecretKeyLength defines the expected length of BLS secret keys in bytes.
-	BLSPubkeyLength                int           // BLSPubkeyLength defines the expected length of BLS public keys in bytes.
-	DefaultBufferSize              int           // DefaultBufferSize for channels across the Prysm repository.
-	ValidatorPrivkeyFileName       string        // ValidatorPrivKeyFileName specifies the string name of a validator private key file.
-	WithdrawalPrivkeyFileName      string        // WithdrawalPrivKeyFileName specifies the string name of a withdrawal private key file.
-	RPCSyncCheck                   time.Duration // Number of seconds to query the sync service, to find out if the node is synced or not.
-	EmptySignature                 [96]byte      // EmptySignature is used to represent a zeroed out BLS Signature.
-	DefaultPageSize                int           // DefaultPageSize defines the default page size for RPC server request.
-	MaxPeersToSync                 int           // MaxPeersToSync describes the limit for number of peers in round robin sync.
-	SlotsPerArchivedPoint          uint64        // SlotsPerArchivedPoint defines the number of slots per one archived point.
-	GenesisCountdownInterval       time.Duration // How often to log the countdown until the genesis time is reached.
-	BeaconStateFieldCount          int           // BeaconStateFieldCount defines how many fields are in beacon state.
-	BeaconStateAltairFieldCount    int           // BeaconStateAltairFieldCount defines how many fields are in beacon state hard fork 1.
-	BeaconStateBellatrixFieldCount int           // BeaconStateBellatrixFieldCount defines how many fields are in beacon state post upgrade to the Bellatrix.
+	GweiPerEth                     uint64            // GweiPerEth is the amount of gwei corresponding to 1 eth.
+	BLSSecretKeyLength             int               // BLSSecretKeyLength defines the expected length of BLS secret keys in bytes.
+	BLSPubkeyLength                int               // BLSPubkeyLength defines the expected length of BLS public keys in bytes.
+	DefaultBufferSize              int               // DefaultBufferSize for channels across the Prysm repository.
+	ValidatorPrivkeyFileName       string            // ValidatorPrivKeyFileName specifies the string name of a validator private key file.
+	WithdrawalPrivkeyFileName      string            // WithdrawalPrivKeyFileName specifies the string name of a withdrawal private key file.
+	RPCSyncCheck                   time.Duration     // Number of seconds to query the sync service, to find out if the node is synced or not.
+	EmptySignature                 libcommon.Bytes96 // EmptySignature is used to represent a zeroed out BLS Signature.
+	DefaultPageSize                int               // DefaultPageSize defines the default page size for RPC server request.
+	MaxPeersToSync                 int               // MaxPeersToSync describes the limit for number of peers in round robin sync.
+	SlotsPerArchivedPoint          uint64            // SlotsPerArchivedPoint defines the number of slots per one archived point.
+	GenesisCountdownInterval       time.Duration     // How often to log the countdown until the genesis time is reached.
+	BeaconStateFieldCount          int               // BeaconStateFieldCount defines how many fields are in beacon state.
+	BeaconStateAltairFieldCount    int               // BeaconStateAltairFieldCount defines how many fields are in beacon state hard fork 1.
+	BeaconStateBellatrixFieldCount int               // BeaconStateBellatrixFieldCount defines how many fields are in beacon state post upgrade to the Bellatrix.
 
 	// Slasher constants.
 	WeakSubjectivityPeriod    uint64 // WeakSubjectivityPeriod defines the time period expressed in number of epochs were proof of stake network should validate block headers and attestations for slashable events.
@@ -418,8 +429,8 @@ type BeaconChainConfig struct {
 	DenebForkVersion     uint32 `yaml:"DENEB_FORK_VERSION" spec:"true"`     // DenebForkVersion is used to represent the fork version for Deneb.
 	DenebForkEpoch       uint64 `yaml:"DENEB_FORK_EPOCH" spec:"true"`       // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
 
-	ForkVersionSchedule map[[VersionLength]byte]uint64 // Schedule of fork epochs by version.
-	ForkVersionNames    map[[VersionLength]byte]string // Human-readable names of fork versions.
+	ForkVersionSchedule map[libcommon.Bytes4]uint64 // Schedule of fork epochs by version.
+	ForkVersionNames    map[libcommon.Bytes4]string // Human-readable names of fork versions.
 
 	// Weak subjectivity values.
 	SafetyDecay uint64 // SafetyDecay is defined as the loss in the 1/3 consensus safety margin of the casper FFG mechanism.
@@ -496,8 +507,8 @@ func toBytes4(in []byte) (ret [4]byte) {
 	return
 }
 
-func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
-	fvs := map[[VersionLength]byte]uint64{}
+func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
+	fvs := map[libcommon.Bytes4]uint64{}
 	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
 	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
@@ -506,8 +517,8 @@ func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	return fvs
 }
 
-func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
-	fvn := map[[VersionLength]byte]string{}
+func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
+	fvn := map[libcommon.Bytes4]string{}
 	fvn[utils.Uint32ToBytes4(b.GenesisForkVersion)] = "phase0"
 	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
 	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
@@ -808,14 +819,17 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x01000064
 	cfg.BellatrixForkEpoch = 385536
 	cfg.BellatrixForkVersion = 0x02000064
+	cfg.CapellaForkEpoch = 648704
+	cfg.CapellaForkVersion = 0x03000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = 648704
-	cfg.CapellaForkVersion = 0x03000064
 	cfg.DenebForkEpoch = math.MaxUint64
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.InactivityScoreBias = 4
+	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.InitializeForkSchedule()
 	return cfg
 }

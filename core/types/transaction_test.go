@@ -30,9 +30,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -561,19 +563,6 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	return parsedTx, nil
 }
 
-func encodeDecodeWrappedBinary(tx *BlobTxWrapper) (*BlobTxWrapper, error) {
-	var buf bytes.Buffer
-	var err error
-	if err = tx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("rlp encoding failed: %w", err)
-	}
-	var parsedTx Transaction
-	if parsedTx, err = UnmarshalWrappedTransactionFromBinary(buf.Bytes()); err != nil {
-		return nil, fmt.Errorf("rlp decoding failed: %w", err)
-	}
-	return parsedTx.(*BlobTxWrapper), nil
-}
-
 func assertEqual(orig Transaction, cpy Transaction) error {
 	// compare nonce, price, gaslimit, recipient, amount, payload, V, R, S
 	if want, got := orig.Hash(), cpy.Hash(); want != got {
@@ -684,7 +673,7 @@ func newRandBlobTx() *BlobTx {
 			To:    randAddr(),
 			Value: uint256.NewInt(rand.Uint64()),
 			Data:  randData(),
-			V:     *uint256.NewInt(rand.Uint64()),
+			V:     *uint256.NewInt(0),
 			R:     *uint256.NewInt(rand.Uint64()),
 			S:     *uint256.NewInt(rand.Uint64()),
 		},
@@ -693,8 +682,8 @@ func newRandBlobTx() *BlobTx {
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
-		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
-		BlobVersionedHashes: randHashes(randIntInRange(5, 10)),
+		MaxFeePerBlobGas:    uint256.NewInt(rand.Uint64()),
+		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
 }
@@ -710,7 +699,7 @@ func printSTX(stx *BlobTx) {
 	fmt.Printf("Value: %v\n", stx.Value)
 	fmt.Printf("Data: %v\n", stx.Data)
 	fmt.Printf("AccessList: %v\n", stx.AccessList)
-	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
+	fmt.Printf("MaxFeePerBlobGas: %v\n", stx.MaxFeePerBlobGas)
 	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
 	fmt.Printf("V: %v\n", stx.V)
 	fmt.Printf("R: %v\n", stx.R)
@@ -759,8 +748,8 @@ func newRandProofs(size int) KZGProofs {
 func newRandBlobs(size int) Blobs {
 	var result Blobs
 	for i := 0; i < size; i++ {
-		var arr [LEN_BLOB]byte
-		for j := 0; j < LEN_BLOB; j++ {
+		var arr [fixedgas.BlobSize]byte
+		for j := 0; j < fixedgas.BlobSize; j++ {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -768,12 +757,14 @@ func newRandBlobs(size int) Blobs {
 	return result
 }
 
-func newRandBlobWrapper(size int) *BlobTxWrapper {
+func newRandBlobWrapper() *BlobTxWrapper {
+	btxw := *newRandBlobTx()
+	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          *newRandBlobTx(),
-		Commitments: newRandCommitments(size),
-		Blobs:       newRandBlobs(size),
-		Proofs:      newRandProofs(size),
+		Tx:          btxw,
+		Commitments: newRandCommitments(l),
+		Blobs:       newRandBlobs(l),
+		Proofs:      newRandProofs(l),
 	}
 }
 
@@ -784,16 +775,8 @@ func populateBlobTxs() {
 }
 
 func populateBlobWrapperTxs() {
-	for i := 0; i < N-1; i++ {
-		n := randIntInRange(0, 10)
-		dummyBlobWrapperTxs[i] = newRandBlobWrapper(n)
-	}
-
-	dummyBlobWrapperTxs[N-1] = &BlobTxWrapper{
-		Tx:          *newRandBlobTx(),
-		Commitments: nil,
-		Blobs:       nil,
-		Proofs:      nil,
+	for i := 0; i < N; i++ {
+		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
 	}
 }
 
@@ -810,21 +793,13 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 		if err := assertEqual(dummyBlobTxs[i], tx); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
 
-func TestBlobTxWrappedEncodeDecode(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-	populateBlobWrapperTxs()
-	for i := 0; i < N; i++ {
-		tx, err := encodeDecodeWrappedBinary(dummyBlobWrapperTxs[i])
+		// JSON
+		tx, err = encodeDecodeJSON(dummyBlobTxs[i])
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := assertEqual(dummyBlobWrapperTxs[i], tx); err != nil {
-			t.Fatal(err)
-		}
-		if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], tx); err != nil {
+		if err = assertEqual(dummyBlobTxs[i], tx); err != nil {
 			t.Fatal(err)
 		}
 	}

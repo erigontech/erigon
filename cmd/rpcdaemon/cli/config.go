@@ -58,6 +58,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
@@ -104,6 +105,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
+	rootCmd.PersistentFlags().Float64Var(&ethconfig.Defaults.RPCTxFeeCap, utils.RPCGlobalTxFeeCapFlag.Name, utils.RPCGlobalTxFeeCapFlag.Value, utils.RPCGlobalTxFeeCapFlag.Usage)
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.TCPServerEnabled, "tcp", false, "Enable TCP server")
 	rootCmd.PersistentFlags().StringVar(&cfg.TCPListenAddress, "tcp.addr", nodecfg.DefaultTCPHost, "TCP server listening interface")
@@ -116,6 +118,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.EvmCallTimeout, "rpc.evmtimeout", rpccfg.DefaultEvmCallTimeout, "Maximum amount of time to wait for the answer from EVM call.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
+
+	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -255,6 +259,7 @@ func EmbeddedServices(ctx context.Context,
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
 	eth = rpcservices.NewRemoteBackend(directClient, erigonDB, blockReader)
+
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {}, logger)
@@ -290,6 +295,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	// Configure DB first
 	var allSnapshots *freezeblocks.RoSnapshots
+	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
@@ -333,10 +339,13 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticReopenWithDB(db)
+		allBorSnapshots.OptimisticalyReopenWithDB(db)
 		allSnapshots.LogStat()
+		allBorSnapshots.LogStat()
 
 		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
@@ -362,6 +371,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				} else {
 					allSnapshots.LogStat()
 				}
+				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+					logger.Error("[bor snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat()
+				}
 
 				_ = reply.HistoryFiles
 
@@ -379,7 +393,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}()
 		}
 		onNewSnapshot()
-		blockReader = freezeblocks.NewBlockReader(allSnapshots)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 		var histV3Enabled bool
 		_ = db.View(ctx, func(tx kv.Tx) error {
@@ -449,6 +463,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	remoteEth := rpcservices.NewRemoteBackend(remoteBackendClient, db, blockReader)
 	blockReader = remoteEth
 	eth = remoteEth
+
 	go func() {
 		if !remoteKv.EnsureVersionCompatibility() {
 			rootCancel()
@@ -468,19 +483,23 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API, logger log.Logger) error {
-	if len(authAPI) > 0 {
-		engineInfo, err := startAuthenticatedRpcServer(cfg, authAPI, logger)
-		if err != nil {
-			return err
-		}
-		go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
-	}
-
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
 	}
 
+	return nil
+}
+
+func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+	if len(rpcAPI) == 0 {
+		return nil
+	}
+	engineInfo, err := startAuthenticatedRpcServer(cfg, rpcAPI, logger)
+	if err != nil {
+		return err
+	}
+	go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
 	return nil
 }
 

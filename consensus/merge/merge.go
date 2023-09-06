@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
@@ -131,10 +132,10 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -163,12 +164,12 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call)
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
-	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall)
+	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -241,18 +242,12 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time) {
-		if header.DataGasUsed != nil {
-			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
-		}
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
-		}
-	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-		// Verify the header's EIP-4844 attributes.
-		return err
+	cancun := chain.Config().IsCancun(header.Time)
+	if cancun {
+		return misc.VerifyPresenceOfCancunHeaderFields(header)
+	} else {
+		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
-	return nil
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
@@ -270,8 +265,17 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
-	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
+func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger,
+) {
+	if !misc.IsPoSHeader(header) {
+		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger)
+	}
+	if chain.Config().IsCancun(header.Time) {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
+			return syscall(addr, data, state, header, false /* constCall */)
+		})
+	}
 }
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {

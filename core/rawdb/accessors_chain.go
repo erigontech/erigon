@@ -44,6 +44,11 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+const (
+	spanLength    = 6400 // Number of blocks in a span
+	zerothSpanEnd = 255  // End block of 0th span
+)
+
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db kv.Getter, number uint64) (libcommon.Hash, error) {
 	data, err := db.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(number))
@@ -98,6 +103,7 @@ func IsCanonicalHashDeprecated(db kv.Getter, hash libcommon.Hash) (bool, *uint64
 	}
 	return canonicalHash != (libcommon.Hash{}) && canonicalHash == hash, number, nil
 }
+
 func IsCanonicalHash(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
 	if err != nil {
@@ -1065,6 +1071,68 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	return nil
 }
 
+// PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
+// keeps genesis in db: [1, to)
+// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	c, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var blockNumBytes [8]byte
+	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
+	k, v, err := c.Seek(blockNumBytes[:])
+	if err != nil {
+		return err
+	}
+	var eventIdTo uint64 = math.MaxUint64
+	if k != nil {
+		eventIdTo = binary.BigEndian.Uint64(v)
+	}
+	c1, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer c1.Close()
+	counter := blocksDeleteLimit
+	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
+		eventId := binary.BigEndian.Uint64(k)
+		if eventId >= eventIdTo {
+			break
+		}
+		if err = c1.DeleteCurrent(); err != nil {
+			return err
+		}
+		counter--
+	}
+	if err != nil {
+		return err
+	}
+	var firstSpanToKeep uint64
+	if blockTo > zerothSpanEnd {
+		firstSpanToKeep = 1 + (blockTo-zerothSpanEnd-1)/spanLength
+	}
+	c2, err := tx.RwCursor(kv.BorSpans)
+	if err != nil {
+		return err
+	}
+	defer c2.Close()
+	counter = blocksDeleteLimit
+	for k, _, err := c2.First(); err == nil && k != nil && counter > 0; k, _, err = c2.Next() {
+		spanId := binary.BigEndian.Uint64(k)
+		if spanId >= firstSpanToKeep {
+			break
+		}
+		if err = c2.DeleteCurrent(); err != nil {
+			return err
+		}
+		counter--
+	}
+	return nil
+}
+
 // TruncateBlocks - delete block >= blockFrom
 // does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
@@ -1135,22 +1203,6 @@ func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
 
 func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
 	return db.Put(kv.Issuance, append([]byte("burnt"), hexutility.EncodeTs(number)...), totalBurnt.Bytes())
-}
-
-func ReadCumulativeGasUsed(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.CumulativeGasIndex, hexutility.EncodeTs(number))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return big.NewInt(0), nil
-	}
-
-	return new(big.Int).SetBytes(data), nil
-}
-
-func WriteCumulativeGasUsed(db kv.Putter, number uint64, cumulativeGasUsed *big.Int) error {
-	return db.Put(kv.CumulativeGasIndex, hexutility.EncodeTs(number), cumulativeGasUsed.Bytes())
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
@@ -1371,7 +1423,7 @@ func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint6
 			return common2.ErrStopped
 		default:
 		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
+		if err = tx.Delete(table, k); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}

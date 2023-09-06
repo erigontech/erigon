@@ -32,10 +32,18 @@ var MainnetBootnodes = []string{
 	"enode://4aeb4ab6c14b23e2c4cfdce879c04b0748a20d8e9b59e25ded2a08143e265c6c25936e74cbc8e641e3312ca288673d91f2f93f8e277de3cfa444ecdaaf982052@157.90.35.166:30303", // bootnode-hetzner-fsn
 }
 
+// HoleskyBootnodes are the enode URLs of the P2P bootstrap nodes running on the
+// Holesky test network.
+var HoleskyBootnodes = []string{
+	"enode://ac906289e4b7f12df423d654c5a962b6ebe5b3a74cc9e06292a85221f9a64a6f1cfdd6b714ed6dacef51578f92b34c60ee91e9ede9c7f8fadc4d347326d95e2b@146.190.13.128:30303",
+	"enode://a3435a0155a3e837c02f5e7f5662a2f1fbc25b48e4dc232016e1c51b544cb5b4510ef633ea3278c0e970fa8ad8141e2d4d0f9f95456c537ff05fdf9b31c15072@178.128.136.233:30303",
+}
+
 // SepoliaBootnodes are the enode URLs of the P2P bootstrap nodes running on the
 // Sepolia test network.
 var SepoliaBootnodes = []string{
 	// EF DevOps
+
 	"enode://4e5e92199ee224a01932a377160aa432f31d0b351f84ab413a8e0a42f4f36476f8fb1cbe914af0d9aef0d51665c214cf653c651c4bbd9d5550a934f241f1682b@138.197.51.181:30303", // sepolia-bootnode-1-nyc3
 	"enode://143e11fb766781d22d92a2e33f8f104cddae4411a122295ed1fdb6638de96a6ce65f5b7c964ba3763bba27961738fef7d3ecc739268f3e5e771fb4c87b6234ba@146.190.1.103:30303",  // sepolia-bootnode-1-sfo3
 	"enode://8b61dc2d06c3f96fddcbebb0efb29d60d3598650275dc469c22229d3e5620369b0d3dedafd929835fe7f489618f19f456fe7c0df572bf2d914a9f4e006f783a9@170.64.250.88:30303",  // sepolia-bootnode-1-syd1
@@ -105,6 +113,14 @@ var V5Bootnodes = []string{
 var MumbaiBootnodes = []string{
 	"enode://320553cda00dfc003f499a3ce9598029f364fbb3ed1222fdc20a94d97dcc4d8ba0cd0bfa996579dcc6d17a534741fb0a5da303a90579431259150de66b597251@54.147.31.250:30303",
 	"enode://f0f48a8781629f95ff02606081e6e43e4aebd503f3d07fc931fad7dd5ca1ba52bd849a6f6c3be0e375cf13c9ae04d859c4a9ae3546dc8ed4f10aa5dbb47d4998@34.226.134.117:30303",
+	// third-party bootnodes
+	"enode://f2350443d7530526dbd3f8558ffc6a1ec4b4db0c4c5be283c982dac8b69398e5a02f8be4328564275113bb0f45d30e4754e2881c59776d441de59bc15ec3d2cf@63.251.232.124:18210",
+	"enode://112d12ef76915b34aa74fa9b70b99eb6db035a396f9542c7226756ad7d70ef0d24abda3d8e4292a002c4bb70e6a5ed4dd7b9ef43f35f885dfa1a4bbcab13574c@63.251.232.124:18220",
+	"enode://00dabd34427ff2ae51f6d1349091fc12f1173edaee5018cceb3726ea76b11653b969175957e58c4efe97d7d87d28ee30642990c23d5ae0a350365b4a62e6a27c@63.251.232.124:18231",
+	"enode://a2189ff7947b5425cf917fc3d343197bfb8f17c62fd9c40e226e887088414eb7ae0d89556acade07257c5f1330c76bc3ef2623e7dd05efdeebdd7dd1eec3325f@216.155.53.69:18210",
+	"enode://876f55213382819bf5e1feb5594bb93f62fe0b8fb66afd11c51cc76b40c7232ac3a21247cb2560ed29d74d7324380508428814031266dc078c58908308f6bb8e@216.155.53.69:18220",
+	"enode://1b7738443552055eaae1a6b9df14b1dccc856fcd61473475bd94553c8b9840a0bd060eb9f9151f7a9915306b7dde0b59fada68bd76c6fb86d9ad9a6619b61816@216.155.53.69:18230",
+	"enode://36105c59723cfa879b19524f964517fb0a468c0a6e9477a7d0512e5e09532c7088ac7366b8da450a572c9e4328c511c83f8d97402c88f0518d828d734c107fd6@162.55.4.38:30303",
 }
 
 var BorMainnetBootnodes = []string{
@@ -121,6 +137,11 @@ var GnosisBootnodes = []string{
 	"enode://d5852bf415d89b756faa809f4ff3f8beb661dc7d60cfb4a5542f9a5fcdf41e1ed0708a210db64b8c7ca32426e04ef0a50da58974124fdf562a8510314d11e28c@3.26.206.142:30303",
 	"enode://01d372392bb22dd8a91f8b10b6bbb8d80d2dbe98d695801e0df9e4bd4825781df84bba88361f24d1b6580a61313f64e6cec82e8d842ad5f1b3d7cf8d6d132da7@15.152.45.82:30303",
 	"enode://aee88e803b8e54925081957965b2527961cd90f4d6d14664884580b429da44729678a1258a8b49a42d1582c9c7c5ded05733622f7ab442ad9c6f655545a5ecdd@54.207.220.169:30303",
+	"enode://fb14d72321ee823fcf21e163091849ee42e0f6ac0cddc737d79e324b0a734c4fc51823ef0a96b749c954483c25e8d2e534d1d5fc2619ea22d58671aff96f5188@65.109.103.148:30303",
+	"enode://40f40acd78004650cce57aa302de9acbf54becf91b609da93596a18979bb203ba79fcbee5c2e637407b91be23ce72f0cc13dfa38d13e657005ce842eafb6b172@65.109.103.149:30303",
+	"enode://9e50857aa48a7a31bc7b46957e8ced0ef69a7165d3199bea924cb6d02b81f1f35bd8e29d21a54f4a331316bf09bb92716772ea76d3ef75ce027699eccfa14fad@141.94.97.22:30303",
+	"enode://96dc133ce3aeb5d9430f1dce1d77a36418c8789b443ae0445f06f73c6b363f5b35c019086700a098c3e6e54974d64f37e97d72a5c711d1eae34dc06e3e00eed5@141.94.97.74:30303",
+	"enode://516cbfbe9bbf26b6395ed68b24e383401fc33e7fe96b9d235ebca86c9f812fde8d33a7dbebc0fb5595459d2c5cc6381595d96507af89e6b48b5bdd0ebf8af0c0@141.94.97.84:30303",
 }
 
 var ChiadoBootnodes = []string{
@@ -145,6 +166,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "mainnet"
 	case GoerliGenesisHash:
 		net = "goerli"
+	case SepoliaGenesisHash:
+		net = "sepolia"
 	default:
 		return ""
 	}
@@ -155,6 +178,8 @@ func BootnodeURLsOfChain(chain string) []string {
 	switch chain {
 	case networkname.MainnetChainName:
 		return MainnetBootnodes
+	case networkname.HoleskyChainName:
+		return HoleskyBootnodes
 	case networkname.SepoliaChainName:
 		return SepoliaBootnodes
 	case networkname.GoerliChainName:

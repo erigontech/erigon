@@ -1,6 +1,7 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -8,8 +9,8 @@ import (
 )
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
-func ProcessHistoricalRootsUpdate(s *state.BeaconState) error {
-	nextEpoch := state.Epoch(s.BeaconState) + 1
+func ProcessHistoricalRootsUpdate(s abstract.BeaconState) error {
+	nextEpoch := state.Epoch(s) + 1
 	beaconConfig := s.BeaconConfig()
 	blockRoots := s.BlockRoots()
 	stateRoots := s.StateRoots()

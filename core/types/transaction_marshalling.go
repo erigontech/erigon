@@ -37,7 +37,7 @@ type txJSON struct {
 	AccessList *types2.AccessList `json:"accessList,omitempty"`
 
 	// Blob transaction fields:
-	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
+	MaxFeePerBlobGas    *hexutil.Big     `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 	// Blob wrapper fields:
 	Blobs       Blobs     `json:"blobs,omitempty"`
@@ -124,8 +124,8 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
-	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.MaxFeePerDataGas.ToBig())
-	enc.BlobVersionedHashes = tx.GetDataHashes()
+	enc.MaxFeePerBlobGas = (*hexutil.Big)(tx.MaxFeePerBlobGas.ToBig())
+	enc.BlobVersionedHashes = tx.GetBlobHashes()
 	return &enc
 }
 
@@ -415,131 +415,117 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 }
 
 func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
-	// var dec txJSON
-	// if err := json.Unmarshal(input, &dec); err != nil {
-	// 	return nil, err
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return nil, err
+	}
+	tx := BlobTx{}
+	if dec.AccessList != nil {
+		tx.AccessList = *dec.AccessList
+	} else {
+		tx.AccessList = []types2.AccessTuple{}
+	}
+	if dec.ChainID == nil {
+		return nil, errors.New("missing required field 'chainId' in transaction")
+	}
+	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
+	if overflow {
+		return nil, errors.New("'chainId' in transaction does not fit in 256 bits")
+	}
+	tx.ChainID = chainID
+	if dec.To != nil {
+		tx.To = dec.To
+	}
+	if dec.Nonce == nil {
+		return nil, errors.New("missing required field 'nonce' in transaction")
+	}
+	tx.Nonce = uint64(*dec.Nonce)
+	// if dec.GasPrice == nil { // do we need gasPrice here?
+	// 	return nil, errors.New("missing required field 'gasPrice' in transaction")
 	// }
-	// tx := SignedBlobTx{}
-	// if dec.AccessList != nil {
-	// 	tx.Message.AccessList = AccessListView(*dec.AccessList)
-	// } else {
-	// 	tx.Message.AccessList = AccessListView([]types2.AccessTuple{})
-	// }
-	// if dec.ChainID == nil {
-	// 	return nil, errors.New("missing required field 'chainId' in transaction")
-	// }
-	// chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'chainId' in transaction does not fit in 256 bits")
-	// }
-	// tx.Message.ChainID = Uint256View(*chainID)
-	// if dec.To != nil {
-	// 	address := AddressSSZ(*dec.To)
-	// 	tx.Message.To = AddressOptionalSSZ{Address: &address}
-	// }
-	// if dec.Nonce == nil {
-	// 	return nil, errors.New("missing required field 'nonce' in transaction")
-	// }
-	// tx.Message.Nonce = Uint64View(uint64(*dec.Nonce))
-	// tip, overflow := uint256.FromBig(dec.Tip.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'tip' in transaction does not fit in 256 bits")
-	// }
-	// tx.Message.GasTipCap = Uint256View(*tip)
-	// feeCap, overflow := uint256.FromBig(dec.FeeCap.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
-	// }
-	// tx.Message.GasFeeCap = Uint256View(*feeCap)
-	// if dec.Gas == nil {
-	// 	return nil, errors.New("missing required field 'gas' in transaction")
-	// }
-	// tx.Message.Gas = Uint64View(uint64(*dec.Gas))
-	// if dec.Value == nil {
-	// 	return nil, errors.New("missing required field 'value' in transaction")
-	// }
-	// value, overflow := uint256.FromBig(dec.Value.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'value' in transaction does not fit in 256 bits")
-	// }
-	// tx.Message.Value = Uint256View(*value)
-	// if dec.Data == nil {
-	// 	return nil, errors.New("missing required field 'input' in transaction")
-	// }
-	// tx.Message.Data = TxDataView(*dec.Data)
+	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
+	if overflow {
+		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
+	}
+	tx.FeeCap, overflow = uint256.FromBig(dec.FeeCap.ToInt())
+	if overflow {
+		return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
+	}
+	if dec.Gas == nil {
+		return nil, errors.New("missing required field 'gas' in transaction")
+	}
+	tx.Gas = uint64(*dec.Gas)
+	if dec.Value == nil {
+		return nil, errors.New("missing required field 'value' in transaction")
+	}
+	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	if overflow {
+		return nil, errors.New("'value' in transaction does not fit in 256 bits")
+	}
+	if dec.Data == nil {
+		return nil, errors.New("missing required field 'input' in transaction")
+	}
+	tx.Data = *dec.Data
 
-	// if dec.MaxFeePerDataGas == nil {
-	// 	return nil, errors.New("missing required field 'maxFeePerDataGas' in transaction")
-	// }
-	// maxFeePerDataGas, overflow := uint256.FromBig(dec.MaxFeePerDataGas.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'maxFeePerDataGas' in transaction does not fit in 256 bits")
-	// }
-	// tx.Message.MaxFeePerDataGas = Uint256View(*maxFeePerDataGas)
+	if dec.MaxFeePerBlobGas == nil {
+		return nil, errors.New("missing required field 'maxFeePerBlobGas' in transaction")
+	}
 
-	// if dec.BlobVersionedHashes != nil {
-	// 	tx.Message.BlobVersionedHashes = VersionedHashesView(dec.BlobVersionedHashes)
-	// } else {
-	// 	tx.Message.BlobVersionedHashes = VersionedHashesView([]libcommon.Hash{})
-	// }
+	maxFeePerBlobGas, overflow := uint256.FromBig(dec.MaxFeePerBlobGas.ToInt())
+	if overflow {
+		return nil, errors.New("'maxFeePerBlobGas' in transaction does not fit in 256 bits")
+	}
+	tx.MaxFeePerBlobGas = maxFeePerBlobGas
 
-	// if dec.V == nil {
-	// 	return nil, errors.New("missing required field 'v' in transaction")
-	// }
-	// var v uint256.Int
-	// overflow = v.SetFromBig(dec.V.ToInt())
-	// if overflow {
-	// 	return nil, fmt.Errorf("dec.V higher than 2^256-1")
-	// }
-	// if v.Uint64() > 255 {
-	// 	return nil, fmt.Errorf("dev.V higher than 2^8 - 1")
-	// }
+	if dec.BlobVersionedHashes != nil {
+		tx.BlobVersionedHashes = dec.BlobVersionedHashes
+	} else {
+		tx.BlobVersionedHashes = []libcommon.Hash{}
+	}
 
-	// tx.Signature.V = Uint8View(v.Uint64())
+	if dec.V == nil {
+		return nil, errors.New("missing required field 'v' in transaction")
+	}
+	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	if overflow {
+		return nil, fmt.Errorf("dec.V higher than 2^256-1")
+	}
+	if dec.R == nil {
+		return nil, errors.New("missing required field 'r' in transaction")
+	}
+	overflow = tx.R.SetFromBig(dec.R.ToInt())
+	if overflow {
+		return nil, fmt.Errorf("dec.R higher than 2^256-1")
+	}
+	if dec.S == nil {
+		return nil, errors.New("missing required field 's' in transaction")
+	}
+	overflow = tx.S.SetFromBig(dec.S.ToInt())
+	if overflow {
+		return nil, fmt.Errorf("dec.S higher than 2^256-1")
+	}
 
-	// if dec.R == nil {
-	// 	return nil, errors.New("missing required field 'r' in transaction")
-	// }
-	// var r uint256.Int
-	// overflow = r.SetFromBig(dec.R.ToInt())
-	// if overflow {
-	// 	return nil, fmt.Errorf("dec.R higher than 2^256-1")
-	// }
-	// tx.Signature.R = Uint256View(r)
+	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
+	if withSignature {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
+			return nil, err
+		}
+	}
 
-	// if dec.S == nil {
-	// 	return nil, errors.New("missing required field 's' in transaction")
-	// }
-	// var s uint256.Int
-	// overflow = s.SetFromBig(dec.S.ToInt())
-	// if overflow {
-	// 	return nil, errors.New("'s' in transaction does not fit in 256 bits")
-	// }
-	// tx.Signature.S = Uint256View(s)
+	if len(dec.Blobs) == 0 {
+		// if no blobs are specified in the json we assume it is an unwrapped blob tx
+		return &tx, nil
+	}
 
-	// withSignature := !v.IsZero() || !r.IsZero() || !s.IsZero()
-	// if withSignature {
-	// 	if err := sanityCheckSignature(&v, &r, &s, false); err != nil {
-	// 		return nil, err
-	// 	}
-	// }
-
-	// if len(dec.Blobs) == 0 {
-	// 	// if no blobs are specified in the json we assume it is an unwrapped blob tx
-	// 	return &tx, nil
-	// }
-
-	// btx := BlobTxWrapper{
-	// 	Tx:          tx,
-	// 	Commitments: dec.Commitments,
-	// 	Blobs:       dec.Blobs,
-	// 	Proofs:      dec.Proofs,
-	// }
-	// err := btx.ValidateBlobTransactionWrapper()
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// return &btx, nil
-
-	return nil, nil
+	btx := BlobTxWrapper{
+		Tx:          tx,
+		Commitments: dec.Commitments,
+		Blobs:       dec.Blobs,
+		Proofs:      dec.Proofs,
+	}
+	err := btx.ValidateBlobTransactionWrapper()
+	if err != nil {
+		return nil, err
+	}
+	return &btx, nil
 }

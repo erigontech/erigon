@@ -16,7 +16,7 @@ func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {
 		return err
 	}
 	if len(data) == 0 { // block not found
-		return fmt.Errorf("no known block with number %v (%x hex)", blockNumber, blockNumber)
+		return fmt.Errorf("no known block with number %v (%x hex)", blockNumber.Uint64(), blockNumber.Uint64())
 	}
 
 	return nil

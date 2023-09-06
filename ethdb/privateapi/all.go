@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
@@ -32,6 +33,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	if miningServer != nil {
 		txpool_proto.RegisterMiningServer(grpcServer, miningServer)
 	}
+
 	remote.RegisterKVServer(grpcServer, kv)
 	var healthServer *health.Server
 	if healthCheck {

@@ -42,12 +42,7 @@ var stateRootCmd = &cobra.Command{
 	Use:   "stateroot",
 	Short: "Exerimental command to re-execute blocks from beginning and compute state root",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "stateroot"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return err
-		}
+		logger := debug.SetupCobra(cmd, "stateroot")
 		return StateRoot(genesis, block, datadirCli, logger)
 	},
 }
@@ -60,7 +55,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }

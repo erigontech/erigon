@@ -2,7 +2,11 @@ package forkchoice
 
 import (
 	"fmt"
+	"runtime"
+	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -14,6 +18,7 @@ import (
 func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -38,18 +43,24 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	case fork_graph.Success:
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "code", status)
+		return nil
 	default:
 		return fmt.Errorf("replay block, code: %+v", status)
-	}
-	if newPayload && f.engine != nil {
-		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
-			log.Warn("newPayload failed", "err", err)
-			return err
-		}
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
+	var invalidBlock bool
+	if newPayload && f.engine != nil {
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
+	}
+	if invalidBlock {
+		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+	}
+
 	if block.Block.Slot > f.highestSeen {
 		f.highestSeen = block.Block.Slot
 	}
@@ -74,7 +85,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
 	// Eagerly compute unrealized justification and finality
-	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState); err != nil {
+	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
@@ -89,5 +100,9 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	log.Debug("OnBlock", "elapsed", time.Since(start), "alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys))
 	return nil
 }

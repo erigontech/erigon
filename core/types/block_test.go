@@ -486,3 +486,29 @@ func TestBlockRawBodyPostShanghaiWithdrawals(t *testing.T) {
 	require.Equal(0, len(body.Transactions))
 	require.Equal(2, len(body.Withdrawals))
 }
+
+func TestCopyTxs(t *testing.T) {
+	var txs Transactions
+	txs = append(txs, &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce: 0,
+			Value: new(uint256.Int).SetUint64(10000),
+			Gas:   50000,
+			Data:  []byte("Sparta"),
+		},
+		GasPrice: new(uint256.Int).SetUint64(10),
+	})
+
+	populateBlobTxs()
+	for _, tx := range dummyBlobTxs {
+		txs = append(txs, tx)
+	}
+
+	populateBlobWrapperTxs()
+	for _, tx := range dummyBlobWrapperTxs {
+		txs = append(txs, tx)
+	}
+
+	copies := CopyTxs(txs)
+	assert.Equal(t, txs, copies)
+}

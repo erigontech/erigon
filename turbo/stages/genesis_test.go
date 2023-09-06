@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -117,7 +117,7 @@ func TestSetupGenesis(t *testing.T) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-				m := stages.MockWithGenesis(t, &oldcustomg, key, false)
+				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
 
 				chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {
@@ -144,7 +144,7 @@ func TestSetupGenesis(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := temporal.NewTestDB(t, datadir.New(tmpdir), nil)
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

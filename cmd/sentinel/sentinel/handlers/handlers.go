@@ -94,7 +94,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
-			log.Error("[pubsubhandler] stream handler", l)
+			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()
 			return
@@ -103,7 +103,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		if err != nil {
 			l["err"] = err
 			if !(strings.Contains(name, "goodbye") && (strings.Contains(err.Error(), "session shut down") || strings.Contains(err.Error(), "stream reset"))) {
-				log.Warn("[pubsubhandler] close stream", l)
+				log.Trace("[pubsubhandler] close stream", l)
 			}
 		}
 	}

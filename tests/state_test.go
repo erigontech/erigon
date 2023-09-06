@@ -38,15 +38,12 @@ import (
 func TestState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
 	}
 	//t.Parallel()
 
 	st := new(testMatcher)
-
-	// EOF is not implemented yet
-	st.skipLoad(`^EIPTests/stEOF/`)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)

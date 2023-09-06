@@ -2,12 +2,15 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
-	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,12 +25,29 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
+func expandHomeDir(dirpath string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dirpath
+	}
+	prefix := fmt.Sprintf("~%c", os.PathSeparator)
+	if strings.HasPrefix(dirpath, prefix) {
+		return filepath.Join(home, dirpath[len(prefix):])
+	} else if dirpath == "~" {
+		return home
+	}
+	return dirpath
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		datadirCli = expandHomeDir(datadirCli)
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")
+		} else {
+			chaindata = expandHomeDir(chaindata)
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -90,7 +110,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			return nil, err
 		}
 		if h3 {
-			_, agg := allSnapshots(context.Background(), db, logger)
+			_, _, agg := allSnapshots(context.Background(), db, logger)
 			tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
 			if err != nil {
 				return nil, err
