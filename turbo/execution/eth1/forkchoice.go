@@ -113,15 +113,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		hash   libcommon.Hash
 		number uint64
 	}
-	tx, err := e.db.BeginRw(ctx)
+	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	defer tx.Rollback()
 
-	defer e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
-
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
@@ -325,6 +324,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		}
 		if log {
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
+		}
+
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error { return e.executionPipeline.RunPrune(e.db, tx, false) }); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 	}
 
