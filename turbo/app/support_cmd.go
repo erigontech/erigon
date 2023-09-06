@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -249,42 +250,85 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	})
 	defer codec.Close()
 
-	for requests, _, err := codec.ReadBatch(); err == nil; requests, _, err = codec.ReadBatch() {
+	for {
+		requests, _, err := codec.ReadBatch()
 
-		fmt.Println(requests[0])
-		/*metricsBuf.Reset()
-		debugResponse, err := metricsClient.Get(debugURL + string(line))
-
-		if err != nil {
-			fmt.Fprintf(&metricsBuf, "ERROR: Requesting metrics url [%s], query [%s], err: %v", debugURL, line, err)
-		} else {
-			// Buffer the metrics response, and relay it back to the diagnostics system, prepending with the size
-			if _, err := io.Copy(&metricsBuf, debugResponse.Body); err != nil {
-				metricsBuf.Reset()
-				fmt.Fprintf(&metricsBuf, "ERROR: Extracting metrics url [%s], query [%s], err: %v", debugURL, line, err)
-			}
-			debugResponse.Body.Close()
-		}
-
-		var sizeBuf [4]byte
-		binary.BigEndian.PutUint32(sizeBuf[:], uint32(metricsBuf.Len()))
-		if _, err = writer.Write(sizeBuf[:]); err != nil {
-			logger.Error("Problem relaying metrics prefix len", "url", debugURL, "query", line, "err", err)
-			break
-		}
-		if _, err = writer.Write(metricsBuf.Bytes()); err != nil {
-			logger.Error("Problem relaying", "url", debugURL, "query", line, "err", err)
-			break
-		}*/
-	}
-
-	if err != nil {
 		select {
 		case <-ctx.Done():
+			return nil
 		default:
-			logger.Error("Breaking connection", "err", err)
+			if err != nil {
+				logger.Info("Breaking connection", "err", err)
+				return nil
+			}
+		}
+
+		var requestId string
+
+		if err = json.Unmarshal(requests[0].ID, &requestId); err != nil {
+			logger.Error("Invalid request id", "err", err)
+			continue
+		}
+
+		nodeRequest := struct {
+			NodeId       string          `json:"nodeId"`
+			MethodParams json.RawMessage `json:"methodParams"`
+		}{}
+
+		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
+			logger.Error("Invalid node request", "err", err, "id", requestId)
+			continue
+		}
+
+		type error struct {
+			Code    int64            `json:"code"`
+			Message string           `json:"message"`
+			Data    *json.RawMessage `json:"data,omitempty"`
+		}
+
+		type nodeResponse struct {
+			Id     string          `json:"id"`
+			Result json.RawMessage `json:"result,omitempty"`
+			Error  *error          `json:"error,omitempty"`
+			Last   bool            `json:"last,omitempty"`
+		}
+
+		if node, ok := nodes[nodeRequest.NodeId]; ok {
+			debugResponse, err := metricsClient.Get(node.debugURL + "/" + requests[0].Method)
+
+			if err != nil {
+				//TODO send error
+				//fmt.Fprintf(&metricsBuf, "ERROR: Requesting metrics url [%s], query [%s], err: %v", debugURL, line, err)
+				continue
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				//TODO send error
+				//return fmt.Errorf("Support request to %s failed: %s", diagnosticsUrl, resp.Status)
+				continue
+			}
+
+			buffer := bytes.Buffer{}
+
+			if _, err := io.Copy(&buffer, debugResponse.Body); err != nil {
+				//	metricsBuf.Reset()
+				//	fmt.Fprintf(&metricsBuf, "ERROR: Extracting metrics url [%s], query [%s], err: %v", debugURL, line, err)
+				continue
+			}
+
+			fmt.Println(buffer.String())
+
+			debugResponse.Body.Close()
+
+			err = json.NewEncoder(writer).Encode(&nodeResponse{
+				Id:     requestId,
+				Result: json.RawMessage("\"v2\""),
+				Last:   true,
+			})
+
+			if err != nil {
+				return err
+			}
 		}
 	}
-
-	return nil
 }
