@@ -117,7 +117,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
 	if err != nil {
@@ -201,19 +201,14 @@ func truncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
-	}
-	defer tx.Rollback()
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, true); err != nil {
+	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
 		e.logger.Error("Could not start execution service", "err", err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
 		e.logger.Error("Could not start execution service", "err", err)
+		return
 	}
 }
 
