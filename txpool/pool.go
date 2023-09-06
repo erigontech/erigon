@@ -1589,12 +1589,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	}
 }
 
-func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
-	defer writeToDBTimer.UpdateDuration(time.Now())
+func (p *TxPool) flushNoFsync(ctx context.Context, db kv.RwDB) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
 			return err
@@ -1605,6 +1604,22 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		}
 		return nil
 	}); err != nil {
+		return 0, err
+	}
+	return written, nil
+}
+
+func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
+	defer writeToDBTimer.UpdateDuration(time.Now())
+	// 1. get global lock on txpool and flush it to db, without fsync (to release lock asap)
+	// 2. then fsync db without txpool lock
+	written, err = p.flushNoFsync(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+
+	// fsync
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return nil }); err != nil {
 		return 0, err
 	}
 	return written, nil
