@@ -164,7 +164,7 @@ var (
 		Value: txpoolcfg.DefaultConfig.PriceBump,
 	}
 	TxPoolBlobPriceBumpFlag = cli.Uint64Flag{
-		Name: "txpool.blobpricebump",
+		Name:  "txpool.blobpricebump",
 		Usage: "Price bump percentage to replace existing (type-3) blob transaction",
 		Value: txpoolcfg.DefaultConfig.BlobPriceBump,
 	}
@@ -1279,7 +1279,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
-	} 
+	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 

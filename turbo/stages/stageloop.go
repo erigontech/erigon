@@ -277,7 +277,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	headHeader = rawdb.ReadHeader(tx, headHash, head)
 	currentHeder = rawdb.ReadCurrentHeader(tx)
 	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
-	if fb :=rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
+	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
 		finalizedBlock = *fb
 	}
 	// update the accumulator with a new plain state version so the cache can be notified that
