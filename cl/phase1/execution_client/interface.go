@@ -19,4 +19,7 @@ type ExecutionEngine interface {
 	InsertBlock(*types.Block) error
 	IsCanonicalHash(libcommon.Hash) (bool, error)
 	Ready() (bool, error)
+	// Range methods
+	GetBodiesByRange(start, count uint64) ([]*types.RawBody, error)
+	GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error)
 }

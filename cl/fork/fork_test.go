@@ -124,7 +124,7 @@ func TestMainnetForkDigestDenebVersion(t *testing.T) {
 func TestMainnetComputeForkNextDigest(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	beaconCfg.ForkVersionSchedule = make(map[[4]byte]uint64)
+	beaconCfg.ForkVersionSchedule = make(map[common.Bytes4]uint64)
 	beaconCfg.ForkVersionSchedule[utils.Uint32ToBytes4(uint32(clparams.Phase0Version))] = 0
 	beaconCfg.ForkVersionSchedule[utils.Uint32ToBytes4(uint32(clparams.BellatrixVersion))] = 210010230210301201
 	digest, err := ComputeNextForkDigest(&beaconCfg, &genesisCfg)

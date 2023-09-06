@@ -101,7 +101,6 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
-	DropUselessPeers: false,
 }
 
 func init() {
@@ -247,7 +246,7 @@ type Config struct {
 
 	OverrideCancunTime *big.Int `toml:",omitempty"`
 
-	DropUselessPeers bool
+	ForcePartialCommit bool
 }
 
 type Sync struct {

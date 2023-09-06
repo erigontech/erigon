@@ -23,7 +23,7 @@ const (
 )
 
 type SignedBeaconBlock struct {
-	Signature [96]byte
+	Signature libcommon.Bytes96
 	Block     *BeaconBlock
 }
 
@@ -37,11 +37,11 @@ type BeaconBlock struct {
 
 type BeaconBody struct {
 	// A byte array used for randomness in the beacon chain
-	RandaoReveal [96]byte
+	RandaoReveal libcommon.Bytes96
 	// Data related to the Ethereum 1.0 chain
 	Eth1Data *Eth1Data
 	// A byte array used to customize validators' behavior
-	Graffiti [32]byte
+	Graffiti libcommon.Hash
 	// A list of slashing events for validators who included invalid blocks in the chain
 	ProposerSlashings *solid.ListSSZ[*ProposerSlashing]
 	// A list of slashing events for validators who included invalid attestations in the chain
@@ -91,6 +91,7 @@ func (b *SignedBeaconBlock) EncodeForStorage(buf []byte) ([]byte, error) {
 }
 
 func (b *SignedBeaconBlock) DecodeForStorage(buf []byte, s int) error {
+	b.Block.Body.Version = clparams.StateVersion(s)
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}

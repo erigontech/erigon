@@ -248,10 +248,17 @@ func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.Blo
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
-func (r *BlockReader) BorSnapshots() services.BlockSnapshots { return r.borSn }
-func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
+func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
+func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
+	if r.borSn != nil {
+		return r.borSn
+	}
+
+	return nil
+}
+
+func (r *BlockReader) FrozenBlocks() uint64    { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenBorBlocks() uint64 { return r.borSn.BlocksAvailable() }
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
 	if r.borSn != nil {
