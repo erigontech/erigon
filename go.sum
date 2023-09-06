@@ -8,8 +8,8 @@ crawshaw.io/sqlite v0.3.3-0.20220618202545-d1964889ea3c/go.mod h1:igAO5JulrQ1Dbd
 filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=
 github.com/AskAlexSharov/bloomfilter/v2 v2.0.3 h1:SmH/eHN8IEITUNgykSwQ4FeHneu/fJnvDVlB9SWCQsA=
 github.com/AskAlexSharov/bloomfilter/v2 v2.0.3/go.mod h1:zpoh+gs7qcpqrHr3dB55AMiJwo0iURXE7ZOP9L9hSkA=
-github.com/AskAlexSharov/btree v1.6.4 h1:Zpg0ySBfi2o8rgupXzcq4JWDxfppQhg3D7YuNIMGB+E=
-github.com/AskAlexSharov/btree v1.6.4/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
+github.com/AskAlexSharov/btree v1.6.3 h1:aazX1bTbog2Ajtsu681WN8jr1Uh/DCV7RxHQK4k4RW4=
+github.com/AskAlexSharov/btree v1.6.3/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/FastFilter/xorfilter v0.1.3 h1:c0nMe68qEoce/2NIolD2nvwQnIgIFBOYI34HcnsjQSc=
 github.com/FastFilter/xorfilter v0.1.3/go.mod h1:RB6+tbWbRN163V4y7z10tNfZec6n1oTsOElP0Tu5hzU=
