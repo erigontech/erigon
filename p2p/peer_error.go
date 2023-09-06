@@ -17,42 +17,88 @@
 package p2p
 
 import (
-	"errors"
 	"fmt"
 )
 
+type PeerErrorCode uint8
+
 const (
-	errInvalidMsgCode = iota
-	errInvalidMsg
+	PeerErrorInvalidMessageCode PeerErrorCode = iota
+	PeerErrorInvalidMessage
+	PeerErrorPingFailure
+	PeerErrorDiscReason
+	PeerErrorDiscReasonRemote
+	PeerErrorMessageReceive
+	PeerErrorMessageSizeLimit
+	PeerErrorMessageObsolete
+	PeerErrorMessageSend
+	PeerErrorLocalStatusNeeded
+	PeerErrorStatusSend
+	PeerErrorStatusReceive
+	PeerErrorStatusDecode
+	PeerErrorStatusIncompatible
+	PeerErrorStatusHandshakeTimeout
+	PeerErrorStatusUnexpected
+	PeerErrorFirstMessageSend
+	PeerErrorTest
 )
 
-var errorToString = map[int]string{
-	errInvalidMsgCode: "invalid message code",
-	errInvalidMsg:     "invalid message",
+var peerErrorCodeToString = map[PeerErrorCode]string{
+	PeerErrorInvalidMessageCode:     "invalid message code",
+	PeerErrorInvalidMessage:         "invalid message",
+	PeerErrorPingFailure:            "ping failure",
+	PeerErrorDiscReason:             "disconnect reason",
+	PeerErrorDiscReasonRemote:       "remote disconnect reason",
+	PeerErrorMessageReceive:         "failed to receive a message",
+	PeerErrorMessageSizeLimit:       "too big message",
+	PeerErrorMessageObsolete:        "obsolete message",
+	PeerErrorMessageSend:            "failed to send a message",
+	PeerErrorLocalStatusNeeded:      "need a local status message",
+	PeerErrorStatusSend:             "failed to send the local status",
+	PeerErrorStatusReceive:          "failed to receive the remote status",
+	PeerErrorStatusDecode:           "failed to decode the remote status",
+	PeerErrorStatusIncompatible:     "incompatible remote status",
+	PeerErrorStatusHandshakeTimeout: "handshake timeout",
+	PeerErrorStatusUnexpected:       "unexpected remote status",
+	PeerErrorFirstMessageSend:       "failed to send the first message",
+	PeerErrorTest:                   "test error",
 }
 
-type peerError struct {
-	code    int
-	message string
-}
-
-func newPeerError(code int, format string, v ...interface{}) *peerError {
-	desc, ok := errorToString[code]
-	if !ok {
-		panic("invalid error code")
+func (c PeerErrorCode) String() string {
+	if len(peerErrorCodeToString) <= int(c) {
+		return fmt.Sprintf("unknown code %d", c)
 	}
-	err := &peerError{code, desc}
-	if format != "" {
-		err.message += ": " + fmt.Sprintf(format, v...)
+	return peerErrorCodeToString[c]
+}
+
+func (c PeerErrorCode) Error() string {
+	return c.String()
+}
+
+type PeerError struct {
+	Code    PeerErrorCode
+	Reason  DiscReason
+	Err     error
+	Message string
+}
+
+func NewPeerError(code PeerErrorCode, reason DiscReason, err error, message string) *PeerError {
+	return &PeerError{
+		code,
+		reason,
+		err,
+		message,
 	}
-	return err
 }
 
-func (pe *peerError) Error() string {
-	return pe.message
+func (pe *PeerError) String() string {
+	return fmt.Sprintf("PeerError(code=%s, reason=%s, err=%v, message=%s)",
+		pe.Code, pe.Reason, pe.Err, pe.Message)
 }
 
-var errProtocolReturned = errors.New("protocol returned")
+func (pe *PeerError) Error() string {
+	return pe.String()
+}
 
 type DiscReason uint8
 
@@ -97,23 +143,4 @@ func (d DiscReason) String() string {
 
 func (d DiscReason) Error() string {
 	return d.String()
-}
-
-func discReasonForError(err error) DiscReason {
-	if reason, ok := err.(DiscReason); ok {
-		return reason
-	}
-	if err == errProtocolReturned {
-		return DiscQuitting
-	}
-	peerError, ok := err.(*peerError)
-	if ok {
-		switch peerError.code {
-		case errInvalidMsgCode, errInvalidMsg:
-			return DiscProtocolError
-		default:
-			return DiscSubprotocolError
-		}
-	}
-	return DiscSubprotocolError
 }

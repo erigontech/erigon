@@ -27,3 +27,20 @@ func StringToClVersion(s string) StateVersion {
 		panic("unsupported fork version: " + s)
 	}
 }
+
+func ClVersionToString(s StateVersion) string {
+	switch s {
+	case Phase0Version:
+		return "phase0"
+	case AltairVersion:
+		return "altair"
+	case BellatrixVersion:
+		return "bellatrix"
+	case CapellaVersion:
+		return "capella"
+	case DenebVersion:
+		return "deneb"
+	default:
+		panic("unsupported fork version")
+	}
+}

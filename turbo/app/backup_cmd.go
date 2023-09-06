@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -44,7 +43,7 @@ TODO:
 		&BackupLabelsFlag,
 		&BackupTablesFlag,
 		&WarmupThreadsFlag,
-	}, debug.Flags, logging.Flags),
+	}),
 }
 
 var (

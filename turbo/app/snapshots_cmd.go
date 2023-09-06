@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -24,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -34,11 +38,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
+	lists = append(lists, debug.Flags, logging.Flags, utils.MetricFlags)
 	for _, list := range lists {
 		res = append(res, list...)
 	}
@@ -57,7 +60,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
 				&SnapshotRebuildFlag,
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 		{
 			Name:   "retire",
@@ -68,28 +71,28 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
-			Flags:  joinFlags([]cli.Flag{}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "compress",
 			Action: doCompress,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "diff",
@@ -103,7 +106,7 @@ var snapshotCommand = cli.Command{
 					Name:     "dst",
 					Required: true,
 				},
-			}, debug.Flags, logging.Flags),
+			}),
 		},
 	},
 }
@@ -134,13 +137,6 @@ var (
 		Usage: "Force rebuild",
 	}
 )
-
-func preloadFileAsync(name string) {
-	go func() {
-		ff, _ := os.Open(name)
-		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
-	}()
-}
 
 func doDiff(cliCtx *cli.Context) error {
 	defer log.Info("Done")
@@ -173,18 +169,15 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	args := cliCtx.Args()
-	if args.Len() != 1 {
-		return fmt.Errorf("expecting .seg file path")
+	if args.Len() < 1 {
+		return fmt.Errorf("expecting file path as a first argument")
 	}
 	f := args.First()
-
-	preloadFileAsync(f)
 
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
@@ -220,9 +213,10 @@ func doRam(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	args := cliCtx.Args()
-	if args.Len() != 1 {
-		return fmt.Errorf("expecting .seg file path")
+	if args.Len() < 1 {
+		return fmt.Errorf("expecting file path as a first argument")
 	}
 	f := args.First()
 	var m runtime.MemStats
@@ -241,18 +235,18 @@ func doRam(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context) error {
-	var err error
-	var logger log.Logger
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory)
@@ -297,18 +291,18 @@ func doUncompress(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
-	if args.Len() != 1 {
-		return fmt.Errorf("expecting .seg file path")
+	if args.Len() < 1 {
+		return fmt.Errorf("expecting file path as a first argument")
 	}
 	f := args.First()
-
-	preloadFileAsync(f)
 
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
+	defer decompressor.EnableReadAhead().DisableReadAhead()
+
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -316,7 +310,6 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	var i uint
 	var numBuf [binary.MaxVarintLen64]byte
-	defer decompressor.EnableReadAhead().DisableReadAhead()
 
 	g := decompressor.MakeGetter()
 	buf := make([]byte, 0, 1*datasize.MB)
@@ -351,11 +344,12 @@ func doCompress(cliCtx *cli.Context) error {
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
-	if args.Len() != 1 {
-		return fmt.Errorf("expecting .seg file path")
+	if args.Len() < 1 {
+		return fmt.Errorf("expecting file path as a first argument")
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	logger.Info("file", "datadir", dirs.DataDir, "f", f)
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -397,14 +391,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	defer logger.Info("Retire Done")
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
-
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
@@ -522,6 +515,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		}
 	}
+	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {

@@ -27,7 +27,7 @@ type Eth1Block struct {
 	GasUsed       uint64
 	Time          uint64
 	Extra         *solid.ExtraData
-	BaseFeePerGas [32]byte
+	BaseFeePerGas libcommon.Hash
 	// Extra fields
 	BlockHash     libcommon.Hash
 	Transactions  *solid.TransactionsSSZ
@@ -238,7 +238,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 
 	// If the header hash does not match the block hash, return an error.
 	if header.Hash() != b.BlockHash {
-		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash")
+		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s", header.Hash(), b.BlockHash)
 	}
 
 	return header, nil

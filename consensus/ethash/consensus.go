@@ -24,7 +24,7 @@ import (
 	"runtime"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -149,9 +149,9 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, header *types.He
 	return nil
 }
 
-func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set, map[libcommon.Hash]*types.Header) {
+func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set[libcommon.Hash], map[libcommon.Hash]*types.Header) {
 	// Gather the set of past uncles and ancestors
-	uncles, ancestors := mapset.NewSet(), make(map[libcommon.Hash]*types.Header)
+	uncles, ancestors := mapset.NewSet[libcommon.Hash](), make(map[libcommon.Hash]*types.Header)
 
 	number, parent := header.Number.Uint64()-1, header.ParentHash
 	for i := 0; i < 7; i++ {
@@ -178,7 +178,7 @@ func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set, m
 	return uncles, ancestors
 }
 
-func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[libcommon.Hash]*types.Header, seal bool) error {
+func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
 	// Make sure every uncle is rewarded only once
 	hash := uncle.Hash()
 	if uncles.Contains(hash) {
@@ -550,7 +550,10 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	if config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(state)
+	}
 }
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
