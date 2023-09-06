@@ -33,6 +33,7 @@ const (
 	ETHBACKEND_TxnLookup_FullMethodName       = "/remote.ETHBACKEND/TxnLookup"
 	ETHBACKEND_NodeInfo_FullMethodName        = "/remote.ETHBACKEND/NodeInfo"
 	ETHBACKEND_Peers_FullMethodName           = "/remote.ETHBACKEND/Peers"
+	ETHBACKEND_AddPeer_FullMethodName         = "/remote.ETHBACKEND/AddPeer"
 	ETHBACKEND_PendingBlock_FullMethodName    = "/remote.ETHBACKEND/PendingBlock"
 	ETHBACKEND_BorEvent_FullMethodName        = "/remote.ETHBACKEND/BorEvent"
 )
@@ -64,6 +65,7 @@ type ETHBACKENDClient interface {
 	NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error)
 	// Peers collects and returns peers information from all running sentry instances.
 	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error)
+	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
 	BorEvent(ctx context.Context, in *BorEventRequest, opts ...grpc.CallOption) (*BorEventReply, error)
@@ -230,6 +232,15 @@ func (c *eTHBACKENDClient) Peers(ctx context.Context, in *emptypb.Empty, opts ..
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error) {
+	out := new(AddPeerReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_AddPeer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error) {
 	out := new(PendingBlockReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_PendingBlock_FullMethodName, in, out, opts...)
@@ -275,6 +286,7 @@ type ETHBACKENDServer interface {
 	NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error)
 	// Peers collects and returns peers information from all running sentry instances.
 	Peers(context.Context, *emptypb.Empty) (*PeersReply, error)
+	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
 	BorEvent(context.Context, *BorEventRequest) (*BorEventReply, error)
@@ -320,6 +332,9 @@ func (UnimplementedETHBACKENDServer) NodeInfo(context.Context, *NodesInfoRequest
 }
 func (UnimplementedETHBACKENDServer) Peers(context.Context, *emptypb.Empty) (*PeersReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Peers not implemented")
+}
+func (UnimplementedETHBACKENDServer) AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddPeer not implemented")
 }
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
@@ -567,6 +582,24 @@ func _ETHBACKEND_Peers_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_AddPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddPeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).AddPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_AddPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).AddPeer(ctx, req.(*AddPeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -649,6 +682,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Peers",
 			Handler:    _ETHBACKEND_Peers_Handler,
+		},
+		{
+			MethodName: "AddPeer",
+			Handler:    _ETHBACKEND_AddPeer_Handler,
 		},
 		{
 			MethodName: "PendingBlock",

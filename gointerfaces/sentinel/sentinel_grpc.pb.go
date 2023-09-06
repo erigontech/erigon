@@ -24,6 +24,9 @@ const (
 	Sentinel_SetStatus_FullMethodName       = "/sentinel.Sentinel/SetStatus"
 	Sentinel_GetPeers_FullMethodName        = "/sentinel.Sentinel/GetPeers"
 	Sentinel_BanPeer_FullMethodName         = "/sentinel.Sentinel/BanPeer"
+	Sentinel_UnbanPeer_FullMethodName       = "/sentinel.Sentinel/UnbanPeer"
+	Sentinel_PenalizePeer_FullMethodName    = "/sentinel.Sentinel/PenalizePeer"
+	Sentinel_RewardPeer_FullMethodName      = "/sentinel.Sentinel/RewardPeer"
 	Sentinel_PublishGossip_FullMethodName   = "/sentinel.Sentinel/PublishGossip"
 )
 
@@ -36,6 +39,9 @@ type SentinelClient interface {
 	SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error)
 	GetPeers(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*PeerCount, error)
 	BanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
+	UnbanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
+	PenalizePeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
+	RewardPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 	PublishGossip(ctx context.Context, in *GossipData, opts ...grpc.CallOption) (*EmptyMessage, error)
 }
 
@@ -115,6 +121,33 @@ func (c *sentinelClient) BanPeer(ctx context.Context, in *Peer, opts ...grpc.Cal
 	return out, nil
 }
 
+func (c *sentinelClient) UnbanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, Sentinel_UnbanPeer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentinelClient) PenalizePeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, Sentinel_PenalizePeer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentinelClient) RewardPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, Sentinel_RewardPeer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sentinelClient) PublishGossip(ctx context.Context, in *GossipData, opts ...grpc.CallOption) (*EmptyMessage, error) {
 	out := new(EmptyMessage)
 	err := c.cc.Invoke(ctx, Sentinel_PublishGossip_FullMethodName, in, out, opts...)
@@ -133,6 +166,9 @@ type SentinelServer interface {
 	SetStatus(context.Context, *Status) (*EmptyMessage, error)
 	GetPeers(context.Context, *EmptyMessage) (*PeerCount, error)
 	BanPeer(context.Context, *Peer) (*EmptyMessage, error)
+	UnbanPeer(context.Context, *Peer) (*EmptyMessage, error)
+	PenalizePeer(context.Context, *Peer) (*EmptyMessage, error)
+	RewardPeer(context.Context, *Peer) (*EmptyMessage, error)
 	PublishGossip(context.Context, *GossipData) (*EmptyMessage, error)
 	mustEmbedUnimplementedSentinelServer()
 }
@@ -155,6 +191,15 @@ func (UnimplementedSentinelServer) GetPeers(context.Context, *EmptyMessage) (*Pe
 }
 func (UnimplementedSentinelServer) BanPeer(context.Context, *Peer) (*EmptyMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BanPeer not implemented")
+}
+func (UnimplementedSentinelServer) UnbanPeer(context.Context, *Peer) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnbanPeer not implemented")
+}
+func (UnimplementedSentinelServer) PenalizePeer(context.Context, *Peer) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PenalizePeer not implemented")
+}
+func (UnimplementedSentinelServer) RewardPeer(context.Context, *Peer) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RewardPeer not implemented")
 }
 func (UnimplementedSentinelServer) PublishGossip(context.Context, *GossipData) (*EmptyMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PublishGossip not implemented")
@@ -265,6 +310,60 @@ func _Sentinel_BanPeer_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentinel_UnbanPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Peer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).UnbanPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_UnbanPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).UnbanPeer(ctx, req.(*Peer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentinel_PenalizePeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Peer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).PenalizePeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_PenalizePeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).PenalizePeer(ctx, req.(*Peer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentinel_RewardPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Peer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).RewardPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_RewardPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).RewardPeer(ctx, req.(*Peer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Sentinel_PublishGossip_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GossipData)
 	if err := dec(in); err != nil {
@@ -305,6 +404,18 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BanPeer",
 			Handler:    _Sentinel_BanPeer_Handler,
+		},
+		{
+			MethodName: "UnbanPeer",
+			Handler:    _Sentinel_UnbanPeer_Handler,
+		},
+		{
+			MethodName: "PenalizePeer",
+			Handler:    _Sentinel_PenalizePeer_Handler,
+		},
+		{
+			MethodName: "RewardPeer",
+			Handler:    _Sentinel_RewardPeer_Handler,
 		},
 		{
 			MethodName: "PublishGossip",
