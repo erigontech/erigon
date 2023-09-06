@@ -114,7 +114,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	if cfg.MdbxDBSizeLimit > 0 {
 		opts = opts.MapSize(cfg.MdbxDBSizeLimit)
 	} else {
-		opts = opts.MapSize(1 * datasize.GB)
+		opts = opts.MapSize(1 * datasize.TB)
 
 	}
 	if cfg.MdbxGrowthStep > 0 {
