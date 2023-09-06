@@ -26,6 +26,7 @@ const (
 	PeerErrorInvalidMessageCode PeerErrorCode = iota
 	PeerErrorInvalidMessage
 	PeerErrorPingFailure
+	PeerErrorPongFailure
 	PeerErrorDiscReason
 	PeerErrorDiscReasonRemote
 	PeerErrorMessageReceive
@@ -47,6 +48,7 @@ var peerErrorCodeToString = map[PeerErrorCode]string{
 	PeerErrorInvalidMessageCode:     "invalid message code",
 	PeerErrorInvalidMessage:         "invalid message",
 	PeerErrorPingFailure:            "ping failure",
+	PeerErrorPongFailure:            "pong failure",
 	PeerErrorDiscReason:             "disconnect reason",
 	PeerErrorDiscReasonRemote:       "remote disconnect reason",
 	PeerErrorMessageReceive:         "failed to receive a message",
