@@ -221,7 +221,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 	blockReader, _ := ethereum.BlockIO()
 
 	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
-	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), nil, ethereum.StagedSync(), initialCycle, logger, blockReader, hook)
+	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), nil, ethereum.StagedSync(), initialCycle, logger, blockReader, hook, false)
 	if err != nil {
 		return err
 	}

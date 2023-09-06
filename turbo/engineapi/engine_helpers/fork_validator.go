@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -93,7 +94,7 @@ func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 	return fv.extendingForkHeadHash
 }
 
-// NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
+// NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
@@ -144,6 +145,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
+	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
 		extendingFork := memdb.NewMemoryBatch(tx, fv.tmpDir)
 		fv.extendingForkNotifications = &shards.Notifications{
@@ -180,6 +182,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
+	log.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
+
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
 	for !foundCanonical {
@@ -214,6 +218,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		if criticalError != nil {
 			return
 		}
+		log.Info("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
@@ -229,7 +234,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
-// because fcu decides what the head is and after the call is done all the non-chosed forks are
+// because fcu decides what the head is and after the call is done all the non-chosen forks are
 // to be considered obsolete.
 func (fv *ForkValidator) clear() {
 	fv.extendingForkHeadHash = libcommon.Hash{}
@@ -237,8 +242,8 @@ func (fv *ForkValidator) clear() {
 	fv.memoryDiff = nil
 }
 
-// Clear wipes out current extending fork data and notify txpool.
-func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
+// Clear wipes out current extending fork data.
+func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()

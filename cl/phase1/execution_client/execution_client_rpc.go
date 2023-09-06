@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
@@ -162,4 +163,64 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 		return fmt.Errorf("status: %s", payloadStatus.Status)
 	}
 	return nil
+}
+
+func (cc *ExecutionClientRpc) SupportInsertion() bool {
+	return false
+}
+
+func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block) error {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) InsertBlock(*types.Block) error {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) Ready() (bool, error) {
+	return true, nil // Engine API is always ready
+}
+
+// Range methods
+
+// GetBodiesByRange gets block bodies in given block range
+func (cc *ExecutionClientRpc) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
+	result := []*engine_types.ExecutionPayloadBodyV1{}
+
+	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
+		return nil, err
+	}
+	ret := make([]*types.RawBody, len(result))
+	for i := range result {
+		ret[i] = &types.RawBody{
+			Withdrawals: result[i].Withdrawals,
+		}
+		for _, txn := range result[i].Transactions {
+			ret[i].Transactions = append(ret[i].Transactions, txn)
+		}
+	}
+	return ret, nil
+}
+
+// GetBodiesByHashes gets block bodies with given hashes
+func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
+	result := []*engine_types.ExecutionPayloadBodyV1{}
+
+	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
+		return nil, err
+	}
+	ret := make([]*types.RawBody, len(result))
+	for i := range result {
+		ret[i] = &types.RawBody{
+			Withdrawals: result[i].Withdrawals,
+		}
+		for _, txn := range result[i].Transactions {
+			ret[i].Transactions = append(ret[i].Transactions, txn)
+		}
+	}
+	return ret, nil
 }

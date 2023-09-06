@@ -1,7 +1,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -158,6 +157,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
+		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
+		}
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
@@ -168,16 +170,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
-	}
-
-	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
-		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
-	}
-
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
+		m3, _ := header.MarshalJSON()
+		fmt.Println(string(m3))
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -207,6 +203,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		actualBlobHashes := []libcommon.Hash{}
 		for _, tx := range transactions {
 			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if expectedBlobHashes == nil {
+			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
 			s.logger.Warn("[NewPayload] mismatch in blob hashes",
@@ -491,57 +490,38 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
+	bodies := s.chainRW.GetBodiesByHases(request)
 
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, len(request))
-
-	for hashIdx, hash := range request {
-		block := s.chainRW.GetBlockByHash(hash)
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		bodies[hashIdx] = body
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range request {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
-func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPayloadBodyV1, error) {
-	if block == nil {
-		return nil, nil
+func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBodyV1 {
+	if body == nil {
+		return nil
 	}
 
-	txs := block.Transactions()
-	bdTxs := make([]hexutility.Bytes, len(txs))
-	for idx, tx := range txs {
-		var buf bytes.Buffer
-		if err := tx.MarshalBinary(&buf); err != nil {
-			return nil, err
-		} else {
-			bdTxs[idx] = buf.Bytes()
-		}
+	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	for idx := range body.Transactions {
+		bdTxs[idx] = body.Transactions[idx]
 	}
 
-	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: block.Withdrawals()}, nil
+	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: body.Withdrawals}
 }
 
 func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
+	bodies := s.chainRW.GetBodiesByRange(start, count)
 
-	for i := uint64(0); i < count; i++ {
-		block := s.chainRW.GetBlockByNumber(start + i)
-
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			break
-		}
-		bodies = append(bodies, body)
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
@@ -560,14 +540,12 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
-
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
-
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
@@ -731,7 +709,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(block); err != nil {
 		return nil, err
 	}
 

@@ -1,12 +1,12 @@
 package observer
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"net"
-	"strings"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -215,15 +215,11 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 		return readMessage(conn, expectedMessageID, decodeError, message)
 	}
 	if messageID == RLPxMessageIDDisconnect {
-		var reason [1]p2p.DiscReason
-		err = rlp.DecodeBytes(data, &reason)
-		if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
-			err = rlp.DecodeBytes(data, &reason[0])
-		}
+		reason, err := p2p.DisconnectMessagePayloadDecode(bytes.NewBuffer(data))
 		if err != nil {
 			return NewHandshakeError(HandshakeErrorIDDisconnectDecode, err, 0)
 		}
-		return NewHandshakeError(HandshakeErrorIDDisconnect, reason[0], uint64(reason[0]))
+		return NewHandshakeError(HandshakeErrorIDDisconnect, reason, uint64(reason))
 	}
 	if messageID != expectedMessageID {
 		return NewHandshakeError(HandshakeErrorIDUnexpectedMessage, nil, messageID)

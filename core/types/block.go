@@ -1598,9 +1598,15 @@ func CopyTxs(in Transactions) Transactions {
 	if err != nil {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
-	for i := 0; i < len(in); i++ {
-		if s, ok := in[i].GetSender(); ok {
-			out[i].SetSender(s)
+	for i, tx := range in {
+		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
+			blobTx := out[i].(*BlobTx)
+			out[i] = &BlobTxWrapper{
+				Tx:          *blobTx,
+				Commitments: txWrapper.Commitments.copy(),
+				Blobs:       txWrapper.Blobs.copy(),
+				Proofs:      txWrapper.Proofs.copy(),
+			}
 		}
 	}
 	return out

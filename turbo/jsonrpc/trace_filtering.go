@@ -7,6 +7,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -47,7 +48,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 		blockNumber = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+	block, err := api.blockByNumberWithSenders(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +168,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, bErr := api.blockWithSenders(tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -387,7 +388,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
-		block, bErr := api.blockByNumberWithSenders(ctx, dbtx, b)
+		block, bErr := api.blockByNumberWithSenders(dbtx, b)
 		if bErr != nil {
 			if first {
 				first = false
@@ -896,8 +897,9 @@ func (api *TraceAPIImpl) callManyTransactions(
 		return nil, nil, err
 	}
 	engine := api.engine()
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState)
+	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
+	logger := log.New("trace_filtering")
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
 	if err != nil {
 		return nil, nil, err
 	}

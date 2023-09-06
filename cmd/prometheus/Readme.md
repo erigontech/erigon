@@ -13,7 +13,7 @@ Env variables:
 - `ERIGON_GRAFANA_CONFIG` path to custom `grafana.ini file`. Default is: `./cmd/prometheus/grafana.ini`
 
 To add custom Erigon host: copy `./cmd/prometheus/prometheus.yml`, modify, pass new location by:
-`ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker-compose up prometheus grafana`
+`ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker compose up prometheus grafana`
 
 ## For developers
 

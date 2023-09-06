@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -42,13 +41,16 @@ import (
 )
 
 var (
-	BlockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	BlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
 
 const (
 	TriesInMemory = 128
+
+	// See gas_limit in https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	SysCallGasLimit = uint64(30_000_000)
 )
 
 type RejectedTx struct {
@@ -78,7 +80,7 @@ func ExecuteBlockEphemerally(
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	logger log.Logger,
 ) (*EphemeralExecResult, error) {
 
@@ -98,15 +100,10 @@ func ExecuteBlockEphemerally(
 		receipts    types.Receipts
 	)
 
-	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs); err != nil {
-			return nil, err
-		}
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
+		return nil, err
 	}
 
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
@@ -216,7 +213,8 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		state.SystemAddress,
 		&contract,
 		0, u256.Num0,
-		math.MaxUint64, u256.Num0,
+		SysCallGasLimit,
+		u256.Num0,
 		nil, nil,
 		data, nil, false,
 		true, // isFree
@@ -257,7 +255,8 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		contract,
 		nil, // to
 		0, u256.Num0,
-		math.MaxUint64, u256.Num0,
+		SysCallGasLimit,
+		u256.Num0,
 		nil, nil,
 		data, nil, false,
 		true, // isFree
@@ -285,7 +284,7 @@ func FinalizeBlockExecution(
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.WriterWithChangeSets, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, headerReader consensus.ChainHeaderReader,
+	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
@@ -293,9 +292,9 @@ func FinalizeBlockExecution(
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, nil, logger)
+		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, logger)
+		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
 	}
 	if err != nil {
 		return nil, nil, nil, err
@@ -312,11 +311,11 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
-	})
+	}, logger)
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil

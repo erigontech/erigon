@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -76,7 +77,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 
 	select {
 	case <-fcuTimer.C:
-		e.logger.Debug("treating forkChoiceUpdated as asyncronous as it is taking too long")
+		e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
 		return &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			Status:          execution.ExecutionStatus_Busy,
@@ -112,29 +113,28 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		hash   libcommon.Hash
 		number uint64
 	}
-	tx, err := e.db.BeginRw(ctx)
+	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	defer tx.Rollback()
 
-	defer e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
-
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Nonce.Uint64())
+	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 
 	if canonicalHash == blockHash {
-		// if block hash is part of the canononical chain treat it as no-op.
+		// if block hash is part of the canonical chain treat it as no-op.
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
@@ -155,7 +155,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
-	// If we dont have it, too bad
+	// If we don't have it, too bad
 	if fcuHeader == nil {
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
@@ -171,7 +171,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 	// Find such point, and collect all hashes
-	newCanonicals := make([]*canonicalEntry, 0, 2048)
+	newCanonicals := make([]*canonicalEntry, 0, 64)
 	newCanonicals = append(newCanonicals, &canonicalEntry{
 		hash:   fcuHeader.Hash(),
 		number: fcuHeader.Number.Uint64(),
@@ -278,12 +278,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if e.hook != nil {
-		if err = e.hook.AfterRun(tx, finishProgressBefore); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-	}
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
@@ -294,7 +288,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
 		if log {
-			e.logger.Warn("bad forkchoice", "hash", headHash)
+			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
+			h, _ := e.getHeader(ctx, tx, headHash, *headNumber)
+			fmt.Println(h.Hash())
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -309,12 +305,30 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			})
 			return
 		}
+		if err := truncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		if e.hook != nil {
+			if err := e.db.View(ctx, func(tx kv.Tx) error {
+				return e.hook.AfterRun(tx, finishProgressBefore)
+			}); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
 		if log {
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
+		}
+
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error { return e.executionPipeline.RunPrune(e.db, tx, false) }); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 	}
 

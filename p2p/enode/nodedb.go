@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 
-	mdbx1 "github.com/torquem-ch/mdbx-go/mdbx"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 )
 
 // Keys in the node database.

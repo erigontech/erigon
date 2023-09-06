@@ -53,6 +53,7 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 	Peers(ctx context.Context) (*remote.PeersReply, error)
+	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
@@ -237,9 +238,29 @@ func (s *EthBackendServer) Peers(ctx context.Context, _ *emptypb.Empty) (*remote
 	return s.eth.Peers(ctx)
 }
 
+func (s *EthBackendServer) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
+	return s.eth.AddPeer(ctx, req)
+}
+
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}
 	return fmt.Errorf("no logs filter available")
+}
+
+func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return &remote.BorEventReply{}, nil
+	}
+	return &remote.BorEventReply{}, nil
 }

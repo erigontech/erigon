@@ -1,13 +1,20 @@
+//go:build integration
+
 package tests
 
 import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
+	if ethconfig.EnableHistoryV3InTest {
+		t.Skip("fix me in e3 please")
+	}
+
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
@@ -15,16 +22,12 @@ func TestExecutionSpec(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests")
 
-	// Probably failing due to pre-Byzantium receipts
-	bt.skipLoad(`^frontier/`)
-	bt.skipLoad(`^homestead/`)
-
 	// TODO(yperbasis): fix me
-	bt.skipLoad(`^cancun/eip4844_blobs/`)
-	bt.skipLoad(`^cancun/eip6780_selfdestruct/`)
+	bt.skipLoad(`^cancun/eip4844_blobs/blob_txs/`)
+	bt.skipLoad(`^cancun/eip4844_blobs/blob_txs_full/`)
+	bt.skipLoad(`^cancun/eip4844_blobs/excess_blob_gas/`)
 
-	// TODO(yperbasis): re-enable checkStateRoot
-	checkStateRoot := false
+	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root

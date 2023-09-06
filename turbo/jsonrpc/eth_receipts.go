@@ -590,7 +590,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	blockNum, ok, err = api.txnLookup(tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +618,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		blockNum = *blockNumPtr
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +679,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -775,7 +775,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 				log.Error(err.Error())
 			}
 			fields["blobGasPrice"] = blobGasPrice
-			fields["blobGasUsed"] = misc.GetBlobGasUsed(numBlobs)
+			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}
 	return fields

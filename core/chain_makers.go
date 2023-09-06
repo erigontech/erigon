@@ -33,11 +33,11 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -367,11 +367,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
 				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
 			}
-			if daoBlock.Cmp(b.header.Number) == 0 {
-				misc.ApplyDAOHardFork(ibs)
-			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs, logger)
+		if b.engine != nil {
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
@@ -652,3 +651,6 @@ func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.B
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
+func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}

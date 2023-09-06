@@ -19,7 +19,6 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cl/beacon"
-	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -51,7 +50,9 @@ func main() {
 }
 
 func runCaplinNode(cliCtx *cli.Context) error {
-	ctx := context.Background()
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
+
 	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
@@ -114,18 +115,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		executionEngine = cc
 	}
 
-	if !cfg.NoBeaconApi {
-		apiHandler := handler.NewApiHandler(cfg.GenesisCfg, cfg.BeaconCfg)
-		go beacon.ListenAndServe(apiHandler, &beacon.RouterConfiguration{
-			Protocol:        cfg.BeaconProtocol,
-			Address:         cfg.BeaconAddr,
-			ReadTimeTimeout: cfg.BeaconApiReadTimeout,
-			WriteTimeout:    cfg.BeaconApiWriteTimeout,
-			IdleTimeout:     cfg.BeaconApiWriteTimeout,
-		})
-		log.Info("Beacon API started", "addr", cfg.BeaconAddr)
-	}
-
 	var caplinFreezer freezer.Freezer
 	if cfg.RecordMode {
 		caplinFreezer = &freezer.RootPathOsFs{
@@ -133,5 +122,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer, cfg.DataDir)
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer, cfg.Dirs, beacon.RouterConfiguration{
+		Protocol:        cfg.BeaconProtocol,
+		Address:         cfg.BeaconAddr,
+		ReadTimeTimeout: cfg.BeaconApiReadTimeout,
+		WriteTimeout:    cfg.BeaconApiWriteTimeout,
+		IdleTimeout:     cfg.BeaconApiWriteTimeout,
+		Active:          !cfg.NoBeaconApi,
+	})
 }

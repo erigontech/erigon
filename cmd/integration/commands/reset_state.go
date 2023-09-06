@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/turbo/backup"
 	"os"
 	"text/tabwriter"
+
+	"github.com/ledgerwatch/erigon/turbo/backup"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -36,8 +37,9 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, agg := allSnapshots(ctx, db, logger)
+		sn, borSn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
+		defer borSn.Close()
 		defer agg.Close()
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {

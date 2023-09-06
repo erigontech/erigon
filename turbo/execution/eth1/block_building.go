@@ -181,13 +181,19 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}
 		for _, commitment := range commitments {
-			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment[:])
+			c := types.KZGCommitment{}
+			copy(c[:], commitment[:])
+			blobsBundle.Commitments = append(blobsBundle.Commitments, c[:])
 		}
 		for _, proof := range proofs {
-			blobsBundle.Proofs = append(blobsBundle.Proofs, proof[:])
+			p := types.KZGProof{}
+			copy(p[:], proof[:])
+			blobsBundle.Proofs = append(blobsBundle.Proofs, p[:])
 		}
 		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+			b := types.Blob{}
+			copy(b[:], blob[:])
+			blobsBundle.Blobs = append(blobsBundle.Blobs, b[:])
 		}
 	}
 

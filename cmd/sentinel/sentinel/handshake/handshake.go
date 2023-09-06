@@ -3,7 +3,6 @@ package handshake
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -89,7 +88,5 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	if err != nil {
 		return false
 	}
-	fmt.Println(responseStatus.ForkDigest)
-	fmt.Println(forkDigest)
 	return responseStatus.ForkDigest == forkDigest
 }

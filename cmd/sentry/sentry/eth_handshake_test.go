@@ -20,15 +20,15 @@ import (
 func TestCheckPeerStatusCompatibility(t *testing.T) {
 	var version uint = direct.ETH66
 	networkID := params.MainnetChainConfig.ChainID.Uint64()
+	heightForks, timeForks := forkid.GatherForks(params.MainnetChainConfig, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
 		TD:              big.NewInt(0),
 		Head:            libcommon.Hash{},
 		Genesis:         params.MainnetGenesisHash,
-		ForkID:          forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0, 0),
+		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, params.MainnetGenesisHash, 0, 0),
 	}
-	heightForks, timeForks := forkid.GatherForks(params.MainnetChainConfig)
 	status := proto_sentry.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),

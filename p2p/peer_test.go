@@ -37,11 +37,11 @@ import (
 var discard = Protocol{
 	Name:   "discard",
 	Length: 1,
-	Run: func(p *Peer, rw MsgReadWriter) error {
+	Run: func(p *Peer, rw MsgReadWriter) *PeerError {
 		for {
 			msg, err := rw.ReadMsg()
 			if err != nil {
-				return err
+				return NewPeerError(PeerErrorTest, DiscProtocolError, err, "peer_test: 'discard' protocol ReadMsg error")
 			}
 			fmt.Printf("discarding %d\n", msg.Code)
 			msg.Discard()
@@ -84,7 +84,7 @@ func newNode(id enode.ID, addr string) *enode.Node {
 	return enode.SignNull(&r, id)
 }
 
-func testPeer(protos []Protocol) (func(), *conn, *Peer, <-chan error) {
+func testPeer(protos []Protocol) (func(), *conn, *Peer, <-chan *PeerError) {
 	var (
 		fd1, fd2   = net.Pipe()
 		key1, key2 = newkey(), newkey()
@@ -100,9 +100,9 @@ func testPeer(protos []Protocol) (func(), *conn, *Peer, <-chan error) {
 	}
 
 	peer := newPeer(log.Root(), c1, protos, [64]byte{1}, true)
-	errc := make(chan error, 1)
+	errc := make(chan *PeerError, 1)
 	go func() {
-		_, err := peer.run()
+		err := peer.run()
 		errc <- err
 	}()
 
@@ -114,7 +114,7 @@ func TestPeerProtoReadMsg(t *testing.T) {
 	proto := Protocol{
 		Name:   "a",
 		Length: 5,
-		Run: func(peer *Peer, rw MsgReadWriter) error {
+		Run: func(peer *Peer, rw MsgReadWriter) *PeerError {
 			if err := ExpectMsg(rw, 2, []uint{1}); err != nil {
 				t.Error(err)
 			}
@@ -137,7 +137,7 @@ func TestPeerProtoReadMsg(t *testing.T) {
 
 	select {
 	case err := <-errc:
-		if err != errProtocolReturned {
+		if (err != nil) && (err.Reason != DiscQuitting) {
 			t.Errorf("peer returned error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -149,7 +149,7 @@ func TestPeerProtoEncodeMsg(t *testing.T) {
 	proto := Protocol{
 		Name:   "a",
 		Length: 2,
-		Run: func(peer *Peer, rw MsgReadWriter) error {
+		Run: func(peer *Peer, rw MsgReadWriter) *PeerError {
 			if err := SendItems(rw, 2); err == nil {
 				t.Error("expected error for out-of-range msg code, got nil")
 			}
@@ -203,17 +203,20 @@ func TestPeerDisconnectRace(t *testing.T) {
 	maybe := func() bool { return rand.Intn(2) == 1 }
 
 	for i := 0; i < 1000; i++ {
-		protoclose := make(chan error)
-		protodisc := make(chan DiscReason)
+		protoclose := make(chan *PeerError)
+		protodisc := make(chan *PeerError)
 		closer, rw, p, disc := testPeer([]Protocol{
 			{
 				Name:   "closereq",
-				Run:    func(p *Peer, rw MsgReadWriter) error { return <-protoclose },
+				Run:    func(p *Peer, rw MsgReadWriter) *PeerError { return <-protoclose },
 				Length: 1,
 			},
 			{
-				Name:   "disconnect",
-				Run:    func(p *Peer, rw MsgReadWriter) error { p.Disconnect(<-protodisc); return nil },
+				Name: "disconnect",
+				Run: func(p *Peer, rw MsgReadWriter) *PeerError {
+					p.Disconnect(<-protodisc)
+					return nil
+				},
 				Length: 1,
 			},
 		})
@@ -224,12 +227,12 @@ func TestPeerDisconnectRace(t *testing.T) {
 		// Close the network connection.
 		go closer()
 		// Make protocol "closereq" return.
-		protoclose <- errors.New("protocol closed")
+		protoclose <- NewPeerError(PeerErrorTest, DiscRequested, nil, "peer_test.TestPeerDisconnectRace: protocol closed")
 		// Make protocol "disconnect" call peer.Disconnect
-		protodisc <- DiscAlreadyConnected
+		protodisc <- NewPeerError(PeerErrorTest, DiscAlreadyConnected, nil, "peer_test.TestPeerDisconnectRace: protocol called peer.Disconnect()")
 		// In some cases, simulate something else calling peer.Disconnect.
 		if maybe() {
-			go p.Disconnect(DiscInvalidIdentity)
+			go p.Disconnect(NewPeerError(PeerErrorTest, DiscInvalidIdentity, nil, "peer_test.TestPeerDisconnectRace: something else called peer.Disconnect()"))
 		}
 		// In some cases, simulate remote requesting a disconnect.
 		if maybe() {
@@ -262,7 +265,7 @@ func TestNewPeer(t *testing.T) {
 		t.Errorf("Caps mismatch: got %v, expected %v", p.Caps(), caps)
 	}
 
-	p.Disconnect(DiscAlreadyConnected) // Should not hang
+	p.Disconnect(NewPeerError(PeerErrorTest, DiscAlreadyConnected, nil, "TestNewPeer Disconnect")) // Should not hang
 }
 
 func TestMatchProtocols(t *testing.T) {
