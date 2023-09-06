@@ -14,7 +14,7 @@ import (
 
 func setupTestDB(t *testing.T) *sql.DB {
 	// Create an in-memory SQLite DB for testing purposes
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
 	require.NoError(t, err)
 	return db
 }

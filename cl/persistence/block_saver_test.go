@@ -96,7 +96,7 @@ func getTestBlock() *cltypes.SignedBeaconBlock {
 
 func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, execution_client.ExecutionEngine) {
 	// Open an in-memory SQLite database for testing
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}

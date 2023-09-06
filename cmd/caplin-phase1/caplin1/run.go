@@ -65,7 +65,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	dataDirIndexer := path.Join(dirs.DataDir, "beacon_indicies")
 
 	os.Remove(dataDirIndexer)
-	db, err := sql.Open("sqlite3", dataDirIndexer)
+	db, err := sql.Open("sqlite", dataDirIndexer)
 	if err != nil {
 		return err
 	}
