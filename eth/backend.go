@@ -1184,7 +1184,7 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
-		s.waitForStageLoopStop = nil
+		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
