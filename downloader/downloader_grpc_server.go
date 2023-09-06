@@ -52,6 +52,8 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	snapDir := s.d.SnapDir()
 	for i, it := range request.Items {
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-logEvery.C:
 			log.Info("[snapshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
 		default:
@@ -72,7 +74,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			continue
 		}
 
-		_, err := createMagnetLinkWithInfoHash(it.TorrentHash, torrentClient, snapDir)
+		_, err := s.d.createMagnetLinkWithInfoHash(ctx, it.TorrentHash, snapDir)
 		if err != nil {
 			return nil, err
 		}
@@ -137,36 +139,3 @@ func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.C
 }
 
 // we dont have .seg or .torrent so we get them through the torrent hash
-func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.Client, snapDir string) (bool, error) {
-	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	if hash == nil {
-		return false, nil
-	}
-	infoHash := Proto2InfoHash(hash)
-	//log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
-
-	if _, ok := torrentClient.Torrent(infoHash); ok {
-		//log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
-		return true, nil
-	}
-
-	magnet := mi.Magnet(&infoHash, nil)
-	t, err := torrentClient.AddMagnet(magnet.String())
-	if err != nil {
-		//log.Warn("[downloader] add magnet link", "err", err)
-		return false, err
-	}
-	t.DisallowDataDownload()
-	t.AllowDataUpload()
-	go func(t *torrent.Torrent) {
-		<-t.GotInfo()
-
-		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(snapDir, t.Info(), &mi); err != nil {
-			log.Warn("[downloader] create torrent file", "err", err)
-			return
-		}
-	}(t)
-	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
-	return false, nil
-}
