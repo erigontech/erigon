@@ -411,20 +411,16 @@ type Getter struct {
 func (g *Getter) Trace(t bool)     { g.trace = t }
 func (g *Getter) FileName() string { return g.fName }
 
-func (g *Getter) nextPos(clean bool) uint64 {
-	if clean {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
+func (g *Getter) nextPos(clean bool) (pos uint64) {
+	if clean && g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
 	}
 	table := g.posDict
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
-	var l byte
-	var pos uint64
-	for l == 0 {
+	for l := byte(0); l == 0; {
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
@@ -439,7 +435,7 @@ func (g *Getter) nextPos(clean bool) uint64 {
 			pos = table.pos[code]
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pos
 }
@@ -470,7 +466,7 @@ func (g *Getter) nextPattern() []byte {
 			pattern = *cw.pattern
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pattern
 }
@@ -530,11 +526,6 @@ func (g *Getter) HasNext() bool {
 // and appends it to the given buf, returning the result of appending
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -542,6 +533,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
+		}
+		if buf == nil { // wordLen == 0, means we have valid record of 0 size. nil - is the marker of "something not found"
+			buf = []byte{}
 		}
 		return buf, g.dataP
 	}
@@ -591,11 +585,6 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
