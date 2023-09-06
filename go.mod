@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/erigontech/mdbx-go v0.33.1
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230906075521-7b1e0bf4e2b0
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230906080353-2ebbf43fa12a
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230818153427-cc16b83a89be
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -271,9 +271,6 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace (
-	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.3
-	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
-)
+replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+
+replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
