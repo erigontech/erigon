@@ -1,13 +1,11 @@
 // Hook go-metrics into expvar
 // on any /debug/metrics request, load all vars from the registry into expvar, and execute regular expvar handler
-package exp
+package metrics
 
 import (
 	"fmt"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon/metrics"
-	"github.com/ledgerwatch/erigon/metrics/prometheus"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -16,7 +14,7 @@ import (
 func Setup(address string, logger log.Logger) *http.ServeMux {
 	prometheusMux := http.NewServeMux()
 
-	prometheusMux.Handle("/debug/metrics/prometheus", prometheus.Handler(metrics.DefaultRegistry))
+	prometheusMux.Handle("/debug/metrics/prometheus", Handler(DefaultRegistry))
 
 	promServer := &http.Server{
 		Addr:    address,

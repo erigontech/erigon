@@ -25,7 +25,7 @@ type Eth1Header struct {
 	GasUsed       uint64
 	Time          uint64
 	Extra         *solid.ExtraData
-	BaseFeePerGas [32]byte
+	BaseFeePerGas libcommon.Hash
 	// Extra fields
 	BlockHash        libcommon.Hash
 	TransactionsRoot libcommon.Hash

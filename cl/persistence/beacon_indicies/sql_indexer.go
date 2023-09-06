@@ -49,7 +49,7 @@ func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (lib
 
 func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
 	// First, reset the Canonical status for all other block roots with the same slot
-	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot != ?", slot); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot = ?", slot); err != nil {
 		return fmt.Errorf("failed to reset canonical status for other block roots: %v", err)
 	}
 
@@ -190,29 +190,96 @@ func ReadBeaconBlockRootsInSlotRange(ctx context.Context, db SQLObject, fromSlot
 	return roots, slots, nil
 }
 
-func ReadHeaderAndSignatureByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, [96]byte, bool, error) {
-	h := &cltypes.BeaconBlockHeader{}
+func ReadSignedHeaderByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
 	var canonical bool
 	var signature []byte
 	// Execute the query.
 	err := db.QueryRowContext(ctx, `SELECT 
 		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
 		FROM beacon_indicies WHERE beacon_block_root = ?`, blockRoot).Scan(
-		&h.Slot,
-		&h.ProposerIndex,
-		&h.Root,
-		&h.ParentRoot,
+		&h.Header.Slot,
+		&h.Header.ProposerIndex,
+		&h.Header.Root,
+		&h.Header.ParentRoot,
 		&canonical,
-		&h.BodyRoot,
+		&h.Header.BodyRoot,
 		&signature,
 	)
+
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, [96]byte{}, false, nil
+			return nil, false, nil
 		}
-		return nil, [96]byte{}, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
+		return nil, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
 	}
-	var sig [96]byte
-	copy(sig[:], signature)
-	return h, sig, canonical, nil
+
+	copy(h.Signature[:], signature)
+	return h, canonical, nil
+}
+
+func parseRowsIntoHeaders(rows *sql.Rows) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+	var signedHeaders []*cltypes.SignedBeaconBlockHeader
+	var canonicals []bool
+
+	for rows.Next() {
+		var canonical bool
+		var signature []byte
+		h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
+		err := rows.Scan(
+			&h.Header.Slot,
+			&h.Header.ProposerIndex,
+			&h.Header.Root,
+			&h.Header.ParentRoot,
+			&canonical,
+			&h.Header.BodyRoot,
+			&signature,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		copy(h.Signature[:], signature)
+		signedHeaders = append(signedHeaders, h)
+		canonicals = append(canonicals, canonical)
+	}
+	return signedHeaders, canonicals, nil
+}
+
+func ReadSignedHeadersBySlot(ctx context.Context, db SQLObject, slot uint64) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+	// Execute the query.
+	rows, err := db.QueryContext(ctx, `SELECT 
+		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
+		FROM beacon_indicies WHERE slot = ?`, slot)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return parseRowsIntoHeaders(rows)
+}
+
+func ReadSignedHeadersByParentRoot(ctx context.Context, db SQLObject, parentRoot libcommon.Hash) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+	// Execute the query.
+	rows, err := db.QueryContext(ctx, `SELECT 
+		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
+		FROM beacon_indicies WHERE parent_root = ?`, parentRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return parseRowsIntoHeaders(rows)
+}
+
+func ReadSignedHeadersByParentRootAndSlot(ctx context.Context, db SQLObject, parentRoot libcommon.Hash, slot uint64) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+	// Execute the query.
+	rows, err := db.QueryContext(ctx, `SELECT 
+		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
+		FROM beacon_indicies WHERE parent_root = ? AND slot = ?`, parentRoot, slot)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return parseRowsIntoHeaders(rows)
 }

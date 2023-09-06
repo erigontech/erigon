@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var (

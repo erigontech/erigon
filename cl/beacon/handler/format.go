@@ -2,24 +2,29 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type BeaconResponse struct {
-	Finalized           *bool         `json:"finalized,omitempty"`
-	Version             string        `json:"version,omitempty"`
-	ExecutionOptimistic *bool         `json:"execution_optimistic,omitempty"`
-	Data                ssz.Marshaler `json:"data,omitempty"`
+	Finalized           *bool  `json:"finalized,omitempty"`
+	Version             string `json:"version,omitempty"`
+	ExecutionOptimistic *bool  `json:"execution_optimistic,omitempty"`
+	Data                any    `json:"data,omitempty"`
 }
 
 // In case of it being a json we need to also expose finalization, version, etc...
-type beaconHandlerFn func(r *http.Request) (data ssz.Marshaler, finalized *bool, version *clparams.StateVersion, httpStatus int, err error)
+type beaconHandlerFn func(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error)
 
 func beaconHandlerWrapper(fn beaconHandlerFn) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +40,7 @@ func beaconHandlerWrapper(fn beaconHandlerFn) func(w http.ResponseWriter, r *htt
 
 		if isSSZ {
 			// SSZ encoding
-			encoded, err := data.EncodeSSZ(nil)
+			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				io.WriteString(w, err.Error())
@@ -61,4 +66,70 @@ func beaconHandlerWrapper(fn beaconHandlerFn) func(w http.ResponseWriter, r *htt
 		w.WriteHeader(httpStatus)
 		json.NewEncoder(w).Encode(resp)
 	}
+}
+
+type chainTag int
+
+var (
+	Head      chainTag = 0
+	Finalized chainTag = 1
+	Justified chainTag = 2
+	Genesis   chainTag = 3
+)
+
+// Represent either state id or block id
+type segmentID struct {
+	tag  chainTag
+	slot *uint64
+	root *libcommon.Hash
+}
+
+func (c *segmentID) head() bool {
+	return c.tag == Head && c.slot == nil && c.root == nil
+}
+
+func (c *segmentID) finalized() bool {
+	return c.tag == Finalized
+}
+
+func (c *segmentID) justified() bool {
+	return c.tag == Justified
+}
+
+func (c *segmentID) genesis() bool {
+	return c.tag == Genesis
+}
+
+func (c *segmentID) getSlot() *uint64 {
+	return c.slot
+}
+
+func (c *segmentID) getRoot() *libcommon.Hash {
+	return c.root
+}
+
+func blockIdFromRequest(r *http.Request) (*segmentID, error) {
+	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|\d+)$`)
+	blockId := chi.URLParam(r, "block_id")
+	if !regex.MatchString(blockId) {
+		return nil, fmt.Errorf("invalid path variable: {block_id}")
+	}
+
+	if blockId == "head" {
+		return &segmentID{tag: Head}, nil
+	}
+	if blockId == "finalized" {
+		return &segmentID{tag: Finalized}, nil
+	}
+	if blockId == "genesis" {
+		return &segmentID{tag: Genesis}, nil
+	}
+	slotMaybe, err := strconv.ParseUint(blockId, 10, 64)
+	if err == nil {
+		return &segmentID{slot: &slotMaybe}, nil
+	}
+	root := libcommon.HexToHash(blockId)
+	return &segmentID{
+		root: &root,
+	}, nil
 }

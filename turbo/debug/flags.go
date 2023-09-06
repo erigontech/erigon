@@ -32,7 +32,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/diagnostics"
-	"github.com/ledgerwatch/erigon/metrics/exp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
@@ -159,7 +159,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 	if metricsEnabled && metricsAddr != "" {
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		metricsMux = exp.Setup(metricsAddress, logger)
+		metricsMux = metrics.Setup(metricsAddress, logger)
 	}
 
 	if pprof {
@@ -207,7 +207,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		metricsMux = exp.Setup(metricsAddress, logger)
+		metricsMux = metrics.Setup(metricsAddress, logger)
 		diagnostics.SetupLogsAccess(ctx, metricsMux)
 		diagnostics.SetupDbAccess(ctx, metricsMux)
 		diagnostics.SetupCmdLineAccess(metricsMux)

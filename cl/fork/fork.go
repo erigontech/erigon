@@ -152,7 +152,7 @@ type fork struct {
 	version [4]byte
 }
 
-func forkList(schedule map[[4]byte]uint64) (f []fork) {
+func forkList(schedule map[libcommon.Bytes4]uint64) (f []fork) {
 	for version, epoch := range schedule {
 		f = append(f, fork{epoch: epoch, version: version})
 	}
