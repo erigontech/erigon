@@ -1199,9 +1199,11 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
+	fmt.Printf("stop2\n")
 	if s.downloader != nil {
 		s.downloader.Close()
 	}
+	fmt.Printf("stop3\n")
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
@@ -1216,8 +1218,11 @@ func (s *Ethereum) Stop() error {
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
+	fmt.Printf("stop4\n")
 	_ = s.engine.Close()
+	fmt.Printf("stop5\n")
 	<-s.waitForStageLoopStop
+	fmt.Printf("stop6\n")
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
 	}
