@@ -39,21 +39,6 @@ const (
 	VersionKeyFinished = "ErigonVersionFinished"
 )
 
-func withModifier(vsn string) string {
-	if !isStable() {
-		vsn += "-" + VersionModifier
-	}
-	return vsn
-}
-
-func isStable() bool {
-	return VersionModifier == "stable"
-}
-
-func isRelease() bool {
-	return isStable() || VersionModifier == "alpha" || VersionModifier == "beta"
-}
-
 // Version holds the textual version string.
 var Version = func() string {
 	return fmt.Sprintf("%d.%02d.%d", VersionMajor, VersionMinor, VersionMicro)
@@ -67,18 +52,6 @@ var VersionWithMeta = func() string {
 	}
 	return v
 }()
-
-// ArchiveVersion holds the textual version string used for Geth archives.
-// e.g. "1.8.11-dea1ce05" for stable releases, or
-//
-//	"1.8.13-unstable-21c059b6" for unstable releases
-func ArchiveVersion(gitCommit string) string {
-	vsn := withModifier(Version)
-	if len(gitCommit) >= 8 {
-		vsn += "-" + gitCommit[:8]
-	}
-	return vsn
-}
 
 func VersionWithCommit(gitCommit string) string {
 	vsn := VersionWithMeta
