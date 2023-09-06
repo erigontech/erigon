@@ -835,6 +835,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 			return
 		}
 	}()
+
 	go s.engineBackendRPC.Start(httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
@@ -1216,9 +1217,10 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
-
 	_ = s.engine.Close()
-	<-s.waitForStageLoopStop
+	if s.waitForStageLoopStop != nil {
+		<-s.waitForStageLoopStop
+	}
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
 	}
