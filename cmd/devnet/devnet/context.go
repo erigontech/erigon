@@ -1,7 +1,7 @@
 package devnet
 
 import (
-	context "context"
+	"context"
 	"math/big"
 
 	"github.com/ledgerwatch/log/v3"
