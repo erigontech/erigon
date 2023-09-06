@@ -255,7 +255,6 @@ release: git-submodules
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
-ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
 
 ## user_linux:                        create "erigon" user (Linux)
 user_linux:
@@ -269,7 +268,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /home/$(ERIGON_USER)/.local/share
 
 ## user_macos:                        create "erigon" user (MacOS)
 user_macos:
@@ -279,7 +278,7 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
 
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage
