@@ -439,20 +439,21 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-
+		_, _ = rawLogs, blockHash
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
-		for _, log := range filtered {
-			log.BlockNumber = blockNum
-			log.BlockHash = blockHash
-			log.TxHash = txn.Hash()
-		}
-		logs = append(logs, filtered...)
+
+		//filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
+		//for _, log := range filtered {
+		//	log.BlockNumber = blockNum
+		//	log.BlockHash = blockHash
+		//	log.TxHash = txn.Hash()
+		//}
+		//logs = append(logs, filtered...)
 	}
 
 	//stats := api._agg.GetAndResetStats()
