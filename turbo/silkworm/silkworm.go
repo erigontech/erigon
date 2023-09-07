@@ -223,7 +223,7 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 	cTxsIdxTxnHashFilePath := C.CString(snapshot.Txs.IdxTxnHash.FilePath)
 	defer C.free(unsafe.Pointer(cTxsIdxTxnHashFilePath))
 	cTxsIdxTxnHash2BlockFilePath := C.CString(snapshot.Txs.IdxTxnHash2BlockNum.FilePath)
-	defer C.free(unsafe.Pointer(cTxsIdxTxnHashFilePath))
+	defer C.free(unsafe.Pointer(cTxsIdxTxnHash2BlockFilePath))
 	cTxsSnapshot := C.struct_SilkwormTransactionsSnapshot {
 		segment: C.struct_SilkwormMemoryMappedFile {
 			file_path: cTxsSegmentFilePath,
