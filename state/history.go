@@ -1175,21 +1175,19 @@ type HistoryContext struct {
 }
 
 func (h *History) MakeContext() *HistoryContext {
-
-	var hc = HistoryContext{
-		h:     h,
-		ic:    h.InvertedIndex.MakeContext(),
-		files: *h.roFiles.Load(),
-
-		trace: false,
-	}
-	for _, item := range hc.files {
-		if !item.src.frozen {
-			item.src.refcount.Add(1)
+	files := *h.roFiles.Load()
+	for i := 0; i < len(files); i++ {
+		if !files[i].src.frozen {
+			files[i].src.refcount.Add(1)
 		}
 	}
 
-	return &hc
+	return &HistoryContext{
+		h:     h,
+		ic:    h.InvertedIndex.MakeContext(),
+		files: files,
+		trace: false,
+	}
 }
 
 func (hc *HistoryContext) statelessGetter(i int) ArchiveGetter {
@@ -1310,17 +1308,17 @@ func (hc *HistoryContext) Close() {
 	}
 	files := hc.files
 	hc.files = nil
-	for _, item := range files {
-		if item.src.frozen {
+	for i := 0; i < len(files); i++ {
+		if files[i].src.frozen {
 			continue
 		}
-		refCnt := item.src.refcount.Add(-1)
+		refCnt := files[i].src.refcount.Add(-1)
 		//if hc.h.filenameBase == "accounts" && item.src.canDelete.Load() {
 		//	log.Warn("[history] HistoryContext.Close: check file to remove", "refCnt", refCnt, "name", item.src.decompressor.FileName())
 		//}
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && item.src.canDelete.Load() {
-			item.src.closeFilesAndRemove()
+		if refCnt == 0 && files[i].src.canDelete.Load() {
+			files[i].src.closeFilesAndRemove()
 		}
 	}
 	for _, r := range hc.readers {

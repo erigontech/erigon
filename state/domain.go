@@ -113,7 +113,7 @@ type filesItem struct {
 }
 type bloomFilter struct {
 	*bloomfilter.Filter
-	fileName, filePath string
+	FileName, FilePath string
 	f                  *os.File
 }
 
@@ -127,13 +127,11 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	}
 
 	_, fileName := filepath.Split(filePath)
-	return &bloomFilter{filePath: filePath, fileName: fileName, Filter: bloom}, nil
+	return &bloomFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
 }
-func (b *bloomFilter) FileName() string { return b.fileName }
-
 func (b *bloomFilter) Build() error {
 	//TODO: fsync and tmp-file rename
-	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
+	if _, err := b.Filter.WriteFile(b.FilePath); err != nil {
 		return err
 	}
 	return nil
@@ -141,7 +139,7 @@ func (b *bloomFilter) Build() error {
 
 func OpenBloom(filePath string) (*bloomFilter, error) {
 	_, fileName := filepath.Split(filePath)
-	f := &bloomFilter{filePath: filePath, fileName: fileName}
+	f := &bloomFilter{FilePath: filePath, FileName: fileName}
 	var err error
 	f.Filter, _, err = bloomfilter.ReadFile(filePath)
 	if err != nil {
@@ -210,8 +208,8 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 	if i.bloom != nil {
 		i.bloom.Close()
-		if err := os.Remove(i.bloom.filePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bloom.fileName)
+		if err := os.Remove(i.bloom.FilePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bloom.FileName)
 		}
 		i.bloom = nil
 	}
@@ -919,17 +917,17 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) MakeContext() *DomainContext {
-	dc := &DomainContext{
-		d:     d,
-		hc:    d.History.MakeContext(),
-		files: *d.roFiles.Load(),
-	}
-	for _, item := range dc.files {
-		if !item.src.frozen {
-			item.src.refcount.Add(1)
+	files := *d.roFiles.Load()
+	for i := 0; i < len(files); i++ {
+		if !files[i].src.frozen {
+			files[i].src.refcount.Add(1)
 		}
 	}
-	return dc
+	return &DomainContext{
+		d:     d,
+		hc:    d.History.MakeContext(),
+		files: files,
+	}
 }
 
 // Collation is the set of compressors created after aggregation
@@ -1737,14 +1735,14 @@ func (dc *DomainContext) Close() {
 	}
 	files := dc.files
 	dc.files = nil
-	for _, item := range files {
-		if item.src.frozen {
+	for i := 0; i < len(files); i++ {
+		if files[i].src.frozen {
 			continue
 		}
-		refCnt := item.src.refcount.Add(-1)
+		refCnt := files[i].src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && item.src.canDelete.Load() {
-			item.src.closeFilesAndRemove()
+		if refCnt == 0 && files[i].src.canDelete.Load() {
+			files[i].src.closeFilesAndRemove()
 		}
 	}
 	//for _, r := range dc.readers {
