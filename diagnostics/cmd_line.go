@@ -2,7 +2,6 @@ package diagnostics
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 )
@@ -10,13 +9,18 @@ import (
 func SetupCmdLineAccess(metricsMux *http.ServeMux) {
 	metricsMux.HandleFunc("/debug/cmdline", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		writeCmdLine(w)
-	})
-}
+		w.Header().Set("Content-Type", "application/json")
+		space := ""
+		fmt.Fprint(w, '"')
+		for _, arg := range os.Args {
+			if len(space) > 0 {
+				fmt.Fprint(w, space)
+			} else {
+				space = " "
+			}
 
-func writeCmdLine(w io.Writer) {
-	fmt.Fprintf(w, "SUCCESS\n")
-	for _, arg := range os.Args {
-		fmt.Fprintf(w, "%s\n", arg)
-	}
+			fmt.Fprint(w, arg)
+		}
+		fmt.Fprint(w, '"')
+	})
 }

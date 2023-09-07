@@ -1,8 +1,7 @@
 package diagnostics
 
 import (
-	"fmt"
-	"io"
+	"encoding/json"
 	"net/http"
 
 	"github.com/urfave/cli/v2"
@@ -11,13 +10,11 @@ import (
 func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	metricsMux.HandleFunc("/debug/flags", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		writeFlags(w, ctx)
+		w.Header().Set("Content-Type", "application/json")
+		flags := map[string]interface{}{}
+		for _, flagName := range ctx.FlagNames() {
+			flags[flagName] = ctx.Value(flagName)
+		}
+		json.NewEncoder(w).Encode(flags)
 	})
-}
-
-func writeFlags(w io.Writer, ctx *cli.Context) {
-	fmt.Fprintf(w, "SUCCESS\n")
-	for _, flagName := range ctx.FlagNames() {
-		fmt.Fprintf(w, "%s=%v\n", flagName, ctx.Value(flagName))
-	}
 }
