@@ -393,7 +393,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 	data := resp.Data
 
-
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) {
@@ -441,13 +440,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion {	// V3 before cancun
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
 		if payloadAttributes.ParentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
 		}
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion {	// Not V3 after cancun
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 		if payloadAttributes.ParentBeaconBlockRoot != nil {
 			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
 		}
