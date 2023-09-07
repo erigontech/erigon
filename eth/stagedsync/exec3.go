@@ -164,14 +164,6 @@ func ExecV3(ctx context.Context,
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 
-	//defer func() {
-	//	if err := recover(); err != nil {
-	//		log.Error("panic", "err", err)
-	//		debug.PrintStack()
-	//		panic(err)
-	//	}
-	//}()
-
 	useExternalTx := applyTx != nil
 	if initialCycle || !useExternalTx {
 		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
@@ -858,7 +850,7 @@ Loop:
 
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
-	if !dbg.DiscardCommitment() {
+	if !dbg.DiscardCommitment() && b != nil {
 		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
