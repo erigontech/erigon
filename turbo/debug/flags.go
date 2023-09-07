@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ethereum/go-ethereum/metrics/exp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
@@ -31,7 +32,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/metrics/exp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
@@ -158,7 +159,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 	if metricsEnabled && metricsAddr != "" {
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		metricsMux = exp.Setup(metricsAddress, logger)
+		metricsMux = metrics.Setup(metricsAddress, logger)
 	}
 
 	if pprof {

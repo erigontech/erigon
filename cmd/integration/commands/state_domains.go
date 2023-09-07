@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -507,9 +507,9 @@ func (b *blockProcessor) applyBlock(
 	rules := b.chainConfig.Rules(block.NumberU64(), block.Time())
 
 	b.blockNum = block.NumberU64()
-
-	b.txNum++ // Pre-block transaction
 	b.writer.w.SetTxNum(b.txNum)
+
+	// Pre-block transaction
 	if b.txNum >= b.startTxNum {
 		ibs := state.New(b.reader)
 		b.engine.Initialize(b.chainConfig, nil, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -522,6 +522,8 @@ func (b *blockProcessor) applyBlock(
 			return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
 		}
 	}
+	b.txNum++
+	b.writer.w.SetTxNum(b.txNum)
 
 	getHashFn := core.GetHashFn(header, b.getHeader)
 	for i, tx := range block.Transactions() {

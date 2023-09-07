@@ -6,9 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
-
 	dbg "runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 

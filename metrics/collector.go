@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package prometheus
+package metrics
 
 import (
 	"bytes"
@@ -84,12 +84,12 @@ func (c *collector) addTimer(name string, m *metrics.Summary) {
 }
 
 func (c *collector) writeGauge(name string, value interface{}) {
-	c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, name))
+	//c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, name))
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }
 
 func (c *collector) writeCounter(name string, value interface{}) {
-	c.buff.WriteString(fmt.Sprintf(typeCounterTpl, name))
+	//c.buff.WriteString(fmt.Sprintf(typeCounterTpl, name))
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }
 

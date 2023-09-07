@@ -1,7 +1,7 @@
 package devnet
 
 import (
-	context "context"
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
