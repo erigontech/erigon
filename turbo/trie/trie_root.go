@@ -139,6 +139,7 @@ func NewRootHashAggregator(trace bool) *RootHashAggregator {
 }
 
 func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCollector2, shc StorageHashCollector2, trace bool) *FlatDBTrieLoader {
+	panic(2)
 	if trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")

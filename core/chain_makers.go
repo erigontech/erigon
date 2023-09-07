@@ -444,7 +444,6 @@ func hashKeyAndAddIncarnation(k []byte, h *common.Hasher) (newK []byte, err erro
 }
 
 func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRoot libcommon.Hash, err error) {
-	panic(1)
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
