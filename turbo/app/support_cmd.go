@@ -333,9 +333,9 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						},
 						Last: true,
 					})
-					return nil
 				}
 
+				fmt.Println(buffer.String())
 				return json.NewEncoder(writer).Encode(&nodeResponse{
 					Id:     requestId,
 					Result: json.RawMessage(buffer.Bytes()),

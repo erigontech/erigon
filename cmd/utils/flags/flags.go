@@ -305,6 +305,10 @@ func (b *bigValue) Set(s string) error {
 	return nil
 }
 
+func (b *bigValue) Get() any {
+	return b.String()
+}
+
 // GlobalBig returns the value of a BigFlag from the global flag set.
 func GlobalBig(ctx *cli.Context, name string) *big.Int {
 	val := ctx.Generic(name)

@@ -1,26 +1,29 @@
 package diagnostics
 
 import (
-	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func SetupCmdLineAccess(metricsMux *http.ServeMux) {
 	metricsMux.HandleFunc("/debug/cmdline", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		space := ""
-		fmt.Fprint(w, '"')
+
+		var space []byte
+
+		w.Write([]byte{'"'})
 		for _, arg := range os.Args {
 			if len(space) > 0 {
-				fmt.Fprint(w, space)
+				w.Write(space)
 			} else {
-				space = " "
+				space = []byte(" ")
 			}
 
-			fmt.Fprint(w, arg)
+			w.Write([]byte(strings.Trim(strconv.Quote(arg), `"`)))
 		}
-		fmt.Fprint(w, '"')
+		w.Write([]byte{'"'})
 	})
 }
