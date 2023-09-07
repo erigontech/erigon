@@ -174,15 +174,13 @@ func New(dllPath string) (*Silkworm, error) {
 		addSnapshot: addSnapshot,
 		executeBlocks: executeBlocks,
 	}
+	C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance)
 	return silkworm, nil
 }
 
-func (s *Silkworm) Init() {
-	C.call_silkworm_init_func(s.initFunc, &s.instance)
-}
-
-func (s *Silkworm) Fini() {
+func (s *Silkworm) Close() {
 	C.call_silkworm_fini_func(s.finiFunc, s.instance)
+	s.instance = nil
 }
 
 func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
