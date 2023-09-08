@@ -25,7 +25,7 @@ func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
 	return json.Marshal(h.u)
 }
 
-func (h uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
+func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
 	return json.Unmarshal(buf, h.u)
 }
 

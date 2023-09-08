@@ -37,5 +37,14 @@ type Uint64VectorSSZ interface {
 	json.Unmarshaler
 }
 
-type HashListSSZ IterableSSZ[common.Hash]
-type HashVectorSSZ IterableSSZ[common.Hash]
+type HashListSSZ interface {
+	IterableSSZ[common.Hash]
+	json.Marshaler
+	json.Unmarshaler
+}
+
+type HashVectorSSZ interface {
+	IterableSSZ[common.Hash]
+	json.Marshaler
+	json.Unmarshaler
+}
