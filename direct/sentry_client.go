@@ -320,6 +320,10 @@ func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentry.PeerEven
 	return &SentryPeersStreamC{ch: ch, ctx: ctx}, nil
 }
 
+func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentry.AddPeerRequest, opts ...grpc.CallOption) (*sentry.AddPeerReply, error) {
+	return c.server.AddPeer(ctx, in)
+}
+
 type peersReply struct {
 	r   *sentry.PeerEvent
 	err error

@@ -21,6 +21,9 @@ var _ SentryServer = &SentryServerMock{}
 //
 //		// make and configure a mocked SentryServer
 //		mockedSentryServer := &SentryServerMock{
+//			AddPeerFunc: func(contextMoqParam context.Context, addPeerRequest *AddPeerRequest) (*AddPeerReply, error) {
+//				panic("mock out the AddPeer method")
+//			},
 //			HandShakeFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error) {
 //				panic("mock out the HandShake method")
 //			},
@@ -73,6 +76,9 @@ var _ SentryServer = &SentryServerMock{}
 //
 //	}
 type SentryServerMock struct {
+	// AddPeerFunc mocks the AddPeer method.
+	AddPeerFunc func(contextMoqParam context.Context, addPeerRequest *AddPeerRequest) (*AddPeerReply, error)
+
 	// HandShakeFunc mocks the HandShake method.
 	HandShakeFunc func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error)
 
@@ -120,6 +126,13 @@ type SentryServerMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AddPeer holds details about calls to the AddPeer method.
+		AddPeer []struct {
+			// ContextMoqParam is the contextMoqParam argument value.
+			ContextMoqParam context.Context
+			// AddPeerRequest is the addPeerRequest argument value.
+			AddPeerRequest *AddPeerRequest
+		}
 		// HandShake holds details about calls to the HandShake method.
 		HandShake []struct {
 			// ContextMoqParam is the contextMoqParam argument value.
@@ -222,6 +235,7 @@ type SentryServerMock struct {
 		mustEmbedUnimplementedSentryServer []struct {
 		}
 	}
+	lockAddPeer                            sync.RWMutex
 	lockHandShake                          sync.RWMutex
 	lockMessages                           sync.RWMutex
 	lockNodeInfo                           sync.RWMutex
@@ -237,6 +251,46 @@ type SentryServerMock struct {
 	lockSendMessageToRandomPeers           sync.RWMutex
 	lockSetStatus                          sync.RWMutex
 	lockmustEmbedUnimplementedSentryServer sync.RWMutex
+}
+
+// AddPeer calls AddPeerFunc.
+func (mock *SentryServerMock) AddPeer(contextMoqParam context.Context, addPeerRequest *AddPeerRequest) (*AddPeerReply, error) {
+	callInfo := struct {
+		ContextMoqParam context.Context
+		AddPeerRequest  *AddPeerRequest
+	}{
+		ContextMoqParam: contextMoqParam,
+		AddPeerRequest:  addPeerRequest,
+	}
+	mock.lockAddPeer.Lock()
+	mock.calls.AddPeer = append(mock.calls.AddPeer, callInfo)
+	mock.lockAddPeer.Unlock()
+	if mock.AddPeerFunc == nil {
+		var (
+			addPeerReplyOut *AddPeerReply
+			errOut          error
+		)
+		return addPeerReplyOut, errOut
+	}
+	return mock.AddPeerFunc(contextMoqParam, addPeerRequest)
+}
+
+// AddPeerCalls gets all the calls that were made to AddPeer.
+// Check the length with:
+//
+//	len(mockedSentryServer.AddPeerCalls())
+func (mock *SentryServerMock) AddPeerCalls() []struct {
+	ContextMoqParam context.Context
+	AddPeerRequest  *AddPeerRequest
+} {
+	var calls []struct {
+		ContextMoqParam context.Context
+		AddPeerRequest  *AddPeerRequest
+	}
+	mock.lockAddPeer.RLock()
+	calls = mock.calls.AddPeer
+	mock.lockAddPeer.RUnlock()
+	return calls
 }
 
 // HandShake calls HandShakeFunc.
@@ -834,6 +888,9 @@ var _ SentryClient = &SentryClientMock{}
 //
 //		// make and configure a mocked SentryClient
 //		mockedSentryClient := &SentryClientMock{
+//			AddPeerFunc: func(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error) {
+//				panic("mock out the AddPeer method")
+//			},
 //			HandShakeFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
 //				panic("mock out the HandShake method")
 //			},
@@ -883,6 +940,9 @@ var _ SentryClient = &SentryClientMock{}
 //
 //	}
 type SentryClientMock struct {
+	// AddPeerFunc mocks the AddPeer method.
+	AddPeerFunc func(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
+
 	// HandShakeFunc mocks the HandShake method.
 	HandShakeFunc func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
 
@@ -927,6 +987,15 @@ type SentryClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AddPeer holds details about calls to the AddPeer method.
+		AddPeer []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *AddPeerRequest
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
 		// HandShake holds details about calls to the HandShake method.
 		HandShake []struct {
 			// Ctx is the ctx argument value.
@@ -1054,6 +1123,7 @@ type SentryClientMock struct {
 			Opts []grpc.CallOption
 		}
 	}
+	lockAddPeer                  sync.RWMutex
 	lockHandShake                sync.RWMutex
 	lockMessages                 sync.RWMutex
 	lockNodeInfo                 sync.RWMutex
@@ -1068,6 +1138,50 @@ type SentryClientMock struct {
 	lockSendMessageToAll         sync.RWMutex
 	lockSendMessageToRandomPeers sync.RWMutex
 	lockSetStatus                sync.RWMutex
+}
+
+// AddPeer calls AddPeerFunc.
+func (mock *SentryClientMock) AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *AddPeerRequest
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockAddPeer.Lock()
+	mock.calls.AddPeer = append(mock.calls.AddPeer, callInfo)
+	mock.lockAddPeer.Unlock()
+	if mock.AddPeerFunc == nil {
+		var (
+			addPeerReplyOut *AddPeerReply
+			errOut          error
+		)
+		return addPeerReplyOut, errOut
+	}
+	return mock.AddPeerFunc(ctx, in, opts...)
+}
+
+// AddPeerCalls gets all the calls that were made to AddPeer.
+// Check the length with:
+//
+//	len(mockedSentryClient.AddPeerCalls())
+func (mock *SentryClientMock) AddPeerCalls() []struct {
+	Ctx  context.Context
+	In   *AddPeerRequest
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *AddPeerRequest
+		Opts []grpc.CallOption
+	}
+	mock.lockAddPeer.RLock()
+	calls = mock.calls.AddPeer
+	mock.lockAddPeer.RUnlock()
+	return calls
 }
 
 // HandShake calls HandShakeFunc.

@@ -207,6 +207,10 @@ func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, o
 	return s.server.Peers(ctx, in)
 }
 
+func (s *EthBackendClientDirect) AddPeer(ctx context.Context, in *remote.AddPeerRequest, opts ...grpc.CallOption) (*remote.AddPeerReply, error) {
+	return s.server.AddPeer(ctx, in)
+}
+
 func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
 	return s.server.PendingBlock(ctx, in)
 }
