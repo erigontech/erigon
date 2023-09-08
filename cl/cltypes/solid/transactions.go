@@ -16,7 +16,7 @@ type TransactionsSSZ struct {
 }
 
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
-	var tmp []hexutility.Bytes
+	tmp := []hexutility.Bytes{}
 	t.root = libcommon.Hash{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
@@ -29,7 +29,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 }
 
 func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
-	var tmp []hexutility.Bytes
+	tmp := []hexutility.Bytes{}
 	for _, tx := range t.underlying {
 		tmp = append(tmp, tx)
 	}

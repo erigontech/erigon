@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -96,6 +97,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		foundLatestEth1ValidHash = true // skip this if we are not using an engine supporting direct insertion
 	}
 
+	var currEth1Progress atomic.Int64
+
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		if !foundLatestEth1ValidHash {
@@ -104,6 +107,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, err
 			}
+			currEth1Progress.Store(int64(payload.BlockNumber))
 			encodedPayload = append(encodedPayload, byte(blk.Version()))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, err
@@ -136,7 +140,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return
 				}
 				logArgs = append(logArgs,
-					"progress", currProgress,
+					"eth2 slot", currProgress,
+					"eth1 blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount)
 				logger.Info("Downloading History", logArgs...)
