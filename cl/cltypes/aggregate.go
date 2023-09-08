@@ -57,8 +57,8 @@ func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
-	SyncCommiteeBits      [64]byte
-	SyncCommiteeSignature [96]byte
+	SyncCommiteeBits      [64]byte          `json:"sync_commitee_bits"`
+	SyncCommiteeSignature libcommon.Bytes96 `json:"signature"`
 }
 
 // return sum of the committee bits
