@@ -101,13 +101,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		if blk.Version() >= clparams.BellatrixVersion {
+			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
+		}
 		if !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
 				return false, err
 			}
-			currEth1Progress.Store(int64(payload.BlockNumber))
 			encodedPayload = append(encodedPayload, byte(blk.Version()))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, err
@@ -140,8 +142,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return
 				}
 				logArgs = append(logArgs,
-					"eth2 slot", currProgress,
-					"eth1 blockNumber", currEth1Progress.Load(),
+					"slot", currProgress,
+					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount)
 				logger.Info("Downloading History", logArgs...)
