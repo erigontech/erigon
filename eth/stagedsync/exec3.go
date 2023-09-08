@@ -790,6 +790,7 @@ Loop:
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
+					doms.ClearRam(false)
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
@@ -813,7 +814,6 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 						t5 = time.Since(tt)
-
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
 							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
@@ -828,18 +828,16 @@ Loop:
 						}
 						t6 = time.Since(tt)
 
-						doms.ClearRam(false)
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
 						}
-						agg.StartWrites()
-						applyWorker.ResetTx(applyTx)
-
-						nc := applyTx.(*temporal.Tx).AggCtx()
-						doms.SetTx(applyTx)
-						doms.SetContext(nc)
 					}
+					agg.StartWrites()
+					applyWorker.ResetTx(applyTx)
+					nc := applyTx.(*temporal.Tx).AggCtx()
+					doms.SetTx(applyTx)
+					doms.SetContext(nc)
 
 					return nil
 				}(); err != nil {
@@ -863,7 +861,7 @@ Loop:
 
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
-	if !dbg.DiscardCommitment() {
+	if !dbg.DiscardCommitment() && b != nil {
 		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
@@ -908,23 +906,24 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 		return true, nil
 	}
 	/* uncomment it when need to debug state-root missmatch*/
-	if err := agg.Flush(context.Background(), applyTx); err != nil {
-		panic(err)
-	}
-	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-	if err != nil {
-		panic(err)
-	}
-	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		if oldAlogNonIncrementalHahs != header.Root {
-			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+	/*
+		if err := agg.Flush(context.Background(), applyTx); err != nil {
+			panic(err)
 		}
-	} else {
-		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-	}
-	//*/
+		oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+		if err != nil {
+			panic(err)
+		}
+		if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+			if oldAlogNonIncrementalHahs != header.Root {
+				log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+			} else {
+				log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is NOT correct): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+			}
+		} else {
+			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+		}
+	*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
