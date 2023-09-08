@@ -777,6 +777,7 @@ Loop:
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
+					doms.ClearRam(false)
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
@@ -800,7 +801,6 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 						t5 = time.Since(tt)
-
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
 							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
@@ -815,18 +815,16 @@ Loop:
 						}
 						t6 = time.Since(tt)
 
-						doms.ClearRam(false)
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
 						}
-						agg.StartWrites()
-						applyWorker.ResetTx(applyTx)
-
-						nc := applyTx.(*temporal.Tx).AggCtx()
-						doms.SetTx(applyTx)
-						doms.SetContext(nc)
 					}
+					agg.StartWrites()
+					applyWorker.ResetTx(applyTx)
+					nc := applyTx.(*temporal.Tx).AggCtx()
+					doms.SetTx(applyTx)
+					doms.SetContext(nc)
 
 					return nil
 				}(); err != nil {
