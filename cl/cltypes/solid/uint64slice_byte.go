@@ -2,6 +2,7 @@ package solid
 
 import (
 	"encoding/binary"
+	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -56,9 +57,26 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 	copy(target.u, arr.u)
 }
 
-// depth returns the depth of the Merkle tree representing the slice.
-func (arr *byteBasedUint64Slice) depth() int {
-	return int(GetDepth(uint64(arr.c) / 4))
+func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
+	list := make([]uint64, arr.l)
+	for i := 0; i < arr.l; i++ {
+		list[0] = arr.Get(i)
+	}
+	return json.Marshal(list)
+}
+
+func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
+	var list []uint64
+
+	if err := json.Unmarshal(buf, &list); err != nil {
+		return err
+	}
+	arr.Clear()
+	arr.l = len(list)
+	for _, elem := range list {
+		arr.Append(elem)
+	}
+	return nil
 }
 
 // Range iterates over the slice and applies a provided function to each element.
