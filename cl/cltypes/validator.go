@@ -16,11 +16,10 @@ const (
 )
 
 type DepositData struct {
-	PubKey                [48]byte
-	WithdrawalCredentials libcommon.Hash
-	Amount                uint64
-	Signature             libcommon.Bytes96
-	Root                  libcommon.Hash // Ignored if not for hashing
+	PubKey                libcommon.Bytes48 `json:"pubkey"`
+	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64            `json:"amount"`
+	Signature             libcommon.Bytes96 `json:"signature"`
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
