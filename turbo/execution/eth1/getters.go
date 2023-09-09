@@ -133,7 +133,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 			return nil, err
 		}
 		if block == nil {
-			return nil, nil
+			break
 		}
 		bodies[hashIdx] = &execution.BlockBody{
 			Transactions: block.RawBody().Transactions,
