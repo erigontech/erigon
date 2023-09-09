@@ -25,6 +25,8 @@ const (
 	Bytes96 = 96
 	// expected length of Bytes48 (bls public key and such)
 	Bytes48 = 48
+	// expected length of Bytes64 (sync committee bits)
+	Bytes64 = 64
 	// expected length of Bytes48 (beacon domain and such)
 	Bytes4 = 4
 	// Addr is the expected length of the address (in bytes)
