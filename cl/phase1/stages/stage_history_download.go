@@ -115,10 +115,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, err
 			}
 
-			foundLatestEth1ValidHash, err = cfg.engine.IsCanonicalHash(payload.BlockHash)
+			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
 				return false, err
 			}
+			foundLatestEth1ValidHash = bodyChainHeader != nil
 		}
 
 		slot := blk.Block.Slot

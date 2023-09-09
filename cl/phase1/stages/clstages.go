@@ -467,7 +467,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					for _, block := range blocks {
-						err := processBlock(block, false, true)
+						err := processBlock(block, true, true)
 						if err != nil {
 							// its okay if block processing fails
 							logger.Warn("extra block failed validation", "err", err)
