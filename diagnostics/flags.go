@@ -23,6 +23,15 @@ func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 			name := flag.Names()[0]
 			value := ctx.Value(name)
 
+			switch typed := value.(type) {
+			case string:
+				if typed == "" {
+					continue
+				}
+			case cli.UintSlice:
+				value = typed.Value()
+			}
+
 			var usage string
 
 			if docFlag, ok := flag.(cli.DocGenerationFlag); ok {
