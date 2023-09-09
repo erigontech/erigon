@@ -132,6 +132,9 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if err != nil {
 			return nil, err
 		}
+		if block == nil {
+			return nil, nil
+		}
 		bodies[hashIdx] = &execution.BlockBody{
 			Transactions: block.RawBody().Transactions,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals()),

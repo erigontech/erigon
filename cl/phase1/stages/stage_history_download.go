@@ -119,7 +119,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, err
 			}
-			foundLatestEth1ValidHash = bodyChainHeader != nil
+			foundLatestEth1ValidHash = len(bodyChainHeader) == 0
 		}
 
 		slot := blk.Block.Slot
