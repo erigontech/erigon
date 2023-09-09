@@ -11,9 +11,9 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices solid.Uint64ListSSZ
-	Data             solid.AttestationData
-	Signature        libcommon.Bytes96
+	AttestingIndices solid.Uint64ListSSZ   `json:"attesting_indicies"`
+	Data             solid.AttestationData `json:"data"`
+	Signature        libcommon.Bytes96     `json:"signature"`
 }
 
 func (i *IndexedAttestation) Static() bool {

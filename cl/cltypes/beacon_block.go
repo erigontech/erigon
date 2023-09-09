@@ -23,46 +23,46 @@ const (
 )
 
 type SignedBeaconBlock struct {
-	Signature libcommon.Bytes96
-	Block     *BeaconBlock
+	Signature libcommon.Bytes96 `json:"signature"`
+	Block     *BeaconBlock      `json:"message"`
 }
 
 type BeaconBlock struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    libcommon.Hash
-	StateRoot     libcommon.Hash
-	Body          *BeaconBody
+	Slot          uint64         `json:"slot"`
+	ProposerIndex uint64         `json:"proposer_index"`
+	ParentRoot    libcommon.Hash `json:"parent_root"`
+	StateRoot     libcommon.Hash `json:"state_root"`
+	Body          *BeaconBody    `json:"body"`
 }
 
 type BeaconBody struct {
 	// A byte array used for randomness in the beacon chain
-	RandaoReveal libcommon.Bytes96
+	RandaoReveal libcommon.Bytes96 `json:"randao_reveal"`
 	// Data related to the Ethereum 1.0 chain
-	Eth1Data *Eth1Data
+	Eth1Data *Eth1Data `json:"eth1_data"`
 	// A byte array used to customize validators' behavior
-	Graffiti libcommon.Hash
+	Graffiti libcommon.Hash `json:"graffit"`
 	// A list of slashing events for validators who included invalid blocks in the chain
-	ProposerSlashings *solid.ListSSZ[*ProposerSlashing]
+	ProposerSlashings *solid.ListSSZ[*ProposerSlashing] `json:"proposer_slashings"`
 	// A list of slashing events for validators who included invalid attestations in the chain
-	AttesterSlashings *solid.ListSSZ[*AttesterSlashing]
+	AttesterSlashings *solid.ListSSZ[*AttesterSlashing] `json:"attester_slashings"`
 	// A list of attestations included in the block
-	Attestations *solid.ListSSZ[*solid.Attestation]
+	Attestations *solid.ListSSZ[*solid.Attestation] `json:"attestations"`
 	// A list of deposits made to the Ethereum 1.0 chain
-	Deposits *solid.ListSSZ[*Deposit]
+	Deposits *solid.ListSSZ[*Deposit] `json:"deposits"`
 	// A list of validators who have voluntarily exited the beacon chain
-	VoluntaryExits *solid.ListSSZ[*SignedVoluntaryExit]
+	VoluntaryExits *solid.ListSSZ[*SignedVoluntaryExit] `json:"voluntary_exits"`
 	// A summary of the current state of the beacon chain
-	SyncAggregate *SyncAggregate
+	SyncAggregate *SyncAggregate `json:"sync_aggregate,omitempty"`
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
-	ExecutionPayload *Eth1Block
+	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"`
 	// Withdrawals Diffs for Execution Layer
-	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange]
+	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"execution_changes,omitempty"`
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]
+	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
 	// The version of the beacon chain
-	Version   clparams.StateVersion
+	Version   clparams.StateVersion `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig
 }
 

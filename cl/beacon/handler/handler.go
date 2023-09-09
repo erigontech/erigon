@@ -42,7 +42,7 @@ func (a *ApiHandler) init() {
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
 					r.Get("/{block_id}", a.getBlock)
-					r.Get("/block_id}/root", a.getBlockRoot)
+					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot))
 				})
 				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis))
 				r.Post("/binded_blocks", nil)
