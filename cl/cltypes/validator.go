@@ -16,11 +16,10 @@ const (
 )
 
 type DepositData struct {
-	PubKey                [48]byte
-	WithdrawalCredentials libcommon.Hash
-	Amount                uint64
-	Signature             libcommon.Bytes96
-	Root                  libcommon.Hash // Ignored if not for hashing
+	PubKey                libcommon.Bytes48 `json:"pubkey"`
+	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64            `json:"amount"`
+	Signature             libcommon.Bytes96 `json:"signature"`
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -49,8 +48,8 @@ func (*DepositData) Static() bool {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof solid.HashVectorSSZ // 33 X 32 size.
-	Data  *DepositData
+	Proof solid.HashVectorSSZ `json:"proof"` // 33 X 32 size.
+	Data  *DepositData        `json:"data"`
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -73,8 +72,8 @@ func (d *Deposit) HashSSZ() ([32]byte, error) {
 }
 
 type VoluntaryExit struct {
-	Epoch          uint64
-	ValidatorIndex uint64
+	Epoch          uint64 `json:"epoch"`
+	ValidatorIndex uint64 `json:"validator_index"`
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -102,8 +101,8 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 }
 
 type SignedVoluntaryExit struct {
-	VolunaryExit *VoluntaryExit
-	Signature    libcommon.Bytes96
+	VolunaryExit *VoluntaryExit    `json:"message"`
+	Signature    libcommon.Bytes96 `json:"signature"`
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
