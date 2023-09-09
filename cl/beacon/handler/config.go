@@ -22,7 +22,7 @@ func (a *ApiHandler) getDepositContract(r *http.Request) (data any, finalized *b
 }
 
 func (a *ApiHandler) getForkSchedule(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var response []cltypes.Fork
+	response := []cltypes.Fork{}
 	// create first response (unordered and incomplete)
 	for currentVersion, epoch := range a.beaconChainCfg.ForkVersionSchedule {
 		response = append(response, cltypes.Fork{
