@@ -1173,7 +1173,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("TruncateBlocks", "block", binary.BigEndian.Uint64(k))
+			log.Info("TruncateBlocks", "block", binary.BigEndian.Uint64(kCopy))
 		default:
 		}
 		return nil
