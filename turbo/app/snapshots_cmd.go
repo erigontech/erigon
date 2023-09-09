@@ -513,12 +513,12 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
-	snapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err := snapshots.ReopenFolder(); err != nil {
+	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	if err := blockSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
-	blockReader := freezeblocks.NewBlockReader(snapshots, allBorSnapshots)
+	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
@@ -533,7 +533,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.KeepStepsInDB(0)
 	db.View(ctx, func(tx kv.Tx) error {
-		snapshots.LogStat()
+		blockSnapshots.LogStat()
 		ac := agg.MakeContext()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -621,7 +621,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger.Info("Work on state history snapshots")
+	logger.Info("Work on state history blockSnapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
@@ -650,10 +650,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	logger.Info("Build state history snapshots")
+	logger.Info("Build state history blockSnapshots")
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
+
 	for i := 0; i < 10; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
@@ -681,7 +682,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, snapshots.Files(), ac.Files())
+		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), ac.Files())
 	}); err != nil {
 		return err
 	}
@@ -689,7 +690,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, snapshots.Files(), ac.Files())
+		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), ac.Files())
 	}); err != nil {
 		return err
 	}
