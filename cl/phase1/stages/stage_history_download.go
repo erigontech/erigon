@@ -178,7 +178,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		var err error
 		var v []byte
-		fmt.Println(len(vComp))
 		if v, err = utils.DecompressSnappy(vComp); err != nil {
 			return fmt.Errorf("error decompressing dump during collection: %s", err)
 		}
