@@ -16,7 +16,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -227,12 +226,12 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	var err error
 	var ok bool
 
-	defer func() {
-		curious := "0da27ef618846cfa981516da2891fe0693a54f8418b85c91c384d2c0f4e14727"
-		if bytes.Equal(hexutility.MustDecodeString(curious), addr) {
-			fmt.Printf("found %s vDB/File %x vCache %x step %d\n", curious, v, v0, sd.txNum.Load()/sd.Account.aggregationStep)
-		}
-	}()
+	//defer func() {
+	//	curious := "0da27ef618846cfa981516da2891fe0693a54f8418b85c91c384d2c0f4e14727"
+	//	if bytes.Equal(hexutility.MustDecodeString(curious), addr) {
+	//		fmt.Printf("found %s vDB/File %x vCache %x step %d\n", curious, v, v0, sd.txNum.Load()/sd.Account.aggregationStep)
+	//	}
+	//}()
 	v0, ok = sd.Get(kv.AccountsDomain, addr)
 	if ok {
 		return v0, nil
