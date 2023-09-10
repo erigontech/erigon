@@ -16,24 +16,24 @@ import (
 
 // ETH1Block represents a block structure CL-side.
 type Eth1Block struct {
-	ParentHash    libcommon.Hash
-	FeeRecipient  libcommon.Address
-	StateRoot     libcommon.Hash
-	ReceiptsRoot  libcommon.Hash
-	LogsBloom     types.Bloom
-	PrevRandao    libcommon.Hash
-	BlockNumber   uint64
-	GasLimit      uint64
-	GasUsed       uint64
-	Time          uint64
-	Extra         *solid.ExtraData
-	BaseFeePerGas libcommon.Hash
+	ParentHash    libcommon.Hash    `json:"parent_hash"`
+	FeeRecipient  libcommon.Address `json:"fee_recipient"`
+	StateRoot     libcommon.Hash    `json:"state_root"`
+	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
+	LogsBloom     types.Bloom       `json:"logs_bloom"`
+	PrevRandao    libcommon.Hash    `json:"prev_randao"`
+	BlockNumber   uint64            `json:"block_number"`
+	GasLimit      uint64            `json:"gas_limit"`
+	GasUsed       uint64            `json:"gas_used"`
+	Time          uint64            `json:"timestamp"`
+	Extra         *solid.ExtraData  `json:"extra_data"`
+	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash     libcommon.Hash
-	Transactions  *solid.TransactionsSSZ
-	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
-	BlobGasUsed   uint64
-	ExcessBlobGas uint64
+	BlockHash     libcommon.Hash                    `json:"block_hash"`
+	Transactions  *solid.TransactionsSSZ            `json:"transactions"`
+	Withdrawals   *solid.ListSSZ[*types.Withdrawal] `json:"withdrawals,omitempty"`
+	BlobGasUsed   uint64                            `json:"blob_gas_used,omitempty"`
+	ExcessBlobGas uint64                            `json:"excess_blob_gas,omitempty"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig

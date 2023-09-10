@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 )
 
@@ -17,6 +19,14 @@ func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	return &uint64VectorSSZ{
 		u: o,
 	}
+}
+
+func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.u)
+}
+
+func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, h.u)
 }
 
 func (arr *uint64VectorSSZ) Clear() {
