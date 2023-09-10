@@ -271,11 +271,6 @@ func ConsensusClStages(ctx context.Context,
 
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
-							if err := processBlock(block, false, false); err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-								continue MainLoop
-							}
 							if shouldInsert && block.Data.Version() >= clparams.BellatrixVersion {
 								executionPayload := block.Data.Block.Body.ExecutionPayload
 								body := executionPayload.Body()
@@ -298,6 +293,11 @@ func ConsensusClStages(ctx context.Context,
 									}
 									blockBatch = blockBatch[:0]
 								}
+							}
+							if err := processBlock(block, false, false); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								continue MainLoop
 							}
 						}
 						currentEpoch++
