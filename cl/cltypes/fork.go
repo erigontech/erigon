@@ -8,9 +8,9 @@ import (
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Fork struct {
-	PreviousVersion libcommon.Bytes4
-	CurrentVersion  libcommon.Bytes4
-	Epoch           uint64
+	PreviousVersion libcommon.Bytes4 `json:"previous_version"`
+	CurrentVersion  libcommon.Bytes4 `json:"current_version"`
+	Epoch           uint64           `json:"epoch"`
 }
 
 func (*Fork) Static() bool {
