@@ -89,8 +89,9 @@ func (s *AggStats) clone() *AggStats {
 		UploadRate:       s.UploadRate,
 		DownloadRate:     s.DownloadRate,
 	}
-	sc.DroppedCompleted.Store(s.DroppedCompleted.Load())
-	sc.DroppedTotal.Store(s.DroppedTotal.Load())
+	atomic.StoreUint64(&sc.DroppedCompleted, atomic.LoadUint64(&s.DroppedCompleted))
+	atomic.StoreUint64(&sc.DroppedTotal, atomic.LoadUint64(&s.DroppedTotal))
+
 	return sc
 }
 
@@ -107,8 +108,9 @@ func (s *AggStats) copy(o *AggStats) *AggStats {
 	s.BytesUpload = o.BytesUpload
 	s.UploadRate = o.UploadRate
 	s.DownloadRate = o.DownloadRate
-	s.DroppedCompleted.Store(o.DroppedCompleted.Load())
-	s.DroppedTotal.Store(o.DroppedTotal.Load())
+	atomic.StoreUint64(&s.DroppedCompleted, atomic.LoadUint64(&o.DroppedCompleted))
+	atomic.StoreUint64(&s.DroppedTotal, atomic.LoadUint64(&o.DroppedTotal))
+
 	return s
 }
 
