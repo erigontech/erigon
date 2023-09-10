@@ -548,9 +548,8 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, err := snaptype.ParseFileName(s.dir, fName)
-		if err != nil {
-			s.logger.Warn("invalid segment name", "err", err, "name", fName)
+		f, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok {
 			continue
 		}
 		var processed bool = true
@@ -2243,7 +2242,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		for _, t := range snaptype.AllSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
-			f, _ := snaptype.ParseFileName(snapDir, segName)
+			f, ok := snaptype.ParseFileName(snapDir, segName)
+			if !ok {
+				continue
+			}
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
