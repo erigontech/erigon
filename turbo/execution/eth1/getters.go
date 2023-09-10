@@ -128,16 +128,20 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 
 	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := e.blockReader.BlockByHash(ctx, tx, h)
+		number := rawdb.ReadHeaderNumber(tx, h)
+		if number == nil {
+			break
+		}
+		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
+		if body == nil {
 			break
 		}
 		bodies = append(bodies, &execution.BlockBody{
-			Transactions: block.RawBody().Transactions,
-			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals()),
+			Transactions: body.RawBody().Transactions,
+			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 
@@ -163,7 +167,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			break
 		}
 
-		body, err := e.blockReader.BodyWithTransactions(ctx, tx, hash, req.Start+i)
+		body, err := e.getBody(ctx, tx, hash, req.Start+i)
 		if err != nil {
 			return nil, err
 		}

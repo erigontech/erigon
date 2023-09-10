@@ -120,9 +120,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
 			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
-			if foundLatestEth1ValidHash {
-				fmt.Println(bodyChainHeader[0])
-			}
 		}
 
 		slot := blk.Block.Slot
