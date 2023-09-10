@@ -111,11 +111,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
-			encodedPayload = append(encodedPayload, byte(blk.Version()))
+			// Use snappy compression that the temporary files do not take too much disk.
+			encodedPayload = utils.CompressSnappy(append(encodedPayload, byte(blk.Version())))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
-			encodedPayload = utils.CompressSnappy(encodedPayload)
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
@@ -172,12 +172,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
 
-	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
 		var err error
-		if v, err = utils.DecompressSnappy(v); err != nil {
+		var v []byte
+		fmt.Println(len(vComp))
+		if v, err = utils.DecompressSnappy(vComp); err != nil {
 			return fmt.Errorf("error decompressing dump during collection: %s", err)
 		}
 
