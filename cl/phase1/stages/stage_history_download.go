@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
@@ -114,6 +115,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
+			encodedPayload = utils.CompressSnappy(encodedPayload)
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
@@ -174,6 +176,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
+		var err error
+		if v, err = utils.DecompressSnappy(v); err != nil {
+			return fmt.Errorf("error decompressing dump during collection: %s", err)
+		}
+
 		version := clparams.StateVersion(v[len(v)-1])
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
 		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
