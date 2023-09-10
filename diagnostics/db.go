@@ -20,15 +20,15 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	} else {
 		dataDir = paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String("chain"))
 	}
-	metricsMux.HandleFunc("/debug/db/list", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/dbs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbList(w, dataDir)
 	})
-	metricsMux.HandleFunc("/debug/db/tables", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/dbs/{db}/tables", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbTables(w, r, dataDir)
 	})
-	metricsMux.HandleFunc("/debug/db/read", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/dbs/{db}/tables/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbRead(w, r, dataDir)
 	})

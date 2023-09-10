@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -312,30 +313,80 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				}
 
 				if resp.StatusCode != http.StatusOK {
+					body, _ := io.ReadAll(debugResponse.Body)
 					return json.NewEncoder(writer).Encode(&nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    int64(resp.StatusCode),
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)),
 						},
 						Last: true,
 					})
 				}
 
-				buffer := bytes.Buffer{}
+				buffer := &bytes.Buffer{}
 
-				if _, err := io.Copy(&buffer, debugResponse.Body); err != nil {
+				switch debugResponse.Header.Get("Content-Type") {
+				case "application/json":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return json.NewEncoder(writer).Encode(&nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    http.StatusInternalServerError,
+								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+				case "application/octet-stream":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return json.NewEncoder(writer).Encode(&nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+					offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
+					size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
+
+					data, err := json.Marshal(struct {
+						Offset int64  `json:"offset"`
+						Size   int64  `json:"fileSize"`
+						Data   []byte `json:"chunk"`
+					}{
+						Offset: offset,
+						Size:   size,
+						Data:   buffer.Bytes(),
+					})
+
+					buffer = bytes.NewBuffer(data)
+
+					if err != nil {
+						return json.NewEncoder(writer).Encode(&nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+				default:
 					return json.NewEncoder(writer).Encode(&nodeResponse{
 						Id: requestId,
 						Error: &responseError{
-							Code:    http.StatusInternalServerError,
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							Code:    int64(http.StatusInternalServerError),
+							Message: fmt.Sprintf("Unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugURL),
 						},
 						Last: true,
 					})
 				}
 
-				fmt.Println(buffer.String())
 				return json.NewEncoder(writer).Encode(&nodeResponse{
 					Id:     requestId,
 					Result: json.RawMessage(buffer.Bytes()),
