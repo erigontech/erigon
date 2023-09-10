@@ -74,6 +74,44 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
+func (s *AggStats) clone() *AggStats {
+	sc := &AggStats{
+		MetadataReady:    s.MetadataReady,
+		FilesTotal:       s.FilesTotal,
+		PeersUnique:      s.PeersUnique,
+		ConnectionsTotal: s.ConnectionsTotal,
+		Completed:        s.Completed,
+		Progress:         s.Progress,
+		BytesCompleted:   s.BytesCompleted,
+		BytesTotal:       s.BytesTotal,
+		BytesDownload:    s.BytesDownload,
+		BytesUpload:      s.BytesUpload,
+		UploadRate:       s.UploadRate,
+		DownloadRate:     s.DownloadRate,
+	}
+	sc.DroppedCompleted.Store(s.DroppedCompleted.Load())
+	sc.DroppedTotal.Store(s.DroppedTotal.Load())
+	return sc
+}
+
+func (s *AggStats) copy(o *AggStats) *AggStats {
+	s.MetadataReady = o.MetadataReady
+	s.FilesTotal = o.FilesTotal
+	s.PeersUnique = o.PeersUnique
+	s.ConnectionsTotal = o.ConnectionsTotal
+	s.Completed = o.Completed
+	s.Progress = o.Progress
+	s.BytesCompleted = o.BytesCompleted
+	s.BytesTotal = o.BytesTotal
+	s.BytesDownload = o.BytesDownload
+	s.BytesUpload = o.BytesUpload
+	s.UploadRate = o.UploadRate
+	s.DownloadRate = o.DownloadRate
+	s.DroppedCompleted.Store(o.DroppedCompleted.Load())
+	s.DroppedTotal.Store(o.DroppedTotal.Load())
+	return s
+}
+
 func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
@@ -300,7 +338,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.statsLock.Lock()
 	defer d.statsLock.Unlock()
-	prevStats, stats := d.stats, d.stats
+	prevStats, stats := d.stats.clone(), d.stats.clone()
 
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
@@ -342,7 +380,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
-	d.stats = stats
+	d.stats.copy(stats)
 }
 
 func moveFromTmp(snapDir string) error {
@@ -540,10 +578,10 @@ func (d *Downloader) addSegments(ctx context.Context) error {
 	return nil
 }
 
-func (d *Downloader) Stats() AggStats {
+func (d *Downloader) Stats() *AggStats {
 	d.statsLock.RLock()
 	defer d.statsLock.RUnlock()
-	return d.stats
+	return d.stats.clone()
 }
 
 func (d *Downloader) Close() {
