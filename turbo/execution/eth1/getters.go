@@ -124,9 +124,9 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 	}
 	defer tx.Rollback()
 
-	bodies := make([]*execution.BlockBody, len(req.Hashes))
+	bodies := make([]*execution.BlockBody, 0, len(req.Hashes))
 
-	for hashIdx, hash := range req.Hashes {
+	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
 		block, err := e.blockReader.BlockByHash(ctx, tx, h)
 		if err != nil {
@@ -135,10 +135,10 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if block == nil {
 			break
 		}
-		bodies[hashIdx] = &execution.BlockBody{
+		bodies = append(bodies, &execution.BlockBody{
 			Transactions: block.RawBody().Transactions,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals()),
-		}
+		})
 	}
 
 	return &execution.GetBodiesBatchResponse{Bodies: bodies}, nil
