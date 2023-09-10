@@ -797,9 +797,8 @@ func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, err := snaptype.ParseFileName(s.dir, fName)
-		if err != nil {
-			s.logger.Warn("invalid segment name", "err", err, "name", fName)
+		f, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok {
 			continue
 		}
 
