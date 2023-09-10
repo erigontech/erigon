@@ -74,46 +74,6 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func (s *AggStats) clone() *AggStats {
-	sc := &AggStats{
-		MetadataReady:    s.MetadataReady,
-		FilesTotal:       s.FilesTotal,
-		PeersUnique:      s.PeersUnique,
-		ConnectionsTotal: s.ConnectionsTotal,
-		Completed:        s.Completed,
-		Progress:         s.Progress,
-		BytesCompleted:   s.BytesCompleted,
-		BytesTotal:       s.BytesTotal,
-		BytesDownload:    s.BytesDownload,
-		BytesUpload:      s.BytesUpload,
-		UploadRate:       s.UploadRate,
-		DownloadRate:     s.DownloadRate,
-	}
-	atomic.StoreUint64(&sc.DroppedCompleted, atomic.LoadUint64(&s.DroppedCompleted))
-	atomic.StoreUint64(&sc.DroppedTotal, atomic.LoadUint64(&s.DroppedTotal))
-
-	return sc
-}
-
-func (s *AggStats) copy(o *AggStats) *AggStats {
-	s.MetadataReady = o.MetadataReady
-	s.FilesTotal = o.FilesTotal
-	s.PeersUnique = o.PeersUnique
-	s.ConnectionsTotal = o.ConnectionsTotal
-	s.Completed = o.Completed
-	s.Progress = o.Progress
-	s.BytesCompleted = o.BytesCompleted
-	s.BytesTotal = o.BytesTotal
-	s.BytesDownload = o.BytesDownload
-	s.BytesUpload = o.BytesUpload
-	s.UploadRate = o.UploadRate
-	s.DownloadRate = o.DownloadRate
-	atomic.StoreUint64(&s.DroppedCompleted, atomic.LoadUint64(&o.DroppedCompleted))
-	atomic.StoreUint64(&s.DroppedTotal, atomic.LoadUint64(&o.DroppedTotal))
-
-	return s
-}
-
 func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
@@ -340,7 +300,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.statsLock.Lock()
 	defer d.statsLock.Unlock()
-	prevStats, stats := d.stats.clone(), d.stats.clone()
+	prevStats, stats := d.stats, d.stats
 
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
@@ -382,7 +342,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
-	d.stats.copy(stats)
+	d.stats = stats
 }
 
 func moveFromTmp(snapDir string) error {
@@ -580,10 +540,10 @@ func (d *Downloader) addSegments(ctx context.Context) error {
 	return nil
 }
 
-func (d *Downloader) Stats() *AggStats {
+func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()
 	defer d.statsLock.RUnlock()
-	return d.stats.clone()
+	return d.stats
 }
 
 func (d *Downloader) Close() {
