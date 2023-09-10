@@ -119,6 +119,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
+			fmt.Println(len(bodyChainHeader) > 0)
 			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
 		}
 
