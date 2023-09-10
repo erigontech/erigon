@@ -1133,6 +1133,12 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	return nil
 }
 
+func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
+	return db.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(k, _ []byte) error {
+		return db.Delete(kv.HeaderCanonical, k)
+	})
+}
+
 // TruncateBlocks - delete block >= blockFrom
 // does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
