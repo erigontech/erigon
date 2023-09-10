@@ -108,16 +108,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
 			encodedPayload = append(encodedPayload, byte(blk.Version()))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
-				return false, err
+				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
 			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
 		}
@@ -177,12 +177,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		version := clparams.StateVersion(v[len(v)-1])
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
 		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
-			return err
+			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
 		body := executionPayload.Body()
 		header, err := executionPayload.RlpHeader()
 		if err != nil {
-			return err
+			return fmt.Errorf("error parsing rlp header during collection: %s", err)
 		}
 
 		txs, err := types.DecodeTransactions(body.Transactions)
@@ -194,7 +194,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		blockBatch = append(blockBatch, block)
 		if len(blockBatch) >= blockBatchMaxSize {
 			if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
-				return err
+				return fmt.Errorf("error inserting block during collection: %s", err)
 			}
 			blockBatch = blockBatch[:0]
 		}
@@ -203,7 +203,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	if cfg.engine != nil && cfg.engine.SupportInsertion() {
-		return cfg.engine.InsertBlocks(blockBatch)
+		if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
+			return fmt.Errorf("error doing last block insertion during collection: %s", err)
+		}
 	}
 	return nil
 }
