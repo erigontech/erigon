@@ -719,11 +719,11 @@ func (ic *InvertedIndexContext) statelessHasher() murmur3.Hash128 {
 	if ic._hasher == nil {
 		ic._hasher = murmur3.New128WithSeed(*ic.ii.salt)
 	}
-	ic._hasher.Reset()
 	return ic._hasher
 }
 func (ic *InvertedIndexContext) hashKey(k []byte) (hi, lo uint64) {
 	hasher := ic.statelessHasher()
+	ic._hasher.Reset()
 	_, _ = hasher.Write(k) //nolint:errcheck
 	return hasher.Sum128()
 }
