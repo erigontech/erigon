@@ -350,6 +350,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 			return err
 		}
 	}
+	if err := rawdb.TruncateCanonicalChain(ctx, batch, header.Number.Uint64()+1); err != nil {
+		return err
+	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {
 		currentHeader := headersChain[i]
