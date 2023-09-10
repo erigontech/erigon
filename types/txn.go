@@ -85,7 +85,7 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxillary information, like ephemeral fields, and indices within priority queues
 type TxSlot struct {
-	Rlp            []byte      // TxPool set it to nil after save it to db
+	Rlp            []byte      // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
 	Value          uint256.Int // Value transferred by the transaction
 	Tip            uint256.Int // Maximum tip that transaction is giving to miner/block proposer
 	FeeCap         uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
@@ -123,9 +123,16 @@ var ErrRejected = errors.New("rejected")
 var ErrAlreadyKnown = errors.New("already known")
 var ErrRlpTooBig = errors.New("txn rlp too big")
 
+// Set the RLP validate function
 func (ctx *TxParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
-func (ctx *TxParseContext) WithSender(v bool)                       { ctx.withSender = v }
-func (ctx *TxParseContext) WithAllowPreEip2s(v bool)                { ctx.allowPreEip2s = v }
+
+// Set the with sender flag
+func (ctx *TxParseContext) WithSender(v bool) { ctx.withSender = v }
+
+// Set the AllowPreEIP2s flag
+func (ctx *TxParseContext) WithAllowPreEip2s(v bool) { ctx.allowPreEip2s = v }
+
+// Set ChainID-Required flag in the Parse context and return it
 func (ctx *TxParseContext) ChainIDRequired() *TxParseContext {
 	ctx.chainIDRequired = true
 	return ctx
@@ -878,6 +885,7 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 	return structLength
 }
 
+// Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 	var fieldSet = 0 // start with first bit set to 0
 	var pos = 1
@@ -905,6 +913,8 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 
 	buffer[0] = byte(fieldSet)
 }
+
+// Decode the sender's balance and nonce from encoded byte-slice
 func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 	if len(enc) == 0 {
 		return

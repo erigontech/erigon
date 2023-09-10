@@ -19,11 +19,14 @@ package txpool
 import (
 	"bytes"
 	"context"
+
+	// "crypto/rand"
 	"fmt"
 	"math"
 	"math/big"
 	"testing"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +34,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -221,7 +226,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
 			Tip:    *uint256.NewInt(300000),
-			FeeCap: *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(3000000),
 			Gas:    100000,
 			Nonce:  3,
 		}
@@ -714,4 +719,190 @@ func TestShanghaiValidateTx(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Blob gas price bump + other requirements to replace existing txns in the pool
+func TestBlobTxReplacement(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan types.Announcements, 5)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, common.Big0, log.New())
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200_000)
+
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+	addr[0] = 1
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	assert.NoError(err)
+
+	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
+
+	//add a blob txn to the pool
+	{
+		txSlots := types.TxSlots{}
+		blobTxn := makeBlobTx()
+
+		blobTxn.Tip = *tip
+		blobTxn.FeeCap = *feeCap
+		blobTxn.BlobFeeCap = *blobFeeCap
+		blobTxn.IDHash[0] = 0x00
+		blobTxn.Nonce = 0x2
+		txSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		t.Logf("Reasons %v", reasons)
+		for _, reason := range reasons {
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
+		}
+	}
+
+	{
+		// try to replace it with 5% extra blob gas, 2x higher tx fee - should fail
+		txSlots := types.TxSlots{}
+		blobTxn := makeBlobTx()
+		blobTxn.Nonce = 0x2
+		blobTxn.FeeCap.Mul(uint256.NewInt(2), feeCap)
+		blobTxn.Tip.Mul(uint256.NewInt(2), tip)
+		//increase blobFeeCap by 10% - no good
+		blobTxn.BlobFeeCap.Add(blobFeeCap, uint256.NewInt(1).Div(blobFeeCap, uint256.NewInt(10)))
+		blobTxn.IDHash[0] = 0x01
+		txSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		t.Logf("Reasons %v", reasons)
+		for _, reason := range reasons {
+			assert.Equal(txpoolcfg.ReplaceUnderpriced, reason, reason.String())
+		}
+	}
+
+	{
+		txSlots := types.TxSlots{}
+		//try to replace it with a regular txn - should fail
+		regularTx := types.TxSlot{
+			DataLen:    32,
+			FeeCap:     *uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap), //10x the previous
+			Tip:        *uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
+			BlobFeeCap: *uint256.NewInt(1).Mul(uint256.NewInt(10), blobFeeCap),
+			Gas:        500000,
+			SenderID:   0,
+			Creation:   true,
+			Nonce:      0x2,
+		}
+		regularTx.IDHash[0] = 0x02
+		txSlots.Append(&regularTx, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		t.Logf("Reasons %v", reasons)
+		for _, reason := range reasons {
+			assert.Equal(txpoolcfg.BlobTxReplace, reason, reason.String())
+		}
+	}
+
+	//try to replace it with required extra gas - should pass\
+	{
+		blobTxn := makeBlobTx()
+		blobTxn.Nonce = 0x2
+		txSlots := types.TxSlots{}
+
+		//Get the config of the pool for BlobPriceBump and bump all prices
+		requiredPriceBump := pool.cfg.BlobPriceBump
+		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		blobTxn.BlobFeeCap.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		blobTxn.IDHash[0] = 0x03
+		txSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		t.Logf("Reasons %v", reasons)
+		for _, reason := range reasons {
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
+		}
+	}
+}
+
+// Todo, make the tx more realistic with good values
+func makeBlobTx() types.TxSlot {
+	// Some arbitrary hardcoded example
+	bodyRlpHex := "f9012705078502540be4008506fc23ac008357b58494811a752c8cd697e3cb27" +
+		"279c330ed1ada745a8d7808204f7f872f85994de0b295669a9fd93d5f28d9ec85e40f4cb697b" +
+		"aef842a00000000000000000000000000000000000000000000000000000000000000003a000" +
+		"00000000000000000000000000000000000000000000000000000000000007d694bb9bc244d7" +
+		"98123fde783fcc1c72d3bb8c189413c07bf842a0c6bdd1de713471bd6cfa62dd8b5a5b42969e" +
+		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
+		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
+		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
+	bodyRlp := hexutility.MustDecodeHex(bodyRlpHex)
+
+	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
+
+	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
+	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1))
+	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2))
+
+	var err error
+	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0, 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1, 0)
+
+	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0, commitment0, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1, commitment1, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+
+	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0[:]...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof1[:]...)
+
+	blobTx := types.TxSlot{}
+	tctx := types.NewTxParseContext(*uint256.NewInt(5))
+	tctx.WithSender(false)
+	tctx.ParseTransaction(wrapperRlp, 0, &blobTx, nil, false, true, nil)
+	blobTx.BlobHashes = make([]common.Hash, 2)
+	blobTx.BlobHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
+	blobTx.BlobHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
+	return blobTx
 }
