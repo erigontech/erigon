@@ -89,12 +89,6 @@ func BorHeimdallForward(
 		if err != nil {
 			return fmt.Errorf("getting headers progress: %w", err)
 		}
-
-		header, err = cfg.blockReader.HeaderByNumber(ctx, tx, headNumber)
-
-		if err != nil {
-			return err
-		}
 	}
 
 	if s.BlockNumber == headNumber {
@@ -129,6 +123,12 @@ func BorHeimdallForward(
 	}
 	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+			if !mine {
+				header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum)
+				if err != nil {
+					return err
+				}
+			}
 			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
