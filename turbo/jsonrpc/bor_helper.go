@@ -44,8 +44,6 @@ var (
 	// errMissingVanity is returned if a block's extra-data section is shorter than
 	// 32 bytes, which is required to store the signer vanity.
 	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
-
-	errBorEngineNotAvailable = errors.New("Only available in Bor engine")
 )
 
 // getHeaderByNumber returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
