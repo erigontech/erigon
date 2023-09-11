@@ -122,6 +122,12 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 			rewindTo = head - 255
 		}
 
+		if isCheckpoint {
+			log.Warn("Rewinding chain due to checkpoint root hash mismatch", "number", rewindTo)
+		} else {
+			log.Warn("Rewinding chain due to milestone endblock hash mismatch", "number", rewindTo)
+		}
+
 		rewindBack(rewindTo)
 
 		return hash, errHashMismatch

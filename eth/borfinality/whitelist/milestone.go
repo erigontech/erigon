@@ -2,9 +2,9 @@ package whitelist
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common/flags"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
+	"github.com/ledgerwatch/erigon/eth/borfinality/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -27,7 +27,7 @@ type milestoneService interface {
 	GetMilestoneIDsList() []string
 	RemoveMilestoneID(milestoneId string)
 	LockMutex(endBlockNum uint64) bool
-	UnlockMutex(doLock bool, milestoneId string, endBlockHash common.Hash)
+	UnlockMutex(doLock bool, milestoneId string, endBlockNum uint64, endBlockHash common.Hash)
 	UnlockSprint(endBlockNum uint64)
 	ProcessFutureMilestone(num uint64, hash common.Hash)
 }
@@ -137,32 +137,26 @@ func (m *milestone) LockMutex(endBlockNum uint64) bool {
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
 		log.Debug("endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
-
 		return false
 	}
 
-	if m.Locked && endBlockNum != m.LockedMilestoneNumber {
-		if endBlockNum < m.LockedMilestoneNumber {
-			log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
-			return false
-		}
-
-		log.Debug("endBlockNum is more than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
-		m.UnlockSprint(m.LockedMilestoneNumber)
-		m.Locked = false
+	if m.Locked && endBlockNum < m.LockedMilestoneNumber {
+		log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
+		return false
 	}
-
-	m.LockedMilestoneNumber = endBlockNum
 
 	return true
 }
 
 // This function will unlock the mutex locked in LockMutex
-func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockHash common.Hash) {
+func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uint64, endBlockHash common.Hash) {
 	m.Locked = m.Locked || doLock
 
 	if doLock {
+		m.UnlockSprint(m.LockedMilestoneNumber)
+		m.Locked = true
 		m.LockedMilestoneHash = endBlockHash
+		m.LockedMilestoneNumber = endBlockNum
 		m.LockedMilestoneIDs[milestoneId] = struct{}{}
 	}
 
@@ -274,6 +268,19 @@ func (m *milestone) IsFutureMilestoneCompatible(chain []*types.Header) bool {
 func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 	if len(m.FutureMilestoneOrder) < m.MaxCapacity {
 		m.enqueueFutureMilestone(num, hash)
+	}
+
+	if num < m.LockedMilestoneNumber {
+		return
+	}
+
+	m.Locked = false
+	m.purgeMilestoneIDsList()
+
+	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+
+	if err != nil {
+		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 }
 

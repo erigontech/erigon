@@ -387,19 +387,18 @@ func checkpointCountURL(urlString string) (*url.URL, error) {
 func milestoneCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchMilestoneCount, "")
 }
+
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchLastNoAckMilestone, "")
 }
 
 func noAckMilestoneURL(urlString string, id string) (*url.URL, error) {
 	url := fmt.Sprintf(fetchNoAckMilestone, id)
-
 	return makeURL(urlString, url, "")
 }
 
 func milestoneIDURL(urlString string, id string) (*url.URL, error) {
 	url := fmt.Sprintf(fetchMilestoneID, id)
-
 	return makeURL(urlString, url, "")
 }
 

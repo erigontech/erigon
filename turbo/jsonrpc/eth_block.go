@@ -383,12 +383,20 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	service := whitelist.GetWhitelistingService()
 
 	if service == nil {
-		return false, errors.New("only available in Bor engine")
+		return false, errBorEngineNotAvailable
 	}
 
-	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
-	// block := localEndBlock.(requests.EthBlockByNumbe
+	//Confirmation of 16 blocks on the endblock
+	tipConfirmationBlockNr := endBlockNr + uint64(16)
 
+	//Check if tipConfirmation block exit
+	_, err = api._blockReader.BlockByNumber(ctx, tx, tipConfirmationBlockNr)
+	if err != nil {
+		return false, errors.New("failed to get tip confirmation block")
+	}
+
+	//Check if end block exist
+	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
 	if err != nil {
 		return false, errors.New("failed to get end block")
 	}
@@ -398,12 +406,12 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	isLocked := service.LockMutex(endBlockNr)
 
 	if !isLocked {
-		service.UnlockMutex(false, "", common.Hash{})
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
 		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
 	}
 
 	if localEndBlockHash != hash {
-		service.UnlockMutex(false, "", common.Hash{})
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
 		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
@@ -416,11 +424,11 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
 
 	if err != nil {
-		service.UnlockMutex(false, "", common.Hash{})
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
 		return false, errors.New("milestone ID doesn't exist in Heimdall")
 	}
 
-	service.UnlockMutex(true, milestoneId, localEndBlock.Hash())
+	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
 
 	return true, nil
 }

@@ -27,7 +27,7 @@ var (
 )
 
 // API is a user facing RPC API to allow controlling the signer and voting
-// mechanisms of the proof-of-authority scheme.
+
 type API struct {
 	chain         consensus.ChainHeaderReader
 	bor           *Bor
@@ -288,7 +288,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 }
 
 func (api *API) GetVoteOnHash(starBlockNr uint64, endBlockNr uint64, hash string, milestoneId string) (bool, error) {
-	return true, nil
+	return false, nil
 }
 
 func (api *API) initializeRootHashCache() error {
