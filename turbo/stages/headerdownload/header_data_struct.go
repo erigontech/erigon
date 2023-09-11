@@ -33,18 +33,18 @@ const (
 // Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still
 // present to allow potential reorgs
 type Link struct {
-	peerID      [64]byte // peerID from which header was fetched, 0x0 if the syncing took place using a snapshot or recovered from db
 	header      *types.Header
 	headerRaw   []byte
 	fChild      *Link       // Pointer to the first child, further children can be found by following `next` pointers to the siblings
 	next        *Link       // Pointer to the next sibling, or nil if there are no siblings
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
-	persisted   bool    // Whether this link comes from the database record
-	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
-	linked      bool    // Whether this link is connected (via chain of ParentHash to one of the persisted links)
-	idx         int     // Index in the heap
-	queueId     QueueID // which queue this link belongs to
+	persisted   bool     // Whether this link comes from the database record
+	verified    bool     // Ancestor of pre-verified header or verified by consensus engine
+	linked      bool     // Whether this link is connected (via chain of ParentHash to one of the persisted links)
+	idx         int      // Index in the heap
+	queueId     QueueID  // which queue this link belongs to
+	peerID      [64]byte // peerID from which header was fetched, 0x0 if the syncing took place using a snapshot or recovered from db
 }
 
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
