@@ -30,25 +30,18 @@ type beaconChainDatabaseFilesystem struct {
 	fullBlocks bool // same encoding as reqresp
 
 	executionEngine execution_client.ExecutionEngine
-	indiciesDB      *sql.DB
 }
 
-func NewBeaconChainDatabaseFilesystem(fs afero.Fs, executionEngine execution_client.ExecutionEngine, fullBlocks bool, cfg *clparams.BeaconChainConfig, indiciesDB *sql.DB) BeaconChainDatabase {
+func NewBeaconChainDatabaseFilesystem(fs afero.Fs, executionEngine execution_client.ExecutionEngine, fullBlocks bool, cfg *clparams.BeaconChainConfig) BeaconChainDatabase {
 	return beaconChainDatabaseFilesystem{
 		fs:              fs,
 		cfg:             cfg,
 		fullBlocks:      fullBlocks,
-		indiciesDB:      indiciesDB,
 		executionEngine: executionEngine,
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
-	tx, err := b.indiciesDB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+func (b beaconChainDatabaseFilesystem) GetRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
@@ -168,13 +161,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, from uint64
 
 }
 
-func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint64, count uint64) error {
-	tx, err := b.indiciesDB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+func (b beaconChainDatabaseFilesystem) PurgeRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) error {
 	if err := beacon_indicies.IterateBeaconIndicies(ctx, tx, from, from+count, func(_ uint64, beaconBlockRoot, _, _ libcommon.Hash, _ bool) bool {
 		_, path := RootToPaths(beaconBlockRoot, b.cfg)
 		_ = b.fs.Remove(path)
@@ -190,7 +177,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, from uint
 	return tx.Commit()
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(tx *sql.Tx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -250,11 +237,6 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, block *cl
 	}
 
 	err = fp.Sync()
-	if err != nil {
-		return err
-	}
-
-	tx, err := b.indiciesDB.Begin()
 	if err != nil {
 		return err
 	}
