@@ -45,9 +45,6 @@ type milestoneService interface {
 
 // 	//Metrics for collecting the number of valid chains received
 // 	MilestoneChainMeter = metrics.NewRegisteredMeter("chain/milestone/isvalidchain", nil)
-
-// 	//Metrics for collecting the number of valid peers received
-// 	MilestonePeerMeter = metrics.NewRegisteredMeter("chain/milestone/isvalidpeer", nil)
 // )
 
 // IsValidChain checks the validity of chain by comparing it
@@ -90,25 +87,6 @@ func (m *milestone) IsValidChain(currentHeader uint64, chain []*types.Header) bo
 
 	// isValid = true
 	return true
-}
-
-// IsValidPeer checks if the chain we're about to receive from a peer is valid or not
-// in terms of reorgs. We won't reorg beyond the last bor finality submitted to mainchain.
-func (m *milestone) IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error) {
-	if !flags.Milestone {
-		return true, nil
-	}
-
-	res, err := m.finality.IsValidPeer(fetchHeadersByNumber)
-
-	// TODO: Uncomment once metrics is added
-	// if res {
-	// 	MilestonePeerMeter.Mark(int64(1))
-	// } else {
-	// 	MilestonePeerMeter.Mark(int64(-1))
-	// }
-
-	return res, err
 }
 
 func (m *milestone) Process(block uint64, hash common.Hash) {
