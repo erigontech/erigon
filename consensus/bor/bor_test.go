@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core"
@@ -100,6 +101,26 @@ func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*chec
 
 func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
+	return fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
+	return "", fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
+	return fmt.Errorf("TODO")
 }
 
 func (h test_heimdall) Close() {}
