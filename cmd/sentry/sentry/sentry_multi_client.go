@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -395,16 +394,16 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
 
-	reqID, err := rlpStream.Uint() // Now stream is at the requestID field
+	_, err := rlpStream.Uint() // Now stream is at the requestID field
 	if err != nil {
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Now stream is at the BlockHeadersPacket, which is list of headers
 
-	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, reqID, rlpStream, in.PeerId, sentry)
+	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, reqID uint64, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	if len(pkt) == 0 {
 		// No point processing empty response
 		return nil
@@ -434,17 +433,6 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			Number:    number,
 		})
 		//blockNums = append(blockNums, int(number))
-	}
-
-	if ch, ok := generics.BorMilestonePeerVerification[reqID]; ok {
-		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
-		res := generics.Response{}
-		for _, cs := range csHeaders {
-			res.Headers = append(res.Headers, cs.Header)
-			res.Hashes = append(res.Hashes, cs.Hash)
-		}
-		ch <- res
-		return nil
 	}
 
 	//sort.Ints(blockNums)
