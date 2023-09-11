@@ -262,7 +262,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 
 	// Update sentry status for peers to see our sync status
 	var headTd *big.Int
-	var plainStateVersion uint64
+	var plainStateVersion, finalizedBlock uint64
 	head, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
@@ -276,7 +276,10 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 	headHeader = rawdb.ReadHeader(tx, headHash, head)
 	currentHeder = rawdb.ReadCurrentHeader(tx)
-
+	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
+	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
+		finalizedBlock = *fb
+	}
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
 	if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
@@ -306,7 +309,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
 
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit)
+		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END
 	return nil
