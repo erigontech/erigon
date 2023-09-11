@@ -124,7 +124,7 @@ func BorHeimdallForward(
 	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			if !mine {
-				header, err = cfg.blockReader.HeaderByNumber(ctx, tx, headNumber)
+				header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum)
 				if err != nil {
 					return err
 				}
