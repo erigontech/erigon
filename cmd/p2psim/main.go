@@ -39,12 +39,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 
@@ -292,7 +292,7 @@ func createNode(ctx *cli.Context) error {
 		config.PrivateKey = privKey
 	}
 	if services := ctx.String("services"); services != "" {
-		config.Lifecycles = utils.SplitAndTrim(services)
+		config.Lifecycles = common.CliString2Array(services)
 	}
 	node, err := client.CreateNode(config)
 	if err != nil {

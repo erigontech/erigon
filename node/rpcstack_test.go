@@ -19,6 +19,7 @@ package node
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"net/http"
 	"net/url"
@@ -86,20 +87,6 @@ type originTest struct {
 	expFail []string
 }
 
-// splitAndTrim splits input separated by a comma
-// and trims excessive white space from the substrings.
-// Copied over from flags.go
-func splitAndTrim(input string) (ret []string) {
-	l := strings.Split(input, ",")
-	for _, r := range l {
-		r = strings.TrimSpace(r)
-		if len(r) > 0 {
-			ret = append(ret, r)
-		}
-	}
-	return ret
-}
-
 // TestWebsocketOrigins makes sure the websocket origins are properly handled on the websocket server.
 func TestWebsocketOrigins(t *testing.T) {
 	tests := []originTest{
@@ -165,7 +152,7 @@ func TestWebsocketOrigins(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: splitAndTrim(tc.spec)})
+		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: common.CliString2Array(tc.spec)})
 		url := fmt.Sprintf("ws://%v", srv.listenAddr())
 		for _, origin := range tc.expOk {
 			if err := wsRequest(t, url, origin); err != nil {
