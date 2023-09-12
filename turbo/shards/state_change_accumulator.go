@@ -32,11 +32,11 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.storageChangeIndex = nil
 	a.plainStateID = plainStateID
 }
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, blockGasLimit uint64) {
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	sc := &remote.StateChangeBatch{StateVersionId: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit}
+	sc := &remote.StateChangeBatch{StateVersionId: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit, FinalizedBlock: finalizedBlock}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }

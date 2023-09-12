@@ -2,11 +2,8 @@ package forkchoice
 
 import (
 	"fmt"
-	"runtime"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -100,9 +97,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	log.Debug("OnBlock", "elapsed", time.Since(start), "alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys))
+	log.Debug("OnBlock", "elapsed", time.Since(start))
 	return nil
 }
