@@ -54,7 +54,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := iiCfg{salt: &salt, dir: dir, tmpdir: dir}
-	ii, err := NewInvertedIndex(cfg, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false,true, nil, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, true, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)

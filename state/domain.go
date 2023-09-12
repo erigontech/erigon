@@ -849,7 +849,6 @@ type DomainContext struct {
 	hc         *HistoryContext
 	keyBuf     [60]byte // 52b key and 8b for inverted step
 	valKeyBuf  [60]byte // 52b key and 8b for inverted step
-	numBuf     [8]byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor

@@ -350,13 +350,6 @@ func (ii *InvertedIndex) buildIdxFilter(ctx context.Context, item *filesItem, ps
 	idxPath := filepath.Join(ii.dir, fName)
 	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync)
 }
-func (ii *InvertedIndex) openIdxFilter(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
-	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	fName := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(ii.dir, fName)
-	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync)
-}
-
 func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
