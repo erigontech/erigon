@@ -111,7 +111,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-func seedableBlocksSnapshots(dir string) ([]string, error) {
+func seedableSegmentFiles(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
