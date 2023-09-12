@@ -1887,28 +1887,6 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return dc.keysC, nil
 }
 
-func (dc *DomainContext) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dc.valsC != nil {
-		return dc.valsC, nil
-	}
-	dc.valsC, err = tx.Cursor(dc.d.valsTable)
-	if err != nil {
-		return nil, err
-	}
-	return dc.valsC, nil
-}
-
-func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
-	if dc.keysC != nil {
-		return dc.keysC, nil
-	}
-	dc.keysC, err = tx.CursorDupSort(dc.d.keysTable)
-	if err != nil {
-		return nil, err
-	}
-	return dc.keysC, nil
-}
-
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	//t := time.Now()
 	key := key1
