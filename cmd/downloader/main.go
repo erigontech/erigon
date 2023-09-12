@@ -86,6 +86,7 @@ func init() {
 	}
 
 	rootCmd.AddCommand(createTorrent)
+	rootCmd.AddCommand(printTorrentHashes)
 }
 
 func withDataDir(cmd *cobra.Command) {
