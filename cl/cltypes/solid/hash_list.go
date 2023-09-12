@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -21,6 +23,28 @@ func NewHashList(c int) HashListSSZ {
 	return &hashList{
 		c: c,
 	}
+}
+
+func (arr *hashList) MarshalJSON() ([]byte, error) {
+	list := make([]libcommon.Hash, arr.l)
+	for i := 0; i < arr.l; i++ {
+		list[0] = arr.Get(i)
+	}
+	return json.Marshal(list)
+}
+
+func (arr *hashList) UnmarshalJSON(buf []byte) error {
+	var list []libcommon.Hash
+
+	if err := json.Unmarshal(buf, &list); err != nil {
+		return err
+	}
+	arr.Clear()
+	arr.l = len(list)
+	for _, elem := range list {
+		arr.Append(elem)
+	}
+	return nil
 }
 
 func (h *hashList) Append(val libcommon.Hash) {

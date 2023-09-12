@@ -3,6 +3,7 @@ package solid
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -35,6 +36,41 @@ func NewAttestionDataFromParameters(
 	a.SetSource(source)
 	a.SetTarget(target)
 	return a
+}
+
+func (a AttestationData) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Slot            uint64
+		Index           uint64
+		BeaconBlockRoot libcommon.Hash
+		Source          Checkpoint
+		Target          Checkpoint
+	}{
+		Slot:            a.Slot(),
+		BeaconBlockRoot: a.BeaconBlockRoot(),
+		Index:           a.ValidatorIndex(),
+		Source:          a.Source(),
+		Target:          a.Target(),
+	})
+}
+
+func (a AttestationData) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		Slot            uint64
+		Index           uint64
+		BeaconBlockRoot libcommon.Hash
+		Source          Checkpoint
+		Target          Checkpoint
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	a.SetSlot(tmp.Slot)
+	a.SetValidatorIndex(tmp.Index)
+	a.SetBeaconBlockRoot(tmp.BeaconBlockRoot)
+	a.SetSource(tmp.Source)
+	a.SetTarget(tmp.Target)
+	return nil
 }
 
 func NewAttestationData() AttestationData {

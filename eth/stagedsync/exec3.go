@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,14 +163,6 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-
-	defer func() {
-		if err := recover(); err != nil {
-			log.Error("panic", "err", err)
-			debug.PrintStack()
-			panic(err)
-		}
-	}()
 
 	useExternalTx := applyTx != nil
 	if initialCycle || !useExternalTx {

@@ -439,20 +439,21 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-
+		_, _ = rawLogs, blockHash
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
-		for _, log := range filtered {
-			log.BlockNumber = blockNum
-			log.BlockHash = blockHash
-			log.TxHash = txn.Hash()
-		}
-		logs = append(logs, filtered...)
+
+		//filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
+		//for _, log := range filtered {
+		//	log.BlockNumber = blockNum
+		//	log.BlockHash = blockHash
+		//	log.TxHash = txn.Hash()
+		//}
+		//logs = append(logs, filtered...)
 	}
 
 	//stats := api._agg.GetAndResetStats()
@@ -590,7 +591,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	blockNum, ok, err = api.txnLookup(tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +619,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		blockNum = *blockNumPtr
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +680,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

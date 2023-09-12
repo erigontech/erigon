@@ -14,7 +14,7 @@ import (
 
 func setupTestDB(t *testing.T) *sql.DB {
 	// Create an in-memory SQLite DB for testing purposes
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
 	require.NoError(t, err)
 	return db
 }
@@ -138,13 +138,12 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	header, signature, isCanonical, err := ReadHeaderAndSignatureByBlockRoot(context.Background(), tx, blockRoot)
+	header, isCanonical, err := ReadSignedHeaderByBlockRoot(context.Background(), tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, isCanonical, canonical)
-	require.Equal(t, signature, mockSignature)
 	require.NotNil(t, header)
 
-	headerRoot, err := header.HashSSZ()
+	headerRoot, err := header.Header.HashSSZ()
 	require.NoError(t, err)
 
 	require.Equal(t, headerRoot, blockRoot)

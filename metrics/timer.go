@@ -1,4 +1,4 @@
-package methelp
+package metrics
 
 import (
 	"fmt"

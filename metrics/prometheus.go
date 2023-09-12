@@ -15,7 +15,7 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Package prometheus exposes go-metrics into a Prometheus format.
-package prometheus
+package metrics
 
 import (
 	"fmt"
@@ -23,14 +23,13 @@ import (
 	"sort"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 )
 
 // Handler returns an HTTP handler which dump metrics in Prometheus format.
-func Handler(reg metrics.Registry) http.Handler {
+func Handler(reg Registry) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Gather and pre-sort the metrics to avoid random listings
 		var names []string
@@ -40,6 +39,9 @@ func Handler(reg metrics.Registry) http.Handler {
 		sort.Strings(names)
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		metrics2.WritePrometheus(w, false)
+
 		contentType := expfmt.Negotiate(r.Header)
 		enc := expfmt.NewEncoder(w, contentType)
 		mf, err := prometheus.DefaultGatherer.Gather()

@@ -112,7 +112,7 @@ func (bp *PeersByMinBlock) Pop() interface{} {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = PeerRef{}
+	old[n-1] = PeerRef{} // avoid memory leak
 	*bp = old[0 : n-1]
 	return x
 }
@@ -1207,6 +1207,15 @@ func (ss *GrpcServer) PeerEvents(req *proto_sentry.PeerEventsRequest, server pro
 	case <-server.Context().Done():
 		return nil
 	}
+}
+
+func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerRequest) (*proto_sentry.AddPeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+	ss.P2pServer.AddPeer(node)
+	return &proto_sentry.AddPeerReply{Success: true}, nil
 }
 
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {

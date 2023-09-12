@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -144,6 +145,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
+	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
 		extendingFork := memdb.NewMemoryBatch(tx, fv.tmpDir)
 		fv.extendingForkNotifications = &shards.Notifications{
@@ -180,6 +182,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
+	log.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
+
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
 	for !foundCanonical {
@@ -214,6 +218,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		if criticalError != nil {
 			return
 		}
+		log.Info("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint")
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
@@ -238,7 +243,7 @@ func (fv *ForkValidator) clear() {
 }
 
 // Clear wipes out current extending fork data.
-func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
+func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()

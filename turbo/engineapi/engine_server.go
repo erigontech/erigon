@@ -362,7 +362,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 }
 
 // EngineGetPayload retrieves previously assembled payload (Validators only)
-func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engine_types.GetPayloadResponse, error) {
+func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -392,6 +392,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 
 	}
 	data := resp.Data
+
+	ts := data.ExecutionPayload.Timestamp
+	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(ts) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 
 	return &engine_types.GetPayloadResponse{
 		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
@@ -434,8 +440,16 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if (!s.config.IsCancun(timestamp) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(timestamp) && version < clparams.DenebVersion) {
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		if payloadAttributes.ParentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
+		}
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		if payloadAttributes.ParentBeaconBlockRoot != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
+		}
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -529,7 +543,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
 	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
-	response, err := e.getPayload(ctx, decodedPayloadId)
+	response, err := e.getPayload(ctx, decodedPayloadId, clparams.BellatrixVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -540,13 +554,13 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
-	return e.getPayload(ctx, decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.CapellaVersion)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
-	return e.getPayload(ctx, decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {

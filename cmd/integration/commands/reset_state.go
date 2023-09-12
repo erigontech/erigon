@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/turbo/backup"
 	"os"
 	"text/tabwriter"
+
+	"github.com/ledgerwatch/erigon/turbo/backup"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
