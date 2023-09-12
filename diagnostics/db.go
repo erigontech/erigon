@@ -3,7 +3,6 @@ package diagnostics
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,7 +86,7 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 
 			writeDbRead(w, r, dataDir, dbname, pathParts[1], nil, offset, limit)
 		case 3:
-			key, err := hex.DecodeString(pathParts[2])
+			key, err := base64.URLEncoding.DecodeString(pathParts[2])
 
 			if err != nil {
 				http.Error(w, fmt.Sprintf(`key "%s" argument may only contain hexadecimal digits: %v`, pathParts[2], err), http.StatusBadRequest)
@@ -238,16 +237,16 @@ func writeDbRead(w http.ResponseWriter, r *http.Request, dataDir string, dbname 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte("{"))
-	fmt.Fprintf(w, `"offset":%d,`, offset)
+	fmt.Fprintf(w, `"offset":%d`, offset)
 	if limit > 0 {
-		fmt.Fprintf(w, `"limit":%d,`, limit)
+		fmt.Fprintf(w, `,"limit":%d`, limit)
 	}
-	fmt.Fprintf(w, `"count":%d,`, count)
+	fmt.Fprintf(w, `,"count":%d`, count)
 	if len(results) > 0 {
 		var comma string
-		w.Write([]byte("results:{"))
+		w.Write([]byte(`,"results":{`))
 		for _, result := range results {
-			fmt.Fprintf(w, `%s"%x":"%s"`, comma, result[0], base64.URLEncoding.EncodeToString(result[1]))
+			fmt.Fprintf(w, `%s"%s":"%s"`, comma, base64.URLEncoding.EncodeToString(result[0]), base64.URLEncoding.EncodeToString(result[1]))
 
 			if comma == "" {
 				comma = ","
