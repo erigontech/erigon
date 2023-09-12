@@ -137,9 +137,9 @@ func seedableBlocksSnapshots(dir string) ([]string, error) {
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
 			continue
 		}
-		ff, err := snaptype.ParseFileName(dir, f.Name())
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
+		ff, ok := snaptype.ParseFileName(dir, f.Name())
+		if !ok {
+			continue
 		}
 		if !ff.Seedable() {
 			continue
@@ -186,7 +186,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 			continue
 		}
 		ext := filepath.Ext(f.Name())
-		if ext != ".kv" && ext != ".v" && ext != ".ef" { // filter out only compressed files
+		if ext != ".kv" && ext != ".v" && ext != ".ef" && ext != ".kv" { // filter out only compressed files
 			continue
 		}
 

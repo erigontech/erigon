@@ -31,6 +31,9 @@ var _ Pool = &PoolMock{}
 //			AddRemoteTxsFunc: func(ctx context.Context, newTxs types2.TxSlots)  {
 //				panic("mock out the AddRemoteTxs method")
 //			},
+//			GetKnownBlobTxnFunc: func(tx kv.Tx, hash []byte) *metaTx {
+//				panic("mock out the GetKnownBlobTxn method")
+//			},
 //			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
 //				panic("mock out the GetRlp method")
 //			},
@@ -61,6 +64,9 @@ type PoolMock struct {
 
 	// AddRemoteTxsFunc mocks the AddRemoteTxs method.
 	AddRemoteTxsFunc func(ctx context.Context, newTxs types2.TxSlots)
+
+	// GetKnownBlobTxnFunc mocks the GetKnownBlobTxn method.
+	GetKnownBlobTxnFunc func(tx kv.Tx, hash []byte) *metaTx
 
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
@@ -99,6 +105,13 @@ type PoolMock struct {
 			Ctx context.Context
 			// NewTxs is the newTxs argument value.
 			NewTxs types2.TxSlots
+		}
+		// GetKnownBlobTxn holds details about calls to the GetKnownBlobTxn method.
+		GetKnownBlobTxn []struct {
+			// Tx is the tx argument value.
+			Tx kv.Tx
+			// Hash is the hash argument value.
+			Hash []byte
 		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
@@ -139,6 +152,7 @@ type PoolMock struct {
 	lockAddLocalTxs           sync.RWMutex
 	lockAddNewGoodPeer        sync.RWMutex
 	lockAddRemoteTxs          sync.RWMutex
+	lockGetKnownBlobTxn       sync.RWMutex
 	lockGetRlp                sync.RWMutex
 	lockIdHashKnown           sync.RWMutex
 	lockOnNewBlock            sync.RWMutex
@@ -255,6 +269,45 @@ func (mock *PoolMock) AddRemoteTxsCalls() []struct {
 	mock.lockAddRemoteTxs.RLock()
 	calls = mock.calls.AddRemoteTxs
 	mock.lockAddRemoteTxs.RUnlock()
+	return calls
+}
+
+// GetKnownBlobTxn calls GetKnownBlobTxnFunc.
+func (mock *PoolMock) GetKnownBlobTxn(tx kv.Tx, hash []byte) *metaTx {
+	callInfo := struct {
+		Tx   kv.Tx
+		Hash []byte
+	}{
+		Tx:   tx,
+		Hash: hash,
+	}
+	mock.lockGetKnownBlobTxn.Lock()
+	mock.calls.GetKnownBlobTxn = append(mock.calls.GetKnownBlobTxn, callInfo)
+	mock.lockGetKnownBlobTxn.Unlock()
+	if mock.GetKnownBlobTxnFunc == nil {
+		var (
+			metaTxMoqParamOut *metaTx
+		)
+		return metaTxMoqParamOut
+	}
+	return mock.GetKnownBlobTxnFunc(tx, hash)
+}
+
+// GetKnownBlobTxnCalls gets all the calls that were made to GetKnownBlobTxn.
+// Check the length with:
+//
+//	len(mockedPool.GetKnownBlobTxnCalls())
+func (mock *PoolMock) GetKnownBlobTxnCalls() []struct {
+	Tx   kv.Tx
+	Hash []byte
+} {
+	var calls []struct {
+		Tx   kv.Tx
+		Hash []byte
+	}
+	mock.lockGetKnownBlobTxn.RLock()
+	calls = mock.calls.GetKnownBlobTxn
+	mock.lockGetKnownBlobTxn.RUnlock()
 	return calls
 }
 
