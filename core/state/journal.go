@@ -45,6 +45,10 @@ func newJournal() *journal {
 		dirties: make(map[libcommon.Address]int),
 	}
 }
+func (j *journal) Reset() {
+	j.entries = j.entries[:0]
+	j.dirties = make(map[libcommon.Address]int, len(j.dirties)/2)
+}
 
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
