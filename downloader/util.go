@@ -186,7 +186,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 			continue
 		}
 		ext := filepath.Ext(f.Name())
-		if ext != ".kv" && ext != ".v" && ext != ".ef" && ext != ".kv" { // filter out only compressed files
+		if ext != ".kv" && ext != ".v" && ext != ".ef" { // filter out only compressed files
 			continue
 		}
 

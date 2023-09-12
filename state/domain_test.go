@@ -148,7 +148,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	require.NoError(t, err)
 
 	p1, p2 = v1, v2
-	v1, v2 = []byte("value1.2"), []byte("value2.2")
+	v1, v2 = []byte("value1.2"), []byte("value2.2") //nolint
 	expectedStep1 := uint64(0)
 
 	d.SetTxNum(6)
