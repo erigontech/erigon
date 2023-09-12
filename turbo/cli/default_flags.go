@@ -142,6 +142,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderVerifyFlag,
 	&HealthCheckFlag,
 	&utils.HeimdallURLFlag,
+	&utils.WebSeedsFlag,
 	&utils.WithoutHeimdallFlag,
 	&utils.HeimdallgRPCAddressFlag,
 	&utils.BorBlockPeriodFlag,
