@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml"
 	"net"
 	"os"
 	"path/filepath"
@@ -25,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,7 +37,9 @@ import (
 )
 
 var (
+	webseeds                       string
 	datadirCli                     string
+	filePath                       string
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
@@ -58,7 +60,7 @@ func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
-
+	rootCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
@@ -73,6 +75,9 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
 
+	withDataDir(createTorrent)
+	withFile(createTorrent)
+
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
@@ -80,12 +85,19 @@ func init() {
 		panic(err)
 	}
 
+	rootCmd.AddCommand(createTorrent)
 	rootCmd.AddCommand(printTorrentHashes)
 }
 
 func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
+}
+func withFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&filePath, "file", "", "")
+	if err := cmd.MarkFlagFilename(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
 }
@@ -138,10 +150,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
-	staticPeers := utils.SplitAndTrim(staticPeersStr)
+	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-	cfg, err := downloadercfg2.New(dirs.Snap, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers)
+	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseeds)
 	if err != nil {
 		return err
 	}
@@ -149,7 +161,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
-	downloadernat.DoNat(natif, cfg, logger)
+	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
 	d, err := downloader.New(ctx, cfg)
 	if err != nil {
@@ -179,6 +191,30 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	<-ctx.Done()
 	return nil
+}
+
+var createTorrent = &cobra.Command{
+	Use:     "torrent_create",
+	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<file_path>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		//logger := debug.SetupCobra(cmd, "integration")
+		//dirs := datadir.New(datadirCli)
+		//ctx := cmd.Context()
+
+		fileDir, fileName := filepath.Split(filePath)
+		info := &metainfo.Info{PieceLength: downloadercfg2.DefaultPieceSize, Name: fileName}
+		if err := info.BuildFromFilePath(filePath); err != nil {
+			return err
+		}
+		mi, err := downloader.CreateMetaInfo(info, nil)
+		if err != nil {
+			return err
+		}
+		if err := downloader.CreateTorrentFromMetaInfo(fileDir, info, mi); err != nil {
+			return err
+		}
+		return nil
+	},
 }
 
 var printTorrentHashes = &cobra.Command{
@@ -248,15 +284,6 @@ var printTorrentHashes = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-// nolint
-func removePieceCompletionStorage(snapDir string) {
-	_ = os.RemoveAll(filepath.Join(snapDir, "db"))
-	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db"))
-	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.bolt.db"))
-	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db-shm"))
-	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db-wal"))
 }
 
 func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
