@@ -501,8 +501,8 @@ github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230911023914-a17786143476 h1:fKbEGitRmRmI0H02MaEmnlqQLj3n7TlE6Beasma77yE=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230911023914-a17786143476/go.mod h1:Iy7Gah8RFSvAutIr3Unph+ttp/7TMXmXOByXk9sXE6A=
-github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230909101632-42a1d412f95f h1:DVjZZpZBRTUXdJn6iZlwJkJ8zF0hwdBucIZFheNfF6w=
-github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230909101632-42a1d412f95f/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
+github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230911054727-4e865b051314 h1:TeQoOW2o0rL5jF4ava+SlB8l0mhzM8ISnq81okJ790c=
+github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230911054727-4e865b051314/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.9.0 h1:iDwrXe0PVwBC68Dd94YSsHbMgQ3ufsgjzXtFNFVZFRk=
 github.com/ledgerwatch/log/v3 v3.9.0/go.mod h1:EiAY6upmI/6LkNhOVxb4eVsmsP11HZCnZ3PlJMjYiqE=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
