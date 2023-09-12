@@ -154,7 +154,6 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		fileName: fName,
 	}
 	defer func() {
-
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
@@ -423,7 +422,6 @@ type Getter struct {
 func (g *Getter) Trace(t bool)     { g.trace = t }
 func (g *Getter) FileName() string { return g.fName }
 
-func (g *Getter) touch() { _ = g.data[g.dataP] }
 func (g *Getter) nextPos(clean bool) (pos uint64) {
 	if clean && g.dataBit > 0 {
 		g.dataP++
@@ -434,7 +432,6 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 		return table.pos[0]
 	}
 	for l := byte(0); l == 0; {
-		g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
@@ -449,7 +446,7 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 			pos = table.pos[code]
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pos
 }
@@ -464,7 +461,6 @@ func (g *Getter) nextPattern() []byte {
 	var l byte
 	var pattern []byte
 	for l == 0 {
-		g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
@@ -481,7 +477,7 @@ func (g *Getter) nextPattern() []byte {
 			pattern = *cw.pattern
 		}
 		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit = g.dataBit % 8
+		g.dataBit %= 8
 	}
 	return pattern
 }

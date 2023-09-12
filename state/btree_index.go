@@ -12,11 +12,13 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -26,13 +28,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
-var UseBpsTree bool = false
+var UseBpsTree bool = true
 
 const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(512)
+var DefaultBtreeM = uint64(256)
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
@@ -104,7 +106,7 @@ func (c *Cursor) Next() bool {
 	if err != nil {
 		return false
 	}
-	c.key, c.value = common.Copy(key), common.Copy(value)
+	c.key, c.value = key, value
 	return true
 }
 
@@ -732,16 +734,16 @@ type BtIndex struct {
 	decompressor *compress.Decompressor
 }
 
-func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, logger log.Logger) (*BtIndex, error) {
-	err := BuildBtreeIndex(dataPath, indexPath, compressed, logger)
+func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, seed uint32, logger log.Logger) (*BtIndex, error) {
+	err := BuildBtreeIndex(dataPath, indexPath, compressed, seed, logger)
 	if err != nil {
 		return nil, err
 	}
 	return OpenBtreeIndex(indexPath, dataPath, M, compressed, false)
 }
 
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed FileCompression, ps *background.ProgressSet, tmpdir string, logger log.Logger) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, logger)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -749,15 +751,13 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func BuildBtreeIndex(dataPath, indexPath string, compressed FileCompression, logger log.Logger) error {
+func BuildBtreeIndex(dataPath, indexPath string, compressed FileCompression, seed uint32, logger log.Logger) error {
 	decomp, err := compress.NewDecompressor(dataPath)
 	if err != nil {
 		return err
 	}
 	defer decomp.Close()
-	defer decomp.EnableReadAhead().DisableReadAhead()
-
-	return BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), logger)
+	return BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger)
 }
 
 func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompression, trace bool) (*BtIndex, error) {
@@ -768,22 +768,22 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64, compressed FileCompres
 	return OpenBtreeIndexWithDecompressor(indexPath, M, kv, compressed)
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compression FileCompression, ps *background.ProgressSet, tmpdir string, logger log.Logger) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compression FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
-	//bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
-	//var bloom *bloomFilter
-	//var err error
-	//if kv.Count() > 0 {
-	//	bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	//hasher := murmur3.New128WithSeed(0)
+	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
+	var bloom *bloomFilter
+	var err error
+	if kv.Count() >= 2 {
+		bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
+		if err != nil {
+			return err
+		}
+	}
+	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -794,6 +794,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	if err != nil {
 		return err
 	}
+	defer iw.Close()
 
 	getter := NewArchiveGetter(kv.MakeGetter(), compression)
 	getter.Reset(0)
@@ -809,11 +810,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		if err != nil {
 			return err
 		}
-		//hasher.Reset()
-		//hasher.Write(key) //nolint:errcheck
-		//hi, _ := hasher.Sum128()
-		//bloom.AddHash(hi)
-
+		hasher.Reset()
+		hasher.Write(key) //nolint:errcheck
+		hi, _ := hasher.Sum128()
+		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 		//if pos-kp == 1 {
 		//	ks[len(key)]++
@@ -826,13 +826,12 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	if err := iw.Build(); err != nil {
 		return err
 	}
-	iw.Close()
 
-	//if bloom != nil {
-	//	if _, err := bloom.WriteFile(bloomPath); err != nil {
-	//		return err
-	//	}
-	//}
+	if bloom != nil {
+		if err := bloom.Build(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

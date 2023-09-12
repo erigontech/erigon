@@ -48,7 +48,7 @@ type Config struct {
 }
 
 var DefaultConfig = Config{
-	SyncToNewPeersEvery:   2 * time.Minute,
+	SyncToNewPeersEvery:   5 * time.Second,
 	ProcessRemoteTxsEvery: 100 * time.Millisecond,
 	CommitEvery:           15 * time.Second,
 	LogEvery:              30 * time.Second,

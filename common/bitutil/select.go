@@ -20,7 +20,7 @@ import (
 )
 
 // Required by select64
-var kSelectInByte []byte = []byte{
+var kSelectInByte = [2048]byte{
 	8, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
 	6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
 	7, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
@@ -58,6 +58,10 @@ const (
 	kOnesStep4    uint64 = 0x1111111111111111
 	kOnesStep8    uint64 = 0x0101010101010101
 	kLAMBDAsStep8 uint64 = 0x80 * kOnesStep8
+
+	kOnesStep4x3 = 0x3 * kOnesStep4
+	kOnesStep4xA = 0xA * kOnesStep4
+	kOnesStep8xF = 0xF * kOnesStep8
 )
 
 /** Returns the index of the k-th 1-bit in the 64-bit word x.
@@ -77,16 +81,25 @@ const (
  * [4] Facebook Folly library: https://github.com/facebook/folly
  *
  */
-func Select64(x uint64, k int) int {
+
+func Select64(x uint64, k int) (place int) {
+	/* Original implementation - a bit obfuscated to satisfy Golang's inlining costs
 	s := x
 	s = s - ((s & (0xA * kOnesStep4)) >> 1)
 	s = (s & (0x3 * kOnesStep4)) + ((s >> 2) & (0x3 * kOnesStep4))
 	s = (s + (s >> 4)) & (0xF * kOnesStep8)
 	byteSums := s * kOnesStep8
-
+	*/
+	s := x - ((x & kOnesStep4xA) >> 1)
+	s = (s & kOnesStep4x3) + ((s >> 2) & kOnesStep4x3)
+	byteSums := ((s + (s >> 4)) & kOnesStep8xF) * kOnesStep8
+	/* Original implementaiton:
 	kStep8 := uint64(k) * kOnesStep8
 	geqKStep8 := ((kStep8 | kLAMBDAsStep8) - byteSums) & kLAMBDAsStep8
-	place := bits.OnesCount64(geqKStep8) * 8
+	place = bits.OnesCount64(geqKStep8) * 8
+	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
+	*/
+	place = bits.OnesCount64((((uint64(k)*kOnesStep8)|kLAMBDAsStep8)-byteSums)&kLAMBDAsStep8) * 8
 	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
 	return place + int(kSelectInByte[((x>>place)&0xFF)|(byteRank<<8)])
 }
