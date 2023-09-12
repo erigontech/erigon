@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -77,26 +78,14 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	file := path.Base(r.URL.Path)
 
 	if file == "/" || file == "." {
-		http.Error(w, fmt.Sprintf("file is required - specify the name of log file to read"), http.StatusBadRequest)
+		http.Error(w, "file is required - specify the name of log file to read", http.StatusBadRequest)
 		return
 	}
 
-	offsetStr := r.URL.Query().Get("offset")
+	offset, err := offsetValue(r.URL.Query())
 
-	var offset int64
-	var err error
-
-	if offsetStr != "" {
-		offset, err = strconv.ParseInt(offsetStr, 10, 64)
-
-		if err != nil {
-			http.Error(w, fmt.Sprintf("offset %s is not a Uint64 number: %v", offsetStr, err), http.StatusBadRequest)
-			return
-		}
-	}
-
-	if offset < 0 {
-		http.Error(w, fmt.Sprintf("offset %d must be non-negative", offset), http.StatusBadRequest)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -120,28 +109,18 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	f, err := os.Open(filepath.Join(dirPath, file))
 
 	if err != nil {
-		fmt.Fprintf(w, "ERROR: opening file %s: %v\n", file, err)
+		http.Error(w, fmt.Sprintf("Can't opening file %s: %v\n", file, err), http.StatusInternalServerError)
 		return
 	}
 
-	sizeStr := r.URL.Query().Get("size")
-
-	var size int64
-
-	if sizeStr == "" {
-		size = fileInfo.Size()
-	}
-
-	if size == 0 {
-		size, err = strconv.ParseInt(sizeStr, 10, 64)
-	}
+	limit, err := limitValue(r.URL.Query(), fileInfo.Size())
 
 	if err != nil {
-		http.Error(w, fmt.Sprintf("size %s is not a Uint64 number: %v", sizeStr, err), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	buf := make([]byte, size)
+	buf := make([]byte, limit)
 
 	if _, err := f.Seek(offset, 0); err != nil {
 		http.Error(w, fmt.Sprintf("seek failed for file: %s to %d: %v", file, offset, err), http.StatusInternalServerError)
@@ -163,6 +142,48 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(int64(readTotal), 10))
 	w.Header().Set("X-Offset", strconv.FormatInt(int64(offset), 10))
+	w.Header().Set("X-Limit", strconv.FormatInt(int64(limit), 10))
 	w.Header().Set("X-Size", strconv.FormatInt(int64(fileInfo.Size()), 10))
 	w.Write(buf[:readTotal])
+}
+
+func limitValue(values url.Values, def int64) (int64, error) {
+	limitStr := values.Get("limit")
+
+	var limit int64
+	var err error
+
+	if limitStr == "" {
+		limit = def
+	} else {
+		limit, err = strconv.ParseInt(limitStr, 10, 64)
+	}
+
+	if err != nil {
+		return 0, fmt.Errorf("limit %s is not a int64 number: %v", limitStr, err)
+	}
+
+	return limit, nil
+}
+
+func offsetValue(values url.Values) (int64, error) {
+
+	offsetStr := values.Get("offset")
+
+	var offset int64
+	var err error
+
+	if offsetStr != "" {
+		offset, err = strconv.ParseInt(offsetStr, 10, 64)
+
+		if err != nil {
+			return 0, fmt.Errorf("offset %s is not a int64 number: %v", offsetStr, err)
+		}
+	}
+
+	if offset < 0 {
+		return 0, fmt.Errorf("offset %d must be non-negative", offset)
+	}
+
+	return offset, nil
 }

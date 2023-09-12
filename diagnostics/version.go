@@ -16,7 +16,7 @@ func SetupVersionAccess(metricsMux *http.ServeMux) {
 		json.NewEncoder(w).Encode(struct {
 			Node int    `json:"nodeVersion"`
 			Code string `json:"codeVersion"`
-			Git  string `json:"gitCommit`
+			Git  string `json:"gitCommit"`
 		}{
 			Node: Version,
 			Code: params.VersionWithMeta,

@@ -102,8 +102,6 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	}
 }
 
-var successLine = []byte("SUCCESS")
-
 type conn struct {
 	io.ReadCloser
 	*io.PipeWriter
@@ -172,7 +170,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 
 		if debugResponse.StatusCode != http.StatusOK {
-			return fmt.Errorf("Debug request to %s failed: %s", debugResponse.Status)
+			return fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
 		}
 
 		var reply remote.NodesInfoReply
@@ -219,7 +217,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Support request to %s failed: %s", diagnosticsUrl, resp.Status)
+		return fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
 	}
 
 	type connectionInfo struct {
@@ -297,10 +295,15 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 		if node, ok := nodes[nodeRequest.NodeId]; ok {
 			err := func() error {
-				debugURL := node.debugURL + "/" + requests[0].Method + "?" + nodeRequest.QueryParams.Encode()
+				var queryString string
+
+				if len(nodeRequest.QueryParams) > 0 {
+					queryString = "?" + nodeRequest.QueryParams.Encode()
+				}
+
+				debugURL := node.debugURL + "/" + requests[0].Method + queryString
 
 				debugResponse, err := metricsClient.Get(debugURL)
-				defer debugResponse.Body.Close()
 
 				if err != nil {
 					return json.NewEncoder(writer).Encode(&nodeResponse{
@@ -312,6 +315,8 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						Last: true,
 					})
 				}
+
+				defer debugResponse.Body.Close()
 
 				if resp.StatusCode != http.StatusOK {
 					body, _ := io.ReadAll(debugResponse.Body)
@@ -356,7 +361,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 					data, err := json.Marshal(struct {
 						Offset int64  `json:"offset"`
-						Size   int64  `json:"fileSize"`
+						Size   int64  `json:"size"`
 						Data   []byte `json:"chunk"`
 					}{
 						Offset: offset,
