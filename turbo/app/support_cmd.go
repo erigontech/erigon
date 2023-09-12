@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -272,8 +273,8 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 
 		nodeRequest := struct {
-			NodeId       string          `json:"nodeId"`
-			MethodParams json.RawMessage `json:"methodParams"`
+			NodeId      string     `json:"nodeId"`
+			QueryParams url.Values `json:"queryParams"`
 		}{}
 
 		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
@@ -296,7 +297,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 		if node, ok := nodes[nodeRequest.NodeId]; ok {
 			err := func() error {
-				debugURL := node.debugURL + "/" + requests[0].Method
+				debugURL := node.debugURL + "/" + requests[0].Method + "?" + nodeRequest.QueryParams.Encode()
 
 				debugResponse, err := metricsClient.Get(debugURL)
 				defer debugResponse.Body.Close()
