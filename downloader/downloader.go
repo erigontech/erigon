@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,10 +36,12 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -57,6 +61,8 @@ type Downloader struct {
 	folder       storage.ClientImplCloser
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
+
+	webseeds *WebSeeds
 }
 
 type AggStats struct {
@@ -75,7 +81,7 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
-	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
+	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
 		return nil, err
 	}
 
@@ -83,10 +89,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	// To provide such consistent view - downloader does:
 	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
 	// and App only work with <datadir>/snapshot s folder
-	if dir.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
-		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
+	if dir.FileExist(cfg.SnapDir + "_tmp") { // migration from prev versions
+		_ = os.Rename(cfg.SnapDir+"_tmp", filepath.Join(cfg.SnapDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
 	}
-	if err := moveFromTmp(cfg.DataDir); err != nil {
+	if err := moveFromTmp(cfg.SnapDir); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +105,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
 	}
-	cfg.PeerID = string(peerID)
+	cfg.ClientConfig.PeerID = string(peerID)
 	if len(peerID) == 0 {
 		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
 			return nil, fmt.Errorf("save peer id: %w", err)
@@ -115,10 +121,20 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		clientLock:        &sync.RWMutex{},
 
 		statsLock: &sync.RWMutex{},
+
+		webseeds: &WebSeeds{},
 	}
 	if err := d.addSegments(ctx); err != nil {
 		return nil, err
 	}
+	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
+	// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.webseeds.Discover(ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles)
+		d.applyWebseeds()
+	}()
 	return d, nil
 }
 
@@ -141,6 +157,8 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) error {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
+
+		// 2 loops: 1-st waiting for "torrents resolution" (receiving metadata from trackers)
 
 		// Torrents that are already taken care of
 		torrentMap := map[metainfo.Hash]struct{}{}
@@ -190,9 +208,6 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) error {
 
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		if err := d.addSegments(ctx); err != nil {
-			return
-		}
 	DownloadLoop2:
 		torrents = d.Torrent().Torrents()
 		for _, t := range torrents {
@@ -289,7 +304,7 @@ func (d *Downloader) mainLoop(ctx context.Context, silent bool) error {
 func (d *Downloader) SnapDir() string {
 	d.clientLock.RLock()
 	defer d.clientLock.RUnlock()
-	return d.cfg.DataDir
+	return d.cfg.SnapDir
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
@@ -451,7 +466,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
 }
 
-func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *prototypes.H160, snapDir string) (bool, error) {
+func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *prototypes.H160, name string, snapDir string) (bool, error) {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	if hash == nil {
 		return false, nil
@@ -464,7 +479,7 @@ func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *pro
 		return true, nil
 	}
 
-	magnet := mi.Magnet(&infoHash, nil)
+	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	t, err := d.torrentClient.AddMagnet(magnet.String())
 	if err != nil {
 		//log.Warn("[downloader] add magnet link", "err", err)
@@ -491,6 +506,23 @@ func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *pro
 	return false, nil
 }
 
+func seedableFiles(snapDir string) ([]string, error) {
+	files, err := seedableSegmentFiles(snapDir)
+	if err != nil {
+		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
+	}
+	files2, err := seedableHistorySnapshots(snapDir, "history")
+	if err != nil {
+		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
+	}
+	files = append(files, files2...)
+	files2, err = seedableHistorySnapshots(snapDir, "warm")
+	if err != nil {
+		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
+	}
+	files = append(files, files2...)
+	return files, nil
+}
 func (d *Downloader) addSegments(ctx context.Context) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -498,18 +530,16 @@ func (d *Downloader) addSegments(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	files, err := seedableSegmentFiles(d.SnapDir())
+	err = AddTorrentFiles(d.SnapDir(), d.torrentClient)
 	if err != nil {
-		return fmt.Errorf("seedableSegmentFiles: %w", err)
+		return fmt.Errorf("AddTorrentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(d.SnapDir())
-	if err != nil {
-		return fmt.Errorf("seedableHistorySnapshots: %w", err)
-	}
-	files = append(files, files2...)
-
 	g, ctx := errgroup.WithContext(ctx)
 	i := atomic.Int64{}
+	files, err := seedableFiles(d.SnapDir())
+	if err != nil {
+		return err
+	}
 	for _, f := range files {
 		f := f
 		g.Go(func() error {
@@ -518,7 +548,7 @@ func (d *Downloader) addSegments(ctx context.Context) error {
 				return ctx.Err()
 			default:
 			}
-			_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
+			_, err := AddSegment(f, d.cfg.SnapDir, d.torrentClient)
 			if err != nil {
 				return err
 			}
@@ -611,4 +641,87 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	}
 
 	return db, c, m, torrentClient, nil
+}
+
+func (d *Downloader) applyWebseeds() {
+	for _, t := range d.Torrent().Torrents() {
+		urls, ok := d.webseeds.GetByFileNames()[t.Name()]
+		if !ok {
+			continue
+		}
+		log.Debug("[downloader] addd webseeds", "file", t.Name())
+		t.AddWebSeeds(urls)
+	}
+}
+
+type WebSeeds struct {
+	lock              sync.Mutex
+	webSeedsByFilName snaptype.WebSeeds
+}
+
+func (d *WebSeeds) GetByFileNames() snaptype.WebSeeds {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return d.webSeedsByFilName
+}
+func (d *WebSeeds) SetByFileNames(l snaptype.WebSeeds) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.webSeedsByFilName = l
+}
+
+func (d *WebSeeds) callWebSeedsProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
+	request, err := http.NewRequest(http.MethodGet, webSeedProviderUrl.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	request = request.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	response := snaptype.WebSeedsFromProvider{}
+	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
+	data, err := os.ReadFile(webSeedProviderPath)
+	if err != nil {
+		return nil, err
+	}
+	response := snaptype.WebSeedsFromProvider{}
+	if err := toml.Unmarshal(data, &response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string) {
+	list := make([]snaptype.WebSeedsFromProvider, len(urls)+len(files))
+	for _, webSeedProviderURL := range urls {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
+		if err != nil { // don't fail on error
+			log.Warn("[downloader] callWebSeedsProvider", "err", err, "url", webSeedProviderURL.EscapedPath())
+			continue
+		}
+		list = append(list, response)
+	}
+	for _, webSeedFile := range files {
+		response, err := d.readWebSeedsFile(webSeedFile)
+		if err != nil { // don't fail on error
+			_, fileName := filepath.Split(webSeedFile)
+			log.Warn("[downloader] readWebSeedsFile", "err", err, "file", fileName)
+			continue
+		}
+		list = append(list, response)
+	}
+	d.SetByFileNames(snaptype.NewWebSeeds(list))
 }
