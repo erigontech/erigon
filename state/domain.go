@@ -113,7 +113,7 @@ type filesItem struct {
 }
 type bloomFilter struct {
 	*bloomfilter.Filter
-	FileName, filePath string
+	FileName, FilePath string
 	f                  *os.File
 }
 
@@ -126,13 +126,13 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 		return nil, fmt.Errorf("%w, %s", err, fileName)
 	}
 
-	return &bloomFilter{filePath: filePath, FileName: fileName, Filter: bloom}, nil
+	return &bloomFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
 }
 
 func (b *bloomFilter) Build() error {
 	log.Trace("[agg] write file", "file", b.FileName)
 	//TODO: fsync and tmp-file rename
-	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
+	if _, err := b.Filter.WriteFile(b.FilePath); err != nil {
 		return err
 	}
 	return nil
@@ -140,7 +140,7 @@ func (b *bloomFilter) Build() error {
 
 func OpenBloom(filePath string) (*bloomFilter, error) {
 	_, fileName := filepath.Split(filePath)
-	f := &bloomFilter{filePath: filePath, FileName: fileName}
+	f := &bloomFilter{FilePath: filePath, FileName: fileName}
 	var err error
 	f.Filter, _, err = bloomfilter.ReadFile(filePath)
 	if err != nil {
@@ -209,7 +209,7 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 	if i.bloom != nil {
 		i.bloom.Close()
-		if err := os.Remove(i.bloom.filePath); err != nil {
+		if err := os.Remove(i.bloom.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bloom.FileName)
 		}
 		i.bloom = nil
