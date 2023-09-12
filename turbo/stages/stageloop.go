@@ -263,6 +263,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	// Update sentry status for peers to see our sync status
 	var headTd *big.Int
 	var plainStateVersion, finalizedBlock uint64
+	var plainStateVersion, finalizedBlock uint64
 	head, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
@@ -276,6 +277,10 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 	headHeader = rawdb.ReadHeader(tx, headHash, head)
 	currentHeder = rawdb.ReadCurrentHeader(tx)
+	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
+	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
+		finalizedBlock = *fb
+	}
 	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
 	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
 		finalizedBlock = *fb
@@ -356,6 +361,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}
+	}
+	if err := rawdb.TruncateCanonicalChain(ctx, batch, header.Number.Uint64()+1); err != nil {
+		return err
 	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {

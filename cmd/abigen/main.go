@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"os"
 	"path/filepath"
@@ -180,7 +181,7 @@ func abigen(c *cli.Context) error {
 	} else {
 		// Generate the list of types to exclude from binding
 		exclude := make(map[string]bool)
-		for _, kind := range utils.SplitAndTrim(c.String(excFlag.Name)) {
+		for _, kind := range common.CliString2Array(c.String(excFlag.Name)) {
 			exclude[strings.ToLower(kind)] = true
 		}
 		var err error
