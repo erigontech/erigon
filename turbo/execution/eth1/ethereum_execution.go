@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/log/v3"
@@ -78,6 +77,13 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if td == nil {
+		return nil, nil
+	}
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
@@ -90,6 +96,13 @@ func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash
 }
 
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if td == nil {
+		return nil, nil
+	}
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -98,10 +111,26 @@ func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHa
 }
 
 func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (libcommon.Hash, error) {
+	var canonical libcommon.Hash
+	var err error
 	if e.blockReader == nil {
-		return rawdb.ReadCanonicalHash(tx, blockNumber)
+		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+	} else {
+		canonical, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 	}
-	return e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	if td == nil {
+		return libcommon.Hash{}, nil
+	}
+	return canonical, nil
+
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
@@ -190,12 +219,6 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		currentNumber--
 	}
 	return nil
-}
-
-func truncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
-	return db.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(k, _ []byte) error {
-		return db.Delete(kv.Receipts, k)
-	})
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {

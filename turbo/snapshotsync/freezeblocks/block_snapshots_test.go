@@ -222,7 +222,6 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.False(ok)
 	_, ok = snaptype.ParseFileName("", stat("1-2-bodies.seg"))
 	require.False(ok)
-	// forwad and backward compatibiliy: no fail when see old or new version
 	_, ok = snaptype.ParseFileName("", stat("v2-1-2-bodies.seg"))
 	require.True(ok)
 	_, ok = snaptype.ParseFileName("", stat("v0-1-2-bodies.seg"))

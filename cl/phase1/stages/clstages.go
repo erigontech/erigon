@@ -244,7 +244,11 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger); err != nil {
+						downloaded = false
+						return err
+					}
+					return nil
 				},
 			},
 			CatchUpEpochs: {
@@ -271,11 +275,6 @@ func ConsensusClStages(ctx context.Context,
 
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
-							if err := processBlock(block, false, false); err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-								continue MainLoop
-							}
 							if shouldInsert && block.Data.Version() >= clparams.BellatrixVersion {
 								executionPayload := block.Data.Block.Body.ExecutionPayload
 								body := executionPayload.Body()
@@ -298,6 +297,11 @@ func ConsensusClStages(ctx context.Context,
 									}
 									blockBatch = blockBatch[:0]
 								}
+							}
+							if err := processBlock(block, false, false); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								continue MainLoop
 							}
 						}
 						currentEpoch++
@@ -467,7 +471,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					for _, block := range blocks {
-						err := processBlock(block, false, true)
+						err := processBlock(block, true, true)
 						if err != nil {
 							// its okay if block processing fails
 							logger.Warn("extra block failed validation", "err", err)

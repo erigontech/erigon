@@ -799,6 +799,7 @@ Loop:
 	for _, fName := range fileNames {
 		f, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
+			s.logger.Trace("BorRoSnapshots.ReopenList: skip", "file", fName)
 			continue
 		}
 
@@ -1135,7 +1136,10 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 
 		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
-			f, _ := snaptype.ParseFileName(snapDir, segName)
+			f, ok := snaptype.ParseFileName(snapDir, segName)
+			if !ok {
+				continue
+			}
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}

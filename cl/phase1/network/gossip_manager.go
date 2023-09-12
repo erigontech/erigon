@@ -2,15 +2,12 @@ package network
 
 import (
 	"context"
-	"runtime"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -102,14 +99,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "sentinel peer count"
 			return err
 		}
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
 
 		log.Debug("Received block via gossip",
 			"peers", count.Amount,
 			"slot", block.Block.Slot,
-			"alloc/sys", libcommon.ByteCount(m.Alloc)+"/"+libcommon.ByteCount(m.Sys),
-			"numGC", m.NumGC,
 		)
 
 		if err := freezer.PutObjectSSZIntoFreezer("signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
