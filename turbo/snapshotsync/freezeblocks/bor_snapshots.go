@@ -797,9 +797,9 @@ func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, err := snaptype.ParseFileName(s.dir, fName)
-		if err != nil {
-			s.logger.Warn("invalid segment name", "err", err, "name", fName)
+		f, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok {
+			s.logger.Trace("BorRoSnapshots.ReopenList: skip", "file", fName)
 			continue
 		}
 
@@ -1136,7 +1136,10 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 
 		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
-			f, _ := snaptype.ParseFileName(snapDir, segName)
+			f, ok := snaptype.ParseFileName(snapDir, segName)
+			if !ok {
+				continue
+			}
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}

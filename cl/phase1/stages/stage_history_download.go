@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
@@ -108,17 +109,19 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
-			encodedPayload = append(encodedPayload, byte(blk.Version()))
+			// Use snappy compression that the temporary files do not take too much disk.
+			encodedPayload = utils.CompressSnappy(append(encodedPayload, byte(blk.Version())))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
-				return false, err
+				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
 
-			foundLatestEth1ValidHash, err = cfg.engine.IsCanonicalHash(payload.BlockHash)
+			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
+			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
 		}
 
 		slot := blk.Block.Slot
@@ -169,19 +172,25 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
 
-	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
+		var err error
+		var v []byte
+		if v, err = utils.DecompressSnappy(vComp); err != nil {
+			return fmt.Errorf("error decompressing dump during collection: %s", err)
+		}
+
 		version := clparams.StateVersion(v[len(v)-1])
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
 		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
-			return err
+			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
 		body := executionPayload.Body()
 		header, err := executionPayload.RlpHeader()
 		if err != nil {
-			return err
+			return fmt.Errorf("error parsing rlp header during collection: %s", err)
 		}
 
 		txs, err := types.DecodeTransactions(body.Transactions)
@@ -193,7 +202,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		blockBatch = append(blockBatch, block)
 		if len(blockBatch) >= blockBatchMaxSize {
 			if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
-				return err
+				return fmt.Errorf("error inserting block during collection: %s", err)
 			}
 			blockBatch = blockBatch[:0]
 		}
@@ -202,7 +211,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	if cfg.engine != nil && cfg.engine.SupportInsertion() {
-		return cfg.engine.InsertBlocks(blockBatch)
+		if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
+			return fmt.Errorf("error doing last block insertion during collection: %s", err)
+		}
 	}
 	return nil
 }
