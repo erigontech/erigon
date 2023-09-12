@@ -4,8 +4,8 @@ crawshaw.io/iox v0.0.0-20181124134642-c51c3df30797 h1:yDf7ARQc637HoxDho7xjqdvO5Z
 crawshaw.io/iox v0.0.0-20181124134642-c51c3df30797/go.mod h1:sXBiorCo8c46JlQV3oXPKINnZ8mcqnye1EkVkqsectk=
 crawshaw.io/sqlite v0.3.2/go.mod h1:igAO5JulrQ1DbdZdtVq48mnZUBAPOeFzer7VhDWNtW4=
 filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=
-github.com/AskAlexSharov/bloomfilter/v2 v2.0.4 h1:xaq958t5pd/Jw95dZDPj5wyzuxtRCjXfiEPRv1Ze1uw=
-github.com/AskAlexSharov/bloomfilter/v2 v2.0.4/go.mod h1:zpoh+gs7qcpqrHr3dB55AMiJwo0iURXE7ZOP9L9hSkA=
+github.com/AskAlexSharov/bloomfilter/v2 v2.0.8 h1:eRExAhnCcGHKC4/s8bpbYHJTQfOtn/urU/CYXNx2Q+8=
+github.com/AskAlexSharov/bloomfilter/v2 v2.0.8/go.mod h1:zpoh+gs7qcpqrHr3dB55AMiJwo0iURXE7ZOP9L9hSkA=
 github.com/AskAlexSharov/btree v1.6.2 h1:5+GQo+SmoAmBEsnW/ksj1csim/aQMRuLUywvwMphs2Y=
 github.com/AskAlexSharov/btree v1.6.2/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
