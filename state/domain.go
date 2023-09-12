@@ -121,7 +121,7 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
-	bloom, err := bloomfilter.New(m, 4)
+	bloom, err := bloomfilter.New(m)
 	if err != nil {
 		return nil, fmt.Errorf("%w, %s", err, fileName)
 	}

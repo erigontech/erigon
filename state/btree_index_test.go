@@ -17,12 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
-func TestName(t *testing.T) {
-	m := bloomfilter.OptimalM(10_000_000, 0.01)
-	bloom, _ := bloomfilter.New(m, 3)
-	fmt.Printf("a: %s, prob=%.7f\n", "a", bloom.FalsePosititveProbability())
-
-}
 func Test_BtreeIndex_Init2(t *testing.T) {
 	//mainnnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
 	//no much reason to merge bloomfilter - can merge them on starup
