@@ -70,7 +70,7 @@ func (st *Stack) Swap(n int) {
 }
 
 func (st *Stack) Dup(n int) {
-	st.Push(&st.Data[st.Len()-n])
+	st.Data = append(st.Data, st.Data[st.Len()-n])
 }
 
 func (st *Stack) Peek() *uint256.Int {
