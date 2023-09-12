@@ -125,6 +125,7 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w, %s", err, fileName)
 	}
+	fmt.Printf("a: %s, prob=%.3f\n", fileName, bloom.FalsePosititveProbability())
 
 	return &bloomFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
 }
