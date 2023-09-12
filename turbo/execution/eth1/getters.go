@@ -124,18 +124,25 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 	}
 	defer tx.Rollback()
 
-	bodies := make([]*execution.BlockBody, len(req.Hashes))
+	bodies := make([]*execution.BlockBody, 0, len(req.Hashes))
 
-	for hashIdx, hash := range req.Hashes {
+	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := e.blockReader.BlockByHash(ctx, tx, h)
+		number := rawdb.ReadHeaderNumber(tx, h)
+		if number == nil {
+			break
+		}
+		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
 			return nil, err
 		}
-		bodies[hashIdx] = &execution.BlockBody{
-			Transactions: block.RawBody().Transactions,
-			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals()),
+		if body == nil {
+			break
 		}
+		bodies = append(bodies, &execution.BlockBody{
+			Transactions: body.RawBody().Transactions,
+			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+		})
 	}
 
 	return &execution.GetBodiesBatchResponse{Bodies: bodies}, nil
@@ -160,7 +167,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			break
 		}
 
-		body, err := e.blockReader.BodyWithTransactions(ctx, tx, hash, req.Start+i)
+		body, err := e.getBody(ctx, tx, hash, req.Start+i)
 		if err != nil {
 			return nil, err
 		}

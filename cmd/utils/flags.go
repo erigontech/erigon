@@ -163,6 +163,11 @@ var (
 		Usage: "Price bump percentage to replace an already existing transaction",
 		Value: txpoolcfg.DefaultConfig.PriceBump,
 	}
+	TxPoolBlobPriceBumpFlag = cli.Uint64Flag{
+		Name:  "txpool.blobpricebump",
+		Usage: "Price bump percentage to replace existing (type-3) blob transaction",
+		Value: txpoolcfg.DefaultConfig.BlobPriceBump,
+	}
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
@@ -1221,7 +1226,8 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 	}
 }
 
-func setTxPool(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
+func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
+	cfg := &fullCfg.DeprecatedTxPool
 	if ctx.IsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
@@ -1271,7 +1277,9 @@ func setTxPool(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
-
+	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
+		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
@@ -1506,8 +1514,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 
-	setTxPool(ctx, &cfg.DeprecatedTxPool)
-	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg.DeprecatedTxPool)
+	setTxPool(ctx, cfg)
+	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
