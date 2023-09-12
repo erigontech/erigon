@@ -222,7 +222,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Increment the call depth which is restricted to 1024
 	in.depth++
 	defer func() {
-		in.depth--
+		// first: capture data/memory/state/depth/etc... then clenup them
 		if in.cfg.Debug && err != nil {
 			if !logged {
 				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
@@ -230,14 +230,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
 			}
 		}
-		// Don't move this deferrred function, it's placed before the capturestate-deferred method,
-		// so that it get's executed _after_: the capturestate needs the stacks before
-		// they are returned to the pools
+		// this function must execute _after_: the `CaptureState` needs the stacks before
 		pool.Put(mem)
 		stack.ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
 		}
+		in.depth--
 	}()
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
