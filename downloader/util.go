@@ -18,9 +18,6 @@ package downloader
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
 	"runtime"
 
 	//nolint:gosec
@@ -37,10 +34,13 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -252,20 +252,16 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			if err := buildTorrentIfNeed(ctx, file, snapDir); err != nil {
 				return err
 			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			}
 			return nil
 		})
-	}
-
-	var m runtime.MemStats
-Loop:
-	for {
-		select {
-		case <-ctx.Done():
-			break Loop // g.Wait() will return right error
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		}
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
