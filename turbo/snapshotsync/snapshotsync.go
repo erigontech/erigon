@@ -200,9 +200,9 @@ Loop:
 				}
 				dbg.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
-				suffix := "downloading"
+				suffix := "downloading archives"
 				if stats.Progress > 0 && stats.DownloadRate == 0 {
-					suffix += "verifying"
+					suffix += "verifying archives"
 				}
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
@@ -210,11 +210,9 @@ Loop:
 					"total-time", time.Since(downloadStartTime).Round(time.Second).String(),
 					"download", common.ByteCount(stats.DownloadRate)+"/s",
 					"upload", common.ByteCount(stats.UploadRate)+"/s",
-				)
-				log.Info(fmt.Sprintf("[%s] download", logPrefix),
 					"peers", stats.PeersUnique,
-					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
+					"connections", stats.ConnectionsTotal,
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 				)
 			}
