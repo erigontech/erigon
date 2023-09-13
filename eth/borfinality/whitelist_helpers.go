@@ -37,6 +37,8 @@ func fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVe
 		return blockNum, blockHash, errCheckpoint
 	}
 
+	log.Info("Got new checkpoint from heimdall", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
+
 	// Verify if the checkpoint fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the checkpoint. If not,
 	// it will return appropriate error.
@@ -66,6 +68,8 @@ func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVer
 		log.Error("Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, errMilestone
 	}
+
+	log.Info("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
 
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash

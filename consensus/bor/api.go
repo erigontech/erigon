@@ -310,7 +310,7 @@ func (api *API) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBlockN
 
 	//Check if end block exist
 	localEndBlock := api.chain.GetHeaderByNumber(endBlockNr)
-	if localEndBlock != nil {
+	if localEndBlock == nil {
 		return false, errors.New("failed to get end block")
 	}
 
