@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"net"
 	"os"
@@ -134,8 +138,29 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func checkChainName(dirs datadir.Dirs, chainName string) error {
+	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+		return nil
+	}
+	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().Label(kv.ChainDB).MustOpen()
+	defer db.Close()
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		cc := tool.ChainConfig(tx)
+		if cc != nil && cc.ChainName != chainName {
+			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to %s", cc.ChainName, chainName)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := checkChainName(dirs, chain); err != nil {
+		return err
+	}
 	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
