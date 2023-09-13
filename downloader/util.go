@@ -20,6 +20,7 @@ import (
 	"context"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/log/v3"
 	"runtime"
 
 	//nolint:gosec
@@ -40,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -244,18 +244,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 8)
 	var i atomic.Int32
-	go func() { // will exit when `errgroup` exit, but will not block it
-		var m runtime.MemStats
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				dbg.ReadMemStats(&m)
-				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-			}
-		}
-	}()
+
 	for _, file := range files {
 		file := file
 		g.Go(func() error {
@@ -265,6 +254,18 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			}
 			return nil
 		})
+	}
+
+	var m runtime.MemStats
+Loop:
+	for {
+		select {
+		case <-ctx.Done():
+			break Loop // g.Wait() will return right error
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		}
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
