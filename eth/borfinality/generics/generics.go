@@ -20,5 +20,3 @@ type Response struct {
 	Headers []*types.Header
 	Hashes  []libcommon.Hash
 }
-
-var BorMilestonePeerVerification map[uint64]chan (Response)

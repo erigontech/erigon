@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 type (

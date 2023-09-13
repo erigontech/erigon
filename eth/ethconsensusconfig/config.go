@@ -132,9 +132,9 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 	if chainConfig.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if chainConfig.Aura != nil {
-		consensusConfig = &chainConfig.Aura
+		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &chainConfig.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake

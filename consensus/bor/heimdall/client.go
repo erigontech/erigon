@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -326,11 +327,11 @@ retryLoop:
 func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 	// isSuccessful := false
 
-	// defer func() {
-	// 	if metrics.EnabledExpensive {
-	// 		sendMetrics(ctx, request.start, isSuccessful)
-	// 	}
-	// }()
+	defer func() {
+		if metrics.EnabledExpensive {
+			sendMetrics(ctx, request.start, isSuccessful)
+		}
+	}()
 
 	result := new(T)
 
@@ -348,7 +349,7 @@ func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 		return nil, err
 	}
 
-	// isSuccessful = true
+	isSuccessful = true
 
 	return result, nil
 }
@@ -376,7 +377,6 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 
 func milestoneURL(urlString string) (*url.URL, error) {
 	url := fetchMilestone
-
 	return makeURL(urlString, url, "")
 }
 
@@ -392,15 +392,11 @@ func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
 }
 
 func noAckMilestoneURL(urlString string, id string) (*url.URL, error) {
-	url := fmt.Sprintf(fetchNoAckMilestone, id)
-
-	return makeURL(urlString, url, "")
+	return makeURL(urlString, fmt.Sprintf(fetchNoAckMilestone, id), "")
 }
 
 func milestoneIDURL(urlString string, id string) (*url.URL, error) {
-	url := fmt.Sprintf(fetchMilestoneID, id)
-
-	return makeURL(urlString, url, "")
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneID, id), "")
 }
 
 func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {

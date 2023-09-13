@@ -6,34 +6,33 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	"github.com/ledgerwatch/log/v3"
 
 	proto "github.com/maticnetwork/polyproto/heimdall"
 	protoutils "github.com/maticnetwork/polyproto/utils"
 )
 
 func (h *HeimdallGRPCClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	log.Info("Fetching milestone count")
+	h.logger.Info("Fetching milestone count")
 
 	res, err := h.client.FetchMilestoneCount(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 
-	log.Info("Fetched milestone count")
+	h.logger.Info("Fetched milestone count")
 
 	return res.Result.Count, nil
 }
 
 func (h *HeimdallGRPCClient) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
-	log.Info("Fetching milestone")
+	h.logger.Info("Fetching milestone")
 
 	res, err := h.client.FetchMilestone(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Info("Fetched milestone")
+	h.logger.Info("Fetched milestone")
 
 	milestone := &milestone.Milestone{
 		StartBlock: new(big.Int).SetUint64(res.Result.StartBlock),
@@ -48,14 +47,14 @@ func (h *HeimdallGRPCClient) FetchMilestone(ctx context.Context) (*milestone.Mil
 }
 
 func (h *HeimdallGRPCClient) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	log.Info("Fetching latest no ack milestone Id")
+	h.logger.Info("Fetching latest no ack milestone Id")
 
 	res, err := h.client.FetchLastNoAckMilestone(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 
-	log.Info("Fetched last no-ack milestone")
+	h.logger.Info("Fetched last no-ack milestone")
 
 	return res.Result.Result, nil
 }
@@ -65,7 +64,7 @@ func (h *HeimdallGRPCClient) FetchNoAckMilestone(ctx context.Context, milestoneI
 		MilestoneID: milestoneID,
 	}
 
-	log.Info("Fetching no ack milestone", "milestoneID", milestoneID)
+	h.logger.Info("Fetching no ack milestone", "milestoneID", milestoneID)
 
 	res, err := h.client.FetchNoAckMilestone(ctx, req)
 	if err != nil {
@@ -76,7 +75,7 @@ func (h *HeimdallGRPCClient) FetchNoAckMilestone(ctx context.Context, milestoneI
 		return fmt.Errorf("Not in rejected list: milestoneID %q", milestoneID)
 	}
 
-	log.Info("Fetched no ack milestone", "milestoneID", milestoneID)
+	h.logger.Info("Fetched no ack milestone", "milestoneID", milestoneID)
 
 	return nil
 }
@@ -86,7 +85,7 @@ func (h *HeimdallGRPCClient) FetchMilestoneID(ctx context.Context, milestoneID s
 		MilestoneID: milestoneID,
 	}
 
-	log.Info("Fetching milestone id", "milestoneID", milestoneID)
+	h.logger.Info("Fetching milestone id", "milestoneID", milestoneID)
 
 	res, err := h.client.FetchMilestoneID(ctx, req)
 	if err != nil {
@@ -97,7 +96,7 @@ func (h *HeimdallGRPCClient) FetchMilestoneID(ctx context.Context, milestoneID s
 		return fmt.Errorf("This milestoneID %q does not exist", milestoneID)
 	}
 
-	log.Info("Fetched milestone id", "milestoneID", milestoneID)
+	h.logger.Info("Fetched milestone id", "milestoneID", milestoneID)
 
 	return nil
 }

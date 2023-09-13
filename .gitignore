@@ -70,8 +70,7 @@ __pycache__
 libmdbx/build/*
 tests/testdata/*
 
-go.work
-go.work.sum
+go.work*
 erigon-lib/
 
 /goerli
@@ -82,6 +81,7 @@ coverage.out
 
 dist
 __debug_bin
+*.exe
 
 *.log
 

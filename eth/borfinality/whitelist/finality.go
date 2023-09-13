@@ -5,8 +5,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -20,26 +20,10 @@ type finality[T rawdb.BlockFinality[T]] struct {
 }
 
 type finalityService interface {
-	IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error)
 	IsValidChain(currentHeader uint64, chain []*types.Header) bool
 	Get() (bool, uint64, common.Hash)
 	Process(block uint64, hash common.Hash)
 	Purge()
-}
-
-// IsValidPeer checks if the chain we're about to receive from a peer is valid or not
-// in terms of reorgs. We won't reorg beyond the last bor finality submitted to mainchain.
-func (f *finality[T]) IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error) {
-	// We want to validate the chain by comparing the last finalized block
-	f.RLock()
-
-	doExist := f.doExist
-	number := f.Number
-	hash := f.Hash
-
-	f.RUnlock()
-
-	return isValidPeer(fetchHeadersByNumber, doExist, number, hash)
 }
 
 // IsValidChain checks the validity of chain by comparing it
