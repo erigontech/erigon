@@ -187,17 +187,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
-		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-			return err
-		}
-	}
-	for _, it := range snapcfg.KnownCfg(chain, nil, nil).PreverifiedHistory {
-		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-			return err
-		}
-	}
-
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
