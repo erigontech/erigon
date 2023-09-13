@@ -231,17 +231,16 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
 	var i atomic.Int32
-	g.Go(func() error {
+	go func() { // will exit when `errgroup` exit, but will not block it
 		for {
 			select {
-			default:
 			case <-ctx.Done():
-				return ctx.Err()
+				return
 			case <-logEvery.C:
 				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			}
 		}
-	})
+	}()
 	for _, file := range files {
 		file := file
 		g.Go(func() error {
