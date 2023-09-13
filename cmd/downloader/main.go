@@ -4,6 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,13 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
@@ -34,11 +33,19 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 var (
 	webseeds                       string
-	datadirCli                     string
+	datadirCli, chain              string
 	filePath                       string
 	forceRebuild                   bool
 	forceVerify                    bool
@@ -60,6 +67,7 @@ func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
+	rootCmd.Flags().StringVar(&chain, utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
 	rootCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
@@ -132,6 +140,9 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := checkChainName(dirs, chain); err != nil {
+		return err
+	}
 	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
@@ -171,6 +182,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
 
 	d.MainLoopInBackground(ctx, false)
+
+	if err := addPreConfiguredHashes(ctx, d); err != nil {
+		return err
+	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
@@ -339,4 +354,37 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	}()
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
+}
+
+// Add pre-configured
+func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
+	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
+		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+			return err
+		}
+	}
+	for _, it := range snapcfg.KnownCfg(chain, nil, nil).PreverifiedHistory {
+		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkChainName(dirs datadir.Dirs, chainName string) error {
+	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+		return nil
+	}
+	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().Label(kv.ChainDB).MustOpen()
+	defer db.Close()
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		cc := tool.ChainConfig(tx)
+		if cc != nil && cc.ChainName != chainName {
+			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
