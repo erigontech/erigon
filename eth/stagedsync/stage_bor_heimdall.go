@@ -172,7 +172,7 @@ func BorHeimdallForward(
 				if !service.IsValidChain(headNumber, []*types.Header{header}) {
 					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum, "err", err)
 					cfg.penalize(ctx, []headerdownload.PenaltyItem{
-						headerdownload.PenaltyItem{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
+						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderEvicted)
 					return err
 				}
