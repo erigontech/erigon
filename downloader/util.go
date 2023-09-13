@@ -18,15 +18,16 @@ package downloader
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"runtime"
+
 	//nolint:gosec
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,14 +35,12 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-
-	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/errgroup"
 )
 
 // `github.com/anacrolix/torrent` library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 7
@@ -229,41 +228,32 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 		return nil, err
 	}
 
-	errs := make(chan error, len(files)*2)
-	wg := &sync.WaitGroup{}
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
-	var sem = semaphore.NewWeighted(int64(workers))
-	i := atomic.Int32{}
-	for _, file := range files {
-		wg.Add(1)
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return nil, err
-		}
-		go func(f string) {
-			defer i.Add(1)
-			defer sem.Release(1)
-			defer wg.Done()
-			if err := buildTorrentIfNeed(ctx, f, snapDir); err != nil {
-				errs <- err
-			}
-
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
+	var i atomic.Int32
+	g.Go(func() error {
+		for {
 			select {
 			default:
 			case <-ctx.Done():
-				errs <- ctx.Err()
+				return ctx.Err()
 			case <-logEvery.C:
 				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			}
-		}(file)
-	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	for err := range errs {
-		if err != nil {
-			return nil, err
 		}
+	})
+	for _, file := range files {
+		file := file
+		g.Go(func() error {
+			defer i.Add(1)
+			if err := buildTorrentIfNeed(ctx, file, snapDir); err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
