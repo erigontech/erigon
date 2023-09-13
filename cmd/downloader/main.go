@@ -38,7 +38,7 @@ import (
 
 var (
 	webseeds                       string
-	datadirCli, chain              string
+	datadirCli                     string
 	filePath                       string
 	forceRebuild                   bool
 	forceVerify                    bool
@@ -60,7 +60,6 @@ func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
-	rootCmd.Flags().StringVar(&chain, utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
 	rootCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
