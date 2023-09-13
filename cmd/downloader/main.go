@@ -138,24 +138,6 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func checkChainName(dirs datadir.Dirs, chainName string) error {
-	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
-		return nil
-	}
-	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().Label(kv.ChainDB).MustOpen()
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc := tool.ChainConfig(tx)
-		if cc != nil && cc.ChainName != chainName {
-			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := checkChainName(dirs, chain); err != nil {
@@ -201,7 +183,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	d.MainLoopInBackground(ctx, false)
 
-	// Add pre-configured
+	if err := addPreConfiguredHashes(ctx, d); err != nil {
+		return err
+	}
+
 	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
 		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 			return err
@@ -380,4 +365,37 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	}()
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
+}
+
+// Add pre-configured
+func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
+	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
+		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+			return err
+		}
+	}
+	for _, it := range snapcfg.KnownCfg(chain, nil, nil).PreverifiedHistory {
+		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkChainName(dirs datadir.Dirs, chainName string) error {
+	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+		return nil
+	}
+	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().Label(kv.ChainDB).MustOpen()
+	defer db.Close()
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		cc := tool.ChainConfig(tx)
+		if cc != nil && cc.ChainName != chainName {
+			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
