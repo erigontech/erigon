@@ -1,4 +1,4 @@
-package bor
+package heimdall
 
 import (
 	"context"

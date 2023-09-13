@@ -322,10 +322,9 @@ retryLoop:
 	}
 }
 
-// TODO: Uncomment once metrics are added
 // Fetch fetches response from heimdall
 func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
-	// isSuccessful := false
+	isSuccessful := false
 
 	defer func() {
 		if metrics.EnabledExpensive {

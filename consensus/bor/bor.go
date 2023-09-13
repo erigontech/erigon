@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
@@ -35,6 +36,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -245,7 +248,7 @@ type Bor struct {
 
 	spanner                Spanner
 	GenesisContractsClient GenesisContract
-	HeimdallClient         IHeimdallClient
+	HeimdallClient         heimdall.IHeimdallClient
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -254,6 +257,7 @@ type Bor struct {
 
 	closeOnce sync.Once
 	logger    log.Logger
+	closeCh   chan struct{} // Channel to signal the background processes to exit
 }
 
 type signer struct {
@@ -356,7 +360,7 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	genesisContracts GenesisContract,
 	logger log.Logger,
 ) *Bor {
@@ -384,6 +388,7 @@ func New(
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
+		closeCh:                make(chan struct{}),
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1220,12 +1225,34 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
-// Close implements consensus.Engine. It's a noop for bor as there are no background threads.
+type FinalityAPI interface {
+	GetRootHash(start uint64, end uint64) (string, error)
+}
+
+func (c *Bor) Start(apiList []rpc.API, chainDB kv.RwDB, blockReader services.FullBlockReader) {
+	borDB := c.DB
+
+	whitelist.RegisterService(borDB)
+
+	var borAPI borfinality.BorAPI
+
+	for _, api := range apiList {
+		if api.Namespace == "bor" {
+			borAPI = api.Service.(FinalityAPI)
+			break
+		}
+	}
+
+	borfinality.Whitelist(c.HeimdallClient, borDB, chainDB, blockReader, c.logger, borAPI, c.closeCh)
+}
+
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
 		if c.HeimdallClient != nil {
 			c.HeimdallClient.Close()
 		}
+		// Close all bg processes
+		close(c.closeCh)
 	})
 
 	return nil
@@ -1362,7 +1389,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h IHeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
 	c.HeimdallClient = h
 }
 
