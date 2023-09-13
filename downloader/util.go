@@ -242,7 +242,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
+	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 8)
 	var i atomic.Int32
 	g.Go(func() error {
 		var m runtime.MemStats
