@@ -19,6 +19,7 @@ package downloader
 import (
 	"context"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"runtime"
 
 	//nolint:gosec
@@ -244,13 +245,15 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
 	var i atomic.Int32
 	g.Go(func() error {
+		var m runtime.MemStats
 		for {
 			select {
 			default:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+				dbg.ReadMemStats(&m)
+				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 		}
 	})
