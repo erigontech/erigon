@@ -18,14 +18,12 @@ package downloader
 
 import (
 	"context"
-	"runtime"
-
-	//nolint:gosec
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -198,6 +196,12 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 }
 
 func buildTorrentIfNeed(ctx context.Context, fName, root string) (err error) {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	fPath := filepath.Join(root, fName)
 	if dir2.FileExist(fPath + ".torrent") {
 		return
@@ -242,7 +246,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 8)
+	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
 	var i atomic.Int32
 
 	for _, file := range files {
@@ -252,7 +256,6 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			if err := buildTorrentIfNeed(ctx, file, snapDir); err != nil {
 				return err
 			}
-
 			return nil
 		})
 	}
