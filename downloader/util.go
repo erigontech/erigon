@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"context"
-	//nolint:gosec
 	"fmt"
 	"net"
 	"os"
@@ -26,7 +25,6 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,13 +33,13 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-
-	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/errgroup"
 )
 
 // `github.com/anacrolix/torrent` library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 7
@@ -145,6 +143,18 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
+	l, err := seedableSnapshotsBySubDir(dir, "history")
+	if err != nil {
+		return nil, err
+	}
+	l2, err := seedableSnapshotsBySubDir(dir, "warm")
+	if err != nil {
+		return nil, err
+	}
+	return append(l, l2...), nil
+}
+
+func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
 	files, err := os.ReadDir(historyDir)
@@ -186,6 +196,12 @@ func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
 }
 
 func buildTorrentIfNeed(ctx context.Context, fName, root string) (err error) {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	fPath := filepath.Join(root, fName)
 	if dir2.FileExist(fPath + ".torrent") {
 		return
@@ -229,41 +245,34 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 		return nil, err
 	}
 
-	errs := make(chan error, len(files)*2)
-	wg := &sync.WaitGroup{}
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
-	var sem = semaphore.NewWeighted(int64(workers))
-	i := atomic.Int32{}
-	for _, file := range files {
-		wg.Add(1)
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return nil, err
-		}
-		go func(f string) {
-			defer i.Add(1)
-			defer sem.Release(1)
-			defer wg.Done()
-			if err := buildTorrentIfNeed(ctx, f, snapDir); err != nil {
-				errs <- err
-			}
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
+	var i atomic.Int32
 
-			select {
-			default:
-			case <-ctx.Done():
-				errs <- ctx.Err()
-			case <-logEvery.C:
-				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+	for _, file := range files {
+		file := file
+		g.Go(func() error {
+			defer i.Add(1)
+			if err := buildTorrentIfNeed(ctx, file, snapDir); err != nil {
+				return err
 			}
-		}(file)
+			return nil
+		})
 	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	for err := range errs {
-		if err != nil {
-			return nil, err
+
+	var m runtime.MemStats
+Loop:
+	for int(i.Load()) < len(files) {
+		select {
+		case <-ctx.Done():
+			break Loop // g.Wait() will return right error
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
