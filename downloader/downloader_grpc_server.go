@@ -77,7 +77,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			continue
 		}
 
-		_, err := s.d.createMagnetLinkWithInfoHash(ctx, it.TorrentHash, it.Path, snapDir)
+		err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path)
 		if err != nil {
 			return nil, err
 		}

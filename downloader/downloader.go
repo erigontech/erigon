@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -466,24 +465,20 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
 }
 
-func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *prototypes.H160, name string, snapDir string) (bool, error) {
+func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	if hash == nil {
-		return false, nil
-	}
-	infoHash := Proto2InfoHash(hash)
 	//log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
 
 	if _, ok := d.torrentClient.Torrent(infoHash); ok {
 		//log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
-		return true, nil
+		return nil
 	}
 
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	t, err := d.torrentClient.AddMagnet(magnet.String())
 	if err != nil {
 		//log.Warn("[downloader] add magnet link", "err", err)
-		return false, err
+		return err
 	}
 	t.DisallowDataDownload()
 	t.AllowDataUpload()
@@ -497,13 +492,13 @@ func (d *Downloader) createMagnetLinkWithInfoHash(ctx context.Context, hash *pro
 		}
 
 		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(snapDir, t.Info(), &mi); err != nil {
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
 			log.Warn("[downloader] create torrent file", "err", err)
 			return
 		}
 	}(t)
 	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
-	return false, nil
+	return nil
 }
 
 func seedableFiles(snapDir string) ([]string, error) {
