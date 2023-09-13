@@ -174,7 +174,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(tx *sql.Tx, ctx context.Contex
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (b beaconChainDatabaseFilesystem) WriteBlock(tx *sql.Tx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
@@ -244,7 +244,7 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(tx *sql.Tx, ctx context.Contex
 	if err := beacon_indicies.GenerateBlockIndicies(ctx, tx, block, canonical); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SlotToPaths define the file structure to store a block
