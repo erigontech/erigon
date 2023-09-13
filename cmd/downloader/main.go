@@ -147,7 +147,7 @@ func checkChainName(dirs datadir.Dirs, chainName string) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)
 		if cc != nil && cc.ChainName != chainName {
-			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to %s", cc.ChainName, chainName)
+			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
 		return nil
 	}); err != nil {
