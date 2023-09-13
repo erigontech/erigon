@@ -112,7 +112,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(datadir.New(ddir).Snap, nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{})
+	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -147,7 +147,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second
 	ethCfg.DeprecatedTxPool.StartOnInit = true
-	ethCfg.Downloader.ListenPort = utils.TorrentPortFlag.Value + minerID
+	ethCfg.Downloader.ClientConfig.ListenPort = utils.TorrentPortFlag.Value + minerID
 	ethCfg.TxPool.AccountSlots = 1000000
 	ethCfg.DeprecatedTxPool.AccountSlots = 1000000
 	ethCfg.DeprecatedTxPool.GlobalSlots = 1000000
