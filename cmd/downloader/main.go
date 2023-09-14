@@ -157,10 +157,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 
 	logger.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
-	natif, err := nat.Parse(natSetting)
-	if err != nil {
-		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
-	}
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
@@ -172,6 +168,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
+	natif, err := nat.Parse(natSetting)
+	if err != nil {
+		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
+	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
 	d, err := downloader.New(ctx, cfg)
