@@ -570,7 +570,8 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
-	heap.Init(&cp)
+	cpPtr := &cp
+	heap.Init(cpPtr)
 	var k, v []byte
 	var err error
 
@@ -581,7 +582,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		k = []byte(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
 		}
 	}
 
@@ -602,7 +603,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
@@ -620,7 +621,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -629,7 +630,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := heap.Pop(&cp).(*CursorItem)
+			ci1 := heap.Pop(cpPtr).(*CursorItem)
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
@@ -637,7 +638,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
-						heap.Push(&cp, ci1)
+						heap.Push(cpPtr, ci1)
 					}
 				}
 			case FILE_CURSOR:
@@ -646,7 +647,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 							ci1.val = ci1.btCursor.Value()
-							heap.Push(&cp, ci1)
+							heap.Push(cpPtr, ci1)
 						}
 					}
 				} else {
@@ -658,7 +659,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
-						heap.Push(&cp, ci1)
+						heap.Push(cpPtr, ci1)
 					}
 				}
 			case DB_CURSOR:
@@ -676,7 +677,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 						return err
 					}
 					ci1.val = common.Copy(v)
-					heap.Push(&cp, ci1)
+					heap.Push(cpPtr, ci1)
 				}
 			}
 		}
