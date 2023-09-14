@@ -179,7 +179,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
+	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.MainLoopInBackground(ctx, false)
 
