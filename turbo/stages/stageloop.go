@@ -365,7 +365,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if chainReader != nil {
 			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				return err
+				return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 			}
 		}
 
@@ -398,7 +398,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	}
 	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
 		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 
 	// Setup
