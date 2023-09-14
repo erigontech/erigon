@@ -69,7 +69,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	if err != nil {
 		return err
 	}
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: false})
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 			}
 		}()
 	}
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig, db)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig)
 
 	if cfg.Active {
 		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db, forkChoice)
