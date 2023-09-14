@@ -30,7 +30,7 @@ func WriteConfigurationIfNotExist(ctx context.Context, tx *sql.Tx, cfg DatabaseC
 func ReadConfiguration(ctx context.Context, tx *sql.Tx) (DatabaseConfiguration, error) {
 	var pruneDepth uint64
 
-	err := tx.QueryRowContext(ctx, "SELECT prune_depth, full_blocks FROM data_config").Scan(&pruneDepth)
+	err := tx.QueryRowContext(ctx, "SELECT prune_depth FROM data_config").Scan(&pruneDepth)
 	if err != nil {
 		return DatabaseConfiguration{}, err
 	}
