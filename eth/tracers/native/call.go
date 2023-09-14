@@ -41,6 +41,7 @@ func init() {
 }
 
 type callLog struct {
+	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
 	Data    hexutility.Bytes  `json:"data"`
@@ -116,6 +117,10 @@ type callTracerConfig struct {
 	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
 }
 
+var (
+	logIndex uint64
+)
+
 // newCallTracer returns a native go tracer which tracks
 // call frames of a tx, and implements vm.EVMLogger.
 func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
@@ -125,6 +130,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 			return nil, err
 		}
 	}
+	logIndex = 0
 	// First callframe contains tx context info
 	// and is populated on start and end.
 	return &callTracer{callstack: make([]callFrame, 1), config: config}, nil
@@ -187,7 +193,8 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		}
 
 		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data)}
+		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data), Index: logIndex}
+		logIndex++
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
 	}
 }
