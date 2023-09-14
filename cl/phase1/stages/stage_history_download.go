@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -31,13 +32,14 @@ type StageHistoryReconstructionCfg struct {
 	backFillingAmount uint64
 	tmpdir            string
 	db                persistence.BeaconChainDatabase
+	indiciesDB        *sql.DB
 	engine            execution_client.ExecutionEngine
 	logger            log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB *sql.DB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:        genesisCfg,
 		beaconCfg:         beaconCfg,
@@ -47,6 +49,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 		startingSlot:      startinSlot,
 		logger:            logger,
 		backFillingAmount: backFillingAmount,
+		indiciesDB:        indiciesDB,
 		db:                db,
 		engine:            engine,
 	}
@@ -100,6 +103,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
+	tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		if blk.Version() >= clparams.BellatrixVersion {
@@ -125,7 +133,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		slot := blk.Block.Slot
-		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(ctx, blk, true)
+		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(tx, ctx, blk, true)
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -162,17 +170,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}
 	close(finishCh)
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
-	db := memdb.New(cfg.tmpdir)
-	tx, err := db.BeginRw(ctx)
+	db2 := memdb.New(cfg.tmpdir)
+	defer db2.Close()
+	tx2, err := db2.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer tx2.Rollback()
 
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
 
-	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := executionBlocksCollector.Load(tx2, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
@@ -215,5 +224,5 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return fmt.Errorf("error doing last block insertion during collection: %s", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }

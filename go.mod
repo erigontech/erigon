@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/erigontech/mdbx-go v0.33.1
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230913050015-a1c1438272fc
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230914020439-33e59e32b56b
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230909101632-42a1d412f95f
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -57,7 +57,7 @@ require (
 	github.com/libp2p/go-libp2p v0.28.2
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/maticnetwork/crand v1.0.2
-	github.com/maticnetwork/polyproto v0.0.2
+	github.com/maticnetwork/polyproto v0.0.3-0.20230216113155-340ea926ca53
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -253,9 +253,9 @@ require (
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.19.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/mod v0.11.0 // indirect
+	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
-	golang.org/x/tools v0.9.3 // indirect
+	golang.org/x/tools v0.13.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect

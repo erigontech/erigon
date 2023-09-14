@@ -1,7 +1,10 @@
 package bor
 
 import (
+	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -18,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -285,6 +289,55 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	api.rootHashCache.Add(key, root)
 
 	return root, nil
+}
+
+// GetVoteOnHash implements bor_getVoteOnHash. Returns the boolean based on the whitelisting in bor consensus
+func (api *API) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBlockNr uint64, hash string, milestoneId string) (bool, error) {
+	service := whitelist.GetWhitelistingService()
+
+	if service == nil {
+		return false, errors.New("Only available in Bor engine")
+	}
+
+	//Confirmation of 16 blocks on the endblock
+	tipConfirmationBlockNr := endBlockNr + uint64(16)
+
+	//Check if tipConfirmation block exit
+	tipConfirmationBlock := api.chain.GetHeaderByNumber(tipConfirmationBlockNr)
+	if tipConfirmationBlock == nil {
+		return false, errors.New("failed to get tip confirmation block")
+	}
+
+	//Check if end block exist
+	localEndBlock := api.chain.GetHeaderByNumber(endBlockNr)
+	if localEndBlock == nil {
+		return false, errors.New("failed to get end block")
+	}
+
+	localEndBlockHash := localEndBlock.Hash().String()
+
+	isLocked := service.LockMutex(endBlockNr)
+
+	if !isLocked {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+	}
+
+	if localEndBlockHash != hash {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+	}
+
+	err := api.bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
+
+	if err != nil {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, errors.New("milestone ID doesn't exist in Heimdall")
+	}
+
+	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
+
+	return true, nil
 }
 
 func (api *API) initializeRootHashCache() error {
