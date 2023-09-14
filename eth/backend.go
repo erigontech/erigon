@@ -47,6 +47,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
@@ -87,7 +89,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common/debug"
 
 	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -165,7 +166,7 @@ type Ethereum struct {
 	// downloader fields
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
-	sentriesClient *sentry.MultiClient
+	sentriesClient *sentry_multi_client.MultiClient
 	sentryServers  []*sentry.GrpcServer
 
 	stagedSync         *stagedsync.Sync
@@ -342,7 +343,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
-			sentryClient, err := sentry.GrpcClient(backend.sentryCtx, addr)
+			sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, addr)
 			if err != nil {
 				return nil, err
 			}
@@ -529,7 +530,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	backend.sentriesClient, err = sentry.NewMultiClient(
+	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		chainKv,
 		stack.Config().NodeName(),
 		chainConfig,
@@ -1337,7 +1338,7 @@ func (s *Ethereum) SentryCtx() context.Context {
 	return s.sentryCtx
 }
 
-func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
+func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentriesClient
 }
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
