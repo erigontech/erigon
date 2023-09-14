@@ -192,7 +192,6 @@ type Ethereum struct {
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
-	closeCh        chan struct{} // Channel to signal the background processes to exit
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
