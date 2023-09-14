@@ -499,7 +499,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		maxBlockBroadcastPeers = func(header *types.Header) uint {
 			isValidator, err := borEngine.IsValidator(header)
 			if err != nil {
-				logger.Error("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
+				logger.Warn("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
 				return defaultValue
 			}
 			if isValidator {
