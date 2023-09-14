@@ -43,6 +43,16 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
+func main() {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
 var (
 	webseeds                       string
 	datadirCli, chain              string
@@ -107,16 +117,6 @@ func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&filePath, "file", "", "")
 	if err := cmd.MarkFlagFilename(utils.DataDirFlag.Name); err != nil {
 		panic(err)
-	}
-}
-
-func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
 	}
 }
 
