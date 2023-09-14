@@ -210,25 +210,11 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 var createTorrent = &cobra.Command{
 	Use:     "torrent_create",
-	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<file_path>",
+	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
-		//dirs := datadir.New(datadirCli)
-		//ctx := cmd.Context()
-
-		fileDir, fileName := filepath.Split(filePath)
-		info := &metainfo.Info{PieceLength: downloadercfg2.DefaultPieceSize, Name: fileName}
-		if err := info.BuildFromFilePath(filePath); err != nil {
-			return err
-		}
-		mi, err := downloader.CreateMetaInfo(info, nil)
-		if err != nil {
-			return err
-		}
-		if err := downloader.CreateTorrentFromMetaInfo(fileDir, info, mi); err != nil {
-			return err
-		}
-		return nil
+		dirs := datadir.New(datadirCli)
+		return downloader.BuildTorrentIfNeed(context.Background(), dirs.Snap, filePath)
 	},
 }
 
