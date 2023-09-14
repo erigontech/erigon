@@ -1532,7 +1532,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	notifications := &shards.Notifications{}
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, heimdallClient, logger)
+	var snapDb kv.RwDB
+	if bor, ok := engine.(*bor.Bor); ok {
+		snapDb = bor.DB
+	}
+
+	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, heimdallClient, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
@@ -1545,7 +1550,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
-			stagedsync.StageBorHeimdallCfg(db, miner, *chainConfig, heimdallClient, blockReader),
+			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, blockReader),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),

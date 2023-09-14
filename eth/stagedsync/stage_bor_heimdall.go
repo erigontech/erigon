@@ -9,11 +9,16 @@ import (
 	"strconv"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -22,12 +27,16 @@ import (
 )
 
 const (
-	spanLength    = 6400 // Number of blocks in a span
-	zerothSpanEnd = 255  // End block of 0th span
+	spanLength              = 6400 // Number of blocks in a span
+	zerothSpanEnd           = 255  // End block of 0th span
+	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
+	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
+	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 )
 
 type BorHeimdallCfg struct {
 	db               kv.RwDB
+	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
 	miningState      MiningState
 	chainConfig      chain.Config
 	heimdallClient   bor.IHeimdallClient
@@ -37,6 +46,7 @@ type BorHeimdallCfg struct {
 
 func StageBorHeimdallCfg(
 	db kv.RwDB,
+	snapDb kv.RwDB,
 	miningState MiningState,
 	chainConfig chain.Config,
 	heimdallClient bor.IHeimdallClient,
@@ -44,6 +54,7 @@ func StageBorHeimdallCfg(
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
+		snapDb:           snapDb,
 		miningState:      miningState,
 		chainConfig:      chainConfig,
 		heimdallClient:   heimdallClient,
@@ -121,6 +132,15 @@ func BorHeimdallForward(
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
+	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+	if err != nil {
+		return err
+	}
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	if err != nil {
+		return err
+	}
+	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			if !mine {
@@ -137,6 +157,9 @@ func BorHeimdallForward(
 			if err = fetchAndWriteSpans(ctx, blockNum, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
+		}
+		if err = persistValidatorSets(ctx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+			return err
 		}
 	}
 	if err = s.Update(tx, headNumber); err != nil {
@@ -286,6 +309,152 @@ func fetchAndWriteSpans(
 		return err
 	}
 	return nil
+}
+
+func persistValidatorSets(
+	ctx context.Context,
+	blockReader services.FullBlockReader,
+	config *chain.BorConfig,
+	chain consensus.ChainHeaderReader,
+	blockNum uint64,
+	hash libcommon.Hash,
+	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	snapDb kv.RwDB,
+	logger log.Logger) error {
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	// Search for a snapshot in memory or on disk for checkpoints
+	var snap *bor.Snapshot
+
+	headers := make([]*types.Header, 0, 16)
+
+	//nolint:govet
+	for snap == nil {
+		// If an in-memory snapshot was found, use that
+		if s, ok := recents.Get(hash); ok {
+			snap = s
+
+			break
+		}
+
+		// If an on-disk snapshot can be found, use that
+		if blockNum%snapshotPersistInterval == 0 {
+			if s, err := bor.LoadSnapshot(config, signatures, snapDb, hash); err == nil {
+				logger.Trace("Loaded snapshot from disk", "number", blockNum, "hash", hash)
+
+				snap = s
+
+				break
+			}
+		}
+
+		// No snapshot for this header, gather the header and move backward
+		var header *types.Header
+		// No explicit parents (or no more left), reach out to the database
+		if chain != nil {
+			header = chain.GetHeader(hash, blockNum)
+		}
+
+		if header == nil {
+			return consensus.ErrUnknownAncestor
+		}
+
+		if blockNum == 0 {
+			break
+		}
+
+		headers = append(headers, header)
+		blockNum, hash = blockNum-1, header.ParentHash
+
+		if chain != nil && blockNum < chain.FrozenBlocks() {
+			break
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", blockNum)
+		default:
+		}
+	}
+	if snap == nil && chain != nil && blockNum <= chain.FrozenBlocks() {
+		// Special handling of the headers in the snapshot
+		zeroHeader := chain.GetHeaderByNumber(0)
+		if zeroHeader != nil {
+			// get checkpoint data
+			hash := zeroHeader.Hash()
+
+			// get validators and current span
+			zeroSpanBytes, err := blockReader.Span(ctx, 0)
+			if err != nil {
+				return err
+			}
+			var zeroSpan *span.HeimdallSpan
+			if err = json.Unmarshal(zeroSpanBytes, zeroSpan); err != nil {
+				return err
+			}
+
+			validators := make([]*valset.Validator, len(zeroSpan.SelectedProducers))
+			for i := range zeroSpan.SelectedProducers {
+				validators[i] = &zeroSpan.SelectedProducers[i]
+			}
+
+			// new snap shot
+			snap = bor.NewSnapshot(config, signatures, 0, hash, validators, logger)
+			if err := snap.Store(snapDb); err != nil {
+				return err
+			}
+			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
+			initialHeaders := make([]*types.Header, 0, 128)
+			for i := uint64(1); i <= blockNum; i++ {
+				header := chain.GetHeaderByNumber(i)
+				initialHeaders = append(initialHeaders, header)
+				if len(initialHeaders) == cap(initialHeaders) {
+					if snap, err = snap.Apply(initialHeaders, logger); err != nil {
+						return err
+					}
+					initialHeaders = initialHeaders[:0]
+				}
+				select {
+				case <-logEvery.C:
+					log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+				default:
+				}
+			}
+			if snap, err = snap.Apply(initialHeaders, logger); err != nil {
+				return err
+			}
+		}
+	}
+
+	// check if snapshot is nil
+	if snap == nil {
+		fmt.Errorf("unknown error while retrieving snapshot at block number %v", blockNum)
+	}
+
+	// Previous snapshot found, apply any pending headers on top of it
+	for i := 0; i < len(headers)/2; i++ {
+		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+	}
+
+	var err error
+	if snap, err = snap.Apply(headers, logger); err != nil {
+		return err
+	}
+
+	recents.Add(snap.Hash, snap)
+
+	// If we've generated a new persistent snapshot, save to disk
+	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
+		if err = snap.Store(snapDb); err != nil {
+			return err
+		}
+
+		logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+	}
+
+	return err
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {

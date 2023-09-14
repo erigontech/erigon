@@ -653,7 +653,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 		// If an on-disk snapshot can be found, use that
 		if number%snapshotPersistInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
+			if s, err := LoadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
@@ -714,8 +714,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 
 			// new snap shot
-			snap = newSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
-			if err := snap.store(c.DB); err != nil {
+			snap = NewSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
+			if err := snap.Store(c.DB); err != nil {
 				return nil, err
 			}
 			c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
@@ -724,7 +724,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				header := chain.GetHeaderByNumber(i)
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
-					if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+					if snap, err = snap.Apply(initialHeaders, c.logger); err != nil {
 						return nil, err
 					}
 					initialHeaders = initialHeaders[:0]
@@ -735,7 +735,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				default:
 				}
 			}
-			if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+			if snap, err = snap.Apply(initialHeaders, c.logger); err != nil {
 				return nil, err
 			}
 		}
@@ -752,7 +752,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	}
 
 	var err error
-	if snap, err = snap.apply(headers, c.logger); err != nil {
+	if snap, err = snap.Apply(headers, c.logger); err != nil {
 		return nil, err
 	}
 
@@ -760,7 +760,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 	// If we've generated a new persistent snapshot, save to disk
 	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.DB); err != nil {
+		if err = snap.Store(c.DB); err != nil {
 			return nil, err
 		}
 

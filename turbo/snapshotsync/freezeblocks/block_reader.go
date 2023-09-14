@@ -235,6 +235,10 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	return result, nil
 }
 
+func (r *RemoteBlockReader) Span(ctx context.Context, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn    *RoSnapshots
@@ -1070,4 +1074,8 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 		lastEventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 	}
 	return lastEventID
+}
+
+func (r *BlockReader) Span(ctx context.Context, spanId uint64) ([]byte, error) {
+	return nil, nil
 }
