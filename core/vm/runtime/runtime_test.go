@@ -370,6 +370,7 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	cfg.State.SetCode(destination, code)
 	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 
+	b.ResetTimer()
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {

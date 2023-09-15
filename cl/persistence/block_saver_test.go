@@ -117,18 +117,21 @@ func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, executio
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 	engine := newMockEngine()
-	return NewBeaconChainDatabaseFilesystem(fs, engine, full, &clparams.MainnetBeaconConfig, db), db, engine
+	return NewBeaconChainDatabaseFilesystem(fs, engine, &clparams.MainnetBeaconConfig), db, engine
 }
 
 func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 	store, db, _ := setupStore(t, true)
 	defer db.Close()
 
+	tx, _ := db.Begin()
+	defer tx.Rollback()
+
 	ctx := context.Background()
 	block := getTestBlock()
-	require.NoError(t, store.WriteBlock(ctx, block, true))
+	require.NoError(t, store.WriteBlock(tx, ctx, block, true))
 
-	blks, err := store.GetRange(context.Background(), block.Block.Slot, 1)
+	blks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
 	require.NoError(t, err)
 	require.Equal(t, len(blks), 1)
 
@@ -140,36 +143,9 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 
 	require.Equal(t, expectedRoot, haveRoot)
 
-	require.NoError(t, store.PurgeRange(ctx, 0, 99999999999)) // THE PUURGE
+	require.NoError(t, store.PurgeRange(tx, ctx, 0, 99999999999)) // THE PUURGE
 
-	newBlks, err := store.GetRange(context.Background(), block.Block.Slot, 1)
+	newBlks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
 	require.NoError(t, err)
 	require.Equal(t, len(newBlks), 0)
-}
-
-func TestBlockSaverStoreAndLoadPartial(t *testing.T) {
-	store, db, engine := setupStore(t, false)
-	defer db.Close()
-
-	ctx := context.Background()
-	block := getTestBlock()
-	require.NoError(t, store.WriteBlock(ctx, block, true))
-
-	eth1Block := block.Block.Body.ExecutionPayload
-	header, err := eth1Block.RlpHeader()
-	require.NoError(t, err)
-
-	engine.InsertBlock(types.NewBlock(header, nil, nil, nil, eth1Block.Body().Withdrawals))
-
-	blks, err := store.GetRange(context.Background(), block.Block.Slot, 1)
-	require.NoError(t, err)
-	require.Equal(t, len(blks), 1)
-
-	expectedRoot, err := block.HashSSZ()
-	require.NoError(t, err)
-
-	haveRoot, err := blks[0].Data.HashSSZ()
-	require.NoError(t, err)
-
-	require.Equal(t, expectedRoot, haveRoot)
 }

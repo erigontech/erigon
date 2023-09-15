@@ -743,7 +743,7 @@ func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal = newJournal()
+	sdb.journal.Reset()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }
