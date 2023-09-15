@@ -541,7 +541,7 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 | engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | 6060  | TCP       | Metrics or Pprof            | Private       |
 | engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | 30303 | TCP & UDP | eth/66 peering              | Public        |
+| sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
 | sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
