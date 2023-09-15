@@ -309,8 +309,9 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
 		var pendingBlobFee uint64 = 1
+		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
 		if currentHeder.ExcessBlobGas != nil {
-			f, err := misc.GetBlobGasPrice(*currentHeder.ExcessBlobGas)
+			f, err := misc.GetBlobGasPrice(excessBlobGas)
 			if(err != nil){
 				return err
 			}
