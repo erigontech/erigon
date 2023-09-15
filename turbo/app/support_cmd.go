@@ -75,7 +75,7 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 
 	debugURLs := cliCtx.StringSlice(debugURLsFlag.Name)
 
-	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name)
+	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name) + "/bridge"
 
 	// Create TLS configuration with the certificate of the server
 	insecure := cliCtx.Bool(insecureFlag.Name)
@@ -301,7 +301,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					queryString = "?" + nodeRequest.QueryParams.Encode()
 				}
 
-				debugURL := node.debugURL + "/" + requests[0].Method + queryString
+				debugURL := node.debugURL + "/debug/" + requests[0].Method + queryString
 
 				debugResponse, err := metricsClient.Get(debugURL)
 

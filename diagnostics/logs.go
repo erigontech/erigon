@@ -29,11 +29,11 @@ func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	if dirPath == "" {
 		return
 	}
-	metricsMux.HandleFunc("/debug/logs", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsList(w, dirPath)
 	})
-	metricsMux.HandleFunc("/debug/logs/", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsRead(w, r, dirPath)
 	})
