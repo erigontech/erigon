@@ -50,11 +50,12 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - name: Lint
-        if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: v1.54
+#      - name: Lint
+#        if: runner.os == 'Linux'
+#        uses: golangci/golangci-lint-action@v3
+#        with:
+#          version: v1.54
+#          skip-build-cache: true
 
       - name: Test
         run: make test

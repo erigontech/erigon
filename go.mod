@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/erigontech/mdbx-go v0.27.14
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230911021829-c23d49fb5d32
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230915052220-297d9e7d1304
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230908120722-853b40162b46
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -19,7 +19,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/alecthomas/kong v0.8.0
 	github.com/anacrolix/sync v0.4.0
-	github.com/anacrolix/torrent v1.52.6-0.20230911001013-87f6cdc1e96f
+	github.com/anacrolix/torrent v1.52.6-0.20230914125831-4fb12d06b31b
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -94,7 +94,6 @@ require (
 	golang.org/x/sys v0.12.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.57.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -144,7 +143,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
-	github.com/go-llsqlite/adapter v0.0.0-20230910110622-f955011c1e41 // indirect
+	github.com/go-llsqlite/adapter v0.0.0-20230912124304-94ed0e573c23 // indirect
 	github.com/go-llsqlite/crawshaw v0.0.0-20230910110433-7e901377eb6c // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
