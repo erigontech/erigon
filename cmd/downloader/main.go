@@ -179,7 +179,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
 
 	d.MainLoopInBackground(ctx, false)
 
@@ -214,7 +214,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		_, err := downloader.BuildTorrentIfNeed(context.Background(), filePath, dirs.Snap)
+		_, err := downloader.BuildTorrentFilesIfNeed(context.Background(), dirs.Snap)
 		if err != nil {
 			return err
 		}
