@@ -100,19 +100,27 @@ func BorHeimdallForward(
 
 	if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
 		s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
-		err := s.state.RunUnwind(nil, tx)
-		if err != nil {
-			log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind.Load()))
-			return err
-		}
 
-		var reset uint64 = 0
-		generics.BorMilestoneRewind.Store(&reset)
+		return fmt.Errorf("milestone block mismatch at %d", headNumber)
 
-		// Update highest in db field after the rewind
-		if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
-			return err
-		}
+		/*
+			This is the code from the original PR - it has been removed in favour of having the outer
+			stage loop perform the unwind which is the standard erigon operating model
+
+			err := s.state.RunUnwind(nil, tx)
+			if err != nil {
+				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind.Load()))
+				return err
+			}
+
+			var reset uint64 = 0
+			generics.BorMilestoneRewind.Store(&reset)
+
+			// Update highest in db field after the rewind
+			if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+				return err
+			}
+		*/
 	}
 
 	headNumber, err = stages.GetStageProgress(tx, stages.Headers)
