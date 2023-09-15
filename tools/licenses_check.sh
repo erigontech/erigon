@@ -24,6 +24,7 @@ export GOFLAGS="-tags=gorules,linux,tools"
 output=$(find "$projectDir" -type 'd' -maxdepth 1 \
     -not -name ".*" \
     -not -name tools \
+    -not -name build \
     | xargs go-licenses report 2>&1 \
     `# exceptions` \
     | grep -v "erigon-lib has empty version"        `# self` \
@@ -35,6 +36,8 @@ output=$(find "$projectDir" -type 'd' -maxdepth 1 \
     | grep -v "github.com/anacrolix/multiless"      `# MPL-2.0` \
     | grep -v "github.com/anacrolix/sync"           `# MPL-2.0` \
     | grep -v "github.com/anacrolix/upnp"           `# MPL-2.0` \
+    | grep -v "github.com/go-llsqlite/adapter"      `# MPL-2.0` \
+    | grep -v "github.com/go-llsqlite/crawshaw"     `# ISC` \
     | grep -v "github.com/consensys/gnark-crypto"   `# Apache-2.0` \
     | grep -v "github.com/erigontech/mdbx-go"       `# Apache-2.0` \
     | grep -v "github.com/ledgerwatch/secp256k1"    `# BSD-3-Clause` \

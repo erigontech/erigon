@@ -47,13 +47,16 @@ type GrpcServer struct {
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	defer s.d.applyWebseeds()
 
 	torrentClient := s.d.Torrent()
 	snapDir := s.d.SnapDir()
 	for i, it := range request.Items {
+		if it.Path == "" {
+			return nil, fmt.Errorf("field 'path' is required")
+		}
+
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		case <-logEvery.C:
 			log.Info("[snapshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
 		default:
@@ -62,7 +65,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		if it.TorrentHash == nil {
 			// if we dont have the torrent hash then we seed a new snapshot
 			log.Info("[snapshots] seeding a new snapshot")
-			ok, err := seedNewSnapshot(it, torrentClient, snapDir)
+			ok, err := seedNewSnapshot(ctx, it.Path, torrentClient, snapDir)
 			if err != nil {
 				return nil, err
 			}
@@ -74,7 +77,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			continue
 		}
 
-		_, err := s.d.createMagnetLinkWithInfoHash(ctx, it.TorrentHash, snapDir)
+		err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -117,14 +120,19 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 // decides what we do depending on wether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
-func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.Client, snapDir string) (bool, error) {
+func seedNewSnapshot(ctx context.Context, name string, torrentClient *torrent.Client, snapDir string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
 	// if we dont have the torrent file we build it if we have the .seg file
-	if err := buildTorrentIfNeed(it.Path, snapDir); err != nil {
+	if err := buildTorrentIfNeed(ctx, name, snapDir); err != nil {
 		return false, err
 	}
 
 	// we add the .seg file we have and create the .torrent file if we dont have it
-	ok, err := AddSegment(it.Path, snapDir, torrentClient)
+	ok, err := AddSegment(name, snapDir, torrentClient)
 	if err != nil {
 		return false, fmt.Errorf("AddSegment: %w", err)
 	}
@@ -137,5 +145,3 @@ func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.C
 	// we skip the item in for loop since we build the seg and torrent file here
 	return true, nil
 }
-
-// we dont have .seg or .torrent so we get them through the torrent hash
