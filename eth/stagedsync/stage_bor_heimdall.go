@@ -123,8 +123,6 @@ func BorHeimdallForward(
 		*/
 	}
 
-	headNumber, err = stages.GetStageProgress(tx, stages.Headers)
-
 	service := whitelist.GetWhitelistingService()
 
 	if mine {
