@@ -635,6 +635,11 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
+### How to change db pagesize
+
+[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+ 
+
 Getting in touch
 ================
 

@@ -69,7 +69,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	if err != nil {
 		return err
 	}
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: false})
 	if err != nil {
 		return err
 	}
@@ -87,10 +87,6 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	logger.Info("Caplin Pruning",
-		"pruning provided", database_config.PruneDepth, "effective pruning", haveDatabaseConfig.PruneDepth,
-		"fullBlocks", haveDatabaseConfig.FullBlocks)
-	logger.Info("Disclaimer: This Caplin will run with database parameters with which it was started the first time, e.g pruning.")
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(50 * time.Millisecond)
@@ -105,7 +101,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient,
 			}
 		}()
 	}
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, haveDatabaseConfig.FullBlocks, beaconConfig, db)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(afero.NewBasePathFs(dataDirFs, dirs.DataDir), engine, beaconConfig)
 
 	if cfg.Active {
 		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db, forkChoice)

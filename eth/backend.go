@@ -1098,7 +1098,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		if err != nil {
 			return err
 		}
-		s.downloader.MainLoopInBackground(ctx, true)
+		s.downloader.MainLoopInBackground(true)
 		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
