@@ -163,7 +163,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	nodes := map[string]*node{}
 
 	for _, debugURL := range debugURLs {
-		debugResponse, err := metricsClient.Get(debugURL + "/" + "nodeinfo")
+		debugResponse, err := metricsClient.Get(debugURL + "/debug/" + "nodeinfo")
 
 		if err != nil {
 			return err
