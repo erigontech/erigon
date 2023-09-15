@@ -38,10 +38,7 @@ func TestDBConfig(t *testing.T) {
 
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	c := DatabaseConfiguration{
-		FullBlocks: true,
-		PruneDepth: 69,
-	}
+	c := DatabaseConfiguration{PruneDepth: 69}
 	require.NoError(t, WriteConfigurationIfNotExist(context.Background(), tx, c))
 	cfg, err := ReadConfiguration(context.Background(), tx)
 	require.NoError(t, err)
