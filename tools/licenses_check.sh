@@ -24,6 +24,7 @@ export GOFLAGS="-tags=gorules,linux,tools"
 output=$(find "$projectDir" -type 'd' -maxdepth 1 \
     -not -name ".*" \
     -not -name tools \
+    -not -name build \
     | xargs go-licenses report 2>&1 \
     `# exceptions` \
     | grep -v "erigon-lib has empty version"        `# self` \

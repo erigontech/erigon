@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -49,8 +48,6 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	defer logEvery.Stop()
 	defer s.d.applyWebseeds()
 
-	torrentClient := s.d.Torrent()
-	snapDir := s.d.SnapDir()
 	for i, it := range request.Items {
 		if it.Path == "" {
 			return nil, fmt.Errorf("field 'path' is required")
@@ -63,22 +60,14 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		}
 
 		if it.TorrentHash == nil {
-			// if we dont have the torrent hash then we seed a new snapshot
-			log.Info("[snapshots] seeding a new snapshot")
-			ok, err := seedNewSnapshot(ctx, it.Path, torrentClient, snapDir)
-			if err != nil {
+			// if we don't have the torrent hash then we seed a new snapshot
+			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
-			}
-			if ok {
-				log.Debug("[snapshots] already have both seg and torrent file")
-			} else {
-				log.Warn("[snapshots] didn't get the seg or the torrent file")
 			}
 			continue
 		}
 
-		err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path)
-		if err != nil {
+		if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}
@@ -115,33 +104,4 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
-}
-
-// decides what we do depending on wether we have the .seg file or the .torrent file
-// have .torrent no .seg => get .seg file from .torrent
-// have .seg no .torrent => get .torrent from .seg
-func seedNewSnapshot(ctx context.Context, name string, torrentClient *torrent.Client, snapDir string) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	default:
-	}
-	// if we dont have the torrent file we build it if we have the .seg file
-	if err := buildTorrentIfNeed(ctx, name, snapDir); err != nil {
-		return false, err
-	}
-
-	// we add the .seg file we have and create the .torrent file if we dont have it
-	ok, err := AddSegment(name, snapDir, torrentClient)
-	if err != nil {
-		return false, fmt.Errorf("AddSegment: %w", err)
-	}
-
-	// torrent file does exist and seg
-	if !ok {
-		return false, nil
-	}
-
-	// we skip the item in for loop since we build the seg and torrent file here
-	return true, nil
 }
