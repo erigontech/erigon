@@ -308,12 +308,18 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
-		pendingBlobFee, err := misc.GetBlobGasPrice(*currentHeder.ExcessBlobGas)
-		if(err != nil){
-			return err
+		var pendingBlobFee uint64 = 1
+		if currentHeder.ExcessBlobGas != nil {
+			f, err := misc.GetBlobGasPrice(*currentHeder.ExcessBlobGas)
+			if(err != nil){
+				return err
+			}
+			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {
+				pendingBlobFee = f.Uint64()
+			}
 		}
 
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee.Uint64(), currentHeder.GasLimit, finalizedBlock)
+		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeder.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END
 	return nil
