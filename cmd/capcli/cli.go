@@ -108,9 +108,15 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, false, beaconConfig, sqlDB)
+
+	tx, err := sqlDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, beaconConfig)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(ctx, vv, true)
+		err := beaconDB.WriteBlock(tx, ctx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -149,7 +155,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, false, beaconConfig, sqlDB)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 	rpcSource := persistence.NewBeaconRpcSource(beacon)
@@ -168,6 +174,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	}
 
 	ctx, cn := context.WithCancel(ctx)
+	defer cn()
 	egg, ctx := errgroup.WithContext(ctx)
 
 	totalEpochs := (b.ToEpoch - b.FromEpoch + 1)
@@ -199,13 +206,19 @@ func (b *Epochs) Run(cctx *Context) error {
 	tk.UpdateTotal(total)
 
 	egg.SetLimit(b.Concurrency)
+
+	tx, err := sqlDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	defer cn()
 	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
 		ii := i
 		egg.Go(func() error {
 			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
 			for {
-				blocks, err = rpcSource.GetRange(ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				blocks, err = rpcSource.GetRange(tx, ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
 					log.Error("dl error", "err", err, "epoch", ii)
 				} else {
@@ -215,7 +228,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(ctx, v.Data, true)
+				err := beaconDB.WriteBlock(tx, ctx, v.Data, true)
 				if err != nil {
 					return err
 				}
@@ -228,7 +241,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	tk.MarkAsDone()
-	return nil
+	return tx.Commit()
 }
 
 type Migrate struct {

@@ -141,6 +141,7 @@ type Ethereum struct {
 
 	lock         sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig  *chain.Config
+	apiList      []rpc.API
 	genesisBlock *types.Block
 	genesisHash  libcommon.Hash
 
@@ -825,9 +826,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	if casted, ok := s.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, s.logger); err != nil {
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
 			return
 		}
@@ -841,7 +842,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 }
 
 func (s *Ethereum) APIs() []rpc.API {
-	return []rpc.API{}
+	return s.apiList
 }
 
 func (s *Ethereum) Etherbase() (eb libcommon.Address, err error) {
@@ -1090,7 +1091,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		if err != nil {
 			return err
 		}
-		s.downloader.MainLoopInBackground(ctx, true)
+		s.downloader.MainLoopInBackground(true)
 		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)

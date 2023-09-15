@@ -81,6 +81,7 @@ coverage.out
 
 dist
 __debug_bin
+*.exe
 
 *.log
 
