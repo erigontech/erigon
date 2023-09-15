@@ -254,12 +254,13 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
-	err := fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
-	if errors.Is(err, consensus.ErrInvalidBlock) {
-		validationError = err
-	} else {
-		criticalError = err
-		return
+	if err := fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
+		if errors.Is(err, consensus.ErrInvalidBlock) {
+			validationError = err
+		} else {
+			criticalError = err
+			return
+		}
 	}
 
 	latestValidHash = header.Hash()
