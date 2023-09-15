@@ -456,3 +456,15 @@ func (ts *Timestamp) UnmarshalJSON(data []byte) error {
 	return nil
 
 }
+
+type OptionsValidateError struct{ Message string }
+
+func (e *OptionsValidateError) ErrorCode() int { return -32003 }
+
+func (e *OptionsValidateError) Error() string { return e.Message }
+
+type KnownAccountsLimitExceededError struct{ Message string }
+
+func (e *KnownAccountsLimitExceededError) ErrorCode() int { return -32005 }
+
+func (e *KnownAccountsLimitExceededError) Error() string { return e.Message }

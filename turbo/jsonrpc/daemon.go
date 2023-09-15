@@ -36,7 +36,7 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 	var borImpl *BorImpl
 
 	if bor, ok := engine.(*bor.Bor); ok {
-		borImpl = NewBorAPI(base, db, bor) // bor (consensus) specific
+		borImpl = NewBorAPI(base, db, bor, txpool) // bor (consensus) specific
 	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)

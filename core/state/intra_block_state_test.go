@@ -35,6 +35,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -347,4 +348,67 @@ func TestTransientStorage(t *testing.T) {
 	if got, exp := state.GetTransientState(addr, key), (*uint256.NewInt(0)); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
 	}
+}
+
+func TestValidateKnownAccounts(t *testing.T) {
+	t.Parallel()
+
+	knownAccounts := make(types.KnownAccounts)
+
+	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
+	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"), map[libcommon.Hash]libcommon.Hash{
+		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb"),
+		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ddd"),
+	})
+
+	stateobjaddr1 := libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1")
+	stateobjaddr2 := libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2")
+
+	storageaddr1 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000zzz")
+	storageaddr21 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa")
+	storageaddr22 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc")
+
+	data1 := libcommon.BytesToHash([]byte{24})
+	data21 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb")
+	data22 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ddd")
+
+	s := newStateTest()
+
+	// set initial state object value
+	s.state.SetState(stateobjaddr1, storageaddr1, data1)
+	s.state.SetState(stateobjaddr2, storageaddr21, data21)
+	s.state.SetState(stateobjaddr2, storageaddr22, data22)
+
+	require.NoError(t, s.state.ValidateKnownAccounts(knownAccounts))
+
+	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1cf"))
+
+	stateobjaddr3 := libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2")
+	storageaddr3 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000yyy")
+	data3 := libcommon.BytesToHash([]byte{24})
+
+	s.state.SetState(stateobjaddr3, storageaddr3, data3)
+
+	// expected error
+	err := s.state.ValidateKnownAccounts(knownAccounts)
+	require.Error(t, err, "should have been an error")
+
+	// correct the previous mistake "0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1cf" -> "0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"
+	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
+	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add3"), map[libcommon.Hash]libcommon.Hash{
+		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb"),
+		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ddd"),
+	})
+
+	stateobjaddr4 := libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add3")
+	storageaddr41 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa")
+	storageaddr42 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc")
+	data4 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb")
+
+	s.state.SetState(stateobjaddr4, storageaddr41, data4)
+	s.state.SetState(stateobjaddr4, storageaddr42, data4)
+
+	// expected error
+	err = s.state.ValidateKnownAccounts(knownAccounts)
+	require.Error(t, err, "should have been an error")
 }

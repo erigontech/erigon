@@ -381,3 +381,11 @@ func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }
+
+func (txw BlobTxWrapper) PutOptions(options *OptionsAA4337) {
+	txw.Tx.DynamicFeeTransaction.CommonTx.TransactionMisc.optionsAA4337 = options
+}
+
+func (txw BlobTxWrapper) GetOptions() *OptionsAA4337 {
+	return txw.Tx.DynamicFeeTransaction.CommonTx.TransactionMisc.optionsAA4337
+}

@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -826,4 +827,43 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+// ValidateKnownAccounts validates the knownAccounts passed in the options parameter in the conditional transaction (EIP-4337)
+func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccounts) error {
+	if knownAccounts == nil {
+		return nil
+	}
+
+	for k, v := range knownAccounts {
+		tempAccount, err := sdb.stateReader.ReadAccountData(k)
+		if err != nil {
+			return fmt.Errorf("error reading account data at: %v", k)
+		}
+
+		// check if the value is hex string or an object
+		switch {
+		case v.IsSingle():
+			if tempAccount != nil {
+				if *v.Single != tempAccount.Root {
+					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", k, v.Single, tempAccount.Root)
+				}
+			} else {
+				return fmt.Errorf("Storage Trie is nil for: %v", k)
+			}
+		case v.IsStorage():
+			for slot, value := range v.Storage {
+				slot := slot
+				tempByte, _ := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
+				actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
+				if value != actualValue {
+					return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", k, slot, value, actualValue)
+				}
+			}
+		default:
+			return fmt.Errorf("impossible to validate known accounts: %v", k)
+		}
+	}
+
+	return nil
 }

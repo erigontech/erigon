@@ -437,6 +437,30 @@ LOOP:
 			continue
 		}
 
+		// not prioritising conditional transaction, yet.
+		if options := txn.GetOptions(); options != nil {
+			if err := header.ValidateBlockNumberOptions4337(options.BlockNumberMin, options.BlockNumberMax); err != nil {
+				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
+				txs.Pop()
+
+				continue
+			}
+
+			if err := header.ValidateTimestampOptions4337(options.TimestampMin, options.TimestampMax); err != nil {
+				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
+				txs.Pop()
+
+				continue
+			}
+
+			if err := ibs.ValidateKnownAccounts(options.KnownAccounts); err != nil {
+				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
+				txs.Pop()
+
+				continue
+			}
+		}
+
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {

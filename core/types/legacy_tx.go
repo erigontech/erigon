@@ -463,3 +463,11 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
+
+func (tx *LegacyTx) PutOptions(options *OptionsAA4337) {
+	tx.CommonTx.TransactionMisc.optionsAA4337 = options
+}
+
+func (tx *LegacyTx) GetOptions() *OptionsAA4337 {
+	return tx.CommonTx.TransactionMisc.optionsAA4337
+}

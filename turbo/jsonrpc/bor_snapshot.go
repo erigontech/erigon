@@ -8,6 +8,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -15,9 +17,12 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 type Snapshot struct {
@@ -248,6 +253,98 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
 
 	return true, nil
+}
+
+// SendRawTransactionConditional will add the signed transaction to the transaction pool.
+// The sender/bundler is responsible for signing the transaction
+func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx hexutility.Bytes, options types.OptionsAA4337) (common.Hash, error) {
+	txn, err := types.DecodeWrappedTransaction(encodedTx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	txTemp, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer txTemp.Rollback()
+
+	currentHeader := rawdb.ReadCurrentHeader(txTemp)
+
+	tempBlockNumber := rpc.BlockNumber(currentHeader.Number.Int64())
+	tempBlockorHash := rpc.BlockNumberOrHash{BlockNumber: &tempBlockNumber}
+
+	readerTemp, err := rpchelper.CreateStateReader(ctx, txTemp, tempBlockorHash, 0, api.filters, api.stateCache, api.historyV3(txTemp), "")
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	currentState := state.New(readerTemp)
+
+	// check block number range
+	if err := currentHeader.ValidateBlockNumberOptions4337(options.BlockNumberMin, options.BlockNumberMax); err != nil {
+		return common.Hash{}, &rpc.OptionsValidateError{Message: "out of block range. err: " + err.Error()}
+	}
+
+	// check timestamp range
+	if err := currentHeader.ValidateTimestampOptions4337(options.TimestampMin, options.TimestampMax); err != nil {
+		return common.Hash{}, &rpc.OptionsValidateError{Message: "out of time range. err: " + err.Error()}
+	}
+
+	// check knownAccounts length (number of slots/accounts) should be less than 1000
+	if err := options.KnownAccounts.ValidateLength(); err != nil {
+		return common.Hash{}, &rpc.KnownAccountsLimitExceededError{Message: "limit exceeded. err: " + err.Error()}
+	}
+
+	// check knownAccounts
+	if err := currentState.ValidateKnownAccounts(options.KnownAccounts); err != nil {
+		return common.Hash{}, &rpc.OptionsValidateError{Message: "storage error. err: " + err.Error()}
+	}
+
+	// put options data in Tx, to use it later while block building
+	txn.PutOptions(&options)
+
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
+		return common.Hash{}, err
+	}
+	if !txn.Protected() {
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
+
+	// this has been moved to prior to adding of transactions to capture the
+	// pre state of the db - which is used for logging in the messages below
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	defer tx.Rollback()
+
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	txnChainId := txn.GetChainID()
+	chainId := cc.ChainID
+
+	if chainId.Cmp(txnChainId.ToBig()) != 0 {
+		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
+	}
+
+	hash := txn.Hash()
+	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
+		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+	}
+
+	return txn.Hash(), nil
 }
 
 type BlockSigners struct {
