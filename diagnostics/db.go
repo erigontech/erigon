@@ -89,7 +89,7 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 			key, err := base64.URLEncoding.DecodeString(pathParts[2])
 
 			if err != nil {
-				http.Error(w, fmt.Sprintf(`key "%s" argument may only contain hexadecimal digits: %v`, pathParts[2], err), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf(`key "%s" argument should be base64url encoded: %v`, pathParts[2], err), http.StatusBadRequest)
 				return
 			}
 
