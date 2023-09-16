@@ -32,12 +32,12 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 
 		urlPath := r.URL.Path
 
-		if !strings.HasPrefix(urlPath, "/debug/dbs/") {
-			http.Error(w, fmt.Sprintf(`Unexpected path prefix: expected: "/debug/dbs/..." got: "%s"`, urlPath), http.StatusNotFound)
+		if !strings.HasPrefix(urlPath, "/dbs/") {
+			http.Error(w, fmt.Sprintf(`Unexpected path prefix: expected: "/dbs/..." got: "%s"`, urlPath), http.StatusNotFound)
 			return
 		}
 
-		pathParts := strings.Split(urlPath[11:], "/")
+		pathParts := strings.Split(urlPath[5:], "/")
 
 		if len(pathParts) < 1 {
 			http.Error(w, fmt.Sprintf(`Unexpected path len: expected: "{db}/tables" got: "%s"`, urlPath), http.StatusNotFound)
