@@ -272,9 +272,11 @@ Loop:
 				noProgressCounter = 0 // Reset, there was progress
 			}
 			if noProgressCounter >= 5 {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")
