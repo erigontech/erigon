@@ -19,7 +19,7 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, db persistence.BeaconChainDatabase, logger log.Logger) (*sentinel.Sentinel, error) {
+func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, logger log.Logger) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(context.Background(), cfg, db, logger)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, db persistence.BeaconChainData
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.BeaconChainDatabase, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := createSentinel(cfg, db, logger)
 	if err != nil {

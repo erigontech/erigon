@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -119,7 +117,7 @@ func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, executio
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 	engine := newMockEngine()
-	return NewBeaconChainDatabaseFilesystem(fs, engine, &clparams.MainnetBeaconConfig), db, engine
+	return NewBeaconChainDatabaseFilesystem(NewAferoRawBlockSaver(fs, &clparams.MainnetBeaconConfig), engine, &clparams.MainnetBeaconConfig), db, engine
 }
 
 func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
@@ -150,29 +148,4 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 	newBlks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
 	require.NoError(t, err)
 	require.Equal(t, len(newBlks), 0)
-}
-
-func TestBlockSaverStoreLoadReadWithWriter(t *testing.T) {
-	store, db, _ := setupStore(t, true)
-	defer db.Close()
-
-	tx, _ := db.Begin()
-	defer tx.Rollback()
-
-	ctx := context.Background()
-	block := getTestBlock()
-	require.NoError(t, store.WriteBlock(tx, ctx, block, true))
-
-	root, _ := block.Block.HashSSZ()
-
-	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	version := clparams.MainnetBeaconConfig.GetCurrentStateVersion(block.Block.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch)
-
-	writer := bytes.Buffer{}
-	require.NoError(t, store.ReadBlockToWriter(ctx, &writer, block.Block.Slot, root))
-	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(&writer, block2, version))
-
-	block2Root, _ := block2.Block.HashSSZ()
-
-	require.Equal(t, block2Root, root)
 }

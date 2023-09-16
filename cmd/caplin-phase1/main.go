@@ -20,11 +20,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -124,7 +124,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	beaconDB, sqlDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{}, cfg.BeaconCfg, afero.NewOsFs(), cfg.Dirs.Tmp, executionEngine)
+	beaconDB, sqlDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{}, cfg.BeaconCfg, persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.Tmp), cfg.Dirs.Tmp, executionEngine)
 	if err != nil {
 		return err
 	}

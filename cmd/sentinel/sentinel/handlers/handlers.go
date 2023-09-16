@@ -37,7 +37,7 @@ type ConsensusHandlers struct {
 	genesisConfig *clparams.GenesisConfig
 	ctx           context.Context
 
-	beaconDB persistence.BeaconChainDatabase
+	beaconDB persistence.RawBeaconBlockChain
 }
 
 const (
@@ -45,7 +45,7 @@ const (
 	ResourceUnavaiablePrefix = 0x03
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.BeaconChainDatabase, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
 	peers *peers.Manager, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:         peers,

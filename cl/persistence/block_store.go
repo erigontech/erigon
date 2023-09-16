@@ -3,10 +3,8 @@ package persistence
 import (
 	"context"
 	"database/sql"
-	"io"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -49,10 +47,6 @@ func (b *BeaconRpcSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, 
 
 // a noop for rpc source since we always return new data
 func (b *BeaconRpcSource) PurgeRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) error {
-	return nil
-}
-
-func (b *BeaconRpcSource) ReadBlockToWriter(ctx context.Context, w io.Writer, slot uint64, blockRoot libcommon.Hash) error {
 	return nil
 }
 
@@ -123,9 +117,5 @@ func (b *GossipSource) PurgeRange(_ *sql.Tx, ctx context.Context, from uint64, c
 		b.blocks.Delete(key)
 		return true
 	})
-	return nil
-}
-
-func (b *GossipSource) ReadBlockToWriter(ctx context.Context, w io.Writer, slot uint64, blockRoot libcommon.Hash) error {
 	return nil
 }

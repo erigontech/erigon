@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -31,14 +30,13 @@ import (
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
-	filesystem afero.Fs,
+	rawBeaconChain persistence.RawBeaconBlockChain,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
 ) (persistence.BeaconChainDatabase, *sql.DB, error) {
-	dataDirFs := afero.NewBasePathFs(filesystem, dbPath)
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
-
 	os.Remove(dataDirIndexer)
+
 	db, err := sql.Open("sqlite", dataDirIndexer)
 	if err != nil {
 		return nil, nil, err
@@ -65,7 +63,7 @@ func OpenCaplinDatabase(ctx context.Context,
 			db.Close() // close sql database here
 		}()
 	}
-	return persistence.NewBeaconChainDatabaseFilesystem(dataDirFs, engine, beaconConfig), db, nil
+	return persistence.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,

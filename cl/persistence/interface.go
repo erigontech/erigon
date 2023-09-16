@@ -13,11 +13,16 @@ import (
 type BlockSource interface {
 	GetRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
 	PurgeRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) error
-	ReadBlockToWriter(ctx context.Context, w io.Writer, slot uint64, blockRoot libcommon.Hash) error
 }
 
 type BeaconChainWriter interface {
 	WriteBlock(tx *sql.Tx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error
+}
+
+type RawBeaconBlockChain interface {
+	BlockWriter(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (io.WriteCloser, error)
+	BlockReader(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (io.ReadCloser, error)
+	DeleteBlock(ctx context.Context, slot uint64, blockRoot libcommon.Hash)
 }
 
 type BeaconChainDatabase interface {

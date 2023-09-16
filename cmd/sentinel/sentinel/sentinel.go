@@ -68,7 +68,7 @@ type Sentinel struct {
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
-	db persistence.BeaconChainDatabase
+	db persistence.RawBeaconBlockChain
 
 	discoverConfig       discover.Config
 	pubsub               *pubsub.PubSub
@@ -230,7 +230,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
-	db persistence.BeaconChainDatabase,
+	db persistence.RawBeaconBlockChain,
 	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
