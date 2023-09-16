@@ -501,7 +501,7 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 `docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-###       
+###
 
 old data
 
@@ -530,59 +530,60 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 ### Default Ports and Firewalls
 
+
+
 #### `erigon` ports
 
-| Port  | Protocol  |        Purpose         | Expose  |
-|:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP |     eth/66 peering     | Public  |
-| 30304 | TCP & UDP |     eth/67 peering     | Public  |
-| 9090  |    TCP    |    gRPC Connections    | Private |
-| 42069 | TCP & UDP | Snap sync (Bittorrent) | Public  |
-| 6060  |    TCP    |    Metrics or Pprof    | Private |
-| 8551  |    TCP    | Engine API (JWT auth)  | Private |
+
+| Component | Port  | Protocol  | Purpose                     | Should Expose |
+| --------- | ----- | --------- | --------------------------- | ------------- |
+| engine    | 9090  | TCP       | gRPC Server                 | Private       |
+| engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
+| engine    | 6060  | TCP       | Metrics or Pprof            | Private       |
+| engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
+| sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
+| sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
+| sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
+| rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+
+
+
 
 Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
 
-#### `RPC` ports
 
-| Port | Protocol |           Purpose           | Expose  |
-|:----:|:--------:|:---------------------------:|:-------:|
-| 8545 |   TCP    | HTTP & WebSockets & GraphQL | Private |
 
-Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket and GraphQL are on the same
-port.
 
-#### `sentry` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-|:-----:|:---------:|:----------------:|:-------:|
-| 30303 | TCP & UDP |     Peering      | Public  |
-| 9091  |    TCP    | gRPC Connections | Private |
+#### `caplin` ports
+| Component | Port | Protocol | Purpose          | Should Expose |
+| --------- | ---- | -------- | ---------------- | ------------- |
+| sentinel  | 4000 | UDP      | Peering          | Public        |
+| sentinel  | 4000 | UDP      | Peering          | Public        |
+| sentinel  | 4001 | TCP      | Peering          | Public        |
+| sentinel  | 7777 | TCP      | gRPC Connections | Private       |
 
-Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will be exposed to the internet on 30303.
-Port
-9091 is for internal gRCP connections (e.g erigon -> sentry).
 
-#### `sentinel` ports
+If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
 
-| Port | Protocol |     Purpose      | Expose  |
-|:----:|:--------:|:----------------:|:-------:|
-| 4000 |   UDP    |     Peering      | Public  |
-| 4001 |   TCP    |     Peering      | Public  |
-| 7777 |   TCP    | gRPC Connections | Private |
 
-#### Other ports
+#### `shared` ports
 
-| Port | Protocol | Purpose | Expose  |
-|:----:|:--------:|:-------:|:-------:|
-| 6060 |   TCP    |  pprof  | Private |
-| 6060 |   TCP    | metrics | Private |
+| Component | Port  | Protocol  | Purpose                     | Should Expose |
+| --------- | ----- | --------- | --------------------------- | ------------- |
+| all       | 6060 | TCP      | pprof            | Private       |
+| all       | 6060 | TCP      | metrics          | Private       |
+
 
 Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
+
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+
+
+#### `other` ports
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
@@ -592,7 +593,7 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
 0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
 10.0.0.0/8            Private-Use Networks       RFC 1918
 100.64.0.0/10         Carrier-Grade NAT (CGN)    RFC 6598, Section 7
-127.16.0.0/12         Private-Use Networks       RFC 1918 
+127.16.0.0/12         Private-Use Networks       RFC 1918
 169.254.0.0/16        Link Local                 RFC 3927
 172.16.0.0/12         Private-Use Networks       RFC 1918
 192.0.0.0/24          IETF Protocol Assignments  RFC 5736
@@ -600,13 +601,13 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
 192.88.99.0/24        6to4 Relay Anycast         RFC 3068
 192.168.0.0/16        Private-Use Networks       RFC 1918
 198.18.0.0/15         Network Interconnect
-                      Device Benchmark Testing   RFC 2544
+Device Benchmark Testing   RFC 2544
 198.51.100.0/24       TEST-NET-2                 RFC 5737
 203.0.113.0/24        TEST-NET-3                 RFC 5737
 224.0.0.0/4           Multicast                  RFC 3171
 240.0.0.0/4           Reserved for Future Use    RFC 1112, Section 4
 255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
-                                                 RFC 922, Section 7
+RFC 922, Section 7
 ```
 
 Same in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
@@ -615,9 +616,9 @@ Same in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
 - Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+    run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+    run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 ### How to run local devnet?
 
@@ -634,6 +635,11 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 ### Run RaspberyPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
+
+### How to change db pagesize
+
+[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+
 
 Getting in touch
 ================
@@ -667,20 +673,20 @@ Next tools show correct memory usage of Erigon:
 
 - `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
     - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
-      shows OS pages cache size.
+        shows OS pages cache size.
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
-  browser `localhost:3000`, credentials `admin/admin`)
+    browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
-memory.
+    Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
+    memory.
 
-**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
-"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-running
-multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same
-Disk.
+    **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
+    main Erigon optimisations: "reduce Disk random access".
+    "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
+    running
+    multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same
+    Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 

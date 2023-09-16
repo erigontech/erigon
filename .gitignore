@@ -81,9 +81,12 @@ coverage.out
 
 dist
 __debug_bin
+*.exe
 
 *.log
 
 caplin-recordings
 
 jwt.hex
+
+.tool-versions
