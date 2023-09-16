@@ -312,7 +312,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
 		if currentHeder.ExcessBlobGas != nil {
 			f, err := misc.GetBlobGasPrice(excessBlobGas)
-			if(err != nil){
+			if err != nil {
 				return err
 			}
 			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {

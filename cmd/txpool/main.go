@@ -51,7 +51,7 @@ var (
 
 	priceLimit    uint64
 	accountSlots  uint64
-	blobSlots	  uint64
+	blobSlots     uint64
 	priceBump     uint64
 	blobPriceBump uint64
 

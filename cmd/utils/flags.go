@@ -176,7 +176,7 @@ var (
 	TxPoolBlobSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.blobslots",
 		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
-		Value:  txpoolcfg.DefaultConfig.BlobSlots,
+		Value: txpoolcfg.DefaultConfig.BlobSlots,
 	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
