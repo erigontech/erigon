@@ -645,8 +645,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		blobFee := uint64(1)
 		if currentBlock.Header().ExcessBlobGas != nil {
-			e := *currentBlock.Header().ExcessBlobGas
-			b, err := misc.GetBlobGasPrice(e)
+			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()))
 			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
 				blobFee = b.Uint64()
 			}
