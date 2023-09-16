@@ -38,7 +38,7 @@ func (a aferoRawBeaconBlockChain) BlockReader(ctx context.Context, slot uint64, 
 	return a.fs.OpenFile(path, os.O_RDONLY, 0o755)
 }
 
-func (a aferoRawBeaconBlockChain) DeleteBlock(ctx context.Context, slot uint64, blockRoot libcommon.Hash) {
+func (a aferoRawBeaconBlockChain) DeleteBlock(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error {
 	_, path := RootToPaths(slot, blockRoot, a.cfg)
-	_ = a.fs.Remove(path)
+	return a.fs.Remove(path)
 }

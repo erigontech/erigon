@@ -22,7 +22,7 @@ type BeaconChainWriter interface {
 type RawBeaconBlockChain interface {
 	BlockWriter(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (io.WriteCloser, error)
 	BlockReader(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (io.ReadCloser, error)
-	DeleteBlock(ctx context.Context, slot uint64, blockRoot libcommon.Hash)
+	DeleteBlock(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error
 }
 
 type BeaconChainDatabase interface {
