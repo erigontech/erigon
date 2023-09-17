@@ -41,6 +41,7 @@ func OpenCaplinDatabase(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: false})
 	if err != nil {
 		return nil, nil, err
@@ -100,8 +101,13 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		go func() {
 			tickInterval := time.NewTicker(50 * time.Millisecond)
 			for {
-				<-tickInterval.C
-				forkChoice.OnTick(uint64(time.Now().Unix()))
+				select {
+				case <-tickInterval.C:
+					forkChoice.OnTick(uint64(time.Now().Unix()))
+				case <-ctx.Done():
+					return
+				}
+
 			}
 		}()
 	}
@@ -137,10 +143,13 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+
 	dbConfig, err := db_config.ReadConfiguration(ctx, tx)
 	if err != nil {
 		return err
 	}
+	tx.Rollback()
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, db, tmpdir, dbConfig)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
