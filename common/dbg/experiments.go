@@ -336,7 +336,7 @@ var (
 )
 
 func MdbxLockInRam() bool {
-	snMadvNormalOnce.Do(func() {
+	mdbxLockInRamOnce.Do(func() {
 		v, _ := os.LookupEnv("MDBX_LOCK_IN_RAM")
 		if v == "true" {
 			mdbxLockInRam = true
