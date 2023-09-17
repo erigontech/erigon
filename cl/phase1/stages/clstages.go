@@ -262,7 +262,6 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
 					currentEpoch := args.seenEpoch
 					blockBatch := []*types.Block{}
-					blockBatchMaxSize := 1000
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
 					if err != nil {
@@ -295,12 +294,6 @@ func ConsensusClStages(ctx context.Context,
 									continue MainLoop
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-								if len(blockBatch) >= blockBatchMaxSize {
-									if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-										return err
-									}
-									blockBatch = blockBatch[:0]
-								}
 							}
 							if err := processBlock(tx, block, false, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
@@ -308,10 +301,16 @@ func ConsensusClStages(ctx context.Context,
 								continue MainLoop
 							}
 						}
+						if len(blockBatch) > 0 {
+							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								blockBatch = blockBatch[:0]
+								continue MainLoop
+							}
+							blockBatch = blockBatch[:0]
+						}
 						currentEpoch++
-					}
-					if shouldInsert {
-						return cfg.executionClient.InsertBlocks(blockBatch)
 					}
 					return nil
 				},
