@@ -1531,7 +1531,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
-	defer agg.EnableMadvNormal().DisableReadAhead()
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
