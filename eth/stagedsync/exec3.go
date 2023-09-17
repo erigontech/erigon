@@ -187,6 +187,11 @@ func ExecV3(ctx context.Context,
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
+		if dbg.MdbxLockInRam() {
+			if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
+				return err
+			}
+		}
 	}
 
 	var blockNum, stageProgress uint64
