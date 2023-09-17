@@ -329,3 +329,19 @@ func SnMadvNormal() bool {
 	})
 	return snMadvNormal
 }
+
+var (
+	mdbxLockInRam     bool
+	mdbxLockInRamOnce sync.Once
+)
+
+func MdbxLockInRam() bool {
+	snMadvNormalOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_LOCK_IN_RAM")
+		if v == "true" {
+			mdbxLockInRam = true
+			log.Info("[Experiment]", "MDBX_LOCK_IN_RAM", mdbxLockInRam)
+		}
+	})
+	return mdbxLockInRam
+}
