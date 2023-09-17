@@ -2308,46 +2308,6 @@ func (h *History) DisableReadAhead() {
 	})
 }
 
-func (h *History) EnableReadAhead() *History {
-	h.InvertedIndex.EnableReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableReadAhead()
-			if item.index != nil {
-				item.index.EnableReadAhead()
-			}
-		}
-		return true
-	})
-	return h
-}
-func (h *History) EnableMadvWillNeed() *History {
-	h.InvertedIndex.EnableMadvWillNeed()
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableWillNeed()
-			if item.index != nil {
-				item.index.EnableWillNeed()
-			}
-		}
-		return true
-	})
-	return h
-}
-func (h *History) EnableMadvNormalReadAhead() *History {
-	h.InvertedIndex.EnableMadvNormalReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableMadvNormal()
-			if item.index != nil {
-				item.index.EnableMadvNormal()
-			}
-		}
-		return true
-	})
-	return h
-}
-
 // HistoryStep used for incremental state reconsitution, it isolates only one snapshot interval
 type HistoryStep struct {
 	compressVals bool

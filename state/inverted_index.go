@@ -1774,43 +1774,6 @@ func (ii *InvertedIndex) DisableReadAhead() {
 	})
 }
 
-func (ii *InvertedIndex) EnableReadAhead() *InvertedIndex {
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableReadAhead()
-			if item.index != nil {
-				item.index.EnableReadAhead()
-			}
-		}
-		return true
-	})
-	return ii
-}
-func (ii *InvertedIndex) EnableMadvWillNeed() *InvertedIndex {
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableWillNeed()
-			if item.index != nil {
-				item.index.EnableWillNeed()
-			}
-		}
-		return true
-	})
-	return ii
-}
-func (ii *InvertedIndex) EnableMadvNormalReadAhead() *InvertedIndex {
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.EnableMadvNormal()
-			if item.index != nil {
-				item.index.EnableMadvNormal()
-			}
-		}
-		return true
-	})
-	return ii
-}
-
 func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
 	if ii.files == nil {
 		return 0, 0, 0

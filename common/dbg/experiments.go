@@ -313,3 +313,19 @@ func NoPrune() bool {
 	})
 	return noPrune
 }
+
+var (
+	snMadvNormal     bool
+	snMadvNormalOnce sync.Once
+)
+
+func SnMadvNormal() bool {
+	snMadvNormalOnce.Do(func() {
+		v, _ := os.LookupEnv("SN_MADV_NORMAL")
+		if v == "true" {
+			snMadvNormal = true
+			log.Info("[Experiment]", "SN_MADV_NORMAL", snMadvNormal)
+		}
+	})
+	return snMadvNormal
+}
