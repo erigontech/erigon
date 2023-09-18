@@ -175,7 +175,11 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 		var reply remote.NodesInfoReply
 
-		if err = json.NewDecoder(debugResponse.Body).Decode(&reply); err != nil {
+		err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+		debugResponse.Body.Close()
+
+		if err != nil {
 			return err
 		}
 
