@@ -18,7 +18,10 @@ const (
 	IsPreviousMatchingHeadAttesterBit   = 0x5
 )
 
-const validatorSetCapacityMultiplier = 1.05 // allocate 5% to the validator set when re-allocation is needed.
+const (
+	validatorSetCapacityMultiplier = 1.2 // allocate 20% to the validator set when re-allocation is needed.
+	validatorTreeCacheGroupLayer   = 4   // It will cache group validatorTreeCacheGroupLayer^2 accordingly
+)
 
 // This is all stuff used by phase0 state transition. It makes many operations faster.
 type Phase0Data struct {
@@ -28,8 +31,10 @@ type Phase0Data struct {
 }
 
 type ValidatorSet struct {
-	buffer []byte
-	l, c   int
+	buffer          []byte
+	treeCacheBuffer []byte
+
+	l, c int
 
 	// We have phase0 data below
 	phase0Data   []Phase0Data
@@ -44,13 +49,19 @@ func NewValidatorSet(c int) *ValidatorSet {
 	}
 }
 
-func (v *ValidatorSet) expandBuffer(size int) {
+func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
+	size := newValidatorSetLength * validatorSize
+	treeCacheSize := newValidatorSetLength * length.Hash
 	if size <= cap(v.buffer) {
+		v.treeCacheBuffer = v.treeCacheBuffer[:treeCacheSize]
 		v.buffer = v.buffer[:size]
 		return
 	}
 	buffer := make([]byte, size, int(float64(size)*validatorSetCapacityMultiplier))
+	cacheBuffer := make([]byte, treeCacheSize, int(float64(size)*validatorSetCapacityMultiplier))
 	copy(buffer, v.buffer)
+	copy(cacheBuffer, v.treeCacheBuffer)
+	v.treeCacheBuffer = cacheBuffer
 	v.buffer = buffer
 }
 
@@ -58,7 +69,7 @@ func (v *ValidatorSet) Append(val Validator) {
 	offset := v.EncodingSizeSSZ()
 	// we are overflowing the buffer? append.
 	if offset >= len(v.buffer) {
-		v.expandBuffer(offset + validatorSize)
+		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
 	copy(v.buffer[offset:], val)
@@ -94,7 +105,7 @@ func (v *ValidatorSet) CopyTo(set2 IterableSSZ[Validator]) {
 	t.c = v.c
 	offset := v.EncodingSizeSSZ()
 	if offset > len(t.buffer) {
-		t.expandBuffer(offset)
+		t.expandBuffer(v.l)
 		t.buffer = append(t.buffer, make([]byte, len(v.buffer)-len(t.buffer))...)
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
@@ -109,7 +120,7 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%validatorSize > 0 {
 		return ssz.ErrBufferNotRounded
 	}
-	v.expandBuffer(len(buf))
+	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
 	v.l = len(buf) / validatorSize
 	v.phase0Data = make([]Phase0Data, v.l)
@@ -150,16 +161,19 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	if v.l == 0 {
 		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
 	}
-	for i := 0; i < v.l; i++ {
-		validator := v.Get(i)
-		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+
+	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
+	// Same thing for now R3MINDER
+	if v.l < validatorsLeafChunkSize {
+		if err := v.computeFlatValidatorsRootsToBuffer(0, v.l, hashBuffer, validatorLeaves); err != nil {
 			return [32]byte{}, err
 		}
-		hashBuffer = hashBuffer[:(8 * 32)]
-		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, validatorLeaves[i*length.Hash:]); err != nil {
+	} else {
+		if err := v.computeFlatValidatorsRootsToBuffer(0, v.l, hashBuffer, validatorLeaves); err != nil {
 			return [32]byte{}, err
 		}
 	}
+
 	offset := length.Hash * v.l
 	elements := common.Copy(validatorLeaves[:offset])
 	for i := uint8(0); i < depth; i++ {
@@ -175,6 +189,20 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		elements = v.buf
 	}
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
+}
+
+func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from int, to int, hashBuffer, validatorLeaves []byte) error {
+	for i := from; i < to; i++ {
+		validator := v.Get(i)
+		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+			return err
+		}
+		hashBuffer = hashBuffer[:(8 * 32)]
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, validatorLeaves[i*length.Hash:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (v *ValidatorSet) Set(idx int, val Validator) {
