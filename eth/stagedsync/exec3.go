@@ -720,8 +720,10 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					if !errors.Is(err, consensus.ErrInvalidBlock) {
+						return err
+					} else {
+						logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
