@@ -207,7 +207,7 @@ func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64
 	}
 
 	layerBuffer = layerBuffer[:(to-from)*length.Hash]
-	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
+	for i := uint8(0); i < depth; i++ {
 		// Sequential
 		if len(layerBuffer)%64 != 0 {
 			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
