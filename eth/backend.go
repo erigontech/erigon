@@ -458,13 +458,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		consensusConfig = &config.Ethash
 	}
 	var heimdallClient heimdall.IHeimdallClient
-	if chainConfig.Bor != nil && !config.WithoutHeimdall {
-		if config.HeimdallgRPCAddress != "" {
-			heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
-		} else {
-			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+	if chainConfig.Bor != nil {
+		if !config.WithoutHeimdall {
+			if config.HeimdallgRPCAddress != "" {
+				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
+			} else {
+				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			}
 		}
+
+		flags.Milestone = config.BorMilestoneFlag
 	}
+
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
