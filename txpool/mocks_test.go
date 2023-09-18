@@ -31,7 +31,10 @@ var _ Pool = &PoolMock{}
 //			AddRemoteTxsFunc: func(ctx context.Context, newTxs types2.TxSlots)  {
 //				panic("mock out the AddRemoteTxs method")
 //			},
-//			GetKnownBlobTxnFunc: func(tx kv.Tx, hash []byte) *metaTx {
+//			FilterKnownIdHashesFunc: func(tx kv.Tx, hashes types2.Hashes) (types2.Hashes, error) {
+//				panic("mock out the FilterKnownIdHashes method")
+//			},
+//			GetKnownBlobTxnFunc: func(tx kv.Tx, hash []byte) (*metaTx, error) {
 //				panic("mock out the GetKnownBlobTxn method")
 //			},
 //			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
@@ -65,8 +68,11 @@ type PoolMock struct {
 	// AddRemoteTxsFunc mocks the AddRemoteTxs method.
 	AddRemoteTxsFunc func(ctx context.Context, newTxs types2.TxSlots)
 
+	// FilterKnownIdHashesFunc mocks the FilterKnownIdHashes method.
+	FilterKnownIdHashesFunc func(tx kv.Tx, hashes types2.Hashes) (types2.Hashes, error)
+
 	// GetKnownBlobTxnFunc mocks the GetKnownBlobTxn method.
-	GetKnownBlobTxnFunc func(tx kv.Tx, hash []byte) *metaTx
+	GetKnownBlobTxnFunc func(tx kv.Tx, hash []byte) (*metaTx, error)
 
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
@@ -105,6 +111,13 @@ type PoolMock struct {
 			Ctx context.Context
 			// NewTxs is the newTxs argument value.
 			NewTxs types2.TxSlots
+		}
+		// FilterKnownIdHashes holds details about calls to the FilterKnownIdHashes method.
+		FilterKnownIdHashes []struct {
+			// Tx is the tx argument value.
+			Tx kv.Tx
+			// Hashes is the hashes argument value.
+			Hashes types2.Hashes
 		}
 		// GetKnownBlobTxn holds details about calls to the GetKnownBlobTxn method.
 		GetKnownBlobTxn []struct {
@@ -152,6 +165,7 @@ type PoolMock struct {
 	lockAddLocalTxs           sync.RWMutex
 	lockAddNewGoodPeer        sync.RWMutex
 	lockAddRemoteTxs          sync.RWMutex
+	lockFilterKnownIdHashes   sync.RWMutex
 	lockGetKnownBlobTxn       sync.RWMutex
 	lockGetRlp                sync.RWMutex
 	lockIdHashKnown           sync.RWMutex
@@ -272,8 +286,48 @@ func (mock *PoolMock) AddRemoteTxsCalls() []struct {
 	return calls
 }
 
+// FilterKnownIdHashes calls FilterKnownIdHashesFunc.
+func (mock *PoolMock) FilterKnownIdHashes(tx kv.Tx, hashes types2.Hashes) (types2.Hashes, error) {
+	callInfo := struct {
+		Tx     kv.Tx
+		Hashes types2.Hashes
+	}{
+		Tx:     tx,
+		Hashes: hashes,
+	}
+	mock.lockFilterKnownIdHashes.Lock()
+	mock.calls.FilterKnownIdHashes = append(mock.calls.FilterKnownIdHashes, callInfo)
+	mock.lockFilterKnownIdHashes.Unlock()
+	if mock.FilterKnownIdHashesFunc == nil {
+		var (
+			unknownHashesOut types2.Hashes
+			errOut           error
+		)
+		return unknownHashesOut, errOut
+	}
+	return mock.FilterKnownIdHashesFunc(tx, hashes)
+}
+
+// FilterKnownIdHashesCalls gets all the calls that were made to FilterKnownIdHashes.
+// Check the length with:
+//
+//	len(mockedPool.FilterKnownIdHashesCalls())
+func (mock *PoolMock) FilterKnownIdHashesCalls() []struct {
+	Tx     kv.Tx
+	Hashes types2.Hashes
+} {
+	var calls []struct {
+		Tx     kv.Tx
+		Hashes types2.Hashes
+	}
+	mock.lockFilterKnownIdHashes.RLock()
+	calls = mock.calls.FilterKnownIdHashes
+	mock.lockFilterKnownIdHashes.RUnlock()
+	return calls
+}
+
 // GetKnownBlobTxn calls GetKnownBlobTxnFunc.
-func (mock *PoolMock) GetKnownBlobTxn(tx kv.Tx, hash []byte) *metaTx {
+func (mock *PoolMock) GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error) {
 	callInfo := struct {
 		Tx   kv.Tx
 		Hash []byte
@@ -287,8 +341,9 @@ func (mock *PoolMock) GetKnownBlobTxn(tx kv.Tx, hash []byte) *metaTx {
 	if mock.GetKnownBlobTxnFunc == nil {
 		var (
 			metaTxMoqParamOut *metaTx
+			errOut            error
 		)
-		return metaTxMoqParamOut
+		return metaTxMoqParamOut, errOut
 	}
 	return mock.GetKnownBlobTxnFunc(tx, hash)
 }
