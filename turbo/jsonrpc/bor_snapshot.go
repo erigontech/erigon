@@ -263,18 +263,24 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 		return common.Hash{}, err
 	}
 
-	txTemp, err := api.db.BeginRo(ctx)
+	// this has been moved to prior to adding of transactions to capture the
+	// pre state of the db - which is used for logging in the messages below
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
-	defer txTemp.Rollback()
+	defer tx.Rollback()
 
-	currentHeader := rawdb.ReadCurrentHeader(txTemp)
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	// Ensure we have an actually valid block
+	if currentHeader == nil {
+		return common.Hash{}, errUnknownBlock
+	}
 
 	tempBlockNumber := rpc.BlockNumber(currentHeader.Number.Int64())
 	tempBlockorHash := rpc.BlockNumberOrHash{BlockNumber: &tempBlockNumber}
 
-	readerTemp, err := rpchelper.CreateStateReader(ctx, txTemp, tempBlockorHash, 0, api.filters, api.stateCache, api.historyV3(txTemp), "")
+	readerTemp, err := rpchelper.CreateStateReader(ctx, tx, tempBlockorHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -311,13 +317,6 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 	}
 	if !txn.Protected() {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-	}
-
-	// this has been moved to prior to adding of transactions to capture the
-	// pre state of the db - which is used for logging in the messages below
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
 	}
 
 	defer tx.Rollback()

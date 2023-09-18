@@ -854,7 +854,11 @@ func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccou
 		case v.IsStorage():
 			for slot, value := range v.Storage {
 				slot := slot
-				tempByte, _ := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
+				tempByte, err := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
+				if err != nil {
+					return fmt.Errorf("error reading account storage at: %v slot: %v", k, slot)
+				}
+
 				actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
 				if value != actualValue {
 					return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", k, slot, value, actualValue)
