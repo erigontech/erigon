@@ -94,7 +94,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		logger := debug.SetupCobra(cmd, "sentry")
-		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, protocol, healthCheck, logger)
+		return sentry.Sentry(cmd.Context(), sentryAddr, discoveryDNS, p2pConfig, protocol, healthCheck, logger)
 	},
 }
 
