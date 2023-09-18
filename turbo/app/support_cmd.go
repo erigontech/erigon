@@ -196,7 +196,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					Id:        ni.Id,
 					Name:      ni.Name,
 					Protocols: ni.Protocols,
-					Enodes: []enode{enode{
+					Enodes: []enode{{
 						Enode:        ni.Enode,
 						Enr:          ni.Enr,
 						Ports:        ni.Ports,
