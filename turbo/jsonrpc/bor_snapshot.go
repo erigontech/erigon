@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -191,6 +193,66 @@ func (api *BorImpl) GetCurrentValidators() ([]*valset.Validator, error) {
 		return make([]*valset.Validator, 0), err
 	}
 	return snap.ValidatorSet.Validators, nil
+}
+
+// GetVoteOnHash gets the vote on milestone hash
+func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBlockNr uint64, hash string, milestoneId string) (bool, error) {
+	tx, err := api.db.BeginRo(context.Background())
+	if err != nil {
+		return false, err
+	}
+
+	service := whitelist.GetWhitelistingService()
+
+	if service == nil {
+		return false, errors.New("Only available in Bor engine")
+	}
+
+	//Confirmation of 16 blocks on the endblock
+	tipConfirmationBlockNr := endBlockNr + uint64(16)
+
+	//Check if tipConfirmation block exit
+	_, err = api._blockReader.BlockByNumber(ctx, tx, tipConfirmationBlockNr)
+	if err != nil {
+		return false, errors.New("failed to get tip confirmation block")
+	}
+
+	//Check if end block exist
+	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
+	if err != nil {
+		return false, errors.New("failed to get end block")
+	}
+
+	localEndBlockHash := localEndBlock.Hash().String()
+
+	isLocked := service.LockMutex(endBlockNr)
+
+	if !isLocked {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+	}
+
+	if localEndBlockHash != hash {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+	}
+
+	bor, ok := api._engine.(*bor.Bor)
+
+	if !ok {
+		return false, errors.New("bor engine not available")
+	}
+
+	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
+
+	if err != nil {
+		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+		return false, errors.New("milestone ID doesn't exist in Heimdall")
+	}
+
+	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
+
+	return true, nil
 }
 
 type BlockSigners struct {
