@@ -72,7 +72,7 @@ func (a *ApiHandler) getBlockRoot(r *http.Request) (data any, finalized *bool, v
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.Begin()
+	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return

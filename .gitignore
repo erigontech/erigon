@@ -47,6 +47,7 @@ profile.cov
 
 # VS Code
 .vscode
+*.code-workspace
 
 # dashboard
 /dashboard/assets/flow-typed
@@ -81,10 +82,12 @@ coverage.out
 
 dist
 __debug_bin
+*.exe
 
 *.log
 
 caplin-recordings
 
 jwt.hex
-*.exe
+
+.tool-versions

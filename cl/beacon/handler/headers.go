@@ -31,7 +31,7 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 		return
 	}
 	var tx *sql.Tx
-	tx, err = a.indiciesDB.Begin()
+	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -88,7 +88,7 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 
 func (a *ApiHandler) getHeader(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	ctx := r.Context()
-	tx, err2 := a.indiciesDB.Begin()
+	tx, err2 := a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err2 != nil {
 		httpStatus = http.StatusInternalServerError
 		err = err2

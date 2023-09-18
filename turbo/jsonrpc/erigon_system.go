@@ -7,6 +7,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -66,6 +68,16 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
+		if whitelist.GetWhitelistingService() != nil {
+			num, err := borfinality.GetFinalizedBlockNumber(tx, api._blockReader)
+			if err != nil {
+				return 0, err
+			}
+
+			blockNum = borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
+			return hexutil.Uint64(blockNum), nil
+		}
+
 		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {
 			return 0, err

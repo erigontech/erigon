@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
@@ -35,6 +36,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -125,6 +128,8 @@ var (
 
 	errUncleDetected     = errors.New("uncles not allowed")
 	errUnknownValidators = errors.New("unknown validators")
+
+	errUnknownSnapshot = errors.New("unknown snapshot")
 )
 
 // SignerFn is a signer callback function to request a header to be signed by a
@@ -245,7 +250,7 @@ type Bor struct {
 
 	spanner                Spanner
 	GenesisContractsClient GenesisContract
-	HeimdallClient         IHeimdallClient
+	HeimdallClient         heimdall.IHeimdallClient
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -254,6 +259,7 @@ type Bor struct {
 
 	closeOnce sync.Once
 	logger    log.Logger
+	closeCh   chan struct{} // Channel to signal the background processes to exit
 }
 
 type signer struct {
@@ -356,7 +362,7 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	genesisContracts GenesisContract,
 	logger log.Logger,
 ) *Bor {
@@ -384,6 +390,7 @@ func New(
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
+		closeCh:                make(chan struct{}),
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -647,7 +654,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
 			snap = s
-
 			break
 		}
 
@@ -657,7 +663,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
-
 				break
 			}
 		}
@@ -674,9 +679,11 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			parents = parents[:len(parents)-1]
 		} else {
 			// No explicit parents (or no more left), reach out to the database
-			if chain != nil {
-				header = chain.GetHeader(hash, number)
+			if chain == nil {
+				break
 			}
+
+			header = chain.GetHeader(hash, number)
 
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
@@ -700,6 +707,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		default:
 		}
 	}
+
 	if snap == nil && chain != nil && number <= chain.FrozenBlocks() {
 		// Special handling of the headers in the snapshot
 		zeroHeader := chain.GetHeaderByNumber(0)
@@ -743,7 +751,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 	// check if snapshot is nil
 	if snap == nil {
-		return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", number)
+		return nil, fmt.Errorf("%w at block number %v", errUnknownSnapshot, number)
 	}
 
 	// Previous snapshot found, apply any pending headers on top of it
@@ -1155,7 +1163,12 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 	}
 
 	snap, err := c.snapshot(nil, number-1, header.ParentHash, nil)
+
 	if err != nil {
+		if errors.Is(err, errUnknownSnapshot) {
+			return false, nil
+		}
+
 		return false, err
 	}
 
@@ -1220,12 +1233,34 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
-// Close implements consensus.Engine. It's a noop for bor as there are no background threads.
+type FinalityAPI interface {
+	GetRootHash(start uint64, end uint64) (string, error)
+}
+
+func (c *Bor) Start(apiList []rpc.API, chainDB kv.RwDB, blockReader services.FullBlockReader) {
+	borDB := c.DB
+
+	whitelist.RegisterService(borDB)
+
+	var borAPI borfinality.BorAPI
+
+	for _, api := range apiList {
+		if api.Namespace == "bor" {
+			borAPI = api.Service.(FinalityAPI)
+			break
+		}
+	}
+
+	borfinality.Whitelist(c.HeimdallClient, borDB, chainDB, blockReader, c.logger, borAPI, c.closeCh)
+}
+
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
 		if c.HeimdallClient != nil {
 			c.HeimdallClient.Close()
 		}
+		// Close all bg processes
+		close(c.closeCh)
 	})
 
 	return nil
@@ -1362,7 +1397,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h IHeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
 	c.HeimdallClient = h
 }
 

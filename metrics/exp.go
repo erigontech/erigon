@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var EnabledExpensive = false
+
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
 func Setup(address string, logger log.Logger) *http.ServeMux {
