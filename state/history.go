@@ -108,6 +108,13 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	return &h, nil
 }
 
+func (h *History) vFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+}
+func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+}
+
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
@@ -216,7 +223,7 @@ func (h *History) openFiles() error {
 				continue
 			}
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+			datPath := h.vFilePath(fromStep, toStep)
 			if !dir.FileExist(datPath) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
@@ -227,7 +234,7 @@ func (h *History) openFiles() error {
 			}
 
 			if item.index == nil {
-				idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+				idxPath := h.vAccessorFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 						h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
@@ -297,7 +304,7 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 	h.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			if !dir.FileExist(filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))) {
+			if !dir.FileExist(h.vAccessorFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -314,10 +321,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	}
 
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-	fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(h.dir, fName)
-
-	//h.logger.Info("[snapshots] build idx", "file", fName)
+	idxPath := h.vAccessorFilePath(fromStep, toStep)
 	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.InvertedIndex.compression, h.compression, h.salt, h.logger)
 }
 
@@ -636,7 +640,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			}
 		}
 	}()
-	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
+	historyPath := h.vFilePath(step, step+1)
 	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
@@ -816,7 +820,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var historyIdxPath, efHistoryPath string
 
 	{
-		historyIdxFileName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, step, step+1)
+		historyIdxFileName := h.vAccessorFilePath(step, step+1)
 		p := ps.AddNew(historyIdxFileName, 1)
 		defer ps.Delete(p)
 		historyIdxPath = filepath.Join(h.dir, historyIdxFileName)

@@ -552,8 +552,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		defer f.decompressor.EnableReadAhead().DisableReadAhead()
 	}
 
-	datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-	datPath := filepath.Join(d.dir, datFileName)
+	datPath := d.kvFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	compr, err := compress.NewCompressor(ctx, "merge", datPath, d.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s domain compressor: %w", d.filenameBase, err)
@@ -563,6 +562,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	if d.noFsync {
 		comp.DisableFsync()
 	}
+	_, datFileName := filepath.Split(datPath)
 	p := ps.AddNew("merge "+datFileName, 1)
 	defer ps.Delete(p)
 
@@ -639,26 +639,24 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
-	idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-	idxPath := filepath.Join(d.dir, idxFileName)
 	//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir,  false /* values */); err != nil {
 	if !UseBpsTree {
+		idxPath := d.kvAccessorFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
 
-	btFileName := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-	btPath := filepath.Join(d.dir, btFileName)
+	btPath := d.btIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
 	{
-		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		if dir.FileExist(filepath.Join(d.dir, fileName)) {
-			valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+		eiPath := d.kvExistenceIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
+		if dir.FileExist(eiPath) {
+			valuesIn.bloom, err = OpenBloom(eiPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
@@ -713,8 +711,8 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		return
 	}
 
-	datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-	datPath := filepath.Join(d.dir, datFileName)
+	datPath := d.kvFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
+	_, datFileName := filepath.Split(datPath)
 	p := ps.AddNew(datFileName, 1)
 	defer ps.Delete(p)
 
@@ -805,15 +803,14 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	}
 	ps.Delete(p)
 
-	idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-	idxPath := filepath.Join(d.dir, idxFileName)
 	if !UseBpsTree {
+		idxPath := d.kvAccessorFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
 
-	btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
+	btPath := d.btIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 	valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.tmpdir, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
@@ -850,8 +847,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 		return nil, ctx.Err()
 	}
 
-	datFileName := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
-	datPath := filepath.Join(ii.dir, datFileName)
+	datPath := ii.efFilePath(startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
@@ -859,6 +855,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 		comp.DisableFsync()
 	}
 	write := NewArchiveWriter(comp, ii.compression)
+	_, datFileName := filepath.Split(datPath)
 	p := ps.AddNew(datFileName, 1)
 	defer ps.Delete(p)
 
@@ -944,15 +941,13 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	ps.Delete(p)
 
 	{
-		idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
-		idxPath := filepath.Join(ii.dir, idxFileName)
+		idxPath := ii.efAccessorFilePath(startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 		if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 			return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 		}
 	}
 	if ii.withExistenceIndex {
-		idxFileName := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
-		idxPath := filepath.Join(ii.dir, idxFileName)
+		idxPath := ii.efExistenceIdxFilePath(startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 		if outItem.bloom, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 			return nil, err
 		}
@@ -1009,10 +1004,8 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				}
 			}
 		}()
-		datFileName := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
-		idxFileName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
-		datPath := filepath.Join(h.dir, datFileName)
-		idxPath := filepath.Join(h.dir, idxFileName)
+		idxPath := h.vAccessorFilePath(r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
+		datPath := h.vFilePath(r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
@@ -1020,6 +1013,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		if h.noFsync {
 			compr.DisableFsync()
 		}
+		_, datFileName := filepath.Split(datPath)
 		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
 
@@ -1093,6 +1087,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		}
 		ps.Delete(p)
 
+		_, idxFileName := filepath.Split(idxPath)
 		p = ps.AddNew(idxFileName, uint64(decomp.Count()/2))
 		defer ps.Delete(p)
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
