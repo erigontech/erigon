@@ -51,14 +51,14 @@ func NewValidatorSet(c int) *ValidatorSet {
 
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
-	treeCacheSize := newValidatorSetLength * length.Hash
+	treeCacheSize := (newValidatorSetLength * length.Hash) / (1 << validatorTreeCacheGroupLayer)
 	if size <= cap(v.buffer) {
 		v.treeCacheBuffer = v.treeCacheBuffer[:treeCacheSize]
 		v.buffer = v.buffer[:size]
 		return
 	}
 	buffer := make([]byte, size, int(float64(size)*validatorSetCapacityMultiplier))
-	cacheBuffer := make([]byte, treeCacheSize, int(float64(size)*validatorSetCapacityMultiplier))
+	cacheBuffer := make([]byte, treeCacheSize, int(float64(treeCacheSize)*validatorSetCapacityMultiplier))
 	copy(buffer, v.buffer)
 	copy(cacheBuffer, v.treeCacheBuffer)
 	v.treeCacheBuffer = cacheBuffer
