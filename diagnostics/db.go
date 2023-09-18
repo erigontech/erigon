@@ -22,22 +22,22 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	} else {
 		dataDir = paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String("chain"))
 	}
-	metricsMux.HandleFunc("/debug/dbs", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/dbs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeDbList(w, dataDir)
 	})
-	metricsMux.HandleFunc("/debug/dbs/", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/dbs/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		urlPath := r.URL.Path
 
-		if !strings.HasPrefix(urlPath, "/debug/dbs/") {
-			http.Error(w, fmt.Sprintf(`Unexpected path prefix: expected: "/debug/dbs/..." got: "%s"`, urlPath), http.StatusNotFound)
+		if !strings.HasPrefix(urlPath, "/dbs/") {
+			http.Error(w, fmt.Sprintf(`Unexpected path prefix: expected: "/dbs/..." got: "%s"`, urlPath), http.StatusNotFound)
 			return
 		}
 
-		pathParts := strings.Split(urlPath[11:], "/")
+		pathParts := strings.Split(urlPath[5:], "/")
 
 		if len(pathParts) < 1 {
 			http.Error(w, fmt.Sprintf(`Unexpected path len: expected: "{db}/tables" got: "%s"`, urlPath), http.StatusNotFound)
@@ -89,7 +89,7 @@ func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 			key, err := base64.URLEncoding.DecodeString(pathParts[2])
 
 			if err != nil {
-				http.Error(w, fmt.Sprintf(`key "%s" argument may only contain hexadecimal digits: %v`, pathParts[2], err), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf(`key "%s" argument should be base64url encoded: %v`, pathParts[2], err), http.StatusBadRequest)
 				return
 			}
 

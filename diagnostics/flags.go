@@ -8,7 +8,7 @@ import (
 )
 
 func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
-	metricsMux.HandleFunc("/debug/flags", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/flags", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		flags := map[string]interface{}{}
