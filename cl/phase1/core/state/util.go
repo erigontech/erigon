@@ -51,14 +51,14 @@ func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Dep
 }
 
 // Check whether a validator is fully withdrawable at the given epoch.
-func isFullyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.Validator, balance uint64, epoch uint64) bool {
+func isFullyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.ReadOnlyValidator, balance uint64, epoch uint64) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
 		validator.WithdrawableEpoch() <= epoch && balance > 0
 }
 
 // Check whether a validator is partially withdrawable.
-func isPartiallyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.Validator, balance uint64) bool {
+func isPartiallyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator solid.ReadOnlyValidator, balance uint64) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
 		validator.EffectiveBalance() == conf.MaxEffectiveBalance && balance > conf.MaxEffectiveBalance

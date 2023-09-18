@@ -22,7 +22,7 @@ func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
 	var err error
-	s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	s.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
 			return true
 		}
@@ -59,7 +59,7 @@ func processSlashings2(s abstract.BeaconState, slashingMultiplier uint64) error 
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
 	var err error
-	s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	s.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
 			return true
 		}

@@ -18,7 +18,7 @@ func GetUnslashedIndiciesSet(s abstract.BeaconState) [][]bool {
 	}
 	previousEpoch := state.PreviousEpoch(s)
 
-	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.ReadOnlyValidator, validatorIndex, total int) bool {
 		for i := range weights {
 			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(s, previousEpoch, uint64(validatorIndex), i)
 		}

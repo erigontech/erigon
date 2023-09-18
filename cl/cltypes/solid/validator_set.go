@@ -1,9 +1,8 @@
 package solid
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -101,8 +100,7 @@ func (v *ValidatorSet) Clone() clonable.Clonable {
 	return NewValidatorSet(v.c)
 }
 
-func (v *ValidatorSet) CopyTo(set2 IterableSSZ[Validator]) {
-	t := set2.(*ValidatorSet)
+func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	t.l = v.l
 	t.c = v.c
 	offset := v.EncodingSizeSSZ()
@@ -145,11 +143,20 @@ func (*ValidatorSet) Static() bool {
 	return false
 }
 
-func (v *ValidatorSet) Get(idx int) Validator {
+func (v *ValidatorSet) Get(idx int) ReadOnlyValidator {
 	if idx >= v.l {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
-	return v.buffer[idx*validatorSize : (idx*validatorSize)+validatorSize]
+
+	return Validator(v.buffer[idx*validatorSize : (idx*validatorSize)+validatorSize])
+}
+
+func (v *ValidatorSet) getValidator(idx int) Validator {
+	if idx >= v.l {
+		panic("ValidatorSet -- Get: out of bounds")
+	}
+
+	return Validator(v.buffer[idx*validatorSize : (idx*validatorSize)+validatorSize])
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
@@ -171,7 +178,6 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		to := utils.Min64(from+uint64(validatorsLeafChunkSize), uint64(v.l))
 		// Use Loop R3MINDER
 		offset := (i / validatorsLeafChunkSize) * length.Hash
-		fmt.Println(from, to, v.l, offset, len(validatorLeaves))
 		if err := v.computeFlatValidatorsRootsToBuffer(from, to, depth, hashBuffer, layerBuffer, validatorLeaves[offset:]); err != nil {
 			return [32]byte{}, err
 		}
@@ -196,7 +202,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 
 func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, validatorLeaves []byte) error {
 	for i := from; i < to; i++ {
-		validator := v.Get(int(i))
+		validator := v.getValidator(int(i))
 		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 			return err
 		}
@@ -213,7 +219,6 @@ func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64
 			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
 		}
 		if err := merkle_tree.HashByteSlice(layerBuffer, layerBuffer); err != nil {
-			panic(err)
 			return err
 		}
 		layerBuffer = layerBuffer[:len(layerBuffer)/2]
@@ -255,7 +260,7 @@ func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
 	v.attesterBits[idx] &= ^(1 << bit)
 }
 
-func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
+func (v *ValidatorSet) Range(fn func(int, ReadOnlyValidator, int) bool) {
 	for i := 0; i < v.l; i++ {
 		if !fn(i, v.Get(i), v.l) {
 			return
@@ -325,4 +330,32 @@ func (v *ValidatorSet) SetMinCurrentInclusionDelayAttestation(idx int, val *Pend
 
 func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *PendingAttestation) {
 	v.getPhase0(idx).MinPreviousInclusionDelayAttestation = val
+}
+
+func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
+	v.getValidator(index).SetWithdrawalCredentials(creds)
+}
+
+func (v *ValidatorSet) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
+	v.getValidator(index).SetExitEpoch(epoch)
+}
+
+func (v *ValidatorSet) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) {
+	v.getValidator(index).SetWithdrawableEpoch(epoch)
+}
+
+func (v *ValidatorSet) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
+	v.getValidator(index).SetEffectiveBalance(balance)
+}
+
+func (v *ValidatorSet) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
+	v.getValidator(index).SetActivationEpoch(epoch)
+}
+
+func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
+	v.getValidator(index).SetActivationEligibilityEpoch(epoch)
+}
+
+func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
+	v.getValidator(index).SetSlashed(slashed)
 }

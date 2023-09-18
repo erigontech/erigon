@@ -187,7 +187,7 @@ func (b *CachingBeaconState) _refreshActiveBalances() {
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
-	b.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
+	b.ForEachValidator(func(validator solid.ReadOnlyValidator, idx, total int) bool {
 		if validator.Active(epoch) {
 			*b.totalActiveBalanceCache += validator.EffectiveBalance()
 		}
@@ -213,7 +213,7 @@ func (b *CachingBeaconState) initBeaconState() error {
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 
 		return true

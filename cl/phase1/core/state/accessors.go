@@ -96,7 +96,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	eligibleValidators = make([]uint64, 0, b.ValidatorLength())
 	previousEpoch := PreviousEpoch(b)
 
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
 		if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
 			eligibleValidators = append(eligibleValidators, uint64(i))
 		}
@@ -157,7 +157,7 @@ func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epo
 		return nil, fmt.Errorf("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
 	}
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
 		if !validator.Active(epoch) ||
 			!cltypes.ParticipationFlags(participation.Get(i)).HasFlag(flagIndex) ||
 			validator.Slashed() {

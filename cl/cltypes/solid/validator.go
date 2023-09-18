@@ -177,10 +177,10 @@ func (v Validator) SetWithdrawableEpoch(i uint64) {
 }
 
 // Active returns if validator is active for given epoch
-func (v *Validator) Active(epoch uint64) bool {
+func (v Validator) Active(epoch uint64) bool {
 	return v.ActivationEpoch() <= epoch && epoch < v.ExitEpoch()
 }
 
-func (v *Validator) IsSlashable(epoch uint64) bool {
+func (v Validator) IsSlashable(epoch uint64) bool {
 	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
 }

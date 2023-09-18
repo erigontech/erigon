@@ -116,8 +116,8 @@ type BeaconStateBasic interface {
 	Eth1DepositIndex() uint64
 	ValidatorLength() int
 	AppendValidator(in solid.Validator)
-	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
-	ValidatorForValidatorIndex(index int) (solid.Validator, error)
+	ForEachValidator(fn func(v solid.ReadOnlyValidator, idx int, total int) bool)
+	ValidatorForValidatorIndex(index int) (solid.ReadOnlyValidator, error)
 	ForEachBalance(fn func(v uint64, idx int, total int) bool)
 	ValidatorBalance(index int) (uint64, error)
 	ValidatorExitEpoch(index int) (uint64, error)
