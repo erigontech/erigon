@@ -44,6 +44,7 @@ type Link struct {
 	linked      bool    // Whether this link is connected (via chain of ParentHash to one of the persisted links)
 	idx         int     // Index in the heap
 	queueId     QueueID // which queue this link belongs to
+	peerId      [64]byte
 }
 
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links

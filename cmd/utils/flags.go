@@ -736,6 +736,7 @@ var (
 		Usage: "URL of Heimdall service",
 		Value: "http://localhost:1317",
 	}
+
 	WebSeedsFlag = cli.StringFlag{
 		Name:  "webseeds",
 		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
@@ -756,6 +757,12 @@ var (
 	BorBlockSizeFlag = cli.BoolFlag{
 		Name:  "bor.minblocksize",
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
+	}
+
+	WithHeimdallMilestones = cli.BoolFlag{
+		Name:  "bor.milestone",
+		Usage: "Enabling bor milestone processing",
+		Value: false,
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
@@ -1362,6 +1369,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.HeimdallgRPCAddress = ctx.String(HeimdallgRPCAddressFlag.Name)
+	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

@@ -7,19 +7,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
-type BorAPI interface {
-	GetRootHash(start uint64, end uint64) (string, error)
-}
-
 type config struct {
-	engine      consensus.Engine
+	heimdall    heimdall.IHeimdallClient
 	borDB       kv.RwDB
 	chainDB     kv.RwDB
 	blockReader services.BlockReader
@@ -28,9 +23,13 @@ type config struct {
 	closeCh     chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+type BorAPI interface {
+	GetRootHash(start uint64, end uint64) (string, error)
+}
+
+func Whitelist(heimdall heimdall.IHeimdallClient, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	config := &config{
-		engine:      engine,
+		heimdall:    heimdall,
 		borDB:       borDB,
 		chainDB:     chainDB,
 		blockReader: blockReader,
@@ -90,7 +89,7 @@ func startNoAckMilestoneByIDService(config *config) {
 	RetryHeimdallHandler(handleNoAckMilestoneByID, config, tickerDuration, noAckMilestoneTimeout, fnName)
 }
 
-type heimdallHandler func(ctx context.Context, bor *bor.Bor, config *config) error
+type heimdallHandler func(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error
 
 func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName)
@@ -104,15 +103,14 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	default:
 	}
 
-	bor, ok := config.engine.(*bor.Bor)
-	if !ok {
+	if config.heimdall == nil {
 		log.Error("bor engine not available")
 		return
 	}
 
 	// first run for fetching milestones
 	firstCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	err := fn(firstCtx, bor, config)
+	err := fn(firstCtx, config.heimdall, config)
 
 	cancel()
 
@@ -127,7 +125,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			err := fn(ctx, bor, config)
+			err := fn(ctx, config.heimdall, config)
 
 			cancel()
 
@@ -141,12 +139,12 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 }
 
 // handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config) error {
+func handleWhitelistCheckpoint(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
+	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, heimdall, verifier, config)
 
 	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
 	// means that array has partial elements and it failed for some block. We'll add those partial
@@ -161,12 +159,12 @@ func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config
 }
 
 // handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
+func handleMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
+	num, hash, err := fetchWhitelistMilestone(ctx, heimdall, verifier, config)
 
 	// If the current chain head is behind the received milestone, add it to the future milestone
 	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
@@ -184,9 +182,9 @@ func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	return nil
 }
 
-func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
+func handleNoAckMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
-	milestoneID, err := fetchNoAckMilestone(ctx, bor)
+	milestoneID, err := fetchNoAckMilestone(ctx, heimdall)
 
 	//If failed to fetch the no-ack milestone then it give the error.
 	if err != nil {
@@ -198,12 +196,12 @@ func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) err
 	return nil
 }
 
-func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config) error {
+func handleNoAckMilestoneByID(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
-		err := fetchNoAckMilestoneByID(ctx, bor, milestoneID)
+		err := fetchNoAckMilestoneByID(ctx, heimdall, milestoneID)
 		if err == nil {
 			service.RemoveMilestoneID(milestoneID)
 		}
