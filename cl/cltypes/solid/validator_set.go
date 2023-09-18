@@ -1,7 +1,8 @@
 package solid
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"bytes"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -51,8 +52,10 @@ func NewValidatorSet(c int) *ValidatorSet {
 }
 
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
+	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
 	size := newValidatorSetLength * validatorSize
-	treeCacheSize := (newValidatorSetLength * length.Hash) / (1 << validatorTreeCacheGroupLayer)
+	treeCacheSize := ((newValidatorSetLength + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize) * length.Hash
+
 	if size <= cap(v.buffer) {
 		v.treeCacheBuffer = v.treeCacheBuffer[:treeCacheSize]
 		v.buffer = v.buffer[:size]
@@ -143,15 +146,7 @@ func (*ValidatorSet) Static() bool {
 	return false
 }
 
-func (v *ValidatorSet) Get(idx int) ReadOnlyValidator {
-	if idx >= v.l {
-		panic("ValidatorSet -- Get: out of bounds")
-	}
-
-	return Validator(v.buffer[idx*validatorSize : (idx*validatorSize)+validatorSize])
-}
-
-func (v *ValidatorSet) getValidator(idx int) Validator {
+func (v *ValidatorSet) Get(idx int) Validator {
 	if idx >= v.l {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
@@ -162,8 +157,6 @@ func (v *ValidatorSet) getValidator(idx int) Validator {
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
 	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
-	v.makeBuf(((v.l + validatorsLeafChunkSize - 1) * length.Hash) / validatorsLeafChunkSize)
-	validatorLeaves := v.buf
 	hashBuffer := make([]byte, 8*32)
 	depth := GetDepth(uint64(v.c))
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
@@ -172,19 +165,24 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
 	}
 
+	emptyHashBytes := make([]byte, length.Hash)
+
 	layerBuffer := make([]byte, validatorsLeafChunkSize*length.Hash)
 	for i := 0; i < v.l; i += validatorsLeafChunkSize {
 		from := uint64(i)
 		to := utils.Min64(from+uint64(validatorsLeafChunkSize), uint64(v.l))
 		// Use Loop R3MINDER
 		offset := (i / validatorsLeafChunkSize) * length.Hash
-		if err := v.computeFlatValidatorsRootsToBuffer(from, to, depth, hashBuffer, layerBuffer, validatorLeaves[offset:]); err != nil {
-			return [32]byte{}, err
+		if bytes.Equal(v.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
+			if err := v.computeFlatValidatorsRootsToBuffer(from, to, depth, hashBuffer, layerBuffer, v.treeCacheBuffer[offset:]); err != nil {
+				return [32]byte{}, err
+			}
 		}
+
 	}
 
 	offset := length.Hash * ((v.l + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize)
-	elements := common.Copy(validatorLeaves[:offset])
+	elements := v.treeCacheBuffer[:offset]
 	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
 		// Sequential
 		if len(elements)%64 != 0 {
@@ -197,12 +195,13 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		}
 		elements = v.buf
 	}
+
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
 func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, validatorLeaves []byte) error {
 	for i := from; i < to; i++ {
-		validator := v.getValidator(int(i))
+		validator := v.Get(int(i))
 		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 			return err
 		}
@@ -260,11 +259,18 @@ func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
 	v.attesterBits[idx] &= ^(1 << bit)
 }
 
-func (v *ValidatorSet) Range(fn func(int, ReadOnlyValidator, int) bool) {
+func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
 	for i := 0; i < v.l; i++ {
 		if !fn(i, v.Get(i), v.l) {
 			return
 		}
+	}
+}
+
+func (v *ValidatorSet) zeroTreeHash(idx int) {
+	iNodeIdx := (idx / (1 << validatorTreeCacheGroupLayer)) * length.Hash
+	for i := iNodeIdx; i < iNodeIdx+length.Hash; i++ {
+		v.treeCacheBuffer[i] = 0
 	}
 }
 
@@ -333,29 +339,36 @@ func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *Pen
 }
 
 func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
-	v.getValidator(index).SetWithdrawalCredentials(creds)
+	v.zeroTreeHash(index)
+	v.Get(index).SetWithdrawalCredentials(creds)
 }
 
 func (v *ValidatorSet) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.getValidator(index).SetExitEpoch(epoch)
+	v.zeroTreeHash(index)
+	v.Get(index).SetExitEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.getValidator(index).SetWithdrawableEpoch(epoch)
+	v.zeroTreeHash(index)
+	v.Get(index).SetWithdrawableEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
-	v.getValidator(index).SetEffectiveBalance(balance)
+	v.zeroTreeHash(index)
+	v.Get(index).SetEffectiveBalance(balance)
 }
 
 func (v *ValidatorSet) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.getValidator(index).SetActivationEpoch(epoch)
+	v.zeroTreeHash(index)
+	v.Get(index).SetActivationEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
-	v.getValidator(index).SetActivationEligibilityEpoch(epoch)
+	v.zeroTreeHash(index)
+	v.Get(index).SetActivationEligibilityEpoch(epoch)
 }
 
 func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
-	v.getValidator(index).SetSlashed(slashed)
+	v.zeroTreeHash(index)
+	v.Get(index).SetSlashed(slashed)
 }

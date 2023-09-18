@@ -91,8 +91,8 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	}
 	mixes := baseState.RandaoMixes()
 	// TODO: make this copy smarter when validators is a smarter struct
-	validators := make([]solid.ReadOnlyValidator, baseState.ValidatorLength())
-	baseState.ForEachValidator(func(v solid.ReadOnlyValidator, idx, total int) bool {
+	validators := make([]solid.Validator, baseState.ValidatorLength())
+	baseState.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		validators[idx] = v
 		return true
 	})

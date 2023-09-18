@@ -10,7 +10,7 @@ func ProcessParticipationRecordUpdates(s abstract.BeaconState) error {
 	s.ResetCurrentEpochAttestations()
 	var err error
 	// Also mark all current attesters as previous
-	s.ForEachValidator(func(_ solid.ReadOnlyValidator, idx, total int) bool {
+	s.ForEachValidator(func(_ solid.Validator, idx, total int) bool {
 
 		var oldCurrentMatchingSourceAttester, oldCurrentMatchingTargetAttester, oldCurrentMatchingHeadAttester bool
 		var oldMinCurrentInclusionDelayAttestation *solid.PendingAttestation

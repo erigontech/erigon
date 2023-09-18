@@ -22,7 +22,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies 
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
-	b.ForEachValidator(func(v solid.ReadOnlyValidator, i, total int) bool {
+	b.ForEachValidator(func(v solid.Validator, i, total int) bool {
 		if !v.Active(epoch) {
 			return true
 		}

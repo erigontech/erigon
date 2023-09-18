@@ -17,7 +17,7 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	inactivityPenaltyDenominator := beaconConfig.InactivityScoreBias * beaconConfig.GetPenaltyQuotient(s.Version())
 	// Make buffer for flag indexes total balances.
 	flagsTotalBalances := make([]uint64, len(weights))
-	s.ForEachValidator(func(validator solid.ReadOnlyValidator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		for i := range weights {
 			if flagsUnslashedIndiciesSet[i][validatorIndex] {
 				flagsTotalBalances[i] += validator.EffectiveBalance()
@@ -83,7 +83,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 	// Make buffer for flag indexes totTargetal balances.
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator solid.ReadOnlyValidator, idx, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 		if validator.Slashed() {
 			return true
 		}
@@ -200,7 +200,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 	}
 	// Lastly process late attestations
 
-	s.ForEachValidator(func(validator solid.ReadOnlyValidator, index, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
 		var previousMatchingSourceAttester bool
 		var attestation *solid.PendingAttestation
 		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(index); err != nil {

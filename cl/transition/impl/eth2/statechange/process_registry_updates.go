@@ -29,7 +29,7 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	activationQueue := make([]minimizeQueuedValidator, 0)
 	// Process activation eligibility and ejections.
 	var err error
-	s.ForEachValidator(func(validator solid.ReadOnlyValidator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		effectivaBalance := validator.EffectiveBalance()
 		if activationEligibilityEpoch == s.BeaconConfig().FarFutureEpoch &&

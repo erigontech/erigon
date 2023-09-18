@@ -70,7 +70,7 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 	previousEpoch := state.PreviousEpoch(s)
 	if s.Version() == clparams.Phase0Version {
 		var err error
-		s.ForEachValidator(func(validator solid.ReadOnlyValidator, idx, total int) bool {
+		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 			if validator.Slashed() {
 				return true
 			}
@@ -99,7 +99,7 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 	} else {
 		// Use bitlists to determine finality.
 		currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
-		s.ForEachValidator(func(validator solid.ReadOnlyValidator, i, total int) bool {
+		s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 			if validator.Slashed() {
 				return true
 			}

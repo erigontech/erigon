@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -446,7 +449,13 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					logger.Debug("Imported chain segment", "hash", headRoot, "slot", headSlot)
+
+					var m runtime.MemStats
+					dbg.ReadMemStats(&m)
+					logger.Debug("Imported chain segment",
+						"hash", headRoot, "slot", headSlot,
+						"alloc", common.ByteCount(m.Alloc),
+						"sys", common.ByteCount(m.Sys))
 					return tx.Commit()
 				},
 			},

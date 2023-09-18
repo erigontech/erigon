@@ -48,18 +48,3 @@ type HashVectorSSZ interface {
 	json.Marshaler
 	json.Unmarshaler
 }
-
-type ReadOnlyValidator interface {
-	WithdrawableEpoch() uint64
-	ExitEpoch() uint64
-	ActivationEpoch() uint64
-	ActivationEligibilityEpoch() uint64
-	Slashed() bool
-	EffectiveBalance() uint64
-	WithdrawalCredentials() common.Hash
-	PublicKey() [48]byte
-	PublicKeyBytes() []byte
-
-	Active(epoch uint64) bool
-	IsSlashable(epoch uint64) bool
-}
