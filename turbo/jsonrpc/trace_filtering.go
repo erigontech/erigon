@@ -618,7 +618,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// TODO(yperbasis) proper rewards for Gnosis
 
 			// if we are in POS
-			// we dont check for uncles or block rewards
+			// we don't check for uncles or block rewards
 			if isPos {
 				continue
 			}
