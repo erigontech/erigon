@@ -356,11 +356,11 @@ func (d *Domain) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(coldNames, warmNames []string) error {
-	if err := d.History.OpenList(coldNames, warmNames); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
+	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	return d.openList(warmNames)
+	return d.openList(domainFiles)
 }
 
 func (d *Domain) openList(names []string) error {
@@ -373,11 +373,11 @@ func (d *Domain) openList(names []string) error {
 }
 
 func (d *Domain) OpenFolder() error {
-	files, warmNames, err := d.fileNamesOnDisk()
+	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return d.OpenList(files, warmNames)
+	return d.OpenList(idx, histFiles, domainFiles)
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {

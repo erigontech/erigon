@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math"
 	"os"
 	"path/filepath"
@@ -61,7 +62,6 @@ type InvertedIndex struct {
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
-	warmDir         string // Directory where static files are created
 	filenameBase    string
 	aggregationStep uint64
 
@@ -92,6 +92,7 @@ type InvertedIndex struct {
 
 type iiCfg struct {
 	salt        *uint32
+	dirs        datadir.Dirs
 	dir, tmpdir string
 }
 
@@ -105,10 +106,8 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	baseDir := filepath.Dir(cfg.dir)
 	ii := InvertedIndex{
 		iiCfg:                   cfg,
-		warmDir:                 filepath.Join(baseDir, "warm"),
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
@@ -132,51 +131,62 @@ func NewInvertedIndex(
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
-	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.salt, ii.logger)
+	ii.warmLocalityIdx = NewLocalityIndex(true, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
-	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.salt, ii.logger)
+	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
 	return nil
 }
 
-func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
-	files, err := os.ReadDir(ii.dir)
+func filesFromDir(dir string) ([]string, error) {
+	allFiles, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
+		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
 	}
-	filteredFiles := make([]string, 0, len(files))
-	for _, f := range files {
-		if !f.Type().IsRegular() {
+	filtered := make([]string, 0, len(allFiles))
+	for _, f := range allFiles {
+		if f.IsDir() || !f.Type().IsRegular() {
 			continue
 		}
-		filteredFiles = append(filteredFiles, f.Name())
+		filtered = append(filtered, f.Name())
 	}
-
-	warmFiles := make([]string, 0, len(files))
-	files, err = os.ReadDir(ii.warmDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
-	}
-	for _, f := range files {
-		if !f.Type().IsRegular() {
-			continue
-		}
-		warmFiles = append(warmFiles, f.Name())
-	}
-
-	return filteredFiles, warmFiles, nil
+	return filtered, nil
 }
 
-func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
-	if err := ii.warmLocalityIdx.OpenList(warmFNames); err != nil {
-		return err
+func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err error) {
+	idx, err = filesFromDir(ii.dirs.SnapIdx)
+	if err != nil {
+		return
 	}
-	if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
-		return err
+	hist, err = filesFromDir(ii.dirs.SnapHistory)
+	if err != nil {
+		return
+	}
+	domain, err = filesFromDir(ii.dirs.SnapState)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (ii *InvertedIndex) OpenList(fNames []string) error {
+	{
+		if ii.withLocalityIndex {
+			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
+			if err != nil {
+				return err
+			}
+			if err := ii.warmLocalityIdx.OpenList(accFiles); err != nil {
+				return err
+			}
+			if err := ii.coldLocalityIdx.OpenList(accFiles); err != nil {
+				return err
+			}
+		}
 	}
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
@@ -187,11 +197,11 @@ func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
 }
 
 func (ii *InvertedIndex) OpenFolder() error {
-	files, warm, err := ii.fileNamesOnDisk()
+	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(files, warm)
+	return ii.OpenList(idxFiles)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {

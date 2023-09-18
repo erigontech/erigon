@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ type AggregatorV3 struct {
 	logTopics        *InvertedIndex
 	tracesFrom       *InvertedIndex
 	backgroundResult *BackgroundResult
-	dir              string
+	dirs             datadir.Dirs
 	tmpdir           string
 	aggregationStep  uint64
 	keepInDB         uint64
@@ -101,8 +102,10 @@ type AggregatorV3 struct {
 
 type OnFreezeFunc func(frozenFileNames []string)
 
-func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
-	salt, err := getIndicesSalt(dir)
+func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
+	dir := dirs.SnapHistory
+	tmpdir := dirs.Tmp
+	salt, err := getIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +115,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		ctx:              ctx,
 		ctxCancel:        ctxCancel,
 		onFreeze:         func(frozenFileNames []string) {},
-		dir:              dir,
+		dirs:             dirs,
 		tmpdir:           tmpdir,
 		aggregationStep:  aggregationStep,
 		db:               db,
@@ -124,7 +127,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg := domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: AccDomainLargeValues,
@@ -134,7 +137,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: StorageDomainLargeValues,
@@ -144,7 +147,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 		domainLargeValues: CodeDomainLargeValues,
@@ -154,7 +157,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
 		},
 		domainLargeValues: CommitmentDomainLargeValues,
@@ -165,19 +168,19 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
-	idxCfg := iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg := iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
 	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
 	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir, dirs: dirs}
 	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
@@ -259,33 +262,33 @@ func (a *AggregatorV3) OpenFolder() error {
 
 	return nil
 }
-func (a *AggregatorV3) OpenList(fNames, warmNames []string) error {
+func (a *AggregatorV3) OpenList(idxFiles, histFiles, domainFiles []string) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 
 	var err error
-	if err = a.accounts.OpenList(fNames, warmNames); err != nil {
+	if err = a.accounts.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.storage.OpenList(fNames, warmNames); err != nil {
+	if err = a.storage.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.code.OpenList(fNames, warmNames); err != nil {
+	if err = a.code.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.commitment.OpenList(fNames, warmNames); err != nil {
+	if err = a.commitment.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.logAddrs.OpenList(fNames, warmNames); err != nil {
+	if err = a.logAddrs.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.logTopics.OpenList(fNames, warmNames); err != nil {
+	if err = a.logTopics.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.tracesFrom.OpenList(fNames, warmNames); err != nil {
+	if err = a.tracesFrom.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.tracesTo.OpenList(fNames, warmNames); err != nil {
+	if err = a.tracesTo.OpenList(idxFiles); err != nil {
 		return err
 	}
 	a.recalcMaxTxNum()

@@ -17,6 +17,7 @@
 package datadir
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"path/filepath"
 )
 
@@ -30,8 +31,10 @@ type Dirs struct {
 	Chaindata       string
 	Tmp             string
 	Snap            string
+	SnapIdx         string
 	SnapHistory     string
-	SnapWarm        string
+	SnapState       string
+	SnapAccessors   string
 	TxPool          string
 	Nodes           string
 }
@@ -47,15 +50,21 @@ func New(datadir string) Dirs {
 		datadir = absdatadir
 	}
 
-	return Dirs{
+	dirs := Dirs{
 		RelativeDataDir: relativeDataDir,
 		DataDir:         datadir,
 		Chaindata:       filepath.Join(datadir, "chaindata"),
 		Tmp:             filepath.Join(datadir, "temp"),
 		Snap:            filepath.Join(datadir, "snapshots"),
+		SnapIdx:         filepath.Join(datadir, "snapshots", "idx"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
-		SnapWarm:        filepath.Join(datadir, "snapshots", "warm"),
+		SnapState:       filepath.Join(datadir, "snapshots", "warm"),
+		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessors"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
+	dir.MustExist(dirs.Chaindata, dirs.Tmp,
+		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapState, dirs.SnapAccessors,
+		dirs.TxPool, dirs.Nodes)
+	return dirs
 }

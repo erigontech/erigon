@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math/rand"
 	"os"
 	"path"
@@ -22,19 +23,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *AggregatorV3) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
 	b.Helper()
 	logger := log.New()
-	path := b.TempDir()
-	b.Cleanup(func() { os.RemoveAll(path) })
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	dirs := datadir.New(b.TempDir())
+	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregatorV3(context.Background(), path, path+"_tmp", aggStep, db, logger)
+	agg, err := NewAggregatorV3(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
-	return path, db, agg
+	return db, agg
 }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
@@ -45,7 +45,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	vals := queueKeys(ctx, 53, length.Hash)
 
 	aggStep := uint64(100_00)
-	_, db, agg := testDbAndAggregatorBench(b, aggStep)
+	db, agg := testDbAndAggregatorBench(b, aggStep)
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(b, err)
