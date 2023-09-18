@@ -222,20 +222,15 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
-		var hashbuf [32]byte
-		var unknownHashes types2.Hashes
-		for i := 0; i < hashCount; i++ {
-			_, pos, err = types2.ParseHash(req.Data, pos, hashbuf[:0])
-			if err != nil {
-				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
-			}
-			known, err := f.pool.IdHashKnown(tx, hashbuf[:])
-			if err != nil {
+		hashes := make([]byte, 32*hashCount)
+		for i := 0; i < len(hashes); i += 32 {
+			if _, pos, err = types2.ParseHash(req.Data, pos, hashes[i:]); err != nil {
 				return err
 			}
-			if !known {
-				unknownHashes = append(unknownHashes, hashbuf[:]...)
-			}
+		}
+		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+		if err != nil {
+			return err
 		}
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
@@ -256,15 +251,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
 		}
-		var unknownHashes types2.Hashes
-		for i := 0; i < len(hashes); i += 32 {
-			known, err := f.pool.IdHashKnown(tx, hashes[i:i+32])
-			if err != nil {
-				return err
-			}
-			if !known {
-				unknownHashes = append(unknownHashes, hashes[i:i+32]...)
-			}
+		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+		if err != nil {
+			return err
 		}
 
 		if len(unknownHashes) > 0 {
@@ -482,7 +471,10 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 						if unwindTxs.Txs[i].Type == types2.BlobTxType {
-							knownBlobTxn := f.pool.GetKnownBlobTxn(tx, unwindTxs.Txs[i].IDHash[:])
+							knownBlobTxn, err := f.pool.GetKnownBlobTxn(tx, unwindTxs.Txs[i].IDHash[:])
+							if err != nil {
+								return err
+							}
 							if knownBlobTxn != nil {
 								unwindTxs.Txs[i] = knownBlobTxn.Tx
 							}

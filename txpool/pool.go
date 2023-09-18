@@ -86,9 +86,10 @@ type Pool interface {
 	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
+	FilterKnownIdHashes(tx kv.Tx, hashes types.Hashes) (unknownHashes types.Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	GetKnownBlobTxn(tx kv.Tx, hash []byte) *metaTx
+	GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error)
 
 	AddNewGoodPeer(peerID types.PeerID)
 }
@@ -292,39 +293,39 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
+	if err := minedTxs.Valid(); err != nil {
+		return err
+	}
+
 	defer newBlockTimer.UpdateDuration(time.Now())
 	//t := time.Now()
 
-	cache := p.cache()
+	coreDB, cache := p.coreDBWithCache()
 	cache.OnNewBlock(stateChanges)
-	coreTx, err := p.coreDB().BeginRo(ctx)
+	coreTx, err := coreDB.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer coreTx.Rollback()
 
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
 	p.lastSeenBlock.Store(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
 	if !p.started.Load() {
-		if err := p.fromDB(ctx, tx, coreTx); err != nil {
+		if err := p.fromDBWithLock(ctx, tx, coreTx); err != nil {
 			return fmt.Errorf("OnNewBlock: loading txs from DB: %w", err)
 		}
 	}
-
 	cacheView, err := cache.View(ctx, coreTx)
 	if err != nil {
 		return err
 	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	if assert.Enable {
 		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
 			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
 		}
-	}
-
-	if err := minedTxs.Valid(); err != nil {
-		return err
 	}
 	baseFee := stateChanges.PendingBlockBaseFee
 
@@ -405,9 +406,9 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		return fmt.Errorf("txpool not started yet")
 	}
 
-	cache := p.cache()
 	defer processBatchTxsTimer.UpdateDuration(time.Now())
-	coreTx, err := p.coreDB().BeginRo(ctx)
+	coreDB, cache := p.coreDBWithCache()
+	coreTx, err := coreDB.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -517,59 +518,87 @@ func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []b
 	types, sizes, hashes = p.AppendRemoteAnnouncements(types, sizes, hashes)
 	return types, sizes, hashes
 }
-func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	if _, ok := p.discardReasonsLRU.Get(string(hash)); ok {
+func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) {
+	if _, ok := p.unprocessedRemoteByHash[hashS]; ok {
 		return true, nil
 	}
-	if _, ok := p.unprocessedRemoteByHash[string(hash)]; ok {
+	if _, ok := p.discardReasonsLRU.Get(hashS); ok {
 		return true, nil
 	}
-	if _, ok := p.byHash[string(hash)]; ok {
+	if _, ok := p.byHash[hashS]; ok {
 		return true, nil
 	}
-	if _, ok := p.minedBlobTxsByHash[string(hash)]; ok {
+	if _, ok := p.minedBlobTxsByHash[hashS]; ok {
 		return true, nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
-
-func (p *TxPool) GetKnownBlobTxn(tx kv.Tx, hash []byte) *metaTx {
+func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
+	hashS := string(hash)
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if mt, ok := p.minedBlobTxsByHash[string(hash)]; ok {
-		return mt
+	return p.idHashKnown(tx, hash, hashS)
+}
+func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes types.Hashes) (unknownHashes types.Hashes, err error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		known, err := p.idHashKnown(tx, hashes[i:i+32], string(hashes[i:i+32]))
+		if err != nil {
+			return unknownHashes, err
+		}
+		if !known {
+			unknownHashes = append(unknownHashes, hashes[i:i+32]...)
+		}
 	}
-	if i, ok := p.unprocessedRemoteByHash[string(hash)]; ok {
-		return newMetaTx(p.unprocessedRemoteTxs.Txs[i], false, 0)
+	return unknownHashes, err
+}
+
+func (p *TxPool) getUnprocessedTxn(hashS string) (*types.TxSlot, bool) {
+	if i, ok := p.unprocessedRemoteByHash[hashS]; ok {
+		return p.unprocessedRemoteTxs.Txs[i], true
 	}
-	if mt, ok := p.byHash[string(hash)]; ok {
-		return mt
+	return nil, false
+}
+
+func (p *TxPool) GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error) {
+	hashS := string(hash)
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if mt, ok := p.minedBlobTxsByHash[hashS]; ok {
+		return mt, nil
 	}
-	if has, _ := tx.Has(kv.PoolTransaction, hash); has {
-		txn, _ := tx.GetOne(kv.PoolTransaction, hash)
-		parseCtx := types.NewTxParseContext(p.chainID)
-		parseCtx.WithSender(false)
-		txSlot := &types.TxSlot{}
-		parseCtx.ParseTransaction(txn, 0, txSlot, nil, false, true, nil)
-		return newMetaTx(txSlot, false, 0)
+	if txn, ok := p.getUnprocessedTxn(hashS); ok {
+		return newMetaTx(txn, false, 0), nil
 	}
-	return nil
+	if mt, ok := p.byHash[hashS]; ok {
+		return mt, nil
+	}
+	has, err := tx.Has(kv.PoolTransaction, hash)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, nil
+	}
+	txn, _ := tx.GetOne(kv.PoolTransaction, hash)
+	parseCtx := types.NewTxParseContext(p.chainID)
+	parseCtx.WithSender(false)
+	txSlot := &types.TxSlot{}
+	parseCtx.ParseTransaction(txn, 0, txSlot, nil, false, true, nil)
+	return newMetaTx(txSlot, false, 0), nil
 }
 
 func (p *TxPool) IsLocal(idHash []byte) bool {
+	hashS := string(idHash)
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	return p.isLocalLRU.Contains(string(idHash))
+	return p.isLocalLRU.Contains(hashS)
 }
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
 func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
 		return false, 0, nil // Too early
@@ -651,11 +680,15 @@ func (p *TxPool) ResetYieldedStatus() {
 }
 
 func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
@@ -670,11 +703,12 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i, txn := range newTxs.Txs {
-		_, ok := p.unprocessedRemoteByHash[string(txn.IDHash[:])]
+		hashS := string(txn.IDHash[:])
+		_, ok := p.unprocessedRemoteByHash[hashS]
 		if ok {
 			continue
 		}
-		p.unprocessedRemoteByHash[string(txn.IDHash[:])] = len(p.unprocessedRemoteTxs.Txs)
+		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxs.Txs)
 		p.unprocessedRemoteTxs.Append(txn, newTxs.Senders.At(i), false)
 	}
 }
@@ -971,13 +1005,14 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxs types.TxSlots,
 }
 
 func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
-	coreTx, err := p.coreDB().BeginRo(ctx)
+	coreDb, cache := p.coreDBWithCache()
+	coreTx, err := coreDb.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer coreTx.Rollback()
 
-	cacheView, err := p.cache().View(ctx, coreTx)
+	cacheView, err := cache.View(ctx, coreTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1035,19 +1070,11 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 	}
 	return reasons, nil
 }
-
-func (p *TxPool) coreDB() kv.RoDB {
+func (p *TxPool) coreDBWithCache() (kv.RoDB, kvcache.Cache) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	return p._chainDB
+	return p._chainDB, p._stateCache
 }
-
-func (p *TxPool) cache() kvcache.Cache {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	return p._stateCache
-}
-
 func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxs types.TxSlots, pendingBaseFee, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
@@ -1244,11 +1271,12 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 
 	// Remove from mined cache in case this is coming from unwind txs
 	// and to ensure not double adding into the memory
-	if _, ok := p.minedBlobTxsByHash[string(mt.Tx.IDHash[:])]; ok {
-		p.deleteMinedBlobTxn(string(mt.Tx.IDHash[:]))
+	hashStr := string(mt.Tx.IDHash[:])
+	if _, ok := p.minedBlobTxsByHash[hashStr]; ok {
+		p.deleteMinedBlobTxn(hashStr)
 	}
 
-	p.byHash[string(mt.Tx.IDHash[:])] = mt
+	p.byHash[hashStr] = mt
 
 	if replaced := p.all.replaceOrInsert(mt); replaced != nil {
 		if assert.Enable {
@@ -1257,7 +1285,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 	}
 
 	if mt.subPool&IsLocal != 0 {
-		p.isLocalLRU.Add(string(mt.Tx.IDHash[:]), struct{}{})
+		p.isLocalLRU.Add(hashStr, struct{}{})
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, p.logger)
@@ -1267,10 +1295,11 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
-	delete(p.byHash, string(mt.Tx.IDHash[:]))
+	hashStr := string(mt.Tx.IDHash[:])
+	delete(p.byHash, hashStr)
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
-	p.discardReasonsLRU.Add(string(mt.Tx.IDHash[:]), reason)
+	p.discardReasonsLRU.Add(hashStr, reason)
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
@@ -1828,6 +1857,11 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
+func (p *TxPool) fromDBWithLock(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return p.fromDB(ctx, tx, coreTx)
+}
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)

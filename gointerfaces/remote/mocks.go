@@ -650,10 +650,10 @@ var _ KV_StateChangesClient = &KV_StateChangesClientMock{}
 //			RecvFunc: func() (*StateChangeBatch, error) {
 //				panic("mock out the Recv method")
 //			},
-//			RecvMsgFunc: func(m interface{}) error {
+//			RecvMsgFunc: func(m any) error {
 //				panic("mock out the RecvMsg method")
 //			},
-//			SendMsgFunc: func(m interface{}) error {
+//			SendMsgFunc: func(m any) error {
 //				panic("mock out the SendMsg method")
 //			},
 //			TrailerFunc: func() metadata.MD {
@@ -679,10 +679,10 @@ type KV_StateChangesClientMock struct {
 	RecvFunc func() (*StateChangeBatch, error)
 
 	// RecvMsgFunc mocks the RecvMsg method.
-	RecvMsgFunc func(m interface{}) error
+	RecvMsgFunc func(m any) error
 
 	// SendMsgFunc mocks the SendMsg method.
-	SendMsgFunc func(m interface{}) error
+	SendMsgFunc func(m any) error
 
 	// TrailerFunc mocks the Trailer method.
 	TrailerFunc func() metadata.MD
@@ -704,12 +704,12 @@ type KV_StateChangesClientMock struct {
 		// RecvMsg holds details about calls to the RecvMsg method.
 		RecvMsg []struct {
 			// M is the m argument value.
-			M interface{}
+			M any
 		}
 		// SendMsg holds details about calls to the SendMsg method.
 		SendMsg []struct {
 			// M is the m argument value.
-			M interface{}
+			M any
 		}
 		// Trailer holds details about calls to the Trailer method.
 		Trailer []struct {
@@ -847,9 +847,9 @@ func (mock *KV_StateChangesClientMock) RecvCalls() []struct {
 }
 
 // RecvMsg calls RecvMsgFunc.
-func (mock *KV_StateChangesClientMock) RecvMsg(m interface{}) error {
+func (mock *KV_StateChangesClientMock) RecvMsg(m any) error {
 	callInfo := struct {
-		M interface{}
+		M any
 	}{
 		M: m,
 	}
@@ -870,10 +870,10 @@ func (mock *KV_StateChangesClientMock) RecvMsg(m interface{}) error {
 //
 //	len(mockedKV_StateChangesClient.RecvMsgCalls())
 func (mock *KV_StateChangesClientMock) RecvMsgCalls() []struct {
-	M interface{}
+	M any
 } {
 	var calls []struct {
-		M interface{}
+		M any
 	}
 	mock.lockRecvMsg.RLock()
 	calls = mock.calls.RecvMsg
@@ -882,9 +882,9 @@ func (mock *KV_StateChangesClientMock) RecvMsgCalls() []struct {
 }
 
 // SendMsg calls SendMsgFunc.
-func (mock *KV_StateChangesClientMock) SendMsg(m interface{}) error {
+func (mock *KV_StateChangesClientMock) SendMsg(m any) error {
 	callInfo := struct {
-		M interface{}
+		M any
 	}{
 		M: m,
 	}
@@ -905,10 +905,10 @@ func (mock *KV_StateChangesClientMock) SendMsg(m interface{}) error {
 //
 //	len(mockedKV_StateChangesClient.SendMsgCalls())
 func (mock *KV_StateChangesClientMock) SendMsgCalls() []struct {
-	M interface{}
+	M any
 } {
 	var calls []struct {
-		M interface{}
+		M any
 	}
 	mock.lockSendMsg.RLock()
 	calls = mock.calls.SendMsg
