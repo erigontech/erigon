@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -152,7 +154,8 @@ func (v *ValidatorSet) Get(idx int) Validator {
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
-	v.makeBuf(v.l * length.Hash)
+	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
+	v.makeBuf(((v.l + validatorsLeafChunkSize - 1) * length.Hash) / validatorsLeafChunkSize)
 	validatorLeaves := v.buf
 	hashBuffer := make([]byte, 8*32)
 	depth := GetDepth(uint64(v.c))
@@ -162,21 +165,21 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
 	}
 
-	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
-	// Same thing for now R3MINDER
-	if v.l < validatorsLeafChunkSize {
-		if err := v.computeFlatValidatorsRootsToBuffer(0, v.l, hashBuffer, validatorLeaves); err != nil {
-			return [32]byte{}, err
-		}
-	} else {
-		if err := v.computeFlatValidatorsRootsToBuffer(0, v.l, hashBuffer, validatorLeaves); err != nil {
+	layerBuffer := make([]byte, validatorsLeafChunkSize*length.Hash)
+	for i := 0; i < v.l; i += validatorsLeafChunkSize {
+		from := uint64(i)
+		to := utils.Min64(from+uint64(validatorsLeafChunkSize), uint64(v.l))
+		// Use Loop R3MINDER
+		offset := (i / validatorsLeafChunkSize) * length.Hash
+		fmt.Println(from, to, v.l, offset, len(validatorLeaves))
+		if err := v.computeFlatValidatorsRootsToBuffer(from, to, depth, hashBuffer, layerBuffer, validatorLeaves[offset:]); err != nil {
 			return [32]byte{}, err
 		}
 	}
 
-	offset := length.Hash * v.l
+	offset := length.Hash * ((v.l + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize)
 	elements := common.Copy(validatorLeaves[:offset])
-	for i := uint8(0); i < depth; i++ {
+	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
 		// Sequential
 		if len(elements)%64 != 0 {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
@@ -191,17 +194,32 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
-func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from int, to int, hashBuffer, validatorLeaves []byte) error {
+func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, validatorLeaves []byte) error {
 	for i := from; i < to; i++ {
-		validator := v.Get(i)
+		validator := v.Get(int(i))
 		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 			return err
 		}
 		hashBuffer = hashBuffer[:(8 * 32)]
-		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, validatorLeaves[i*length.Hash:]); err != nil {
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, layerBuffer[(i-from)*length.Hash:]); err != nil {
 			return err
 		}
 	}
+
+	layerBuffer = layerBuffer[:(to-from)*length.Hash]
+	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
+		// Sequential
+		if len(layerBuffer)%64 != 0 {
+			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
+		}
+		if err := merkle_tree.HashByteSlice(layerBuffer, layerBuffer); err != nil {
+			panic(err)
+			return err
+		}
+		layerBuffer = layerBuffer[:len(layerBuffer)/2]
+	}
+
+	copy(validatorLeaves, layerBuffer[:length.Hash])
 	return nil
 }
 
