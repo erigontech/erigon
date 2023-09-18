@@ -172,7 +172,7 @@ func executeBlock(
 
 	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger), getTracer, logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.StateSyncReceipt
@@ -378,6 +378,10 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
+	defer func() {
+		logger.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
+	}()
+
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle, logger); err != nil {
 			return err
@@ -488,12 +492,14 @@ Loop:
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", blockHash.String(), "err", err)
-				if cfg.hd != nil {
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash() /* lastValidAncestor */)
 				}
 				if cfg.badBlockHalt {
 					return err
 				}
+			}
+			if errors.Is(err, consensus.ErrInvalidBlock) {
 				u.UnwindTo(blockNum-1, blockHash /* badBlock */)
 			} else {
 				u.UnwindTo(blockNum-1, libcommon.Hash{} /* badBlock */)
@@ -869,10 +875,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		if initialCycle {
-			if err = tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 1*time.Second, tx); err != nil { // prune part of retired data, before commit
-				return err
-			}
+		if err = tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 1*time.Second, tx); err != nil { // prune part of retired data, before commit
+			return err
 		}
 	} else {
 		if cfg.prune.History.Enabled() {

@@ -1,5 +1,9 @@
 run:
   deadline: 10m
+  build-tags:
+    - nosqlite
+    - noboltdb
+    - integration
 
 linters:
   presets:

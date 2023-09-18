@@ -187,6 +187,11 @@ func ExecV3(ctx context.Context,
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
+		if dbg.MdbxLockInRam() {
+			if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
+				return err
+			}
+		}
 	}
 
 	var blockNum, stageProgress uint64
@@ -719,8 +724,10 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					if !errors.Is(err, consensus.ErrInvalidBlock) {
+						return err
+					} else {
+						logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
@@ -1535,7 +1542,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
-	defer agg.EnableMadvNormal().DisableReadAhead()
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
