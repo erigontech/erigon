@@ -313,3 +313,35 @@ func NoPrune() bool {
 	})
 	return noPrune
 }
+
+var (
+	snMadvNormal     bool
+	snMadvNormalOnce sync.Once
+)
+
+func SnMadvNormal() bool {
+	snMadvNormalOnce.Do(func() {
+		v, _ := os.LookupEnv("SN_MADV_NORMAL")
+		if v == "true" {
+			snMadvNormal = true
+			log.Info("[Experiment]", "SN_MADV_NORMAL", snMadvNormal)
+		}
+	})
+	return snMadvNormal
+}
+
+var (
+	mdbxLockInRam     bool
+	mdbxLockInRamOnce sync.Once
+)
+
+func MdbxLockInRam() bool {
+	mdbxLockInRamOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_LOCK_IN_RAM")
+		if v == "true" {
+			mdbxLockInRam = true
+			log.Info("[Experiment]", "MDBX_LOCK_IN_RAM", mdbxLockInRam)
+		}
+	})
+	return mdbxLockInRam
+}

@@ -1539,51 +1539,6 @@ func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash [
 	return a.domains.Commit(saveStateAfter, trace)
 }
 
-// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (a *AggregatorV3) DisableReadAhead() {
-	a.accounts.DisableReadAhead()
-	a.storage.DisableReadAhead()
-	a.code.DisableReadAhead()
-	a.commitment.DisableReadAhead()
-	a.logAddrs.DisableReadAhead()
-	a.logTopics.DisableReadAhead()
-	a.tracesFrom.DisableReadAhead()
-	a.tracesTo.DisableReadAhead()
-}
-func (a *AggregatorV3) EnableReadAhead() *AggregatorV3 {
-	a.accounts.EnableReadAhead()
-	a.storage.EnableReadAhead()
-	a.code.EnableReadAhead()
-	a.commitment.EnableReadAhead()
-	a.logAddrs.EnableReadAhead()
-	a.logTopics.EnableReadAhead()
-	a.tracesFrom.EnableReadAhead()
-	a.tracesTo.EnableReadAhead()
-	return a
-}
-func (a *AggregatorV3) EnableMadvWillNeed() *AggregatorV3 {
-	a.accounts.EnableMadvWillNeed()
-	a.storage.EnableMadvWillNeed()
-	a.code.EnableMadvWillNeed()
-	a.commitment.EnableMadvWillNeed()
-	a.logAddrs.EnableMadvWillNeed()
-	a.logTopics.EnableMadvWillNeed()
-	a.tracesFrom.EnableMadvWillNeed()
-	a.tracesTo.EnableMadvWillNeed()
-	return a
-}
-func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
-	a.accounts.EnableMadvNormalReadAhead()
-	a.storage.EnableMadvNormalReadAhead()
-	a.code.EnableMadvNormalReadAhead()
-	a.commitment.EnableMadvNormalReadAhead()
-	a.logAddrs.EnableMadvNormalReadAhead()
-	a.logTopics.EnableMadvNormalReadAhead()
-	a.tracesFrom.EnableMadvNormalReadAhead()
-	a.tracesTo.EnableMadvNormalReadAhead()
-	return a
-}
-
 func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:

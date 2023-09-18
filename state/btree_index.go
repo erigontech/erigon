@@ -869,11 +869,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	if len(idx.data[pos:]) == 0 {
 		return idx, nil
 	}
+	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
 	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 
 	getter := NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
-	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
