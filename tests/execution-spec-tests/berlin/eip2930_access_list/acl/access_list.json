@@ -1,7 +1,7 @@
 {
     "000-fork=Berlin": {
         "_info": {
-            "filling-transition-tool": "evm version 1.12.1-unstable-cf01e7db-20230808",
+            "filling-transition-tool": "evm version 1.13.0-unstable-b1a1675c-20230912",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2930.md",
             "reference-spec-version": "c9db53a936c5c9cbe2db32ba0d1b86c4c6e73534"
         },
@@ -112,7 +112,7 @@
     },
     "001-fork=London": {
         "_info": {
-            "filling-transition-tool": "evm version 1.12.1-unstable-cf01e7db-20230808",
+            "filling-transition-tool": "evm version 1.13.0-unstable-b1a1675c-20230912",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2930.md",
             "reference-spec-version": "c9db53a936c5c9cbe2db32ba0d1b86c4c6e73534"
         },

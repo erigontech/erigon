@@ -365,7 +365,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if chainReader != nil {
 			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				return err
+				return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 			}
 		}
 
@@ -398,7 +398,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	}
 	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
 		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 
 	// Setup
@@ -539,7 +539,7 @@ func NewPipelineStages(ctx context.Context,
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
-	logger log.Logger) (*stagedsync.Sync, error) {
+	logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
@@ -570,5 +570,5 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
-	), nil
+	)
 }
