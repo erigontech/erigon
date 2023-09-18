@@ -114,7 +114,7 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, beaconConfig)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 	for _, vv := range resp {
 		err := beaconDB.WriteBlock(tx, ctx, vv, true)
 		if err != nil {
@@ -155,7 +155,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(aferoFS, nil, beaconConfig)
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 	rpcSource := persistence.NewBeaconRpcSource(beacon)

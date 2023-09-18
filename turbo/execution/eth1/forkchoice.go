@@ -127,6 +127,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	if fcuHeader == nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
+		return
+	}
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)

@@ -172,7 +172,7 @@ func executeBlock(
 
 	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger), getTracer, logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.StateSyncReceipt
@@ -462,12 +462,14 @@ Loop:
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", blockHash.String(), "err", err)
-				if cfg.hd != nil {
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash() /* lastValidAncestor */)
 				}
 				if cfg.badBlockHalt {
 					return err
 				}
+			}
+			if errors.Is(err, consensus.ErrInvalidBlock) {
 				u.UnwindTo(blockNum-1, blockHash /* badBlock */)
 			} else {
 				u.UnwindTo(blockNum-1, libcommon.Hash{} /* badBlock */)
