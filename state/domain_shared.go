@@ -514,8 +514,8 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
-	t := time.Now()
-	defer func() { log.Info("[dbg] [agg] commitment", "took", time.Since(t)) }()
+	//t := time.Now()
+	//defer func() { log.Info("[dbg] [agg] commitment", "took", time.Since(t)) }()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()

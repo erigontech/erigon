@@ -846,7 +846,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 		// Build history ef
-		efHistoryPath := h.efFilePath(step, step+1)
+		efHistoryPath = h.efFilePath(step, step+1)
 		_, efHistoryFileName := filepath.Split(efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
