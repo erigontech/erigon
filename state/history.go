@@ -212,7 +212,6 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 }
 
 func (h *History) openFiles() error {
-	var totalKeys uint64
 	var err error
 	invalidFileItems := make([]*filesItem, 0)
 	h.files.Walk(func(items []*filesItem) bool {
@@ -238,7 +237,6 @@ func (h *History) openFiles() error {
 						h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 
