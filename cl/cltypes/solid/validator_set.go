@@ -2,6 +2,7 @@ package solid
 
 import (
 	"bytes"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -9,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -21,8 +23,8 @@ const (
 )
 
 const (
-	validatorSetCapacityMultiplier = 1.2 // allocate 20% to the validator set when re-allocation is needed.
-	validatorTreeCacheGroupLayer   = 4   // It will cache group validatorTreeCacheGroupLayer^2 accordingly
+	validatorSetCapacityMultiplier = 1.01 // allocate 20% to the validator set when re-allocation is needed.
+	validatorTreeCacheGroupLayer   = 3    // It will cache group validatorTreeCacheGroupLayer^2 accordingly
 )
 
 // This is all stuff used by phase0 state transition. It makes many operations faster.
@@ -62,7 +64,8 @@ func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 		return
 	}
 	buffer := make([]byte, size, int(float64(size)*validatorSetCapacityMultiplier))
-	cacheBuffer := make([]byte, treeCacheSize, int(float64(treeCacheSize)*validatorSetCapacityMultiplier))
+	increaseValidatorCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
+	cacheBuffer := make([]byte, treeCacheSize, int(increaseValidatorCapacity*length.Hash))
 	copy(buffer, v.buffer)
 	copy(cacheBuffer, v.treeCacheBuffer)
 	v.treeCacheBuffer = cacheBuffer
@@ -155,6 +158,7 @@ func (v *ValidatorSet) Get(idx int) Validator {
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
+	begin := time.Now()
 	// generate root list
 	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
 	hashBuffer := make([]byte, 8*32)
@@ -171,12 +175,24 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	for i := 0; i < v.l; i += validatorsLeafChunkSize {
 		from := uint64(i)
 		to := utils.Min64(from+uint64(validatorsLeafChunkSize), uint64(v.l))
-		// Use Loop R3MINDER
 		offset := (i / validatorsLeafChunkSize) * length.Hash
-		if bytes.Equal(v.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
-			if err := v.computeFlatValidatorsRootsToBuffer(from, to, depth, hashBuffer, layerBuffer, v.treeCacheBuffer[offset:]); err != nil {
+
+		if !bytes.Equal(v.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
+			continue
+		}
+		for i := from; i < to; i++ {
+			validator := v.Get(int(i))
+			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				return [32]byte{}, err
 			}
+			hashBuffer = hashBuffer[:(8 * 32)]
+			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, layerBuffer[(i-from)*length.Hash:]); err != nil {
+				return [32]byte{}, err
+			}
+		}
+		endOffset := (to - from) * length.Hash
+		if err := computeFlatRootsToBuffer(from, to, validatorTreeCacheGroupLayer, hashBuffer, layerBuffer[:endOffset], v.treeCacheBuffer[offset:]); err != nil {
+			return [32]byte{}, err
 		}
 
 	}
@@ -195,24 +211,14 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		}
 		elements = v.buf
 	}
+	log.Debug("ValidatorSet hashing", "elapsed", time.Since(begin))
 
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
-func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, validatorLeaves []byte) error {
-	for i := from; i < to; i++ {
-		validator := v.Get(int(i))
-		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
-			return err
-		}
-		hashBuffer = hashBuffer[:(8 * 32)]
-		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, layerBuffer[(i-from)*length.Hash:]); err != nil {
-			return err
-		}
-	}
-
+func computeFlatRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, leaves []byte) error {
 	layerBuffer = layerBuffer[:(to-from)*length.Hash]
-	for i := uint8(0); i < validatorTreeCacheGroupLayer; i++ {
+	for i := uint8(0); i < depth; i++ {
 		// Sequential
 		if len(layerBuffer)%64 != 0 {
 			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
@@ -223,7 +229,7 @@ func (v *ValidatorSet) computeFlatValidatorsRootsToBuffer(from uint64, to uint64
 		layerBuffer = layerBuffer[:len(layerBuffer)/2]
 	}
 
-	copy(validatorLeaves, layerBuffer[:length.Hash])
+	copy(leaves, layerBuffer[:length.Hash])
 	return nil
 }
 
