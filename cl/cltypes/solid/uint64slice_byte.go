@@ -1,6 +1,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-const treeCacheDepthUint64Slice = 2
+const treeCacheDepthUint64Slice = 3
 
 func convertDepthToChunkSize(d int) int {
 	return (1 << d) // just power of 2
@@ -149,6 +150,10 @@ func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
 		panic("index out of range")
 	}
 	offset := index * 8
+	ihIdx := (offset / length.Hash) / convertDepthToChunkSize(treeCacheDepthUint64Slice)
+	for i := ihIdx * length.Hash; i < ihIdx*length.Hash+length.Hash; i++ {
+		arr.treeCacheBuffer[i] = 0
+	}
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
 }
 
@@ -183,15 +188,19 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	chunkSize := convertDepthToChunkSize(treeCacheDepthUint64Slice)
 	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
-	//emptyHashBytes := make([]byte, length.Hash)
+	emptyHashBytes := make([]byte, length.Hash)
 
 	layerBuffer := make([]byte, chunkSize*length.Hash)
 
 	for i := 0; i < len(arr.u); i += chunkSize * length.Hash {
+		offset := (i / (chunkSize * length.Hash)) * length.Hash
 		from := i
 		to := int(utils.Min64(uint64(from+(chunkSize*length.Hash)), uint64(len(arr.u))))
+
+		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+32], emptyHashBytes) {
+			continue
+		}
 		copy(layerBuffer, arr.u[from:to])
-		offset := (i / (chunkSize * length.Hash)) * length.Hash
 		if err := computeFlatRootsToBuffer(treeCacheDepthUint64Slice, layerBuffer[:to-from], arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
@@ -224,7 +233,7 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%8 > 0 {
 		return ssz.ErrBadDynamicLength
 	}
-	bufferLength := len(buf) + (length.Hash - (len(buf) % length.Hash))
+	bufferLength := ((len(buf) + length.Hash - 1) / length.Hash) * length.Hash
 	arr.u = make([]byte, bufferLength)
 	copy(arr.u, buf)
 	arr.l = len(buf) / 8
