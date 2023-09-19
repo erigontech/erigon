@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"io"
 	"os"
 	"path/filepath"
@@ -114,6 +115,14 @@ var snapshotCommand = cli.Command{
 			Name:   "locality_idx",
 			Action: doLocalityIdx,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}),
+		},
+		{
+			Name: "remove_all_state_snapshots",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
 			Name:   "diff",
