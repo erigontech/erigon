@@ -65,7 +65,7 @@ type InvertedIndex struct {
 	filenameBase    string
 	aggregationStep uint64
 
-	//TODO: re-visit this check - maybe we don't need it.
+	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
 	integrityCheck func(fromStep, toStep uint64) bool
 
 	withLocalityIndex  bool
