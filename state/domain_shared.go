@@ -527,7 +527,6 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-	t := time.Now()
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
 
@@ -552,17 +551,11 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 		}
 		mxCommitmentBranchUpdates.Inc()
 	}
-	t1 := time.Since(t)
 
-	t = time.Now()
 	if saveStateAfter {
 		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
 			return nil, err
 		}
-	}
-	t2 := time.Since(t)
-	if t2 > 2*time.Second || t1 > 2*time.Second {
-		log.Info("[dbg] com", "t3", t1, "t4", t2)
 	}
 	return rootHash, nil
 }
