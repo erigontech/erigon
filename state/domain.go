@@ -281,8 +281,6 @@ type Domain struct {
 
 	domainLargeValues bool
 	compression       FileCompression
-
-	dir string
 }
 
 type domainCfg struct {
@@ -296,7 +294,6 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		panic("empty `dirs` varialbe")
 	}
 	d := &Domain{
-		dir:         cfg.hist.iiCfg.dirs.SnapState,
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
@@ -1187,9 +1184,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
-	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
 	if !UseBpsTree {
+		valuesIdxPath := d.kvAccessorFilePath(step, step+1)
 		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1205,9 +1201,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	var bloom *bloomFilter
 	{
-		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, step, step+1)
-		if dir.FileExist(filepath.Join(d.dir, fileName)) {
-			bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+		fPath := d.kvExistenceIdxFilePath(step, step+1)
+		if dir.FileExist(fPath) {
+			bloom, err = OpenBloom(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1240,7 +1236,8 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))) {
+			fPath := d.kvAccessorFilePath(fromStep, toStep)
+			if !dir.FileExist(fPath) {
 				l = append(l, item)
 			}
 		}
@@ -1388,6 +1385,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
+				panic(1)
 				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {

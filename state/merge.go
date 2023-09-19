@@ -716,7 +716,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	p := ps.AddNew(datFileName, 1)
 	defer ps.Delete(p)
 
-	cmp, err := compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
+	cmp, err := compress.NewCompressor(ctx, "merge", datPath, d.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 	}
@@ -805,7 +805,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 	if !UseBpsTree {
 		idxPath := d.kvAccessorFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
