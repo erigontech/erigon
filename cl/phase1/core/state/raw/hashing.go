@@ -95,7 +95,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(HistoricalRootsLeafIndex, root)
 	}
-	log.Debug("HistoricalRoots hashing", "elapsed", time.Since(begin))
+	log.Trace("HistoricalRoots hashing", "elapsed", time.Since(begin))
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
@@ -131,7 +131,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(ValidatorsLeafIndex, root)
 
 	}
-	log.Debug("ValidatorSet hashing", "elapsed", time.Since(begin))
+	log.Trace("ValidatorSet hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(12): Balances
@@ -142,7 +142,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
-	log.Debug("Balances hashing", "elapsed", time.Since(begin))
+	log.Trace("Balances hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(13): RandaoMixes
@@ -153,7 +153,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(RandaoMixesLeafIndex, root)
 	}
-	log.Debug("RandaoMixes hashing", "elapsed", time.Since(begin))
+	log.Trace("RandaoMixes hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(14): Slashings
@@ -164,7 +164,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(SlashingsLeafIndex, root)
 	}
-	log.Debug("Slashings hashing", "elapsed", time.Since(begin))
+	log.Trace("Slashings hashing", "elapsed", time.Since(begin))
 	// Field(15) and Field(16) are special due to the fact that they have different format in Phase0.
 
 	begin = time.Now()
@@ -183,7 +183,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 		b.updateLeaf(PreviousEpochParticipationLeafIndex, root)
 	}
-	log.Debug("PreviousEpochParticipation hashing", "elapsed", time.Since(begin))
+	log.Trace("PreviousEpochParticipation hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 
@@ -201,7 +201,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(CurrentEpochParticipationLeafIndex, root)
 	}
-	log.Debug("CurrentEpochParticipation hashing", "elapsed", time.Since(begin))
+	log.Trace("CurrentEpochParticipation hashing", "elapsed", time.Since(begin))
 
 	// Field(17): JustificationBits
 	if b.isLeafDirty(JustificationBitsLeafIndex) {
@@ -247,7 +247,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(InactivityScoresLeafIndex, root)
 	}
-	log.Debug("InactivityScores hashing", "elapsed", time.Since(begin))
+	log.Trace("InactivityScores hashing", "elapsed", time.Since(begin))
 
 	// Field(22): CurrentSyncCommitte
 	if b.isLeafDirty(CurrentSyncCommitteeLeafIndex) {
@@ -302,7 +302,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(HistoricalSummariesLeafIndex, root)
 	}
-	log.Debug("HistoricalSummaries hashing", "elapsed", time.Since(begin))
+	log.Trace("HistoricalSummaries hashing", "elapsed", time.Since(begin))
 
 	return nil
 }

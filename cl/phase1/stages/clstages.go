@@ -272,7 +272,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 				MainLoop:
-					for currentEpoch <= args.targetEpoch {
+					for currentEpoch <= args.targetEpoch+1 {
 						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
 						blocks, err := rpcSource.GetRange(tx, ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
@@ -298,7 +298,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							}
-							if err := processBlock(tx, block, false, false); err != nil {
+							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
