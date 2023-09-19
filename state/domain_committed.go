@@ -526,6 +526,10 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 	fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
 	var latestState []byte
 	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
+		if len(value) < 8 {
+			fmt.Printf("[commitment] SeekCommitment invalid value size %d [%x]\n", len(value), value)
+			return
+		}
 		txn := binary.BigEndian.Uint64(value)
 		fmt.Printf("[commitment] Seek txn=%d %x\n", txn, value[:16])
 		if txn >= sinceTx && txn <= untilTx {

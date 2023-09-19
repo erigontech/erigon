@@ -849,29 +849,7 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-//	func (a *AggregatorV3) rotate() []flusher {
-//		a.walLock.Lock()
-//		defer a.walLock.Unlock()
-//		return []flusher{
-//			a.accounts.Rotate(),
-//			a.storage.Rotate(),
-//			a.code.Rotate(),
-//			a.commitment.Domain.Rotate(),
-//			a.logAddrs.Rotate(),
-//			a.logTopics.Rotate(),
-//			a.tracesFrom.Rotate(),
-//			a.tracesTo.Rotate(),
-//		}
-//	}
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	//flushers := a.rotate()
-	//for _, f := range flushers {
-	//	if err := f.Flush(ctx, tx); err != nil {
-	//		return err
-	//	}
-	//}
-	//return nil
-
 	return a.domains.Flush(ctx, tx)
 }
 

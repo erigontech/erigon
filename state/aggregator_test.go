@@ -158,12 +158,12 @@ type runCfg struct {
 func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	t.Helper()
 	logger := log.New()
-	db, agg := testDbAndAggregatorv3(t, rc.aggStep)
+	aggStep := rc.aggStep
+	db, agg := testDbAndAggregatorv3(t, aggStep)
 	if rc.useBplus {
 		UseBpsTree = true
 		defer func() { UseBpsTree = false }()
 	}
-	aggStep := rc.aggStep
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -803,5 +803,4 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 	n, b, ch := DecodeAccountBytes(input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
-
 }
