@@ -319,8 +319,6 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	defer tx.Rollback()
-
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return common.Hash{}, err
