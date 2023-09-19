@@ -89,21 +89,30 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPath string) error 
 
 	switch segment.T {
 	case snaptype.Headers:
-		jobProgress := &background.Progress{}
-		ps.Add(jobProgress)
-		err = freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+		g.Go(func() error {
+			jobProgress := &background.Progress{}
+			ps.Add(jobProgress)
+			defer ps.Delete(jobProgress)
+			return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+		})
 	case snaptype.Bodies:
-		jobProgress := &background.Progress{}
-		ps.Add(jobProgress)
-		err = freezeblocks.BodiesIdx(ctx, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+		g.Go(func() error {
+			jobProgress := &background.Progress{}
+			ps.Add(jobProgress)
+			defer ps.Delete(jobProgress)
+			return freezeblocks.BodiesIdx(ctx, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+		})
 	case snaptype.Transactions:
-		jobProgress := &background.Progress{}
-		ps.Add(jobProgress)
-		dir, _ := filepath.Split(segment.Path)
-		err = freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+		g.Go(func() error {
+			jobProgress := &background.Progress{}
+			ps.Add(jobProgress)
+			defer ps.Delete(jobProgress)
+			dir, _ := filepath.Split(segment.Path)
+			return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+		})
 	}
 
-	if err != nil {
+	if err := g.Wait(); err != nil {
 		return err
 	}
 
