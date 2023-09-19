@@ -660,7 +660,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer agg.Close()
 
 	br, bw := blocksIO(db, logger)
-	engine, _, _, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -670,7 +670,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			}
 		}
 		dirs := datadir.New(datadirCli)
-		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
+		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 			return fmt.Errorf("resetting blocks: %w", err)
 		}
 		ac := agg.MakeContext()
@@ -712,7 +712,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer borSn.Close()
 	defer agg.Close()
 	br, bw := blocksIO(db, logger)
-	engine, _, _, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -722,7 +722,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
+			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
 			return nil
@@ -936,21 +936,30 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		if err := reset2.ResetExec(ctx, db, chain, "", agg.EndTxNumMinimax() == 0); err != nil {
+		ct := agg.MakeContext()
+		doms := agg.SharedDomains(ct)
+
+		bn, _, err := doms.SeekCommitment(0, math.MaxUint64)
+		if err != nil {
+			return err
+		}
+
+		ct.Close()
+		doms.Close()
+
+		if err := reset2.ResetExec(ctx, db, chain, "", bn); err != nil {
 			return err
 		}
 
 		br, bw := blocksIO(db, logger)
 		chainConfig := fromdb.ChainConfig(db)
 
-		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
+		return db.Update(ctx, func(tx kv.RwTx) error {
+			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
 			return nil
 		})
-
-		return err
 	}
 
 	if txtrace {

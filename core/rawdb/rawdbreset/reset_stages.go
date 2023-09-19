@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -45,14 +44,13 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir, true); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir, 0); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
-	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -132,7 +130,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, writeGenesis bool) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, blockNum uint64) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
@@ -153,10 +151,12 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, wri
 			}
 		}
 
+		_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
+
 		if err := backup.ClearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
 			return nil
 		}
-		if writeGenesis && !historyV3 {
+		if blockNum == 0 && !historyV3 {
 			genesis := core.GenesisBlockByChainName(chain)
 			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
 				return err
