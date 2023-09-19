@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
@@ -308,7 +309,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
-		var pendingBlobFee uint64 = 1
+		var pendingBlobFee uint64 = params.MinBlobGasPrice
 		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
 		if currentHeder.ExcessBlobGas != nil {
 			f, err := misc.GetBlobGasPrice(excessBlobGas)
