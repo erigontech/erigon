@@ -1004,8 +1004,8 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				}
 			}
 		}()
-		idxPath := h.vAccessorFilePath(r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
 		datPath := h.vFilePath(r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
+		idxPath := h.vAccessorFilePath(r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}

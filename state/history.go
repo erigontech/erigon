@@ -63,10 +63,12 @@ type History struct {
 	// MakeContext() using this field in zero-copy way
 	roFiles atomic.Pointer[[]ctxItem]
 
-	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
-	compressWorkers         int
-	compression             FileCompression
-	integrityFileExtensions []string
+	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
+	compressWorkers  int
+	compression      FileCompression
+
+	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
+	integrityCheck func(fromStep, toStep uint64) bool
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -89,14 +91,14 @@ type histCfg struct {
 	withExistenceIndex bool // move to iiCfg
 }
 
-func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
 	h := History{
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable:        historyValsTable,
-		compression:             cfg.compression,
-		compressWorkers:         1,
-		integrityFileExtensions: integrityFileExtensions,
-		historyLargeValues:      cfg.historyLargeValues,
+		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		historyValsTable:   historyValsTable,
+		compression:        cfg.compression,
+		compressWorkers:    1,
+		integrityCheck:     integrityCheck,
+		historyLargeValues: cfg.historyLargeValues,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
@@ -175,16 +177,9 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 		startTxNum, endTxNum := startStep*h.aggregationStep, endStep*h.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, h.aggregationStep)
 
-		/*TODO: support this feature??
-		for _, ext := range h.integrityFileExtensions {
-			requiredFile := fmt.Sprintf("%s.%d-%d.%s", h.filenameBase, startStep, endStep, ext)
-			if !dir.FileExist(filepath.Join(h.dir, requiredFile)) {
-				h.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-				garbageFiles = append(garbageFiles, newFile)
-				continue Loop
-			}
+		if h.integrityCheck != nil && !h.integrityCheck(startStep, endStep) {
+			continue
 		}
-		*/
 
 		if _, has := h.files.Get(newFile); has {
 			continue

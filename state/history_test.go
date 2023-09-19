@@ -840,7 +840,7 @@ func TestScanStaticFilesH(t *testing.T) {
 	require.Equal(t, 6, h.files.Len())
 
 	h.files.Clear()
-	h.integrityFileExtensions = []string{"kv"}
+	h.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	h.scanStateFiles(files)
 	require.Equal(t, 0, h.files.Len())
 
