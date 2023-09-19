@@ -17,6 +17,10 @@ import (
 	"time"
 )
 
+// Build snapshot indexes for given snapshot files.
+// Sample usage:
+// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1-000000-000500-headers.seg,/snapshots/v1-000500-001000-headers.seg
+
 func main() {
 
 	app := &cli.App{
@@ -26,14 +30,13 @@ func main() {
 				Value: "./dev",
 				Usage: "node data directory",
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:  "snapshot_path",
-				Value: ".",
 				Usage: "pathname of the snapshot file",
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.String("snapshot_path"))
+			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"))
 		},
 	}
 
@@ -51,7 +54,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 	return snaptype.FileInfo{}, false // Return zero value and false if not found
 }
 
-func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPath string) error {
+func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) error {
 	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -76,40 +79,41 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPath string) error 
 		return err
 	}
 
-	segment, found := FindIf(segments, func(s snaptype.FileInfo) bool {
-		return s.Path == snapshotPath
-	})
-	if !found {
-		fmt.Printf("Segment %s not found\n", snapshotPath)
-		return nil
-	}
-
-	fmt.Printf("Building index:\ndataDir: %s, \nsnapshotPath: %s\n", dataDir, snapshotPath)
+	fmt.Printf("Building indexes:\n- dataDir: %s\n- snapshots: %s\n", dataDir, snapshotPaths)
 	start := time.Now()
 
-	switch segment.T {
-	case snaptype.Headers:
-		g.Go(func() error {
-			jobProgress := &background.Progress{}
-			ps.Add(jobProgress)
-			defer ps.Delete(jobProgress)
-			return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+	for _, snapshotPath := range snapshotPaths {
+		segment, found := FindIf(segments, func(s snaptype.FileInfo) bool {
+			return s.Path == snapshotPath
 		})
-	case snaptype.Bodies:
-		g.Go(func() error {
-			jobProgress := &background.Progress{}
-			ps.Add(jobProgress)
-			defer ps.Delete(jobProgress)
-			return freezeblocks.BodiesIdx(ctx, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
-		})
-	case snaptype.Transactions:
-		g.Go(func() error {
-			jobProgress := &background.Progress{}
-			ps.Add(jobProgress)
-			defer ps.Delete(jobProgress)
-			dir, _ := filepath.Split(segment.Path)
-			return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
-		})
+		if !found {
+			return fmt.Errorf("Segment %s not found\n", snapshotPath)
+		}
+
+		switch segment.T {
+		case snaptype.Headers:
+			g.Go(func() error {
+				jobProgress := &background.Progress{}
+				ps.Add(jobProgress)
+				defer ps.Delete(jobProgress)
+				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+			})
+		case snaptype.Bodies:
+			g.Go(func() error {
+				jobProgress := &background.Progress{}
+				ps.Add(jobProgress)
+				defer ps.Delete(jobProgress)
+				return freezeblocks.BodiesIdx(ctx, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+			})
+		case snaptype.Transactions:
+			g.Go(func() error {
+				jobProgress := &background.Progress{}
+				ps.Add(jobProgress)
+				defer ps.Delete(jobProgress)
+				dir, _ := filepath.Split(segment.Path)
+				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+			})
+		}
 	}
 
 	if err := g.Wait(); err != nil {
@@ -117,7 +121,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPath string) error 
 	}
 
 	elapsed := time.Since(start)
-	fmt.Printf("Index for snapshot %s built in %d ms\n", snapshotPath, elapsed.Milliseconds())
+	fmt.Printf("Indexes for %d snapshots built in %d ms\n", len(snapshotPaths), elapsed.Milliseconds())
 
 	return nil
 }
