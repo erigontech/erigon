@@ -470,8 +470,6 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 }
 
 func (d *Domain) openFiles() (err error) {
-	//var totalKeys uint64
-
 	invalidFileItems := make([]*filesItem, 0)
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -498,7 +496,6 @@ func (d *Domain) openFiles() (err error) {
 						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					//totalKeys += item.index.KeyCount()
 				}
 			}
 			if item.bindex == nil {
@@ -510,7 +507,6 @@ func (d *Domain) openFiles() (err error) {
 						return false
 					}
 				}
-				//totalKeys += item.bindex.KeyCount()
 			}
 			if item.bloom == nil {
 				idxPath := d.kvExistenceIdxFilePath(fromStep, toStep)
