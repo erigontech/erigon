@@ -293,7 +293,7 @@ type domainCfg struct {
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapState == "" {
-		panic(1)
+		panic("empty `dirs` varialbe")
 	}
 	d := &Domain{
 		dir:         cfg.hist.iiCfg.dirs.SnapState,

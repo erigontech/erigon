@@ -820,10 +820,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var historyIdxPath, efHistoryPath string
 
 	{
-		historyIdxFileName := h.vAccessorFilePath(step, step+1)
+		historyIdxPath := h.vAccessorFilePath(step, step+1)
+		_, historyIdxFileName := filepath.Split(historyIdxPath)
 		p := ps.AddNew(historyIdxFileName, 1)
 		defer ps.Delete(p)
-		historyIdxPath = filepath.Join(h.dir, historyIdxFileName)
 		if err := historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s history: %w", h.filenameBase, err)
 		}
@@ -845,11 +845,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 		// Build history ef
-		efHistoryFileName := fmt.Sprintf("%s.%d-%d.ef", h.filenameBase, step, step+1)
-
+		efHistoryPath := h.efFilePath(step, step+1)
+		_, efHistoryFileName := filepath.Split(efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
-		efHistoryPath = filepath.Join(h.dir, efHistoryFileName)
 		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
@@ -888,8 +887,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
-		efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
+		efHistoryIdxPath := h.efAccessorFilePath(step, step+1)
 		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 		}

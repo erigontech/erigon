@@ -107,7 +107,7 @@ func NewInvertedIndex(
 	logger log.Logger,
 ) (*InvertedIndex, error) {
 	if cfg.dirs.SnapState == "" {
-		panic(1)
+		panic("empty `dirs` varialbe")
 	}
 	ii := InvertedIndex{
 		iiCfg:                   cfg,
