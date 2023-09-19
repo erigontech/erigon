@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	"hash"
 	"time"
 
@@ -470,8 +471,10 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	}
 	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
 
+	t := time.Now()
 	touchedKeys, updates := d.updates.List(true)
 	mxCommitmentKeys.Add(len(touchedKeys))
+	t1 := time.Since(t)
 
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
@@ -484,6 +487,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 
+	t = time.Now()
 	switch d.mode {
 	case CommitmentModeDirect:
 		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(touchedKeys)
@@ -500,6 +504,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	default:
 		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
+	t2 := time.Since(t)
+
+	log.Info("[dbg] com", "t1", t1, "t2", t2)
 	return rootHash, branchNodeUpdates, err
 }
 
