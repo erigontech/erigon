@@ -444,7 +444,6 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 
 func (ii *InvertedIndex) openFiles() error {
 	var err error
-	var totalKeys uint64
 	var invalidFileItems []*filesItem
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -470,7 +469,6 @@ func (ii *InvertedIndex) openFiles() error {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 			if item.bloom == nil && ii.withExistenceIndex {
@@ -480,7 +478,6 @@ func (ii *InvertedIndex) openFiles() error {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 		}
