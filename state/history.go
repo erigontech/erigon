@@ -818,10 +818,8 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 	}()
 
-	var historyIdxPath, efHistoryPath string
-
+	historyIdxPath := h.vAccessorFilePath(step, step+1)
 	{
-		historyIdxPath := h.vAccessorFilePath(step, step+1)
 		_, historyIdxFileName := filepath.Split(historyIdxPath)
 		p := ps.AddNew(historyIdxFileName, 1)
 		defer ps.Delete(p)
@@ -839,6 +837,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	slices.Sort(keys)
 
+	efHistoryPath := h.efFilePath(step, step+1)
 	{
 		var err error
 		if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
@@ -846,7 +845,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 		// Build history ef
-		efHistoryPath = h.efFilePath(step, step+1)
 		_, efHistoryFileName := filepath.Split(efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
@@ -900,6 +898,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 	}
+	fmt.Printf("historyIdxPath: %s, %s\n", historyIdxPath, h.dirs.Tmp)
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    collation.historyCount,
 		Enums:       false,
@@ -942,6 +941,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
+				panic(1)
 				return HistoryFiles{}, fmt.Errorf("build idx: %w", err)
 			}
 		} else {
