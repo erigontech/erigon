@@ -346,16 +346,16 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
 	// can't discard domain wal - it required, but can discard history
-	d.wal = d.newWriter(d.tmpdir, true, false)
+	d.wal = d.newWriter(d.dirs.Tmp, true, false)
 }
 
 func (d *Domain) StartUnbufferedWrites() {
-	d.wal = d.newWriter(d.tmpdir, false, false)
+	d.wal = d.newWriter(d.dirs.Tmp, false, false)
 	d.History.StartUnbufferedWrites()
 }
 
 func (d *Domain) StartWrites() {
-	d.wal = d.newWriter(d.tmpdir, true, false)
+	d.wal = d.newWriter(d.dirs.Tmp, true, false)
 	d.History.StartWrites()
 }
 
@@ -1020,7 +1020,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 	comp := NewArchiveWriter(coll.valuesComp, d.compression)
@@ -1190,7 +1190,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
 	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
 	if !UseBpsTree {
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync); err != nil {
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1198,7 +1198,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	var bt *BtIndex
 	{
 		btPath := d.btIdxFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.tmpdir, d.logger)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
@@ -1270,7 +1270,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		g.Go(func() error {
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.dirs.Tmp, *d.salt, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
@@ -1285,7 +1285,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
+			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
@@ -1451,7 +1451,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	restore := d.newWriter(filepath.Join(d.tmpdir, "unwind"+d.filenameBase), true, false)
+	restore := d.newWriter(filepath.Join(d.dirs.Tmp, "unwind"+d.filenameBase), true, false)
 
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if !bytes.Equal(v, stepBytes) {

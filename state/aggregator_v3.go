@@ -103,7 +103,6 @@ type AggregatorV3 struct {
 type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
-	dir := dirs.SnapHistory
 	tmpdir := dirs.Tmp
 	salt, err := getIndicesSalt(dirs.Snap)
 	if err != nil {
@@ -127,7 +126,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg := domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: AccDomainLargeValues,
@@ -137,7 +136,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: StorageDomainLargeValues,
@@ -147,7 +146,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 		domainLargeValues: CodeDomainLargeValues,
@@ -157,7 +156,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir, dirs: dirs},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
 		},
 		domainLargeValues: CommitmentDomainLargeValues,
@@ -168,19 +167,19 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
-	idxCfg := iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
+	idxCfg := iiCfg{salt: salt, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.dirs.Tmp, dirs: dirs}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir, dirs: dirs}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}

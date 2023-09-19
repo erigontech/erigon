@@ -91,9 +91,8 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt        *uint32
-	dirs        datadir.Dirs
-	dir, tmpdir string
+	salt *uint32
+	dirs datadir.Dirs
 }
 
 func NewInvertedIndex(
@@ -220,7 +219,6 @@ func (ii *InvertedIndex) OpenFolder() error {
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
-Loop:
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -246,6 +244,7 @@ Loop:
 		startTxNum, endTxNum := startStep*ii.aggregationStep, endStep*ii.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
+		/*TODO: restore this feature?
 		for _, ext := range ii.integrityFileExtensions {
 			requiredFile := fmt.Sprintf("%s.%d-%d.%s", ii.filenameBase, startStep, endStep, ext)
 			if !dir.FileExist(filepath.Join(ii.dir, requiredFile)) {
@@ -254,6 +253,7 @@ Loop:
 				continue Loop
 			}
 		}
+		*/
 
 		if _, has := ii.files.Get(newFile); has {
 			continue
@@ -569,10 +569,10 @@ func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
 	ii.wal = ii.newWriter(tmpdir, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
-	ii.wal = ii.newWriter(ii.tmpdir, true, false)
+	ii.wal = ii.newWriter(ii.dirs.Tmp, true, false)
 }
 func (ii *InvertedIndex) StartUnbufferedWrites() {
-	ii.wal = ii.newWriter(ii.tmpdir, false, false)
+	ii.wal = ii.newWriter(ii.dirs.Tmp, false, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.wal.close()
@@ -946,7 +946,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}
 
-	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 
@@ -1703,7 +1703,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 		return nil
 	}
 
-	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 

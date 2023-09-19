@@ -58,7 +58,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dir: dirs.SnapIdx, tmpdir: dirs.Tmp, dirs: dirs},
+		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
 		withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
