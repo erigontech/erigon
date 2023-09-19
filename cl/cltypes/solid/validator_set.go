@@ -188,7 +188,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 			}
 		}
 		endOffset := (to - from) * length.Hash
-		if err := computeFlatRootsToBuffer(from, to, validatorTreeCacheGroupLayer, hashBuffer, layerBuffer[:endOffset], v.treeCacheBuffer[offset:]); err != nil {
+		if err := computeFlatRootsToBuffer(validatorTreeCacheGroupLayer, layerBuffer[:endOffset], v.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
 
@@ -212,8 +212,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
-func computeFlatRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, layerBuffer, leaves []byte) error {
-	layerBuffer = layerBuffer[:(to-from)*length.Hash]
+func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
 	for i := uint8(0); i < depth; i++ {
 		// Sequential
 		if len(layerBuffer)%64 != 0 {
@@ -225,7 +224,7 @@ func computeFlatRootsToBuffer(from uint64, to uint64, depth uint8, hashBuffer, l
 		layerBuffer = layerBuffer[:len(layerBuffer)/2]
 	}
 
-	copy(leaves, layerBuffer[:length.Hash])
+	copy(output, layerBuffer[:length.Hash])
 	return nil
 }
 
