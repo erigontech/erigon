@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -1238,20 +1239,22 @@ type FinalityAPI interface {
 }
 
 func (c *Bor) Start(apiList []rpc.API, chainDB kv.RwDB, blockReader services.FullBlockReader) {
-	borDB := c.DB
+	if flags.Milestone {
+		borDB := c.DB
 
-	whitelist.RegisterService(borDB)
+		whitelist.RegisterService(borDB)
 
-	var borAPI borfinality.BorAPI
+		var borAPI borfinality.BorAPI
 
-	for _, api := range apiList {
-		if api.Namespace == "bor" {
-			borAPI = api.Service.(FinalityAPI)
-			break
+		for _, api := range apiList {
+			if api.Namespace == "bor" {
+				borAPI = api.Service.(FinalityAPI)
+				break
+			}
 		}
-	}
 
-	borfinality.Whitelist(c.HeimdallClient, borDB, chainDB, blockReader, c.logger, borAPI, c.closeCh)
+		borfinality.Whitelist(c.HeimdallClient, borDB, chainDB, blockReader, c.logger, borAPI, c.closeCh)
+	}
 }
 
 func (c *Bor) Close() error {

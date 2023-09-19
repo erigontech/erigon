@@ -426,7 +426,7 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 
 	// check status code
 	if res.StatusCode != 200 && res.StatusCode != 204 {
-		return nil, fmt.Errorf("%w: response code %d", ErrNotSuccessfulResponse, res.StatusCode)
+		return nil, fmt.Errorf("%w: %s:response code %d", u.String(), ErrNotSuccessfulResponse, res.StatusCode)
 	}
 
 	// unmarshall data from buffer

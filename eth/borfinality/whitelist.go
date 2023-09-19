@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -28,6 +29,10 @@ type BorAPI interface {
 }
 
 func Whitelist(heimdall heimdall.IHeimdallClient, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+	if !flags.Milestone {
+		return
+	}
+
 	config := &config{
 		heimdall:    heimdall,
 		borDB:       borDB,
