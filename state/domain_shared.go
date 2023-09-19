@@ -561,7 +561,9 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 		}
 	}
 	t2 := time.Since(t)
-	log.Info("[dbg] com", "t3", t1, "t4", t2)
+	if t2 > 2*time.Second || t1 > 2*time.Second {
+		log.Info("[dbg] com", "t3", t1, "t4", t2)
+	}
 	return rootHash, nil
 }
 

@@ -506,7 +506,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	}
 	t2 := time.Since(t)
 
-	log.Info("[dbg] com", "t1", t1, "t2", t2)
+	if t2 > 2*time.Second || t1 > 2*time.Second {
+		log.Info("[dbg] com", "t1", t1, "t2", t2)
+	}
 	return rootHash, branchNodeUpdates, err
 }
 
