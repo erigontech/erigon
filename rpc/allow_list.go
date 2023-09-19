@@ -2,7 +2,9 @@ package rpc
 
 import "encoding/json"
 
-type AllowList map[string]struct{}
+type MethodList map[string]struct{}
+
+type AllowList = MethodList
 
 func (a *AllowList) UnmarshalJSON(data []byte) error {
 	var keys []string
@@ -34,7 +36,7 @@ func (a *AllowList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(keys)
 }
 
-type ForbiddenList map[string]struct{}
+type ForbiddenList = MethodList
 
 func newForbiddenList() ForbiddenList {
 	return ForbiddenList{}

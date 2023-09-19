@@ -24,13 +24,46 @@ import (
 )
 
 var (
+	rpcMetricsLabels   = map[bool]map[string]string{}
 	rpcRequestGauge    = metrics.GetOrCreateCounter("rpc_total")
 	failedReqeustGauge = metrics.GetOrCreateCounter("rpc_failure")
 )
 
-func newRPCServingTimerMS(method string, valid bool) *metrics2.Summary {
-	if valid {
-		return metrics.GetOrCreateSummary(fmt.Sprintf(`rpc_duration_seconds{method="%s",success="success"}`, method))
+func preAllocateRPCMetricLabels(methods MethodList) {
+	successMap, ok := rpcMetricsLabels[true]
+	if !ok {
+		successMap = make(map[string]string)
 	}
-	return metrics.GetOrCreateSummary(fmt.Sprintf(`rpc_duration_seconds{method="%s",success="failure"}`, method))
+
+	failureMap, ok := rpcMetricsLabels[false]
+	if !ok {
+		failureMap = make(map[string]string)
+	}
+
+	for method := range methods {
+		successMap[method] = createRPCMetricsLabel(method, true)
+		failureMap[method] = createRPCMetricsLabel(method, false)
+	}
+
+	rpcMetricsLabels[true] = successMap
+	rpcMetricsLabels[false] = failureMap
+}
+
+func createRPCMetricsLabel(method string, valid bool) string {
+	status := "failure"
+	if valid {
+		status = "success"
+	}
+
+	return fmt.Sprintf(`rpc_duration_seconds{method="%s",success="%s"}`, method, status)
+
+}
+
+func newRPCServingTimerMS(method string, valid bool) *metrics2.Summary {
+	label, ok := rpcMetricsLabels[valid][method]
+	if !ok {
+		label = createRPCMetricsLabel(method, valid)
+	}
+
+	return metrics.GetOrCreateSummary(label)
 }
