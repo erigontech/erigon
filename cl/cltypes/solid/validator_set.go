@@ -2,7 +2,6 @@ package solid
 
 import (
 	"bytes"
-	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -10,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -158,7 +156,6 @@ func (v *ValidatorSet) Get(idx int) Validator {
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
-	begin := time.Now()
 	// generate root list
 	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
 	hashBuffer := make([]byte, 8*32)
@@ -211,7 +208,6 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		}
 		elements = v.buf
 	}
-	log.Debug("ValidatorSet hashing", "elapsed", time.Since(begin))
 
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
