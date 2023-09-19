@@ -107,7 +107,7 @@ func NewInvertedIndex(
 	integrityCheck func(fromStep, toStep uint64) bool,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	if cfg.dirs.SnapState == "" {
+	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
 	ii := InvertedIndex{
@@ -180,7 +180,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	if err != nil {
 		return
 	}
-	domain, err = filesFromDir(ii.dirs.SnapState)
+	domain, err = filesFromDir(ii.dirs.SnapDomain)
 	if err != nil {
 		return
 	}
