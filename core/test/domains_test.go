@@ -46,7 +46,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	require.NoError(t, os.MkdirAll(filepath.Join(path, "db"), 0740))
 	require.NoError(t, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
 	require.NoError(t, os.MkdirAll(histDir, 0740))
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).Path(filepath.Join(path, "db")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
@@ -128,6 +128,7 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	writer := state2.NewWriterV4(tx.(*temporal.Tx), domains)
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		domains.SetTxNum(txNum)
+		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(loc[:])
@@ -136,7 +137,6 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 
 		acc, addr := randomAccount(t)
 		if txNum > txs-aggStep {
-			fmt.Printf(" txn %d addr %x\n", txNum, addr)
 			addrs = append(addrs, addr)
 			accs = append(accs, acc)
 			locs = append(locs, loc)
@@ -152,19 +152,23 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 		require.NoError(t, err)
 
 		if txNum%blockSize == 0 && txNum >= txs-aggStep {
-			rh, err := domains.Commit(true, false)
+			rh, err := writer.Commitment(true, false)
 			require.NoError(t, err)
-			fmt.Printf("tx %d rh %x\n", txNum, rh)
+			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
 			hashes = append(hashes, rh)
 			hashedTxs = append(hashedTxs, txNum)
 		}
 	}
-	//rh, err = domains.Commit(true, false)
+	//_, err = writer.Commitment(true, false)
 	//require.NoError(t, err)
 
 	err = agg.Flush(context.Background(), tx)
 	require.NoError(t, err)
+
+	//bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	//bn-- we set bn+1 in domains.SeekCommitment to correctly start from the next block
+
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
@@ -173,8 +177,14 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	require.NoError(t, err)
 
 	maxStep := (txs - 1) / aggStep
+	domains.Close()
 	agg.FinishWrites()
 	agg.Close()
+	//fmt.Printf("before reset found commit bn %d\n", bn)
+
+	db.Close()
+	db = nil
+
 	fmt.Printf("maxStep %d tx %d hashed %d\n", maxStep, txs, len(hashedTxs))
 
 	// remove db
@@ -188,8 +198,6 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 			break
 		}
 	}
-	db.Close()
-	db = nil
 
 	// ======== reset domains ========
 	db, agg, datadir = testDbAndAggregatorv3(t, datadir, aggStep)
@@ -246,7 +254,7 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 		i++
 
 		if txNum%blockSize == 0 /*&& txNum >= txs-aggStep */ {
-			rh, err := domains.Commit(true, false)
+			rh, err := writer.Commitment(true, false)
 			require.NoError(t, err)
 			fmt.Printf("tx %d rh %x\n", txNum, rh)
 
@@ -256,18 +264,6 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 			//hashedTxs = append(hashedTxs, txNum)
 		}
 	}
-
-	//br, bw := blocksIO(db, logger)
-	//chainConfig := fromdb.ChainConfig(db)
-	//
-	//err = db.Update(ctx, func(tx kv.RwTx) error {
-	//	if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
-	//		return err
-	//	}
-	//	return nil
-	//})
-	//require.NoError(t, err)
-
 }
 
 func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
