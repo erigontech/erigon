@@ -1385,7 +1385,6 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				panic(1)
 				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {

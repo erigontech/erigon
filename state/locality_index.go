@@ -445,7 +445,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				li.logger.Warn("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				panic(1)
 				return nil, fmt.Errorf("build idx: %w", err)
 			}
 		} else {

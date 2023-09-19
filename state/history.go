@@ -940,7 +940,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				panic(1)
 				return HistoryFiles{}, fmt.Errorf("build idx: %w", err)
 			}
 		} else {
