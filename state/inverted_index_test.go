@@ -523,7 +523,7 @@ func TestScanStaticFiles(t *testing.T) {
 
 	//integrity extension case
 	ii.files.Clear()
-	ii.integrityFileExtensions = []string{"v"}
+	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	ii.scanStateFiles(files)
 	require.Equal(t, 0, ii.files.Len())
 }

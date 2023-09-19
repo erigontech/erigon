@@ -65,9 +65,11 @@ type InvertedIndex struct {
 	filenameBase    string
 	aggregationStep uint64
 
-	integrityFileExtensions []string
-	withLocalityIndex       bool
-	withExistenceIndex      bool
+	//TODO: re-visit this check - maybe we don't need it.
+	integrityCheck func(fromStep, toStep uint64) bool
+
+	withLocalityIndex  bool
+	withExistenceIndex bool
 
 	// localityIdx of warm files - storing `steps` where `key` was updated
 	//  - need re-calc when new file created
@@ -102,24 +104,24 @@ func NewInvertedIndex(
 	indexKeysTable string,
 	indexTable string,
 	withLocalityIndex, withExistenceIndex bool,
-	integrityFileExtensions []string,
+	integrityCheck func(fromStep, toStep uint64) bool,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
 	if cfg.dirs.SnapState == "" {
 		panic("empty `dirs` varialbe")
 	}
 	ii := InvertedIndex{
-		iiCfg:                   cfg,
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		aggregationStep:         aggregationStep,
-		filenameBase:            filenameBase,
-		indexKeysTable:          indexKeysTable,
-		indexTable:              indexTable,
-		compressWorkers:         1,
-		integrityFileExtensions: integrityFileExtensions,
-		withLocalityIndex:       withLocalityIndex,
-		withExistenceIndex:      withExistenceIndex,
-		logger:                  logger,
+		iiCfg:              cfg,
+		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		aggregationStep:    aggregationStep,
+		filenameBase:       filenameBase,
+		indexKeysTable:     indexKeysTable,
+		indexTable:         indexTable,
+		compressWorkers:    1,
+		integrityCheck:     integrityCheck,
+		withLocalityIndex:  withLocalityIndex,
+		withExistenceIndex: withExistenceIndex,
+		logger:             logger,
 	}
 	ii.roFiles.Store(&[]ctxItem{})
 
@@ -244,16 +246,9 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 		startTxNum, endTxNum := startStep*ii.aggregationStep, endStep*ii.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
-		/*TODO: restore this feature?
-		for _, ext := range ii.integrityFileExtensions {
-			requiredFile := fmt.Sprintf("%s.%d-%d.%s", ii.filenameBase, startStep, endStep, ext)
-			if !dir.FileExist(filepath.Join(ii.dir, requiredFile)) {
-				ii.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-				garbageFiles = append(garbageFiles, newFile)
-				continue Loop
-			}
+		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
+			continue
 		}
-		*/
 
 		if _, has := ii.files.Get(newFile); has {
 			continue
