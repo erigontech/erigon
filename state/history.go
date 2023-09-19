@@ -898,7 +898,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 	}
-	fmt.Printf("historyIdxPath: %s, %s\n", historyIdxPath, h.dirs.Tmp)
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    collation.historyCount,
 		Enums:       false,
