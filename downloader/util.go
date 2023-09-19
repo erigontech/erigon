@@ -19,6 +19,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"net"
 	"os"
 	"path/filepath"
@@ -241,7 +242,8 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) ([]string, error) {
+	snapDir := dirs.Snap
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
