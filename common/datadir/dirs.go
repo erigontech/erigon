@@ -59,7 +59,7 @@ func New(datadir string) Dirs {
 		SnapIdx:         filepath.Join(datadir, "snapshots", "idx"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessors"),
+		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}

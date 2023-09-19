@@ -19,7 +19,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"net"
 	"os"
 	"path/filepath"
@@ -143,16 +142,20 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
-	l, err := seedableSnapshotsBySubDir(dir, "history")
+func seedableHistorySnapshots(dir string) ([]string, error) {
+	l, err := seedableSnapshotsBySubDir(dir, "idx")
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableSnapshotsBySubDir(dir, "warm")
+	l2, err := seedableSnapshotsBySubDir(dir, "history")
 	if err != nil {
 		return nil, err
 	}
-	return append(l, l2...), nil
+	l3, err := seedableSnapshotsBySubDir(dir, "domain")
+	if err != nil {
+		return nil, err
+	}
+	return append(append(l, l2...), l3...), nil
 }
 
 func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
@@ -242,8 +245,7 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) ([]string, error) {
-	snapDir := dirs.Snap
+func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
