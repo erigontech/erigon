@@ -142,16 +142,20 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
-	l, err := seedableSnapshotsBySubDir(dir, "history")
+func seedableHistorySnapshots(dir string) ([]string, error) {
+	l, err := seedableSnapshotsBySubDir(dir, "idx")
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableSnapshotsBySubDir(dir, "warm")
+	l2, err := seedableSnapshotsBySubDir(dir, "history")
 	if err != nil {
 		return nil, err
 	}
-	return append(l, l2...), nil
+	l3, err := seedableSnapshotsBySubDir(dir, "domain")
+	if err != nil {
+		return nil, err
+	}
+	return append(append(l, l2...), l3...), nil
 }
 
 func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
@@ -346,22 +350,24 @@ func AddTorrentFiles(snapDir string, torrentClient *torrent.Client) error {
 	return nil
 }
 
-func allTorrentFiles(snapDir string) (res []*torrent.TorrentSpec, err error) {
-	res, err = torrentInDir(snapDir)
+func allTorrentFiles(snapDir string) ([]*torrent.TorrentSpec, error) {
+	l, err := torrentInDir(snapDir)
 	if err != nil {
 		return nil, err
 	}
-	res2, err := torrentInDir(filepath.Join(snapDir, "history"))
+	l2, err := torrentInDir(filepath.Join(snapDir, "idx"))
 	if err != nil {
 		return nil, err
 	}
-	res = append(res, res2...)
-	res2, err = torrentInDir(filepath.Join(snapDir, "warm"))
+	l3, err := torrentInDir(filepath.Join(snapDir, "history"))
 	if err != nil {
 		return nil, err
 	}
-	res = append(res, res2...)
-	return res, nil
+	l4, err := torrentInDir(filepath.Join(snapDir, "domain"))
+	if err != nil {
+		return nil, err
+	}
+	return append(append(append(l, l2...), l3...), l4...), nil
 }
 func torrentInDir(snapDir string) (res []*torrent.TorrentSpec, err error) {
 	files, err := os.ReadDir(snapDir)
