@@ -131,7 +131,6 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		traceRequests:       traceRequests,
 	}
 
-
 	if conn.remoteAddr() != "" {
 		h.logger = h.logger.New("conn", conn.remoteAddr())
 	}
