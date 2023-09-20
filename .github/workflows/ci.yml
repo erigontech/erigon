@@ -50,14 +50,35 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - name: Lint
+      - name: Install golangci-lint
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
           version: v1.54
+          skip-build-cache: true
+          args: --help
+
+      - name: Lint erigon
+        if: runner.os == 'Linux'
+        run: golangci-lint run --config ./.golangci.yml
+
+      - name: Lint erigon-lib
+        if: runner.os == 'Linux'
+        env:
+          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+        run: cd erigon-lib && golangci-lint run --config ./.golangci.yml
+
+      - name: Lint source code licenses
+        if: runner.os == 'Linux'
+        run: cd erigon-lib && make lint-licenses-deps lint-licenses
 
       - name: Test
         run: make test
+
+      - name: Test erigon-lib
+        env:
+          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+        run: cd erigon-lib && make test
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
@@ -67,6 +88,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 8GB
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v4
         with:
@@ -88,6 +113,11 @@ jobs:
 
       - name: Test
         run: .\wmake.ps1 test
+
+      - name: Test erigon-lib
+        env:
+          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+        run: cd erigon-lib && make test-no-fuzz
 
   docker-build-check:
     # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
