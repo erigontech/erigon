@@ -173,6 +173,11 @@ var (
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
 		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
 	}
+	TxPoolBlobSlotsFlag = cli.Uint64Flag{
+		Name:  "txpool.blobslots",
+		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
+		Value: txpoolcfg.DefaultConfig.BlobSlots,
+	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
@@ -1250,8 +1255,14 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)
 	}
+	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
+		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
 	if ctx.IsSet(TxPoolAccountSlotsFlag.Name) {
 		cfg.AccountSlots = ctx.Uint64(TxPoolAccountSlotsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
+		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)

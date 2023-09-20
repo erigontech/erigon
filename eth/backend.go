@@ -96,6 +96,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -645,11 +646,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		time.Sleep(10 * time.Millisecond)
 		baseFee := uint64(0)
 		if currentBlock.BaseFee() != nil {
-			baseFee = currentBlock.BaseFee().Uint64()
+			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
+		}
+		blobFee := uint64(params.MinBlobGasPrice)
+		if currentBlock.Header().ExcessBlobGas != nil {
+			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()))
+			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
+				blobFee = b.Uint64()
+			}
 		}
 		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
-		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit(), 0)
-
+		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, blobFee, currentBlock.GasLimit(), 0)
 	}()
 
 	if !config.DeprecatedTxPool.Disable {
