@@ -72,13 +72,13 @@ jobs:
         if: runner.os == 'Linux'
         run: cd erigon-lib && make lint-licenses-deps lint-licenses
 
-      - name: Test
-        run: make test
-
       - name: Test erigon-lib
         env:
           CGO_CXXFLAGS: "-g -O2 -std=c++17"
         run: cd erigon-lib && make test
+
+      - name: Test
+        run: make test
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
