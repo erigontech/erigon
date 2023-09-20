@@ -30,14 +30,15 @@ type MiningServer struct {
 	minedBlockStreams   MinedBlockStreams
 	ethash              *ethash.API
 	isMining            IsMining
+	logger              log.Logger
 }
 
 type IsMining interface {
 	IsMining() bool
 }
 
-func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API) *MiningServer {
-	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi}
+func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
+	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
 }
 
 func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -100,7 +101,7 @@ func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
 		return err
 	}
 	reply := &proto_txpool.OnPendingBlockReply{RplBlock: b}
-	s.pendingBlockStreams.Broadcast(reply)
+	s.pendingBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
@@ -121,7 +122,7 @@ func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 		return err
 	}
 	reply := &proto_txpool.OnPendingBlockReply{RplBlock: buf.Bytes()}
-	s.pendingBlockStreams.Broadcast(reply)
+	s.pendingBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
@@ -133,21 +134,22 @@ func (s *MiningServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
-	log.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
+	s.logger.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
 	}
 	reply := &proto_txpool.OnMinedBlockReply{RplBlock: buf.Bytes()}
-	s.minedBlockStreams.Broadcast(reply)
+	s.minedBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
 type MinedBlockStreams struct {
-	chans map[uint]proto_txpool.Mining_OnMinedBlockServer
-	id    uint
-	mu    sync.Mutex
+	chans  map[uint]proto_txpool.Mining_OnMinedBlockServer
+	id     uint
+	mu     sync.Mutex
+	logger log.Logger
 }
 
 func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (remove func()) {
@@ -162,13 +164,13 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (
 	return func() { s.remove(id) }
 }
 
-func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
+func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Trace("failed send to mined block stream", "err", err)
+			logger.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -207,13 +209,13 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 	return func() { s.remove(id) }
 }
 
-func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
+func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Trace("failed send to mined block stream", "err", err)
+			logger.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -252,13 +254,13 @@ func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer)
 	return func() { s.remove(id) }
 }
 
-func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply) {
+func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Trace("failed send to mined block stream", "err", err)
+			logger.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)

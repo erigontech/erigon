@@ -99,11 +99,11 @@ var (
 			"\n\tSyntax <forkname>(+ExtraEip)",
 			strings.Join(tests.AvailableForks(), "\n\t    "),
 			strings.Join(vm.ActivateableEips(), ", ")),
-		Value: "ArrowGlacier",
+		Value: "Merge",
 	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
-		Usage: "sets the verbosity level",
+		Usage: "Deprecated. Use --log.console.verbosity, --log.dir.verbosity, --torrent.verbosity, --database.verbosity",
 		Value: 3,
 	}
 )

@@ -24,8 +24,6 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -34,6 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
 
@@ -70,32 +70,37 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
+	excessBlobGas := uint64(50000)
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		Coinbase:    libcommon.Address{},
-		BlockNumber: 8000000,
-		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
-		GasLimit:    uint64(6000000),
+		CanTransfer:   core.CanTransfer,
+		Transfer:      core.Transfer,
+		Coinbase:      libcommon.Address{},
+		BlockNumber:   8000000,
+		Time:          5,
+		Difficulty:    big.NewInt(0x30000),
+		GasLimit:      uint64(6000000),
+		ExcessBlobGas: &excessBlobGas,
 	}
 	context.BaseFee = uint256.NewInt(0)
-	alloc := core.GenesisAlloc{}
+	alloc := types.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
 	// the address
-	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = core.GenesisAccount{
+	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    hexutil.MustDecode("0x63deadbeef60005263cafebabe6004601c6000F560005260206000F3"),
 		Balance: big.NewInt(1),
 	}
-	alloc[origin] = core.GenesisAccount{
+	alloc[origin] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
 
-	_, tx := memdb.NewTestTx(t)
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
@@ -110,7 +115,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()))
+	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()))
 	if _, err = st.TransitionDb(false, false); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}

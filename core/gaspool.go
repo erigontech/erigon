@@ -23,32 +23,62 @@ import (
 
 // GasPool tracks the amount of gas available during execution of the transactions
 // in a block. The zero value is a pool with zero gas available.
-type GasPool uint64
+type GasPool struct {
+	gas, blobGas uint64
+}
+
+func (gp *GasPool) Reset(amount uint64) {
+	gp.gas = amount
+}
 
 // AddGas makes gas available for execution.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
-	if uint64(*gp) > math.MaxUint64-amount {
+	if gp.gas > math.MaxUint64-amount {
 		panic("gas pool pushed above uint64")
 	}
-	*(*uint64)(gp) += amount
+	gp.gas += amount
 	return gp
 }
 
 // SubGas deducts the given amount from the pool if enough gas is
 // available and returns an error otherwise.
 func (gp *GasPool) SubGas(amount uint64) error {
-	if uint64(*gp) < amount {
+	if gp.gas < amount {
 		return ErrGasLimitReached
 	}
-	*(*uint64)(gp) -= amount
+	gp.gas -= amount
 	return nil
 }
 
 // Gas returns the amount of gas remaining in the pool.
 func (gp *GasPool) Gas() uint64 {
-	return uint64(*gp)
+	return gp.gas
+}
+
+// AddBlobGas makes blob gas available for execution.
+func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
+	if gp.blobGas > math.MaxUint64-amount {
+		panic("blob gas pool pushed above uint64")
+	}
+	gp.blobGas += amount
+	return gp
+}
+
+// SubBlobGas deducts the given amount from the pool if enough blob gas is available and returns an
+// error otherwise.
+func (gp *GasPool) SubBlobGas(amount uint64) error {
+	if gp.blobGas < amount {
+		return ErrBlobGasLimitReached
+	}
+	gp.blobGas -= amount
+	return nil
+}
+
+// BlobGas returns the amount of blob gas remaining in the pool.
+func (gp *GasPool) BlobGas() uint64 {
+	return gp.blobGas
 }
 
 func (gp *GasPool) String() string {
-	return fmt.Sprintf("%d", *gp)
+	return fmt.Sprintf("gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
 }

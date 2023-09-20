@@ -60,10 +60,10 @@ func (a ByCategory) Less(i, j int) bool {
 }
 
 // NewApp creates an app with sane defaults.
-func NewApp(gitCommit, gitDate, usage string) *cli.App {
+func NewApp(gitCommit, usage string) *cli.App {
 	app := cli.NewApp()
 	app.Name = filepath.Base(os.Args[0])
-	app.Version = params.VersionWithCommit(gitCommit, gitDate)
+	app.Version = params.VersionWithCommit(gitCommit)
 	app.Usage = usage
 	return app
 }

@@ -10,18 +10,17 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
-
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -31,14 +30,11 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc/contracts"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/log/v3"
 )
-
-func CreateTestKV(t *testing.T) kv.RwDB {
-	s, _, _ := CreateTestSentry(t)
-	return s.DB
-}
 
 type testAddresses struct {
 	key      *ecdsa.PrivateKey
@@ -69,7 +65,7 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*core.ChainPack) {
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.ChainPack) {
 	addresses := makeTestAddresses()
 	var (
 		key      = addresses.key
@@ -79,9 +75,9 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 	)
 
 	var (
-		gspec = &core.Genesis{
+		gspec = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
@@ -89,14 +85,14 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 			GasLimit: 10000000,
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 
 	// Generate empty chain to have some orphaned blocks for tests
 	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
-	}, true)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +102,10 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(orphanedChain); err != nil {
+	if err = m.InsertChain(orphanedChain, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -161,7 +157,7 @@ func generateChain(
 	var tokenContract *contracts.Token
 
 	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 10, func(i int, block *core.BlockGen) {
+	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -265,6 +261,9 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+		case 10:
+			// Empty block
+			break
 		}
 
 		if err != nil {
@@ -278,14 +277,14 @@ func generateChain(
 			block.AddTx(txn)
 		}
 		contractBackend.Commit()
-	}, true)
+	})
 }
 
 type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
@@ -296,9 +295,10 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReader(), nil, nil, nil, false))
+	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events,
+		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore()))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
+	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
@@ -324,7 +324,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	return ctx, conn
 }
 
-func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
+func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 	var (
 		a0 = libcommon.HexToAddress("0x00000000000000000000000000000000000000ff")
 		a1 = libcommon.HexToAddress("0x00000000000000000000000000000000000001ff")
@@ -335,9 +335,9 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
 				a0: {
@@ -416,20 +416,129 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 			},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
 			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
+	return m
+}
+
+func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
+	var (
+		// Generate a canonical chain to act as the main dataset
+		// A sender who makes transactions, has some funds
+		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address   = crypto.PubkeyToAddress(key.PublicKey)
+		funds     = big.NewInt(1000000000)
+		bb        = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
+		aaStorage = make(map[libcommon.Hash]libcommon.Hash)    // Initial storage in AA
+		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
+	)
+	// Populate two slots
+	aaStorage[libcommon.HexToHash("01")] = libcommon.HexToHash("01")
+	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
+
+	// The bb-code needs to CREATE2 the aa contract. It consists of
+	// both initcode and deployment code
+	// initcode:
+	// 1. Set slots 3=3, 4=4,
+	// 2. Return aaCode
+
+	initCode := []byte{
+		byte(vm.PUSH1), 0x3, // value
+		byte(vm.PUSH1), 0x3, // location
+		byte(vm.SSTORE),     // Set slot[3] = 3
+		byte(vm.PUSH1), 0x4, // value
+		byte(vm.PUSH1), 0x4, // location
+		byte(vm.SSTORE), // Set slot[4] = 4
+		// Slots are set, now return the code
+		byte(vm.PUSH2), byte(vm.PC), byte(vm.SELFDESTRUCT), // Push code on stack
+		byte(vm.PUSH1), 0x0, // memory start on stack
+		byte(vm.MSTORE),
+		// Code is now in memory.
+		byte(vm.PUSH1), 0x2, // size
+		byte(vm.PUSH1), byte(32 - 2), // offset
+		byte(vm.RETURN),
+	}
+	if l := len(initCode); l > 32 {
+		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
+	}
+	bbCode := []byte{
+		// Push initcode onto stack
+		byte(vm.PUSH1) + byte(len(initCode)-1)}
+	bbCode = append(bbCode, initCode...)
+	bbCode = append(bbCode, []byte{
+		byte(vm.PUSH1), 0x0, // memory start on stack
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x00, // salt
+		byte(vm.PUSH1), byte(len(initCode)), // size
+		byte(vm.PUSH1), byte(32 - len(initCode)), // offset
+		byte(vm.PUSH1), 0x00, // endowment
+		byte(vm.CREATE2),
+	}...)
+
+	initHash := crypto.Keccak256Hash(initCode)
+	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	t.Logf("Destination address: %x\n", aa)
+
+	gspec := &types.Genesis{
+		Config: params.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			address: {Balance: funds},
+			// The address 0xAAAAA selfdestructs if called
+			aa: {
+				// Code needs to just selfdestruct
+				Code:    aaCode,
+				Nonce:   1,
+				Balance: big.NewInt(0),
+				Storage: aaStorage,
+			},
+			// The contract BB recreates AA
+			bb: {
+				Code:    bbCode,
+				Balance: big.NewInt(1),
+			},
+			bb: {
+				Code:    bbCode,
+				Balance: big.NewInt(1),
+			},
+		},
+	}
+	m := mock.MockWithGenesis(t, gspec, key, false)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(libcommon.Address{1})
+		// One transaction to AA, to kill it
+		tx, _ := types.SignTx(types.NewTransaction(0, aa,
+			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		b.AddTx(tx)
+		// One transaction to BB, to recreate AA
+		tx, _ = types.SignTx(types.NewTransaction(1, bb,
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		b.AddTx(tx)
+		tx, _ = types.SignTx(types.NewTransaction(2, bb,
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+		b.AddTx(tx)
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+	// Import the canonical chain
+	if err := m.InsertChain(chain, nil); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
+	}
+
+	fmt.Println(chain.Blocks[0].Transactions()[2].Hash().Hex())
+
 	return m
 }

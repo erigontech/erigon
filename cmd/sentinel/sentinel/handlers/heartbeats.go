@@ -14,6 +14,7 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -22,35 +23,35 @@ import (
 // Type safe handlers which all have access to the original stream & decompressed data.
 // Since packets are just structs, they can be resent with no issue
 
-func (c *ConsensusHandlers) pingHandler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
+func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: c.metadata.SeqNumber,
 	}, SuccessfulResponsePrefix)
 }
 
-func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
+func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)
 }
 
-func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
+func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
 	}, SuccessfulResponsePrefix)
 }
 
-func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, c.metadata, SuccessfulResponsePrefix)
+func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
+	return ssz_snappy.EncodeAndWrite(s, c.metadata, SuccessfulResponsePrefix)
 }
 
 // TODO: Actually respond with proper status
-func (c *ConsensusHandlers) statusHandler(s network.Stream) {
+func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
+	defer s.Close()
 	status := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status); err != nil {
-		s.Close()
-		return
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status, clparams.Phase0Version); err != nil {
+		return err
 	}
-	ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

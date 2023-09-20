@@ -25,29 +25,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 const sampleNumber = 3 // Number of transactions sampled in a block
-
-var (
-	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
-	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
-)
-
-type Config struct {
-	Blocks           int
-	Percentile       int
-	MaxHeaderHistory int
-	MaxBlockHistory  int
-	Default          *big.Int `toml:",omitempty"`
-	MaxPrice         *big.Int `toml:",omitempty"`
-	IgnorePrice      *big.Int `toml:",omitempty"`
-}
 
 // OracleBackend includes all necessary background APIs for oracle.
 type OracleBackend interface {
@@ -55,7 +40,7 @@ type OracleBackend interface {
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
@@ -81,7 +66,7 @@ type Oracle struct {
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
 // gasprice for newly created transaction.
-func NewOracle(backend OracleBackend, params Config, cache Cache) *Oracle {
+func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache) *Oracle {
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
@@ -98,12 +83,12 @@ func NewOracle(backend OracleBackend, params Config, cache Cache) *Oracle {
 	}
 	maxPrice := params.MaxPrice
 	if maxPrice == nil || maxPrice.Int64() <= 0 {
-		maxPrice = DefaultMaxPrice
+		maxPrice = gaspricecfg.DefaultMaxPrice
 		log.Warn("Sanitizing invalid gasprice oracle price cap", "provided", params.MaxPrice, "updated", maxPrice)
 	}
 	ignorePrice := params.IgnorePrice
 	if ignorePrice == nil || ignorePrice.Int64() < 0 {
-		ignorePrice = DefaultIgnorePrice
+		ignorePrice = gaspricecfg.DefaultIgnorePrice
 		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
 	return &Oracle{
@@ -212,7 +197,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -291,7 +276,7 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	*s = old[0 : n-1]
 	return x
 }

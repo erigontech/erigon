@@ -30,43 +30,6 @@ const (
 	mul
 )
 
-func TestOverflow(t *testing.T) {
-	for i, test := range []struct {
-		x        uint64
-		y        uint64
-		overflow bool
-		op       operation
-	}{
-		// add operations
-		{MaxUint64, 1, true, add},
-		{MaxUint64 - 1, 1, false, add},
-
-		// sub operations
-		{0, 1, true, sub},
-		{0, 0, false, sub},
-
-		// mul operations
-		{0, 0, false, mul},
-		{10, 10, false, mul},
-		{MaxUint64, 2, true, mul},
-		{MaxUint64, 1, false, mul},
-	} {
-		var overflows bool
-		switch test.op {
-		case sub:
-			_, overflows = SafeSub(test.x, test.y)
-		case add:
-			_, overflows = SafeAdd(test.x, test.y)
-		case mul:
-			_, overflows = SafeMul(test.x, test.y)
-		}
-
-		if test.overflow != overflows {
-			t.Errorf("%d failed. Expected test to be %v, got %v", i, test.overflow, overflows)
-		}
-	}
-}
-
 func TestHexOrDecimal64(t *testing.T) {
 	tests := []struct {
 		input string

@@ -11,23 +11,30 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var (
@@ -48,14 +55,14 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
+		logger := debug.SetupCobra(cmd, "check_change_sets")
+		return CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, logger)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, logger log.Logger) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -74,19 +81,13 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if err != nil {
 		return err
 	}
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil /* BorSnapshots */)
+
 	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb
@@ -123,7 +124,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots, blockReader, logger)
 
 	for !interrupt {
 
@@ -166,7 +167,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			}
 			return h
 		}
-		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, b, vmConfig, blockNum == block)
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, b, vmConfig, blockNum == block, logger)
 		if err1 != nil {
 			return err1
 		}
@@ -263,7 +264,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 		blockNum++
 		if blockNum%1000 == 0 {
-			log.Info("Checked", "blocks", blockNum)
+			logger.Info("Checked", "blocks", blockNum)
 		}
 
 		// Check for interrupts
@@ -273,6 +274,23 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		default:
 		}
 	}
-	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
+	logger.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
+}
+
+func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
+	config := ethconfig.Defaults
+
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		consensusConfig = &config.Aura
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil /* heimdallClient */, config.WithoutHeimdall, blockReader, true /* readonly */, logger)
 }

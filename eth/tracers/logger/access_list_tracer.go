@@ -19,8 +19,8 @@ package logger
 import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
@@ -92,11 +92,11 @@ func (al accessList) equal(other accessList) bool {
 	return true
 }
 
-// accesslist converts the accesslist to a types.AccessList.
-func (al accessList) accessList() types.AccessList {
-	acl := make(types.AccessList, 0, len(al))
+// accesslist converts the accesslist to a types2.AccessList.
+func (al accessList) accessList() types2.AccessList {
+	acl := make(types2.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
+		tuple := types2.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -115,7 +115,7 @@ type AccessListTracer struct {
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
 // the resulting accesslist.
-func NewAccessListTracer(acl types.AccessList, from, to libcommon.Address, precompiles []libcommon.Address) *AccessListTracer {
+func NewAccessListTracer(acl types2.AccessList, from, to libcommon.Address, precompiles []libcommon.Address) *AccessListTracer {
 	excl := map[libcommon.Address]struct{}{
 		from: {}, to: {},
 	}
@@ -180,7 +180,7 @@ func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.
-func (a *AccessListTracer) AccessList() types.AccessList {
+func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()
 }
 

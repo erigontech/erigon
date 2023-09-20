@@ -26,13 +26,13 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
 	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
 var (
-	app = cli2.NewApp(params.GitCommit, "", "the evm command line interface")
+	app = cli2.NewApp(params.GitCommit, "the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",
@@ -63,12 +63,12 @@ var (
 		Usage: "gas limit for the evm",
 		Value: 10000000000,
 	}
-	PriceFlag = utils.BigFlag{
+	PriceFlag = flags.BigFlag{
 		Name:  "price",
 		Usage: "price set for the evm",
 		Value: new(big.Int),
 	}
-	ValueFlag = utils.BigFlag{
+	ValueFlag = flags.BigFlag{
 		Name:  "value",
 		Usage: "value set for the evm",
 		Value: new(big.Int),

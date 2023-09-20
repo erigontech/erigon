@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -30,43 +30,8 @@ import (
 // copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
 // do not use e.g. SetInt() on the numbers. For testing only
 func copyConfig(original *chain.Config) *chain.Config {
-	return &chain.Config{
-		ChainName:                     original.ChainName,
-		ChainID:                       original.ChainID,
-		Consensus:                     original.Consensus,
-		HomesteadBlock:                original.HomesteadBlock,
-		DAOForkBlock:                  original.DAOForkBlock,
-		DAOForkSupport:                original.DAOForkSupport,
-		TangerineWhistleBlock:         original.TangerineWhistleBlock,
-		TangerineWhistleHash:          original.TangerineWhistleHash,
-		SpuriousDragonBlock:           original.SpuriousDragonBlock,
-		ByzantiumBlock:                original.ByzantiumBlock,
-		ConstantinopleBlock:           original.ConstantinopleBlock,
-		PetersburgBlock:               original.PetersburgBlock,
-		IstanbulBlock:                 original.IstanbulBlock,
-		MuirGlacierBlock:              original.MuirGlacierBlock,
-		BerlinBlock:                   original.BerlinBlock,
-		LondonBlock:                   original.LondonBlock,
-		ArrowGlacierBlock:             original.ArrowGlacierBlock,
-		GrayGlacierBlock:              original.GrayGlacierBlock,
-		TerminalTotalDifficulty:       original.TerminalTotalDifficulty,
-		TerminalTotalDifficultyPassed: original.TerminalTotalDifficultyPassed,
-		MergeNetsplitBlock:            original.MergeNetsplitBlock,
-		ShanghaiTime:                  original.ShanghaiTime,
-		CancunTime:                    original.CancunTime,
-		RamanujanBlock:                original.RamanujanBlock,
-		NielsBlock:                    original.NielsBlock,
-		MirrorSyncBlock:               original.MirrorSyncBlock,
-		BrunoBlock:                    original.BrunoBlock,
-		EulerBlock:                    original.EulerBlock,
-		GibbsBlock:                    original.GibbsBlock,
-		PosdaoBlock:                   original.PosdaoBlock,
-		Ethash:                        original.Ethash,
-		Clique:                        original.Clique,
-		Aura:                          original.Aura,
-		Parlia:                        original.Parlia,
-		Bor:                           original.Bor,
-	}
+	copy := *original
+	return &copy
 }
 
 func config() *chain.Config {
@@ -115,7 +80,7 @@ func TestBlockGasLimits(t *testing.T) {
 			BaseFee:  initial,
 			Number:   big.NewInt(tc.pNum + 1),
 		}
-		err := VerifyEip1559Header(config(), parent, header)
+		err := VerifyEip1559Header(config(), parent, header, false /*skipGasLimit*/)
 		if tc.ok && err != nil {
 			t.Errorf("test %d: Expected valid header: %s", i, err)
 		}

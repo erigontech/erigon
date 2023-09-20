@@ -27,6 +27,8 @@ var (
 	mainnetDepositContractBlock uint64 = 11052984
 	sepoliaDepositContractBlock uint64 = 1273020
 	goerliDepositContractBlock  uint64 = 4367322
+	gnosisDepositContractBlock  uint64 = 19475089
+	chiadoDepositContractBlock  uint64 = 155530
 )
 
 type Experiments struct {
@@ -109,6 +111,10 @@ func pruneBlockDefault(chainId uint64) uint64 {
 		return sepoliaDepositContractBlock
 	case 5 /* goerli */ :
 		return goerliDepositContractBlock
+	case 10200 /* chiado */ :
+		return chiadoDepositContractBlock
+	case 100 /* gnosis */ :
+		return gnosisDepositContractBlock
 	}
 
 	return 0

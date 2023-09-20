@@ -3,17 +3,17 @@ package state
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
-	// convert to libcommon.Address form
-	addresses := make([]libcommon.Address, 0, len(astrings))
-	var addressMap = make(map[libcommon.Address]struct{})
+	// convert to common.Address form
+	addresses := make([]common.Address, 0, len(astrings))
+	var addressMap = make(map[common.Address]struct{})
 	for _, astring := range astrings {
-		address := libcommon.HexToAddress(astring)
+		address := common.HexToAddress(astring)
 		addresses = append(addresses, address)
 		addressMap[address] = struct{}{}
 	}
@@ -32,15 +32,15 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 }
 
 func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotStrings ...string) {
-	if !s.AddressInAccessList(libcommon.HexToAddress(addrString)) {
+	if !s.AddressInAccessList(common.HexToAddress(addrString)) {
 		t.Fatalf("scope missing address/slots %v", addrString)
 	}
-	var address = libcommon.HexToAddress(addrString)
-	// convert to libcommon.Hash form
-	slots := make([]libcommon.Hash, 0, len(slotStrings))
-	var slotMap = make(map[libcommon.Hash]struct{})
+	var address = common.HexToAddress(addrString)
+	// convert to common.Hash form
+	slots := make([]common.Hash, 0, len(slotStrings))
+	var slotMap = make(map[common.Hash]struct{})
 	for _, slotString := range slotStrings {
-		s := libcommon.HexToHash(slotString)
+		s := common.HexToHash(slotString)
 		slots = append(slots, s)
 		slotMap[s] = struct{}{}
 	}
@@ -64,8 +64,8 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 
 func TestAccessList(t *testing.T) {
 	// Some helpers
-	addr := libcommon.HexToAddress
-	slot := libcommon.HexToHash
+	addr := common.HexToAddress
+	slot := common.HexToHash
 
 	_, tx := memdb.NewTestTx(t)
 	state := New(NewPlainState(tx, 1, nil))

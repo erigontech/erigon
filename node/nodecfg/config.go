@@ -74,6 +74,9 @@ type Config struct {
 	// relative), then that specific path is enforced. An empty path disables IPC.
 	IPCPath string
 
+	// GraphQLEnabled decides if we enable the GraphQL endpoint or not.
+	GraphQLEnabled bool
+
 	// HTTPHost is the host interface on which to start the HTTP RPC server. If this
 	// field is empty, no HTTP API endpoint will be started.
 	HTTPHost string
@@ -138,9 +141,6 @@ type Config struct {
 	// private APIs to untrusted users is a major security risk.
 	WSExposeAll bool `toml:",omitempty"`
 
-	// Log is a custom logger to use with the p2p.Server.
-	Log log.Logger `toml:",omitempty"`
-
 	DatabaseVerbosity kv.DBVerbosityLvl
 
 	// Address to listen to when launchig listener for remote database access
@@ -160,8 +160,9 @@ type Config struct {
 	TLSKeyFile          string
 	TLSCACert           string
 
-	MdbxPageSize datasize.ByteSize
-
+	MdbxPageSize    datasize.ByteSize
+	MdbxDBSizeLimit datasize.ByteSize
+	MdbxGrowthStep  datasize.ByteSize
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 
@@ -283,20 +284,20 @@ func (c *Config) ResolvePath(path string) string {
 }
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
-func (c *Config) StaticNodes() ([]*enode.Node, error) {
+func (c *Config) StaticNodes(logger log.Logger) ([]*enode.Node, error) {
 	dbPath := c.ResolvePath(datadirStaticNodes)
-	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath), nil
+	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath, logger), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
-func (c *Config) TrustedNodes() ([]*enode.Node, error) {
+func (c *Config) TrustedNodes(logger log.Logger) ([]*enode.Node, error) {
 	dbPath := c.ResolvePath(datadirTrustedNodes)
-	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath), nil
+	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath, logger), nil
 }
 
 // parsePersistentNodes parses a list of discovery node URLs loaded from a .json
 // file from within the data directory.
-func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
+func (c *Config) parsePersistentNodes(w *bool, path string, logger log.Logger) []*enode.Node {
 	// Short circuit if no node config is present
 	if c.Dirs.DataDir == "" {
 		return nil
@@ -304,7 +305,7 @@ func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	c.warnOnce(w, "Found deprecated node list file %s, please use the TOML config file instead.", path)
+	c.warnOnce(logger, w, "Found deprecated node list file %s, please use the TOML config file instead.", path)
 
 	// Load the nodes from the config file.
 	var nodelist []string
@@ -330,17 +331,13 @@ func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 
 var warnLock sync.Mutex
 
-func (c *Config) warnOnce(w *bool, format string, args ...interface{}) {
+func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...interface{}) {
 	warnLock.Lock()
 	defer warnLock.Unlock()
 
 	if *w {
 		return
 	}
-	l := c.Log
-	if l == nil {
-		l = log.Root()
-	}
-	l.Warn(fmt.Sprintf(format, args...))
+	logger.Warn(fmt.Sprintf(format, args...))
 	*w = true
 }

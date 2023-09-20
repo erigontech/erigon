@@ -161,7 +161,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, kv.AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, accountChanges, kv.E2AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, kv.StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, storageChanges, kv.E2StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func writeIndex(blocknum uint64, changes *historyv2.ChangeSet, bucket string, ch
 	for _, change := range changes.Changes {
 		k := dbutils.CompositeKeyWithoutIncarnation(change.Key)
 
-		index, err := bitmapdb.Get64(changeDb, bucket, k, 0, math.MaxUint32)
+		index, err := bitmapdb.Get64(changeDb, bucket, k, math.MaxUint32, math.MaxUint32)
 		if err != nil {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}

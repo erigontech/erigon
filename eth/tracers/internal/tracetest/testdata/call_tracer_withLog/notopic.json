@@ -71,9 +71,7 @@
       "chainId": 1,
       "homesteadBlock": 1150000,
       "daoForkBlock": 1920000,
-      "daoForkSupport": true,
       "eip150Block": 2463000,
-      "eip150Hash": "0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0",
       "eip155Block": 2675000,
       "eip158Block": 2675000,
       "byzantiumBlock": 4370000,
@@ -262,6 +260,7 @@
         ],
         "logs": [
           {
+            "index": 1,
             "address": "0x88e1315687aec48a72786c6b3b3f075208b62713",
             "topics": [
               "0xaf30e4d66b2f1f23e63ef4591058a897f67e6867233e33ca3508b982dcc4129b"
@@ -275,6 +274,7 @@
     ],
     "logs": [
       {
+        "index": 0,
         "address": "0x50739060a2c32dc076e507ae1a893aab28ecfe68",
         "topics": [],
         "data": "0x62616e6b726f6c6c5f6d69736d61746368"

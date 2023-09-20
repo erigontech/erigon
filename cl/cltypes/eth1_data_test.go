@@ -21,10 +21,10 @@ var expectedTestEth1DataMarshalled = common.Hex2Bytes("0000000000000000000000000
 var expectedTestEth1DataRoot = common.Hex2Bytes("adbafa10f1d6046b59cb720371c5e70ce2c6c3067b0e87985f5cd0899a515886")
 
 func TestEth1DataMarshalUnmarmashal(t *testing.T) {
-	marshalled := testEth1Data.EncodeSSZ(nil)
+	marshalled, _ := testEth1Data.EncodeSSZ(nil)
 	assert.Equal(t, marshalled, expectedTestEth1DataMarshalled)
 	testData2 := &cltypes.Eth1Data{}
-	require.NoError(t, testData2.DecodeSSZ(marshalled))
+	require.NoError(t, testData2.DecodeSSZ(marshalled, 0))
 	require.Equal(t, testData2, testEth1Data)
 }
 

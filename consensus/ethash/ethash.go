@@ -32,12 +32,12 @@ import (
 	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
-	"github.com/hashicorp/golang-lru/simplelru"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -64,8 +64,8 @@ var (
 // sharedEthash is a full instance that can be shared between multiple users.
 func GetSharedEthash() *Ethash {
 	sharedEthashOnce.Do(func() {
-		sharedConfig := Config{
-			PowMode:       ModeNormal,
+		sharedConfig := ethashcfg.Config{
+			PowMode:       ethashcfg.ModeNormal,
 			CachesInMem:   3,
 			DatasetsInMem: 1,
 		}
@@ -182,7 +182,7 @@ type lru struct {
 	mu   sync.Mutex
 	// Items are kept in a LRU cache, but there is a special case:
 	// We always keep an item for (highest seen epoch) + 1 as the 'future item'.
-	cache      *simplelru.LRU
+	cache      *simplelru.LRU[uint64, any]
 	future     uint64
 	futureItem interface{}
 }
@@ -193,7 +193,7 @@ func newlru(what string, maxItems int, new func(epoch uint64) interface{}) *lru 
 	if maxItems <= 0 {
 		maxItems = 1
 	}
-	cache, _ := simplelru.NewLRU(maxItems, func(key, value interface{}) {
+	cache, _ := simplelru.NewLRU[uint64, any](maxItems, func(key uint64, value interface{}) {
 		log.Trace("Evicted ethash "+what, "epoch", key)
 	})
 	return &lru{what: what, new: new, cache: cache}
@@ -400,46 +400,17 @@ func (d *dataset) finalizer() {
 	}
 }
 
-// Mode defines the type and amount of PoW verification an ethash engine makes.
-type Mode uint
-
-const (
-	ModeNormal Mode = iota
-	ModeShared
-	ModeTest
-
-	ModeFake
-	ModeFullFake
-)
-
-// Config are the configuration parameters of the ethash.
-type Config struct {
-	CachesInMem      int
-	CachesLockMmap   bool
-	DatasetDir       string
-	DatasetsInMem    int
-	DatasetsOnDisk   int
-	DatasetsLockMmap bool
-	PowMode          Mode
-
-	// When set, notifications sent by the remote sealer will
-	// be block header JSON objects instead of work package arrays.
-	NotifyFull bool
-
-	Log log.Logger `toml:"-"`
-}
-
 // Ethash is a consensus engine based on proof-of-work implementing the ethash
 // algorithm.
 type Ethash struct {
-	config Config
+	config ethashcfg.Config
 
 	caches   *lru // In memory caches to avoid regenerating too often
 	datasets *lru // In memory datasets to avoid regenerating too often
 
 	// Mining related fields
-	rand     *rand.Rand    // Properly seeded random source for nonces
-	hashrate metrics.Meter // Meter tracking the average hashrate
+	rand     *rand.Rand     // Properly seeded random source for nonces
+	hashrate *hashRateMeter // Meter tracking the average hashrate
 	remote   *remoteSealer
 
 	// The fields below are hooks for testing
@@ -452,7 +423,7 @@ type Ethash struct {
 // New creates a full sized ethash PoW scheme and starts a background thread for
 // remote mining, also optionally notifying a batch of remote services of new work
 // packages.
-func New(config Config, notify []string, noverify bool) *Ethash {
+func New(config ethashcfg.Config, notify []string, noverify bool) *Ethash {
 	if config.Log == nil {
 		config.Log = log.Root()
 	}
@@ -467,9 +438,9 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 		config:   config,
 		caches:   newlru("cache", config.CachesInMem, newCache),
 		datasets: newlru("dataset", config.DatasetsInMem, newDataset),
-		hashrate: metrics.NewMeterForced(),
+		hashrate: newHashRateMeter(),
 	}
-	if config.PowMode == ModeShared {
+	if config.PowMode == ethashcfg.ModeShared {
 		ethash.shared = GetSharedEthash()
 	}
 	ethash.remote = startRemoteSealer(ethash, notify, noverify)
@@ -479,7 +450,7 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 // NewTester creates a small sized ethash PoW scheme useful only for testing
 // purposes.
 func NewTester(notify []string, noverify bool) *Ethash {
-	return New(Config{PowMode: ModeTest}, notify, noverify)
+	return New(ethashcfg.Config{PowMode: ethashcfg.ModeTest}, notify, noverify)
 }
 
 // NewShared creates a full sized ethash PoW shared between all requesters running
@@ -510,12 +481,12 @@ func (ethash *Ethash) cache(block uint64) *cache {
 	current := currentI.(*cache)
 
 	// Wait for generation finish.
-	current.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
+	current.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 
 	// If we need a new future cache, now's a good time to regenerate it.
 	if futureI != nil {
 		future := futureI.(*cache)
-		go future.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ModeTest)
+		go future.generate(doNotStoreCachesOnDisk, 0, ethash.config.CachesLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 	}
 	return current
 }
@@ -536,20 +507,20 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 	if async && !current.generated() {
 		go func() {
 			defer debug.LogPanic()
-			current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ModeTest)
+			current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 
 			if futureI != nil {
 				future := futureI.(*dataset)
-				future.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ModeTest)
+				future.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 			}
 		}()
 	} else {
 		// Either blocking generation was requested, or already done
-		current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ModeTest)
+		current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 
 		if futureI != nil {
 			future := futureI.(*dataset)
-			go future.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ModeTest)
+			go future.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 		}
 	}
 	return current
@@ -561,8 +532,8 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 // hashrate of all remote miner.
 func (ethash *Ethash) Hashrate() float64 {
 	// Short circuit if we are run the ethash in normal/test mode.
-	if (ethash.config.PowMode != ModeNormal && ethash.config.PowMode != ModeTest) || ethash.remote == nil {
-		return ethash.hashrate.Rate1()
+	if (ethash.config.PowMode != ethashcfg.ModeNormal && ethash.config.PowMode != ethashcfg.ModeTest) || ethash.remote == nil {
+		return ethash.hashrate.Rate()
 	}
 	var res = make(chan uint64, 1)
 
@@ -570,11 +541,11 @@ func (ethash *Ethash) Hashrate() float64 {
 	case ethash.remote.fetchRateCh <- res:
 	case <-ethash.remote.exitCh:
 		// Return local hashrate only if ethash is stopped.
-		return ethash.hashrate.Rate1()
+		return ethash.hashrate.Rate()
 	}
 
 	// Gather total submitted hash rate of remote sealers.
-	return ethash.hashrate.Rate1() + float64(<-res)
+	return ethash.hashrate.Rate() + float64(<-res)
 }
 
 // APIs implements consensus.Engine, returning the user facing RPC APIs.

@@ -1,218 +1,40 @@
 package aura_test
 
 import (
-	"context"
-	"fmt"
+	"math/big"
+	"strings"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
-	"github.com/ledgerwatch/erigon/consensus/aura/test"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
-
-/*
-#[test]
-
-	fn block_reward_contract() {
-	    let spec = Spec::new_test_round_block_reward_contract();
-	    let tap = Arc::new(AccountProvider::transient_provider());
-
-	    let addr1 = tap.insert_account(keccak("1").into(), &"1".into()).unwrap();
-
-	    let engine = &*spec.engine;
-	    let genesis_header = spec.genesis_header();
-	    let db1 = spec
-	        .ensure_db_good(get_temp_state_db(), &Default::default())
-	        .unwrap();
-	    let db2 = spec
-	        .ensure_db_good(get_temp_state_db(), &Default::default())
-	        .unwrap();
-
-	    let last_hashes = Arc::new(vec![genesis_header.hash()]);
-
-	    let client = generate_dummy_client_with_spec(Spec::new_test_round_block_reward_contract);
-	    engine.register_client(Arc::downgrade(&client) as _);
-
-	    // step 2
-	    let b1 = OpenBlock::new(
-	        engine,
-	        Default::default(),
-	        false,
-	        db1,
-	        &genesis_header,
-	        last_hashes.clone(),
-	        addr1,
-	        (3141562.into(), 31415620.into()),
-	        vec![],
-	        false,
-	        None,
-	    )
-	    .unwrap();
-	    let b1 = b1.close_and_lock().unwrap();
-
-	    // since the block is empty it isn't sealed and we generate empty steps
-	    engine.set_signer(Some(Box::new((tap.clone(), addr1, "1".into()))));
-	    assert_eq!(engine.generate_seal(&b1, &genesis_header), Seal::None);
-	    engine.step();
-
-	    // step 3
-	    // the signer of the accumulated empty step message should be rewarded
-	    let b2 = OpenBlock::new(
-	        engine,
-	        Default::default(),
-	        false,
-	        db2,
-	        &genesis_header,
-	        last_hashes.clone(),
-	        addr1,
-	        (3141562.into(), 31415620.into()),
-	        vec![],
-	        false,
-	        None,
-	    )
-	    .unwrap();
-	    let addr1_balance = b2.state.balance(&addr1).unwrap();
-
-	    // after closing the block `addr1` should be reward twice, one for the included empty step
-	    // message and another for block creation
-	    let b2 = b2.close_and_lock().unwrap();
-
-	    // the contract rewards (1000 + kind) for each benefactor/reward kind
-	    assert_eq!(
-	        b2.state.balance(&addr1).unwrap(),
-	        addr1_balance + (1000 + 0) + (1000 + 2),
-	    )
-	}
-*/
-func TestRewardContract(t *testing.T) {
-	t.Skip("not ready yet")
-	auraDB, require := memdb.NewTestDB(t), require.New(t)
-	engine, err := aura.NewAuRa(nil, auraDB, libcommon.Address{}, test.AuthorityRoundBlockRewardContract)
-	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, core.DefaultSokolGenesisBlock(), engine, false)
-	m.EnableLogs()
-
-	var accBefore *accounts.Account
-	err = auraDB.View(context.Background(), func(tx kv.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accBefore); return err })
-	require.NoError(err)
-
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(m.Address)
-	}, false /* intermediateHashes */)
-	require.NoError(err)
-
-	err = m.InsertChain(chain)
-	require.NoError(err)
-
-	var accAfter *accounts.Account
-	err = auraDB.View(context.Background(), func(tx kv.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accAfter); return err })
-	require.NoError(err)
-
-	fmt.Printf("balance: %d\n", accAfter.Balance.Uint64())
-	/*
-
-	   	let spec = Spec::new_test_round_block_reward_contract();
-	              let tap = Arc::new(AccountProvider::transient_provider());
-
-	              let addr1 = tap.insert_account(keccak("1").into(), &"1".into()).unwrap();
-
-	              let engine = &*spec.engine;
-	              let genesis_header = spec.genesis_header();
-	              let db1 = spec
-	                  .ensure_db_good(get_temp_state_db(), &Default::default())
-	                  .unwrap();
-	              let db2 = spec
-	                  .ensure_db_good(get_temp_state_db(), &Default::default())
-	                  .unwrap();
-
-	              let last_hashes = Arc::new(vec![genesis_header.hash()]);
-
-	              let client = generate_dummy_client_with_spec(Spec::new_test_round_block_reward_contract);
-	              engine.register_client(Arc::downgrade(&client) as _);
-
-	              // step 2
-	              let b1 = OpenBlock::new(
-	                  engine,
-	                  Default::default(),
-	                  false,
-	                  db1,
-	                  &genesis_header,
-	                  last_hashes.clone(),
-	                  addr1,
-	                  (3141562.into(), 31415620.into()),
-	                  vec![],
-	                  false,
-	                  None,
-	              )
-	              .unwrap();
-	              let b1 = b1.close_and_lock().unwrap();
-
-	              // since the block is empty it isn't sealed and we generate empty steps
-	              engine.set_signer(Some(Box::new((tap.clone(), addr1, "1".into()))));
-	              assert_eq!(engine.generate_seal(&b1, &genesis_header), Seal::None);
-	              engine.step();
-
-	              // step 3
-	              // the signer of the accumulated empty step message should be rewarded
-	              let b2 = OpenBlock::new(
-	                  engine,
-	                  Default::default(),
-	                  false,
-	                  db2,
-	                  &genesis_header,
-	                  last_hashes.clone(),
-	                  addr1,
-	                  (3141562.into(), 31415620.into()),
-	                  vec![],
-	                  false,
-	                  None,
-	              )
-	              .unwrap();
-	              let addr1_balance = b2.state.balance(&addr1).unwrap();
-
-	              // after closing the block `addr1` should be reward twice, one for the included empty step
-	              // message and another for block creation
-	              let b2 = b2.close_and_lock().unwrap();
-
-	              // the contract rewards (1000 + kind) for each benefactor/reward kind
-	              assert_eq!(
-	                  b2.state.balance(&addr1).unwrap(),
-	                  addr1_balance + (1000 + 0) + (1000 + 2),
-	              )
-	*/
-}
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
 // does not change the state root.
 func TestEmptyBlock(t *testing.T) {
-	if ethconfig.EnableHistoryV3InTest {
-		t.Skip("")
-	}
-
 	require := require.New(t)
-	genesis := core.DefaultGnosisGenesisBlock()
-	genesisBlock, _, err := genesis.ToBlock()
+	genesis := core.GnosisGenesisBlock()
+	genesisBlock, _, err := core.GenesisToBlock(genesis, "")
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
 	chainConfig := genesis.Config
 	auraDB := memdb.NewTestDB(t)
-	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB, chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
+	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -236,6 +58,65 @@ func TestEmptyBlock(t *testing.T) {
 	blocks[0] = block
 
 	chain := &core.ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: block}
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	require.NoError(err)
+}
+
+func TestAuRaSkipGasLimit(t *testing.T) {
+	require := require.New(t)
+	genesis := core.GnosisGenesisBlock()
+	genesis.Config.TerminalTotalDifficultyPassed = false
+	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]libcommon.Address{0: libcommon.HexToAddress("0x4000000000000000000000000000000000000001")}
+
+	chainConfig := genesis.Config
+	auraDB := memdb.NewTestDB(t)
+	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
+	require.NoError(err)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
+
+	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
+	//Populate a sample valid header for a Pre-merge block
+	// - actually sampled from 5000th block in chiado
+	validPreMergeHeader := &types.Header{
+		ParentHash:  libcommon.HexToHash("0x102482332de853f2f8967263e77e71d4fddf68fd5d84b750b2ddb7e501052097"),
+		UncleHash:   libcommon.HexToHash("0x0"),
+		Coinbase:    libcommon.HexToAddress("0x14747a698Ec1227e6753026C08B29b4d5D3bC484"),
+		Root:        libcommon.HexToHash("0x0"),
+		TxHash:      libcommon.HexToHash("0x0"),
+		ReceiptHash: libcommon.HexToHash("0x0"),
+		Bloom:       types.BytesToBloom(nil),
+		Difficulty:  difficlty,
+		Number:      big.NewInt(5000),
+		GasLimit:    12500000,
+		GasUsed:     0,
+		Time:        1664049551,
+		Extra:       []byte{},
+		Nonce:       [8]byte{0, 0, 0, 0, 0, 0, 0, 0},
+	}
+
+	syscallCustom := func(libcommon.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+		//Packing as constructor gives the same effect as unpacking the returned value
+		json := `[{"inputs": [{"internalType": "uint256","name": "blockGasLimit","type": "uint256"}],"stateMutability": "nonpayable","type": "constructor"}]`
+		fakeAbi, err := abi.JSON(strings.NewReader(json))
+		require.NoError(err)
+
+		fakeVal, err := fakeAbi.Pack("", big.NewInt(12500000))
+		return fakeVal, err
+	}
+	require.NotPanics(func() {
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil)
+	})
+
+	invalidPreMergeHeader := validPreMergeHeader
+	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
+	require.Panics(func() {
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil)
+	})
+
+	invalidPostMergeHeader := invalidPreMergeHeader
+	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
+	require.NotPanics(func() {
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil)
+	})
 }

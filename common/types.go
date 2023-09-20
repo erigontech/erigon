@@ -28,7 +28,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/crypto/cryptopool"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
@@ -39,12 +38,6 @@ const (
 	BlockNumberLength = 8
 	// IncarnationLength length of uint64 for contract incarnations
 	IncarnationLength = 8
-	// Address32Length is the expected length of the Starknet address (in bytes)
-	Address32Length = 32
-)
-
-var (
-	addressSt = reflect.TypeOf(Address32{})
 )
 
 // UnprefixedHash allows marshaling a Hash without 0x prefix.
@@ -182,135 +175,4 @@ func (keys StorageKeys) Less(i, j int) bool {
 }
 func (keys StorageKeys) Swap(i, j int) {
 	keys[i], keys[j] = keys[j], keys[i]
-}
-
-/////////// Address32
-
-// Address32 represents the 32 byte address.
-type Address32 [Address32Length]byte
-
-// BytesToAddress32 returns Address32 with value b.
-// If b is larger than len(h), b will be cropped from the left.
-func BytesToAddress32(b []byte) Address32 {
-	var a Address32
-	a.SetBytes(b)
-	return a
-}
-
-// HexToAddress32 returns Address32 with byte values of s.
-// If s is larger than len(h), s will be cropped from the left.
-func HexToAddress32(s string) Address32 { return BytesToAddress32(FromHex(s)) }
-
-// IsHexAddress32 verifies whether a string can represent a valid hex-encoded
-// Starknet address or not.
-func IsHexAddress32(s string) bool {
-	if has0xPrefix(s) {
-		s = s[2:]
-	}
-	return len(s) == 2*Address32Length && isHex(s)
-}
-
-// Bytes gets the string representation of the underlying address.
-func (a Address32) Bytes() []byte { return a[:] }
-
-// Hash converts an address to a hash by left-padding it with zeros.
-func (a Address32) Hash() libcommon.Hash { return libcommon.BytesToHash(a[:]) }
-
-// Hex returns an EIP55-compliant hex string representation of the address.
-func (a Address32) Hex() string {
-	return string(a.checksumHex())
-}
-
-// String implements fmt.Stringer.
-func (a Address32) String() string {
-	return a.Hex()
-}
-
-func (a *Address32) checksumHex() []byte {
-	buf := a.hex()
-
-	// compute checksum
-	sha := cryptopool.GetLegacyKeccak256()
-	//nolint:errcheck
-	sha.Write(buf[2:])
-	hash := sha.Sum(nil)
-	cryptopool.ReturnLegacyKeccak256(sha)
-	for i := 2; i < len(buf); i++ {
-		hashByte := hash[(i-2)/2]
-		if i%2 == 0 {
-			hashByte = hashByte >> 4
-		} else {
-			hashByte &= 0xf
-		}
-		if buf[i] > '9' && hashByte > 7 {
-			buf[i] -= 32
-		}
-	}
-	return buf
-}
-
-func (a Address32) hex() []byte {
-	var buf [len(a)*2 + 2]byte
-	copy(buf[:2], "0x")
-	hex.Encode(buf[2:], a[:])
-	return buf[:]
-}
-
-// SetBytes sets the address to the value of b.
-// If b is larger than len(a), b will be cropped from the left.
-func (a *Address32) SetBytes(b []byte) {
-	if len(b) > len(a) {
-		b = b[len(b)-Address32Length:]
-	}
-	copy(a[Address32Length-len(b):], b)
-}
-
-// MarshalText returns the hex representation of a.
-func (a Address32) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(a[:]).MarshalText()
-}
-
-// UnmarshalText parses a hash in hex syntax.
-func (a *Address32) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Address", input, a[:])
-}
-
-// UnmarshalJSON parses a hash in hex syntax.
-func (a *Address32) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(addressSt, input, a[:])
-}
-
-// ToCommonAddress converts Address32 to Address
-func (a *Address32) ToCommonAddress() libcommon.Address {
-	ad := libcommon.Address{}
-	ad.SetBytes(a.Bytes())
-	return ad
-}
-
-// Format implements fmt.Formatter.
-// Address32 supports the %v, %s, %v, %x, %X and %d format verbs.
-func (a Address32) Format(s fmt.State, c rune) {
-	switch c {
-	case 'v', 's':
-		s.Write(a.checksumHex())
-	case 'q':
-		q := []byte{'"'}
-		s.Write(q)
-		s.Write(a.checksumHex())
-		s.Write(q)
-	case 'x', 'X':
-		// %x disables the checksum.
-		hex := a.hex()
-		if !s.Flag('#') {
-			hex = hex[2:]
-		}
-		if c == 'X' {
-			hex = bytes.ToUpper(hex)
-		}
-		s.Write(hex)
-	case 'd':
-		fmt.Fprint(s, ([len(a)]byte)(a))
-	default:
-		fmt.Fprintf(s, "%%!%c(address=%x)", c, a)
-	}
 }

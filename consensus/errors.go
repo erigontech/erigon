@@ -19,6 +19,11 @@ package consensus
 import "errors"
 
 var (
+	// ErrInvalidBlock is a generic error to wrap all non-transient genuine protocol validation errors.
+	// For example, ErrUnexpectedWithdrawals should be wrapped as ErrInvalidBlock,
+	// while an out-of-memory error should not.
+	ErrInvalidBlock = errors.New("invalid block")
+
 	// ErrUnknownAncestor is returned when validating a block requires an ancestor
 	// that is unknown.
 	ErrUnknownAncestor = errors.New("unknown ancestor")

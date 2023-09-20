@@ -31,6 +31,7 @@ type SyncStage string
 var (
 	Snapshots           SyncStage = "Snapshots"       // Snapshots
 	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BorHeimdall         SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
 	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
 	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
 	Bodies              SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
@@ -45,7 +46,6 @@ var (
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	Issuance            SyncStage = "WatchTheBurn"        // Compute ether issuance for each block
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
@@ -62,6 +62,7 @@ var (
 var AllStages = []SyncStage{
 	Snapshots,
 	Headers,
+	BorHeimdall,
 	BlockHashes,
 	Bodies,
 	Senders,

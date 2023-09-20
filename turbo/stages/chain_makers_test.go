@@ -24,8 +24,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 
-	"github.com/ledgerwatch/erigon/turbo/stages"
-
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -33,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestGenerateChain(t *testing.T) {
@@ -52,11 +51,11 @@ func TestGenerateChain(t *testing.T) {
 	log.Root().SetHandler(log.DiscardHandler())
 
 	// Ensure that key1 has some funds in the genesis block.
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
+		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := stages.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1, false)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -88,23 +87,27 @@ func TestGenerateChain(t *testing.T) {
 			b3.Extra = []byte("foo")
 			gen.AddUncle(b3)
 		}
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		fmt.Printf("generate chain: %v\n", err)
 	}
 
+	tx, err := m.DB.BeginRw(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
+	defer tx.Rollback()
+
 	// Import the chain. This runs all block validation rules.
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, tx); err != nil {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}
 
-	tx, _ := m.DB.BeginRo(m.Ctx)
-	defer tx.Rollback()
-
-	st := state.New(state.NewPlainStateReader(tx))
-	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
-		t.Errorf("wrong block number: %d", current(m.DB).Number())
+	st := state.New(m.NewStateReader(tx))
+	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m, tx).Number())
 	}
 	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
 		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))

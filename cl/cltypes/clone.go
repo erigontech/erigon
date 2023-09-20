@@ -1,13 +1,39 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+)
 
-func (*SignedBeaconBlock) Clone() clonable.Clonable {
-	return &SignedBeaconBlock{}
+func (s *SignedBeaconBlock) Clone() clonable.Clonable {
+	return NewSignedBeaconBlock(s.Block.Body.beaconCfg)
 }
 
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
+func (*IndexedAttestation) Clone() clonable.Clonable {
+	return &IndexedAttestation{}
+}
+
+func (b *BeaconBody) Clone() clonable.Clonable {
+	return NewBeaconBody(b.beaconCfg)
+}
+
+func (e *Eth1Block) Clone() clonable.Clonable {
+	return NewEth1Block(e.version, e.beaconCfg)
+}
+
+func (*Eth1Data) Clone() clonable.Clonable {
+	return &Eth1Data{}
+}
+
+func (*SignedBLSToExecutionChange) Clone() clonable.Clonable {
+	return &SignedBLSToExecutionChange{}
+}
+
+func (*HistoricalSummary) Clone() clonable.Clonable {
+	return &HistoricalSummary{}
+}
+
+func (*DepositData) Clone() clonable.Clonable {
+	return &DepositData{}
 }
 
 func (*Status) Clone() clonable.Clonable {
@@ -16,6 +42,10 @@ func (*Status) Clone() clonable.Clonable {
 
 func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
+}
+
+func (*SyncAggregate) Clone() clonable.Clonable {
+	return &SyncAggregate{}
 }
 
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {
@@ -30,14 +60,6 @@ func (*AttesterSlashing) Clone() clonable.Clonable {
 	return &AttesterSlashing{}
 }
 
-func (*LightClientFinalityUpdate) Clone() clonable.Clonable {
-	return &LightClientFinalityUpdate{}
-}
-
-func (*LightClientOptimisticUpdate) Clone() clonable.Clonable {
-	return &LightClientOptimisticUpdate{}
-}
-
 func (*Metadata) Clone() clonable.Clonable {
 	return &Metadata{}
 }
@@ -50,10 +72,34 @@ func (*Deposit) Clone() clonable.Clonable {
 	return &Deposit{}
 }
 
-func (*LightClientBootstrap) Clone() clonable.Clonable {
-	return &LightClientBootstrap{}
+func (b *BeaconBlock) Clone() clonable.Clonable {
+	return NewBeaconBlock(b.Body.beaconCfg)
 }
 
-func (*LightClientUpdate) Clone() clonable.Clonable {
-	return &LightClientUpdate{}
+func (*AggregateAndProof) Clone() clonable.Clonable {
+	return &AggregateAndProof{}
+}
+
+func (*BeaconBlockHeader) Clone() clonable.Clonable {
+	return &BeaconBlockHeader{}
+}
+
+func (*BLSToExecutionChange) Clone() clonable.Clonable {
+	return &BLSToExecutionChange{}
+}
+
+func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
+	return &SignedBeaconBlockHeader{}
+}
+
+func (*Fork) Clone() clonable.Clonable {
+	return &Fork{}
+}
+
+func (*KZGCommitment) Clone() clonable.Clonable {
+	return &KZGCommitment{}
+}
+
+func (*Eth1Header) Clone() clonable.Clonable {
+	return &Eth1Header{}
 }

@@ -18,15 +18,18 @@
 package consensus
 
 import (
-	"context"
 	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
@@ -49,6 +52,9 @@ type ChainHeaderReader interface {
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
 	GetTd(hash libcommon.Hash, number uint64) *big.Int
+
+	// Number of blocks frozen in the block snapshots
+	FrozenBlocks() uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -58,21 +64,39 @@ type ChainReader interface {
 
 	// GetBlock retrieves a block from the database by hash and number.
 	GetBlock(hash libcommon.Hash, number uint64) *types.Block
-	GetHeader(hash libcommon.Hash, number uint64) *types.Header
 
 	HasBlock(hash libcommon.Hash, number uint64) bool
-}
 
-type EpochReader interface {
-	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
+	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// Use more options to call contract
+type SysCallCustom func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// RewardKind - The kind of block reward.
+// Depending on the consensus engine the allocated block reward might have
+// different semantics which could lead e.g. to different reward values.
+type RewardKind uint16
+
+const (
+	// RewardAuthor - attributed to the block author.
+	RewardAuthor RewardKind = 0
+	// RewardEmptyStep - attributed to the author(s) of empty step(s) included in the block (AuthorityRound engine).
+	RewardEmptyStep RewardKind = 1
+	// RewardExternal - attributed by an external protocol (e.g. block reward contract).
+	RewardExternal RewardKind = 2
+	// RewardUncle - attributed to the block uncle(s) with given difference.
+	RewardUncle RewardKind = 3
+)
+
+type Reward struct {
+	Beneficiary libcommon.Address
+	Kind        RewardKind
+	Amount      uint256.Int
+}
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
@@ -92,6 +116,9 @@ type EngineReader interface {
 	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 
 	Type() chain.ConsensusName
+
+	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
+	) ([]Reward, error)
 }
 
 // EngineReader are write methods of the consensus engine
@@ -110,8 +137,8 @@ type EngineWriter interface {
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *chain.Config, chain ChainHeaderReader, e EpochReader, header *types.Header,
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
+		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
@@ -120,7 +147,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
+		chain ChainReader, syscall SystemCall, logger log.Logger,
 	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -130,7 +157,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
+		chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
 	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
@@ -145,7 +172,8 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
+		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
@@ -162,24 +190,4 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
-}
-
-var (
-	SystemAddress = libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
-)
-
-type PoSA interface {
-	Engine
-
-	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
-	IsSystemContract(to *libcommon.Address) bool
-	EnoughDistance(chain ChainReader, header *types.Header) bool
-	IsLocalBlock(header *types.Header) bool
-	AllowLightProcess(chain ChainReader, currentHeader *types.Header) bool
-}
-
-type AsyncEngine interface {
-	Engine
-
-	WithExecutionContext(context.Context) AsyncEngine
 }

@@ -14,7 +14,6 @@ type LogsFilterAggregator struct {
 	aggLogsFilter  LogsFilter                       // Aggregation of all current log filters
 	logsFilters    *SyncMap[LogsSubID, *LogsFilter] // Filter for each subscriber, keyed by filterID
 	logsFilterLock sync.RWMutex
-	nextFilterId   LogsSubID
 }
 
 // LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
@@ -44,14 +43,12 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 			addrs:  make(map[libcommon.Address]int),
 			topics: make(map[libcommon.Hash]int),
 		},
-		logsFilters:  NewSyncMap[LogsSubID, *LogsFilter](),
-		nextFilterId: 0,
+		logsFilters: NewSyncMap[LogsSubID, *LogsFilter](),
 	}
 }
 
 func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSubID, *LogsFilter) {
-	filterId := a.nextFilterId
-	a.nextFilterId++
+	filterId := LogsSubID(generateSubscriptionID())
 	filter := &LogsFilter{addrs: map[libcommon.Address]int{}, topics: map[libcommon.Hash]int{}, sender: sender}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter

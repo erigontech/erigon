@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -38,18 +39,12 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsMoran:
-		precompiles = PrecompiledContractsIsMoran
-	case evm.chainRules.IsNano:
-		precompiles = PrecompiledContractsNano
+	case evm.chainRules.IsCancun:
+		precompiles = PrecompiledContractsCancun
 	case evm.chainRules.IsBerlin:
 		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsIstanbul:
-		if evm.chainRules.IsParlia {
-			precompiles = PrecompiledContractsIstanbulForBSC
-		} else {
-			precompiles = PrecompiledContractsIstanbul
-		}
+		precompiles = PrecompiledContractsIstanbul
 	case evm.chainRules.IsByzantium:
 		precompiles = PrecompiledContractsByzantium
 	default:
@@ -79,8 +74,6 @@ type EVM struct {
 	txContext evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
 	intraBlockState evmtypes.IntraBlockState
-	// Depth is the current call stack
-	depth int
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -152,17 +145,29 @@ func (evm *EVM) Cancelled() bool {
 	return atomic.LoadInt32(&evm.abort) == 1
 }
 
+// CallGasTemp returns the callGasTemp for the EVM
+func (evm *EVM) CallGasTemp() uint64 {
+	return evm.callGasTemp
+}
+
+// SetCallGasTemp sets the callGasTemp for the EVM
+func (evm *EVM) SetCallGasTemp(gas uint64) {
+	evm.callGasTemp = gas
+}
+
 // Interpreter returns the current interpreter
 func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	if evm.config.NoRecursion && evm.depth > 0 {
+	depth := evm.interpreter.Depth()
+
+	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
 	// Fail if we're trying to execute above the call depth limit
-	if evm.depth > int(params.CallCreateDepth) {
+	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
 	if typ == CALL || typ == CALLCODE {
@@ -190,16 +195,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 						v = nil
 					}
 					// Calling a non existing account, don't do anything, but ping the tracer
-					if evm.depth == 0 {
+					if depth == 0 {
 						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-						defer func(startGas uint64) { // Lazy evaluation of the parameters
-							evm.config.Tracer.CaptureEnd(ret, 0, err)
-						}(gas)
+						evm.config.Tracer.CaptureEnd(ret, 0, nil)
 					} else {
 						evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-						defer func(startGas uint64) { // Lazy evaluation of the parameters
-							evm.config.Tracer.CaptureExit(ret, 0, err)
-						}(gas)
+						evm.config.Tracer.CaptureExit(ret, 0, nil)
 					}
 				}
 				return nil, gas, nil
@@ -219,7 +220,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			v = nil
 		}
-		if evm.depth == 0 {
+		if depth == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
 			defer func(startGas uint64) { // Lazy evaluation of the parameters
 				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
@@ -331,10 +332,28 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	incrementNonce, fromEOF bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
+	var gasConsumption uint64
+	depth := evm.interpreter.Depth()
+
+	if evm.config.Debug {
+		if depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
+			}()
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureExit(ret, gasConsumption, err)
+			}()
+		}
+	}
+
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
-	if evm.depth > int(params.CallCreateDepth) {
-		return nil, libcommon.Address{}, gas, ErrDepth
+	if depth > int(params.CallCreateDepth) {
+		err = ErrDepth
+		return nil, libcommon.Address{}, gas, err
 	}
 	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		return nil, libcommon.Address{}, gas, ErrInsufficientBalance
@@ -368,7 +387,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
-			return nil, libcommon.Address{}, gas, ErrNonceUintOverflow
+			err = ErrNonceUintOverflow
+			return nil, libcommon.Address{}, gas, err
 		}
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
@@ -392,19 +412,20 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 	evm.context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
 
-	if evm.config.Debug {
-		if evm.depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-		}
-	}
-
-	if evm.config.NoRecursion && evm.depth > 0 {
+	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil
 	}
 
 	ret, err = run(evm, contract, nil, false)
+
+	// EIP-170: Contract code size limit
+	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
+		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
+		// but EIP-3860 (part of Shanghai) requires EIP-170.
+		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
+			err = ErrMaxCodeSizeExceeded
+		}
+	}
 
 	// check whether the max code size has been exceeded
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize && !evm.chainRules.IsAura {
@@ -453,13 +474,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		}
 	}
 
-	if evm.config.Debug {
-		if evm.depth == 0 {
-			evm.config.Tracer.CaptureEnd(ret, gas-contract.Gas, err)
-		} else {
-			evm.config.Tracer.CaptureExit(ret, gas-contract.Gas, err)
-		}
-	}
+	// calculate gasConsumption for deferred captures
+	gasConsumption = gas - contract.Gas
 
 	return ret, address, contract.Gas, err
 }
@@ -501,18 +517,22 @@ func (evm *EVM) ChainConfig() *chain.Config {
 	return evm.chainConfig
 }
 
+// ChainRules returns the environment's chain rules
 func (evm *EVM) ChainRules() *chain.Rules {
 	return evm.chainRules
 }
 
+// Context returns the EVM's BlockContext
 func (evm *EVM) Context() evmtypes.BlockContext {
 	return evm.context
 }
 
+// TxContext returns the EVM's TxContext
 func (evm *EVM) TxContext() evmtypes.TxContext {
 	return evm.txContext
 }
 
+// IntraBlockState returns the EVM's IntraBlockState
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }

@@ -95,15 +95,17 @@ const (
 
 // 0x40 range - block operations.
 const (
-	BLOCKHASH OpCode = 0x40 + iota
-	COINBASE
-	TIMESTAMP
-	NUMBER
-	DIFFICULTY
-	GASLIMIT
+	BLOCKHASH   OpCode = 0x40
+	COINBASE    OpCode = 0x41
+	TIMESTAMP   OpCode = 0x42
+	NUMBER      OpCode = 0x43
+	DIFFICULTY  OpCode = 0x44
+	GASLIMIT    OpCode = 0x45
 	CHAINID     OpCode = 0x46
 	SELFBALANCE OpCode = 0x47
 	BASEFEE     OpCode = 0x48
+	BLOBHASH    OpCode = 0x49
+	BLOBBASEFEE OpCode = 0x4a
 )
 
 // 0x50 range - 'storage' and execution.
@@ -120,9 +122,9 @@ const (
 	MSIZE    OpCode = 0x59
 	GAS      OpCode = 0x5a
 	JUMPDEST OpCode = 0x5b
-	RJUMP    OpCode = 0x5c
-	RJUMPI   OpCode = 0x5d
-	RJUMPV   OpCode = 0x5e
+	TLOAD    OpCode = 0x5c
+	TSTORE   OpCode = 0x5d
+	MCOPY    OpCode = 0x5e
 	PUSH0    OpCode = 0x5f
 )
 
@@ -205,8 +207,17 @@ const (
 
 // 0xb0 range - control flow ops.
 const (
-	CALLF OpCode = 0xb0
-	RETF  OpCode = 0xb1
+// CALLF OpCode = 0xb0
+// RETF  OpCode = 0xb1
+)
+
+// 0xe0 range - eof ops.
+const (
+	RJUMP OpCode = 0xe0 + iota
+	RJUMPI
+	RJUMPV
+	CALLF
+	RETF
 )
 
 // 0xf0 range - closures.
@@ -286,6 +297,8 @@ var opCodeToString = map[OpCode]string{
 	CHAINID:     "CHAINID",
 	SELFBALANCE: "SELFBALANCE",
 	BASEFEE:     "BASEFEE",
+	BLOBHASH:    "BLOBHASH",
+	BLOBBASEFEE: "BLOBBASEFEE",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -302,9 +315,9 @@ var opCodeToString = map[OpCode]string{
 	MSIZE:    "MSIZE",
 	GAS:      "GAS",
 	JUMPDEST: "JUMPDEST",
-	RJUMP:    "RJUMP",
-	RJUMPI:   "RJUMPI",
-	RJUMPV:   "RJUMPV",
+	TLOAD:    "TLOAD",
+	TSTORE:   "TSTORE",
+	MCOPY:    "MCOPY",
 	PUSH0:    "PUSH0",
 
 	// 0x60 range - push.
@@ -380,9 +393,12 @@ var opCodeToString = map[OpCode]string{
 	LOG3:   "LOG3",
 	LOG4:   "LOG4",
 
-	// 0xb0 range.
-	CALLF: "CALLF",
-	RETF:  "RETF",
+	// 0xe0 range.
+	RJUMP:  "RJUMP",
+	RJUMPI: "RJUMPI",
+	RJUMPV: "RJUMPV",
+	CALLF:  "CALLF",
+	RETF:   "RETF",
 
 	// 0xf0 range.
 	CREATE:       "CREATE",
@@ -444,6 +460,8 @@ var stringToOp = map[string]OpCode{
 	"CALLDATACOPY":   CALLDATACOPY,
 	"CHAINID":        CHAINID,
 	"BASEFEE":        BASEFEE,
+	"BLOBHASH":       BLOBHASH,
+	"BLOBBASEFEE":    BLOBBASEFEE,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -473,9 +491,9 @@ var stringToOp = map[string]OpCode{
 	"MSIZE":          MSIZE,
 	"GAS":            GAS,
 	"JUMPDEST":       JUMPDEST,
-	"RJUMP":          RJUMP,
-	"RJUMPI":         RJUMPI,
-	"RJUMPV":         RJUMPV,
+	"TLOAD":          TLOAD,
+	"TSTORE":         TSTORE,
+	"MCOPY":          MCOPY,
 	"PUSH0":          PUSH0,
 	"PUSH1":          PUSH1,
 	"PUSH2":          PUSH2,
@@ -546,6 +564,9 @@ var stringToOp = map[string]OpCode{
 	"LOG2":           LOG2,
 	"LOG3":           LOG3,
 	"LOG4":           LOG4,
+	"RJUMP":          RJUMP,
+	"RJUMPI":         RJUMPI,
+	"RJUMPV":         RJUMPV,
 	"CALLF":          CALLF,
 	"RETF":           RETF,
 	"CREATE":         CREATE,

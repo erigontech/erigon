@@ -24,7 +24,7 @@ const (
 // the regular main function
 func main() {
 	// initializing Erigon application here and providing our custom flag
-	app := erigonapp.MakeApp(runErigon,
+	app := erigonapp.MakeApp("erigoncustom", runErigon,
 		append(erigoncli.DefaultFlags, &flag), // always use DefaultFlags, but add a new one in the end.
 	)
 	if err := app.Run(os.Args); err != nil {

@@ -7,7 +7,7 @@ contract selfDestructor {
     }
 
     function selfDestruct() public {
-        address payable nil = address(0);
+        address payable nil = payable(0);
         selfdestruct(nil);
     }
 }

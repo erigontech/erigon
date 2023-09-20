@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -25,8 +26,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/core"
@@ -34,7 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/tests/contracts"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestSelfDestructReceive(t *testing.T) {
@@ -43,7 +42,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -52,7 +51,7 @@ func TestSelfDestructReceive(t *testing.T) {
 				TangerineWhistleBlock: new(big.Int),
 				SpuriousDragonBlock:   new(big.Int),
 			},
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 			},
 		}
@@ -60,12 +59,9 @@ func TestSelfDestructReceive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key, false)
-	db := olddb.NewObjectDatabase(m.DB)
-	defer db.Close()
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 
@@ -78,31 +74,37 @@ func TestSelfDestructReceive(t *testing.T) {
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
+			contractAddress, txn, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
-			tx, err = selfDestructorContract.SelfDestruct(transactOpts)
+			block.AddTx(txn)
+			txn, err = selfDestructorContract.SelfDestruct(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Send 1 wei to contract after self-destruction
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
-			block.AddTx(tx)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -111,19 +113,19 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), tx); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), tx); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(state.NewPlainStateReader(db))
+	st = state.New(m.NewStateReader(tx))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}

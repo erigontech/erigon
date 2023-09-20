@@ -23,8 +23,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	checker "gopkg.in/check.v1"
 
@@ -32,7 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-var toAddr = libcommon.BytesToAddress
+var toAddr = common.BytesToAddress
 
 type StateSuite struct {
 	kv    kv.RwDB
@@ -71,7 +72,12 @@ func (s *StateSuite) TestDump(c *checker.C) {
 		c.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	got := string(NewDumper(tx, 1).DefaultDump())
+
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+	got := string(NewDumper(tx, 1, historyV3).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -102,7 +108,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.kv = memdb.New()
+	s.kv = memdb.New("")
 	tx, err := s.kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		panic(err)
@@ -119,12 +125,12 @@ func (s *StateSuite) TearDownTest(c *checker.C) {
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
-	address := libcommon.HexToAddress("0x823140710bf13990e4500136726d8b55")
+	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
 	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &libcommon.Hash{}, value)
+	s.state.SetState(address, &common.Hash{}, value)
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
@@ -132,14 +138,14 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &libcommon.Hash{}, &value)
+	s.state.GetCommittedState(address, &common.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
 func (s *StateSuite) TestTouchDelete(c *checker.C) {
-	s.state.GetOrNewStateObject(libcommon.Address{})
+	s.state.GetOrNewStateObject(common.Address{})
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	if err != nil {
@@ -154,7 +160,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(libcommon.Address{}, new(uint256.Int))
+	s.state.AddBalance(common.Address{}, new(uint256.Int))
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -167,7 +173,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
-	var storageaddr libcommon.Hash
+	var storageaddr common.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
@@ -186,14 +192,14 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
+	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
 func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
@@ -209,7 +215,7 @@ func TestSnapshot2(t *testing.T) {
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
-	var storageaddr libcommon.Hash
+	var storageaddr common.Hash
 
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
@@ -361,7 +367,11 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 2).DefaultDump())
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+	got := string(NewDumper(tx, 2, historyV3).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

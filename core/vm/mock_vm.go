@@ -62,6 +62,10 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	return
 }
 
+func (evm *testVM) Depth() int {
+	return 0
+}
+
 type readOnlyState struct {
 	outer  bool
 	before bool

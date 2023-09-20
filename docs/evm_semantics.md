@@ -1,10 +1,10 @@
 Corresponding code is in the folder `semantics`.
 
 ## EVM without opcodes (Ether transfers only)
-We start with looking at a very restricted version of EVM, having no opcodes. That means only Ether transfers are possible.
+We start by looking at a very restricted version of EVM, having no opcodes. That means only Ether transfers are possible.
 Even that seemingly simple case already has a relatively complex semantics.
 
-First, we would like to define what kind semantics we are looking for. Ethereum is a state machine, which has a global state, and
+First, we would like to define what kind of semantics we are looking for. Ethereum is a state machine, which has a global state, and
 transactions that trigger some state transition. There are also some state transitions that happen at the end of each block. These are
 related to miner and ommer rewards. The transition from one state to another is deterministic. Given the initial state, some extra
 environment (recent header hashes, current block number, timestamp of the current block), and the transaction object, there is only
@@ -14,22 +14,22 @@ transition function:
 `STATE_end = STATE_TR_FUNC(STATE_init, env, tx)`
 
 But this is not the only way to describe state transitions.
-And it is not always the most convinient way. In our approach, we will instead describe state transitions as a set of boolean expressions.
+And it is not always the most convenient way. In our approach, we will instead describe state transitions as a set of boolean expressions.
 They are boolean in the sense that they can be evaluated to either `true` or `false`, but they can rely on variety of types.
-These expressions will only tell us whether certain combination of the initial state, environment, transaction object, and the end state,
+These expressions will only tell us whether certain combinations of the initial state, environment, transaction object, and the end state,
 are all part of a valid state transition. However, they do not have a goal of helping us to determine (compute) the end state from
 the initial state, environment, and the transaction object. So they look more like this:
 
 `EXPRESSION(STATE_init, env, tx, STATE_end) == true?`
 
-Moreover, this representation allows for some non determinsm, which means that there could be some extra "oracle" input that helps the
+Moreover, this representation allows for some non determinism, which means that there could be some extra "oracle" input that helps the
 evaluation:
 
 `EXPRESSION(STATE_init, env, tx, STATE_end, ORACLE_input) == true?`
 
 From our experience with EVM and Ethereum, we know that each transaction can normally be decomposed into series of intermediate transitions.
 These intermediate transitions could be various internal accounting steps of Ethereum (like purchasing gas for Ether, or gas refunds), or
-steps of the EVM interpreter. In other words, the decomposion could look omething like this:
+steps of the EVM interpreter. In other words, the decomposition could look something like this:
 
 `EXPRESSION_1(STATE_init, env, tx, STATE_1, ORACLE_input1) == E1`
 
@@ -48,7 +48,7 @@ How do these expressions re-compose back into the `EXPRESSION`?. First of all, w
 Obviously, oracle input of the `EXPRESSION` could simply be a collection of all individual oracle inputs.
 
 Next observation we make is that the intermediate transitions are usually quite "local", which means that if we compare
-the initial state and the end state of each of those transitions, the difference between can be described succintly. This
+the initial state and the end state of each of those transitions, the difference between can be described succinctly. This
 can be understood as the length of the description having a pre-determined upper bound. Since there is no upper bound on
 the size of the state, we need a way of specifying part of the state the state transition modifies. At this point, we
 choose to represent the state as an array of accounts. Here, we use "array" in the context of theory of arrays. In this

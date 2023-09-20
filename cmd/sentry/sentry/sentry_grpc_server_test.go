@@ -8,21 +8,23 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
 )
 
-func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon.Hash) *GrpcServer {
+func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommon.Hash) *GrpcServer {
 	s := &GrpcServer{
 		ctx: context.Background(),
 	}
@@ -35,7 +37,7 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon
 
 	headTd256 := new(uint256.Int)
 	headTd256.SetFromBig(headTd)
-	heightForks, timeForks := forkid.GatherForks(genesis.Config)
+	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
 	s.statusData = &proto_sentry.StatusData{
 		NetworkId:       1,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
@@ -52,9 +54,22 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon
 
 }
 
+func startHandshake(
+	ctx context.Context,
+	status *proto_sentry.StatusData,
+	pipe *p2p.MsgPipeRW,
+	protocolVersion uint,
+	errChan chan *p2p.PeerError,
+) {
+	go func() {
+		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion)
+		errChan <- err
+	}()
+}
+
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
+func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, direct.ETH66) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -67,14 +82,14 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
-		dbNoFork  = memdb.NewTestDB(t)
-		dbProFork = memdb.NewTestDB(t)
+		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 
-		gspecNoFork  = &core.Genesis{Config: configNoFork}
-		gspecProFork = &core.Genesis{Config: configProFork}
+		gspecNoFork  = &types.Genesis{Config: configNoFork}
+		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
-		genesisProFork = gspecProFork.MustCommit(dbProFork)
+		genesisNoFork  = core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
+		genesisProFork = core.MustCommitGenesis(gspecProFork, dbProFork, "")
 	)
 
 	var s1, s2 *GrpcServer
@@ -95,9 +110,9 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pNoFork.Close()
 	defer p2pProFork.Close()
 
-	errc := make(chan error, 2)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	errc := make(chan *p2p.PeerError, 2)
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -114,8 +129,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s1.statusData.MaxBlockHeight = 1
 	s2.statusData.MaxBlockHeight = 1
 
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -133,8 +148,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s2.statusData.MaxBlockHeight = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
+	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
+	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	var successes int
 	for i := 0; i < 2; i++ {
@@ -160,9 +175,9 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}()
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
-	dbNoFork := memdb.NewTestDB(t)
-	gspecNoFork := &core.Genesis{Config: configNoFork}
-	genesisNoFork := gspecNoFork.MustCommit(dbNoFork)
+	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	gspecNoFork := &types.Genesis{Config: configNoFork}
+	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{

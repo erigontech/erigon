@@ -16,17 +16,17 @@
 
 package params
 
-import "math/big"
+import (
+	"math/big"
 
-// GasLimitBoundDivisor it can be changed by BSC
-var (
-	GasLimitBoundDivisor uint64 = 1024 // The bound divisor of the gas limit, used in update calculations.
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 const (
-	MinGasLimit     uint64 = 5000               // Minimum the gas limit may ever be.
-	MaxGasLimit     uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
-	GenesisGasLimit uint64 = 4712388            // Gas limit of the Genesis block.
+	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
+	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
+	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.
@@ -165,7 +165,15 @@ const (
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
+
+	// EIP-4844: Shard Blob Transactions
+	MinBlobGasPrice                   = 1
+	BlobGasPriceUpdateFraction        = 3338477
+	PointEvaluationGas         uint64 = 50000
 )
+
+// EIP-4788: Beacon block root in the EVM
+var BeaconRootsAddress = common.HexToAddress("0xbEac00dDB15f3B6d645C48263dC93862413A222D")
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MultiExpDiscountTable = [128]uint64{1200, 888, 764, 641, 594, 547, 500, 453, 438, 423, 408, 394, 379, 364, 349, 334, 330, 326, 322, 318, 314, 310, 306, 302, 298, 294, 289, 285, 281, 277, 273, 269, 268, 266, 265, 263, 262, 260, 259, 257, 256, 254, 253, 251, 250, 248, 247, 245, 244, 242, 241, 239, 238, 236, 235, 233, 232, 231, 229, 228, 226, 225, 223, 222, 221, 220, 219, 219, 218, 217, 216, 216, 215, 214, 213, 213, 212, 211, 211, 210, 209, 208, 208, 207, 206, 205, 205, 204, 203, 202, 202, 201, 200, 199, 199, 198, 197, 196, 196, 195, 194, 193, 193, 192, 191, 191, 190, 189, 188, 188, 187, 186, 185, 185, 184, 183, 182, 182, 181, 180, 179, 179, 178, 177, 176, 176, 175, 174}
@@ -176,7 +184,3 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
-
-func ApplyBinanceSmartChainParams() {
-	GasLimitBoundDivisor = 256
-}

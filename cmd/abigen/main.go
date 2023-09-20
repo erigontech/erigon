@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"os"
 	"path/filepath"
@@ -99,7 +100,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
+	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -119,7 +120,7 @@ func init() {
 }
 
 func abigen(c *cli.Context) error {
-	utils.CheckExclusive(c, abiFlag, jsonFlag, solFlag, vyFlag) // Only one source can be selected.
+	utils.CheckExclusive(c, &abiFlag, &jsonFlag, &solFlag, &vyFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")
 	}
@@ -180,7 +181,7 @@ func abigen(c *cli.Context) error {
 	} else {
 		// Generate the list of types to exclude from binding
 		exclude := make(map[string]bool)
-		for _, kind := range strings.Split(c.String(excFlag.Name), ",") {
+		for _, kind := range common.CliString2Array(c.String(excFlag.Name)) {
 			exclude[strings.ToLower(kind)] = true
 		}
 		var err error

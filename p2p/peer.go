@@ -25,15 +25,15 @@ import (
 	"sync"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -112,21 +112,23 @@ type Peer struct {
 	created mclock.AbsTime
 
 	wg       sync.WaitGroup
-	protoErr chan error
+	protoErr chan *PeerError
 	closed   chan struct{}
-	disc     chan DiscReason
+	pingRecv chan struct{}
+	disc     chan *PeerError
 
 	// events receives message send / receive events if set
-	events *event.Feed
-	pubkey [64]byte
+	events         *event.Feed
+	pubkey         [64]byte
+	metricsEnabled bool
 }
 
 // NewPeer returns a peer for testing purposes.
-func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap) *Peer {
+func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap, metricsEnabled bool) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil, pubkey)
+	peer := newPeer(log.Root(), conn, nil, pubkey, metricsEnabled)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -191,9 +193,9 @@ func (p *Peer) LocalAddr() net.Addr {
 
 // Disconnect terminates the peer connection with the given reason.
 // It returns immediately and does not wait until the connection is closed.
-func (p *Peer) Disconnect(reason DiscReason) {
+func (p *Peer) Disconnect(err *PeerError) {
 	select {
-	case p.disc <- reason:
+	case p.disc <- err:
 	case <-p.closed:
 	}
 }
@@ -209,17 +211,19 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
-		rw:       conn,
-		running:  protomap,
-		created:  mclock.Now(),
-		disc:     make(chan DiscReason),
-		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
-		closed:   make(chan struct{}),
-		log:      logger.New("id", conn.node.ID(), "conn", conn.flags),
-		pubkey:   pubkey,
+		rw:             conn,
+		running:        protomap,
+		created:        mclock.Now(),
+		disc:           make(chan *PeerError),
+		protoErr:       make(chan *PeerError, len(protomap)+1), // protocols + pingLoop
+		closed:         make(chan struct{}),
+		pingRecv:       make(chan struct{}, 16),
+		log:            logger.New("id", conn.node.ID(), "conn", conn.flags),
+		pubkey:         pubkey,
+		metricsEnabled: metricsEnabled,
 	}
 	return p
 }
@@ -228,13 +232,13 @@ func (p *Peer) Log() log.Logger {
 	return p.log
 }
 
-func (p *Peer) run() (remoteRequested bool, err error) {
+func (p *Peer) run() (peerErr *PeerError) {
 	var (
 		writeStart = make(chan struct{}, 1)
 		writeErr   = make(chan error, 1)
 		readErr    = make(chan error, 1)
-		reason     DiscReason // sent to the peer
 	)
+
 	p.wg.Add(2)
 	go p.readLoop(readErr)
 	go p.pingLoop()
@@ -243,39 +247,33 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 	writeStart <- struct{}{}
 	p.startProtocols(writeStart, writeErr)
 
+	defer func() {
+		close(p.closed)
+		p.rw.close(peerErr.Reason)
+		p.wg.Wait()
+	}()
+
 	// Wait for an error or disconnect.
-loop:
 	for {
 		select {
-		case err = <-writeErr:
-			// A write finished. Allow the next write to start if
-			// there was no error.
+		case err := <-writeErr:
 			if err != nil {
-				reason = DiscNetworkError
-				break loop
+				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run writeErr")
 			}
+			// Allow the next write to start if there was no error.
 			writeStart <- struct{}{}
-		case err = <-readErr:
-			if r, ok := err.(DiscReason); ok {
-				remoteRequested = true
-				reason = r
+		case err := <-readErr:
+			if reason, ok := err.(DiscReason); ok {
+				return NewPeerError(PeerErrorDiscReasonRemote, reason, nil, "Peer.run got a remote DiscReason")
 			} else {
-				reason = DiscNetworkError
+				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run readErr")
 			}
-			break loop
-		case err = <-p.protoErr:
-			reason = discReasonForError(err)
-			break loop
-		case err = <-p.disc:
-			reason = discReasonForError(err)
-			break loop
+		case err := <-p.protoErr:
+			return err
+		case err := <-p.disc:
+			return err
 		}
 	}
-
-	close(p.closed)
-	p.rw.close(reason)
-	p.wg.Wait()
-	return remoteRequested, err
 }
 
 func (p *Peer) pingLoop() {
@@ -287,10 +285,15 @@ func (p *Peer) pingLoop() {
 		select {
 		case <-ping.C:
 			if err := SendItems(p.rw, pingMsg); err != nil {
-				p.protoErr <- err
+				p.protoErr <- NewPeerError(PeerErrorPingFailure, DiscNetworkError, err, "Failed to send pingMsg")
 				return
 			}
 			ping.Reset(pingInterval)
+		case <-p.pingRecv:
+			if err := SendItems(p.rw, pongMsg); err != nil {
+				p.protoErr <- NewPeerError(PeerErrorPongFailure, DiscNetworkError, err, "Failed to send pongMsg")
+				return
+			}
 		case <-p.closed:
 			return
 		}
@@ -318,13 +321,18 @@ func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
-		go SendItems(p.rw, pongMsg)
+		select {
+		case p.pingRecv <- struct{}{}:
+		case <-p.closed:
+		}
 	case msg.Code == discMsg:
-		// This is the last message. We don't need to discard or
-		// check errors because, the connection will be closed after it.
-		var m struct{ R DiscReason }
-		rlp.Decode(msg.Payload, &m)
-		return m.R
+		// This is the last message.
+		// We don't need to discard because the connection will be closed after it.
+		reason, err := DisconnectMessagePayloadDecode(msg.Payload)
+		if err != nil {
+			p.log.Debug("Peer.handle: failed to rlp.Decode msg.Payload", "err", err)
+		}
+		return reason
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
 		msg.Discard()
@@ -335,10 +343,10 @@ func (p *Peer) handle(msg Msg) error {
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
-		if metrics.Enabled {
+		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics2.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
-			metrics2.GetOrCreateCounter(m + "_packets").Set(1)
+			metrics.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
+			metrics.GetOrCreateCounter(m + "_packets").Set(1)
 		}
 		select {
 		case proto.in <- msg:
@@ -403,11 +411,9 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 			defer debug.LogPanic()
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
+			// only unit test protocols can return nil
 			if err == nil {
-				p.log.Trace(fmt.Sprintf("Protocol %s/%d returned", proto.Name, proto.Version))
-				err = errProtocolReturned
-			} else if err != io.EOF {
-				p.log.Trace(fmt.Sprintf("Protocol %s/%d failed", proto.Name, proto.Version), "err", err)
+				err = NewPeerError(PeerErrorTest, DiscQuitting, nil, fmt.Sprintf("Protocol %s/%d returned", proto.Name, proto.Version))
 			}
 			p.protoErr <- err
 		}()
@@ -422,7 +428,7 @@ func (p *Peer) getProto(code uint64) (*protoRW, error) {
 			return proto, nil
 		}
 	}
-	return nil, newPeerError(errInvalidMsgCode, "%d", code)
+	return nil, NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("code=%d", code))
 }
 
 type protoRW struct {
@@ -437,7 +443,7 @@ type protoRW struct {
 
 func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	if msg.Code >= rw.Length {
-		return newPeerError(errInvalidMsgCode, "not handled")
+		return NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("not handled code=%d", msg.Code))
 	}
 	msg.meterCap = rw.cap()
 	msg.meterCode = msg.Code

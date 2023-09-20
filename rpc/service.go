@@ -41,6 +41,7 @@ var (
 type serviceRegistry struct {
 	mu       sync.Mutex
 	services map[string]service
+	logger   log.Logger
 }
 
 // service represents a registered object.
@@ -59,6 +60,7 @@ type callback struct {
 	errPos      int            // err return idx, of -1 when method cannot return error
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
+	logger      log.Logger
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
@@ -66,7 +68,7 @@ func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
 	}
-	callbacks := suitableCallbacks(rcvrVal)
+	callbacks := suitableCallbacks(rcvrVal, r.logger)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
 	}
@@ -116,7 +118,7 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 // suitableCallbacks iterates over the methods of the given type. It determines if a method
 // satisfies the criteria for a RPC callback or a subscription callback and adds it to the
 // collection of callbacks. See server documentation for a summary of these criteria.
-func suitableCallbacks(receiver reflect.Value) map[string]*callback {
+func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
 	for m := 0; m < typ.NumMethod(); m++ {
@@ -125,7 +127,7 @@ func suitableCallbacks(receiver reflect.Value) map[string]*callback {
 			continue // method not exported
 		}
 		name := formatName(method.Name)
-		cb := newCallback(receiver, method.Func, name)
+		cb := newCallback(receiver, method.Func, name, logger)
 		if cb == nil {
 			continue // function invalid
 		}
@@ -136,9 +138,9 @@ func suitableCallbacks(receiver reflect.Value) map[string]*callback {
 
 // newCallback turns fn (a function) into a callback object. It returns nil if the function
 // is unsuitable as an RPC callback.
-func newCallback(receiver, fn reflect.Value, name string) *callback {
+func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *callback {
 	fntype := fn.Type()
-	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype)}
+	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype), logger: logger}
 	// Determine parameter types. They must all be exported or builtin types.
 	c.makeArgTypes()
 
@@ -149,7 +151,7 @@ func newCallback(receiver, fn reflect.Value, name string) *callback {
 		outs[i] = fntype.Out(i)
 	}
 	if len(outs) > 2 {
-		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs)))
+		logger.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs)))
 		return nil
 	}
 	// If an error is returned, it must be the last returned value.
@@ -158,7 +160,7 @@ func newCallback(receiver, fn reflect.Value, name string) *callback {
 		c.errPos = 0
 	case len(outs) == 2:
 		if isErrorType(outs[0]) || !isErrorType(outs[1]) {
-			log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - error must the last return value", name))
+			logger.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - error must the last return value", name))
 			return nil
 		}
 		c.errPos = 1
@@ -214,7 +216,7 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 	// Catch panic while running the callback.
 	defer func() {
 		if err := recover(); err != nil {
-			log.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
+			c.logger.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, dbg.Stack()))
 			errRes = errors.New("method handler crashed")
 		}
 	}()

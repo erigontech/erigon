@@ -23,58 +23,13 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
-
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var (
-	bytesT  = reflect.TypeOf(Bytes(nil))
 	bigT    = reflect.TypeOf((*Big)(nil))
 	uintT   = reflect.TypeOf(Uint(0))
 	uint64T = reflect.TypeOf(Uint64(0))
 )
-
-// Bytes marshals/unmarshals as a JSON string with 0x prefix.
-// The empty slice marshals as "0x".
-type Bytes []byte
-
-const hexPrefix = `0x`
-
-// MarshalText implements encoding.TextMarshaler
-func (b Bytes) MarshalText() ([]byte, error) {
-	result := make([]byte, len(b)*2+2)
-	copy(result, hexPrefix)
-	hex.Encode(result[2:], b)
-	return result, nil
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (b *Bytes) UnmarshalJSON(input []byte) error {
-	if !isString(input) {
-		return errNonString(bytesT)
-	}
-	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), bytesT)
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (b *Bytes) UnmarshalText(input []byte) error {
-	raw, err := checkText(input, true)
-	if err != nil {
-		return err
-	}
-	dec := make([]byte, len(raw)/2)
-	if _, err = hex.Decode(dec, raw); err != nil {
-		err = mapError(err)
-	} else {
-		*b = dec
-	}
-	return err
-}
-
-// String returns the hex encoding of b.
-func (b Bytes) String() string {
-	return hexutility.Encode(b)
-}
 
 // UnmarshalFixedUnprefixedText decodes the input as a string with optional 0x prefix. The
 // length of out determines the required input length. This function is commonly used to
@@ -160,6 +115,10 @@ func (b *Big) String() string {
 	return EncodeBig(b.ToInt())
 }
 
+func (b *Big) Uint64() uint64 {
+	return ((*big.Int)(b)).Uint64()
+}
+
 // Uint64 marshals/unmarshals as a JSON string with 0x prefix.
 // The zero value marshals as "0x0".
 type Uint64 uint64
@@ -205,6 +164,10 @@ func (b *Uint64) UnmarshalText(input []byte) error {
 // String returns the hex encoding of b.
 func (b Uint64) String() string {
 	return EncodeUint64(uint64(b))
+}
+
+func (b Uint64) Uint64() uint64 {
+	return (uint64)(b)
 }
 
 // Uint marshals/unmarshals as a JSON string with 0x prefix.

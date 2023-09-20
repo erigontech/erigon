@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -42,10 +43,12 @@ type CallArgs struct {
 	GasPrice             *hexutil.Big       `json:"gasPrice"`
 	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
 	Nonce                *hexutil.Uint64    `json:"nonce"`
-	Data                 *hexutil.Bytes     `json:"data"`
-	AccessList           *types.AccessList  `json:"accessList"`
+	Data                 *hexutility.Bytes  `json:"data"`
+	Input                *hexutility.Bytes  `json:"input"`
+	AccessList           *types2.AccessList `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
 
@@ -80,9 +83,10 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	}
 
 	var (
-		gasPrice  *uint256.Int
-		gasFeeCap *uint256.Int
-		gasTipCap *uint256.Int
+		gasPrice         *uint256.Int
+		gasFeeCap        *uint256.Int
+		gasTipCap        *uint256.Int
+		maxFeePerBlobGas *uint256.Int
 	)
 	if baseFee == nil {
 		// If there's no basefee, then it must be a non-1559 execution
@@ -126,6 +130,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
 			}
 		}
+		if args.MaxFeePerBlobGas != nil {
+			maxFeePerBlobGas.SetFromBig(args.MaxFeePerBlobGas.ToInt())
+		}
 	}
 
 	value := new(uint256.Int)
@@ -136,15 +143,17 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		}
 	}
 	var data []byte
-	if args.Data != nil {
+	if args.Input != nil {
+		data = *args.Input
+	} else if args.Data != nil {
 		data = *args.Data
 	}
-	var accessList types.AccessList
+	var accessList types2.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
 }
 
@@ -156,7 +165,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 // message.
 type Account struct {
 	Nonce     *hexutil.Uint64                 `json:"nonce"`
-	Code      *hexutil.Bytes                  `json:"code"`
+	Code      *hexutility.Bytes               `json:"code"`
 	Balance   **hexutil.Big                   `json:"balance"`
 	State     *map[libcommon.Hash]uint256.Int `json:"state"`
 	StateDiff *map[libcommon.Hash]uint256.Int `json:"stateDiff"`
@@ -266,7 +275,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
 		"difficulty":       (*hexutil.Big)(head.Difficulty),
-		"extraData":        hexutil.Bytes(head.Extra),
+		"extraData":        hexutility.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
 		"gasUsed":          hexutil.Uint64(head.GasUsed),
@@ -279,6 +288,15 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
+	}
+	if head.BlobGasUsed != nil {
+		result["blobGasUsed"] = (*hexutil.Uint64)(head.BlobGasUsed)
+	}
+	if head.ExcessBlobGas != nil {
+		result["excessBlobGas"] = (*hexutil.Uint64)(head.ExcessBlobGas)
+	}
+	if head.ParentBeaconBlockRoot != nil {
+		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
 
 	return result
@@ -373,18 +391,21 @@ type RPCTransaction struct {
 	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
 	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
 	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	MaxFeePerBlobGas *hexutil.Big       `json:"maxFeePerBlobGas,omitempty"`
 	Hash             libcommon.Hash     `json:"hash"`
-	Input            hexutil.Bytes      `json:"input"`
+	Input            hexutility.Bytes   `json:"input"`
 	Nonce            hexutil.Uint64     `json:"nonce"`
 	To               *libcommon.Address `json:"to"`
 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
 	Value            *hexutil.Big       `json:"value"`
 	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types.AccessList  `json:"accessList,omitempty"`
+	Accesses         *types2.AccessList `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
 	V                *hexutil.Big       `json:"v"`
 	R                *hexutil.Big       `json:"r"`
 	S                *hexutil.Big       `json:"s"`
+
+	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -399,7 +420,7 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
 		Hash:  tx.Hash(),
-		Input: hexutil.Bytes(tx.GetData()),
+		Input: hexutility.Bytes(tx.GetData()),
 		Nonce: hexutil.Uint64(tx.GetNonce()),
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
@@ -433,13 +454,20 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
-		if baseFee != nil && blockHash != (libcommon.Hash{}) {
-			// price = min(tip, gasFeeCap - baseFee) + baseFee
-			price := math.BigMin(new(big.Int).Add(t.Tip.ToBig(), baseFee), t.FeeCap.ToBig())
-			result.GasPrice = (*hexutil.Big)(price)
-		} else {
-			result.GasPrice = nil
-		}
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+	case *types.BlobTx:
+		chainId.Set(t.ChainID)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
+		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+		// if the transaction has been mined, compute the effective gas price
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+		result.MaxFeePerBlobGas = (*hexutil.Big)(t.MaxFeePerBlobGas.ToBig())
+		result.BlobVersionedHashes = t.GetBlobHashes()
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	var err error
@@ -455,6 +483,15 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 	return result
 }
 
+func computeGasPrice(tx types.Transaction, blockHash libcommon.Hash, baseFee *big.Int) *hexutil.Big {
+	if baseFee != nil && blockHash != (libcommon.Hash{}) {
+		// price = min(tip + baseFee, gasFeeCap)
+		price := math.BigMin(new(big.Int).Add(tx.GetTip().ToBig(), baseFee), tx.GetFeeCap().ToBig())
+		return (*hexutil.Big)(price)
+	}
+	return nil
+}
+
 // newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func newRPCBorTransaction(opaqueTx types.Transaction, txHash libcommon.Hash, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
@@ -465,7 +502,7 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash libcommon.Hash, blo
 		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
 		Gas:      hexutil.Uint64(tx.GetGas()),
 		Hash:     txHash,
-		Input:    hexutil.Bytes(tx.GetData()),
+		Input:    hexutility.Bytes(tx.GetData()),
 		Nonce:    hexutil.Uint64(tx.GetNonce()),
 		From:     libcommon.Address{},
 		To:       tx.GetTo(),

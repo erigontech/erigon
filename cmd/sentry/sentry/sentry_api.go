@@ -8,7 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -33,7 +32,7 @@ func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash
 		}
 
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
-			log.Error("Update status message for the sentry", "err", err)
+			cs.logger.Error("Update status message for the sentry", "err", err)
 		}
 	}
 }
@@ -45,38 +44,35 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			continue
 		}
 
-		switch cs.sentries[i].Protocol() {
-		case eth.ETH66, eth.ETH67:
-			//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
-			var bytes []byte
-			var err error
-			bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
-				RequestId:            rand.Uint64(), // nolint: gosec
-				GetBlockBodiesPacket: req.Hashes,
-			})
-			if err != nil {
-				log.Error("Could not encode block bodies request", "err", err)
-				return [64]byte{}, false
-			}
-			outreq := proto_sentry.SendMessageByMinBlockRequest{
-				MinBlock: req.BlockNums[len(req.BlockNums)-1],
-				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-					Data: bytes,
-				},
-				MaxPeers: 1,
-			}
-
-			sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err1 != nil {
-				log.Error("Could not send block bodies request", "err", err1)
-				return [64]byte{}, false
-			}
-			if sentPeers == nil || len(sentPeers.Peers) == 0 {
-				continue
-			}
-			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
+		var bytes []byte
+		var err error
+		bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+			RequestId:            rand.Uint64(), // nolint: gosec
+			GetBlockBodiesPacket: req.Hashes,
+		})
+		if err != nil {
+			cs.logger.Error("Could not encode block bodies request", "err", err)
+			return [64]byte{}, false
 		}
+		outreq := proto_sentry.SendMessageByMinBlockRequest{
+			MinBlock: req.BlockNums[len(req.BlockNums)-1],
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+				Data: bytes,
+			},
+			MaxPeers: 1,
+		}
+
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			cs.logger.Error("Could not send block bodies request", "err", err1)
+			return [64]byte{}, false
+		}
+		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			continue
+		}
+		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }
@@ -87,52 +83,43 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		if !cs.sentries[i].Ready() {
 			continue
 		}
-		switch cs.sentries[i].Protocol() {
-		case eth.ETH66, eth.ETH67:
-			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-			reqData := &eth.GetBlockHeadersPacket66{
-				RequestId: rand.Uint64(), // nolint: gosec
-				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-					Amount:  req.Length,
-					Reverse: req.Reverse,
-					Skip:    req.Skip,
-					Origin:  eth.HashOrNumber{Hash: req.Hash},
-				},
-			}
-			if req.Hash == (libcommon.Hash{}) {
-				reqData.Origin.Number = req.Number
-			}
-			bytes, err := rlp.EncodeToBytes(reqData)
-			if err != nil {
-				log.Error("Could not encode header request", "err", err)
-				return [64]byte{}, false
-			}
-			minBlock := req.Number
-
-			var maxPeers uint64
-			if cs.passivePeers {
-				maxPeers = 5
-			} else {
-				maxPeers = 1
-			}
-			outreq := proto_sentry.SendMessageByMinBlockRequest{
-				MinBlock: minBlock,
-				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-					Data: bytes,
-				},
-				MaxPeers: maxPeers,
-			}
-			sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err1 != nil {
-				log.Error("Could not send header request", "err", err1)
-				return [64]byte{}, false
-			}
-			if sentPeers == nil || len(sentPeers.Peers) == 0 {
-				continue
-			}
-			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+		reqData := &eth.GetBlockHeadersPacket66{
+			RequestId: rand.Uint64(), // nolint: gosec
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Amount:  req.Length,
+				Reverse: req.Reverse,
+				Skip:    req.Skip,
+				Origin:  eth.HashOrNumber{Hash: req.Hash},
+			},
 		}
+		if req.Hash == (libcommon.Hash{}) {
+			reqData.Origin.Number = req.Number
+		}
+		bytes, err := rlp.EncodeToBytes(reqData)
+		if err != nil {
+			cs.logger.Error("Could not encode header request", "err", err)
+			return [64]byte{}, false
+		}
+		minBlock := req.Number
+
+		outreq := proto_sentry.SendMessageByMinBlockRequest{
+			MinBlock: minBlock,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Data: bytes,
+			},
+			MaxPeers: 5,
+		}
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			cs.logger.Error("Could not send header request", "err", err1)
+			return [64]byte{}, false
+		}
+		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			continue
+		}
+		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }
@@ -162,7 +149,7 @@ func (cs *MultiClient) Penalize(ctx context.Context, penalties []headerdownload.
 			}
 
 			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-				log.Error("Could not send penalty", "err", err1)
+				cs.logger.Error("Could not send penalty", "err", err1)
 			}
 		}
 	}

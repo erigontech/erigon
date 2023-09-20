@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -18,15 +17,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -47,6 +46,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -58,7 +58,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
@@ -78,8 +77,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	cfg := &httpcfg.HttpCfg{Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
-	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
+	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -105,6 +105,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
+	rootCmd.PersistentFlags().Float64Var(&ethconfig.Defaults.RPCTxFeeCap, utils.RPCGlobalTxFeeCapFlag.Name, utils.RPCGlobalTxFeeCapFlag.Value, utils.RPCGlobalTxFeeCapFlag.Usage)
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.TCPServerEnabled, "tcp", false, "Enable TCP server")
 	rootCmd.PersistentFlags().StringVar(&cfg.TCPListenAddress, "tcp.addr", nodecfg.DefaultTCPHost, "TCP server listening interface")
@@ -118,6 +119,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 
+	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
+
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
 	}
@@ -126,9 +129,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := debug.SetupCobra(cmd); err != nil {
-			return err
-		}
 
 		err := cfg.StateCache.CacheSize.UnmarshalText([]byte(stateCacheStr))
 		if err != nil {
@@ -206,38 +206,35 @@ func subscribeToStateChanges(ctx context.Context, client StateChangesClient, cac
 
 func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	// DB schema version compatibility check
-	var version []byte
 	var compatErr error
 	var compatTx kv.Tx
 	if compatTx, compatErr = db.BeginRo(ctx); compatErr != nil {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if version, compatErr = compatTx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey); compatErr != nil {
+	major, minor, patch, ok, err := rawdb.ReadDBSchemaVersion(compatTx)
+	if err != nil {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
-	if len(version) != 12 {
-		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
+	if ok {
+		var compatible bool
+		dbSchemaVersion := &kv.DBSchemaVersion
+		if major != dbSchemaVersion.Major {
+			compatible = false
+		} else if minor != dbSchemaVersion.Minor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
+				dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
+				major, minor, patch)
+		}
+		log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
+			"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	}
-	major := binary.BigEndian.Uint32(version)
-	minor := binary.BigEndian.Uint32(version[4:])
-	patch := binary.BigEndian.Uint32(version[8:])
-	var compatible bool
-	dbSchemaVersion := &kv.DBSchemaVersion
-	if major != dbSchemaVersion.Major {
-		compatible = false
-	} else if minor != dbSchemaVersion.Minor {
-		compatible = false
-	} else {
-		compatible = true
-	}
-	if !compatible {
-		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
-			dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
-			major, minor, patch)
-	}
-	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
-		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
+
 	return nil
 }
 
@@ -245,6 +242,7 @@ func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
 	blockReader services.FullBlockReader, ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer,
 	miningServer txpool.MiningServer, stateDiffClient StateChangesClient,
+	logger log.Logger,
 ) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters, err error) {
 	if stateCacheCfg.CacheSize > 0 {
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -261,9 +259,10 @@ func EmbeddedServices(ctx context.Context,
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
 	eth = rpcservices.NewRemoteBackend(directClient, erigonDB, blockReader)
+
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
+	ff = rpchelper.New(ctx, eth, txPool, mining, func() {}, logger)
 
 	return
 }
@@ -295,12 +294,13 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	// Configure DB first
-	var allSnapshots *snapshotsync.RoSnapshots
+	var allSnapshots *freezeblocks.RoSnapshots
+	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		dir.MustExist(cfg.Dirs.SnapHistory)
-		log.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
+		logger.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
@@ -313,14 +313,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
 				return err
 			}
-			if genesisBlock == nil {
-				return fmt.Errorf("genesis not found in DB. Likely Erigon was never started on this datadir")
-			}
-			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			cc, err = rawdb.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
 			}
@@ -337,72 +334,80 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.UseSnapshots
 		if !cfg.Snap.Enabled {
-			log.Info("Use --snapshots=false")
+			logger.Info("Use --snapshots=false")
 		}
 
 		// Configure sapshots
-		if cfg.Snap.Enabled {
-			allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-			allSnapshots.OptimisticReopenWithDB(db)
-			allSnapshots.LogStat()
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSnapshots.OptimisticReopenWithDB(db)
+		allBorSnapshots.OptimisticalyReopenWithDB(db)
+		allSnapshots.LogStat()
+		allBorSnapshots.LogStat()
 
-			if agg, err = libstate.NewAggregator22(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
-			}
-			_ = agg.ReopenFiles()
-
-			db.View(context.Background(), func(tx kv.Tx) error {
-				agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress
-				})
-				return nil
-			})
-			onNewSnapshot = func() {
-				go func() { // don't block events processing by network communication
-					reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
-					if err != nil {
-						log.Warn("[Snapshots] reopen", "err", err)
-						return
-					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						allSnapshots.LogStat()
-					}
-
-					if err = agg.ReopenFiles(); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						db.View(context.Background(), func(tx kv.Tx) error {
-							agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-								_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
-								return histBlockNumProgress
-							})
-							return nil
-						})
-					}
-				}()
-			}
-			onNewSnapshot()
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-			var histV3Enabled bool
-			_ = db.View(ctx, func(tx kv.Tx) error {
-				histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
-				return nil
-			})
-			if histV3Enabled {
-				log.Info("HistoryV3", "enable", histV3Enabled)
-				db = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
-			}
-			stateCache = kvcache.NewDummy()
-		} else {
-			blockReader = snapshotsync.NewBlockReader()
-			stateCache = kvcache.NewDummy()
+		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		_ = agg.OpenFolder()
+
+		db.View(context.Background(), func(tx kv.Tx) error {
+			agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress
+			})
+			return nil
+		})
+		onNewSnapshot = func() {
+			go func() { // don't block events processing by network communication
+				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+				if err != nil {
+					logger.Warn("[snapshots] reopen", "err", err)
+					return
+				}
+				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+					logger.Error("[snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat()
+				}
+				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+					logger.Error("[bor snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat()
+				}
+
+				_ = reply.HistoryFiles
+
+				if err = agg.OpenFolder(); err != nil {
+					logger.Error("[snapshots] reopen", "err", err)
+				} else {
+					db.View(context.Background(), func(tx kv.Tx) error {
+						agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress
+						})
+						return nil
+					})
+				}
+			}()
+		}
+		onNewSnapshot()
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+
+		var histV3Enabled bool
+		_ = db.View(ctx, func(tx kv.Tx) error {
+			histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
+			return nil
+		})
+		if histV3Enabled {
+			logger.Info("HistoryV3", "enable", histV3Enabled)
+			db, err = temporal.New(rwKv, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+			}
+		}
+		stateCache = kvcache.NewDummy()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
@@ -420,7 +425,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			tmpDb.Close()
 		}
-		log.Trace("Creating consensus db", "path", borDbPath)
+		logger.Trace("Creating consensus db", "path", borDbPath)
 		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
@@ -433,7 +438,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		} else {
 			stateCache = kvcache.NewDummy()
 		}
-		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
+		logger.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
 	subscribeToStateChangesLoop(ctx, remoteKvClient, stateCache)
@@ -452,12 +457,13 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	txPoolService := rpcservices.NewTxPoolService(txPool)
 
 	if !cfg.WithDatadir {
-		blockReader = snapshotsync.NewRemoteBlockReader(remoteBackendClient)
+		blockReader = freezeblocks.NewRemoteBlockReader(remoteBackendClient)
 	}
 
 	remoteEth := rpcservices.NewRemoteBackend(remoteBackendClient, db, blockReader)
 	blockReader = remoteEth
 	eth = remoteEth
+
 	go func() {
 		if !remoteKv.EnsureVersionCompatibility() {
 			rootCancel()
@@ -473,32 +479,35 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 	}()
 
-	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot)
+	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot, logger)
 	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {
-	if len(authAPI) > 0 {
-		engineInfo, err := startAuthenticatedRpcServer(cfg, authAPI)
-		if err != nil {
-			return err
-		}
-		go stopAuthenticatedRpcServer(ctx, engineInfo)
-	}
-
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
-		return startRegularRpcServer(ctx, cfg, rpcAPI)
+		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
 	}
 
 	return nil
 }
 
-func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
+func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+	if len(rpcAPI) == 0 {
+		return nil
+	}
+	engineInfo, err := startAuthenticatedRpcServer(cfg, rpcAPI, logger)
+	if err != nil {
+		return err
+	}
+	go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
+	return nil
+}
+
+func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
-	log.Trace("TraceRequests = %t\n", cfg.TraceRequests)
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
@@ -523,22 +532,24 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		}
 	}
 
-	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false); err != nil {
+	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
+		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger)
 	}
 
-	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, nil)
+	graphQLHandler := graphql.CreateHandler(defaultAPIList)
+
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
 	}
 
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
+	listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
@@ -553,14 +564,16 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 			defer tcpListener.Close()
 			err := srv.ServeListener(tcpListener)
 			if err != nil {
-				log.Error("TCP Listener Fatal Error", "err", err)
+				logger.Error("TCP Listener Fatal Error", "err", err)
 			}
 		}()
-		log.Info("TCP Endpoint opened", "url", tcpEndpoint)
+		logger.Info("TCP Endpoint opened", "url", tcpEndpoint)
 	}
 
-	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
-		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+	info := []interface{}{
+		"url", httpAddr, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled,
+	}
 
 	var (
 		healthServer *grpcHealth.Server
@@ -582,14 +595,14 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		info = append(info, "grpc.port", cfg.GRPCPort)
 	}
 
-	log.Info("HTTP endpoint opened", info...)
+	logger.Info("HTTP endpoint opened", info...)
 
 	defer func() {
 		srv.Stop()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
-		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+		logger.Info("HTTP endpoint closed", "url", httpAddr)
 
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
@@ -597,11 +610,11 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 			}
 			grpcServer.GracefulStop()
 			_ = grpcListener.Close()
-			log.Info("GRPC endpoint closed", "url", grpcEndpoint)
+			logger.Info("GRPC endpoint closed", "url", grpcEndpoint)
 		}
 	}()
 	<-ctx.Done()
-	log.Info("Exiting...")
+	logger.Info("Exiting...")
 	return nil
 }
 
@@ -612,18 +625,17 @@ type engineInfo struct {
 	EngineHttpEndpoint string
 }
 
-func startAuthenticatedRpcServer(cfg httpcfg.HttpCfg, rpcAPI []rpc.API) (*engineInfo, error) {
-	log.Trace("TraceRequests = %t\n", cfg.TraceRequests)
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
+func startAuthenticatedRpcServer(cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*engineInfo, error) {
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger)
 
-	engineListener, engineSrv, engineHttpEndpoint, err := createEngineListener(cfg, rpcAPI)
+	engineListener, engineSrv, engineHttpEndpoint, err := createEngineListener(cfg, rpcAPI, logger)
 	if err != nil {
 		return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 	}
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
 }
 
-func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo) {
+func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.Logger) {
 	defer func() {
 		engineInfo.Srv.Stop()
 		if engineInfo.EngineSrv != nil {
@@ -634,11 +646,11 @@ func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo) {
 
 		if engineInfo.EngineListener != nil {
 			_ = engineInfo.EngineListener.Shutdown(shutdownCtx)
-			log.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
+			logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
 		}
 	}()
 	<-ctx.Done()
-	log.Info("Exiting Engine...")
+	logger.Info("Exiting Engine...")
 }
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.
@@ -650,9 +662,9 @@ func isWebsocket(r *http.Request) bool {
 // obtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
+func obtainJWTSecret(cfg httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	// try reading from file
-	log.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
+	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
 	if len(cfg.JWTSecretPath) == 0 {
 		cfg.JWTSecretPath = "jwt.hex"
@@ -662,7 +674,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 		if len(jwtSecret) == 32 {
 			return jwtSecret, nil
 		}
-		log.Error("Invalid JWT secret", "path", cfg.JWTSecretPath, "length", len(jwtSecret))
+		logger.Error("Invalid JWT secret", "path", cfg.JWTSecretPath, "length", len(jwtSecret))
 		return nil, errors.New("invalid JWT secret")
 	}
 	// Need to generate one
@@ -672,12 +684,16 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutility.Encode(jwtSecret)), 0600); err != nil {
 		return nil, err
 	}
-	log.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
+	logger.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
 	return jwtSecret, nil
 }
 
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
+			return
+		}
+
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
@@ -697,36 +713,38 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
-	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true)
+	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true, logger)
 
-	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
+	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	jwtSecret, err := obtainJWTSecret(cfg)
+	jwtSecret, err := obtainJWTSecret(cfg, logger)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	wsHandler := engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
+	wsHandler := engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression, logger)
 
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, cfg.HttpCompression)
 
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, jwtSecret)
+	graphQLHandler := graphql.CreateHandler(engineApi)
+
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, graphQLHandler, jwtSecret)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
+	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", true, "ws.compression", cfg.WebsocketCompression}
-	log.Info("HTTP endpoint opened for Engine API", engineInfo...)
+	engineInfo := []interface{}{"url", engineAddr, "ws", true, "ws.compression", cfg.WebsocketCompression}
+	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
-	return engineListener, engineSrv, engineHttpEndpoint, nil
+	return engineListener, engineSrv, engineAddr.String(), nil
 }

@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -17,15 +18,6 @@ var testMetadata = &cltypes.Metadata{
 
 var testPing = &cltypes.Ping{
 	Id: 420,
-}
-
-var testSingleRoot = &cltypes.SingleRoot{
-	Root: libcommon.HexToHash("96"),
-}
-
-var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
-	Period: 69,
-	Count:  666,
 }
 
 var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
@@ -40,29 +32,32 @@ var testStatus = &cltypes.Status{
 	FinalizedRoot:  libcommon.HexToHash("bbba"),
 }
 
+var testHeader = &cltypes.BeaconBlockHeader{
+	Slot:          2,
+	ProposerIndex: 24,
+	ParentRoot:    libcommon.HexToHash("a"),
+	Root:          libcommon.HexToHash("d"),
+	BodyRoot:      libcommon.HexToHash("ad"),
+}
+
 func TestMarshalNetworkTypes(t *testing.T) {
-	cases := []ssz_utils.EncodableSSZ{
+	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
-		testSingleRoot,
-		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
 	}
 
-	unmarshalDestinations := []ssz_utils.EncodableSSZ{
+	unmarshalDestinations := []ssz.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
-		&cltypes.SingleRoot{},
-		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
 	}
 	for i, tc := range cases {
-		marshalledBytes, err := tc.MarshalSSZ()
+		marshalledBytes, err := tc.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.Equal(t, len(marshalledBytes), tc.SizeSSZ())
-		require.NoError(t, unmarshalDestinations[i].UnmarshalSSZ(marshalledBytes))
-		require.Equal(t, tc, unmarshalDestinations[i])
+		require.Equal(t, len(marshalledBytes), tc.EncodingSizeSSZ())
+		require.NoError(t, unmarshalDestinations[i].DecodeSSZ(marshalledBytes, int(clparams.CapellaVersion)))
 	}
 }

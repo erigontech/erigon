@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,8 +27,10 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
@@ -37,17 +38,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *nodecfg.Config
-	log           log.Logger
+	logger        log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
-	server        *p2p.Server   // Currently running P2P networking layer
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
 	state         int           // Tracks state of node lifecycle
 
@@ -64,14 +63,11 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *nodecfg.Config) (*Node, error) {
+func New(conf *nodecfg.Config, logger log.Logger) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
 	conf = &confCopy
-	if conf.Log == nil {
-		conf.Log = log.New()
-	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
 	// other files in the data directory.
@@ -84,7 +80,7 @@ func New(conf *nodecfg.Config) (*Node, error) {
 
 	node := &Node{
 		config:    conf,
-		log:       conf.Log,
+		logger:    logger,
 		stop:      make(chan struct{}),
 		databases: make([]kv.Closer, 0),
 	}
@@ -95,9 +91,6 @@ func New(conf *nodecfg.Config) (*Node, error) {
 	}
 
 	return node, nil
-}
-
-func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
@@ -134,11 +127,11 @@ func (n *Node) Start() error {
 	if err != nil {
 		stopErr := n.stopServices(started)
 		if stopErr != nil {
-			n.log.Warn("Failed to doClose for this node", "err", stopErr)
+			n.logger.Warn("Failed to doClose for this node", "err", stopErr)
 		} //nolint:errcheck
 		closeErr := n.doClose(nil)
 		if closeErr != nil {
-			n.log.Warn("Failed to doClose for this node", "err", closeErr)
+			n.logger.Warn("Failed to doClose for this node", "err", closeErr)
 		}
 	}
 	return err
@@ -240,6 +233,7 @@ func (n *Node) openDataDir() error {
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
 	l := flock.New(filepath.Join(instdir, "LOCK"))
+
 	locked, err := l.TryLock()
 	if err != nil {
 		return convertFileLockError(err)
@@ -255,7 +249,7 @@ func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
 		if err := n.dirLock.Unlock(); err != nil {
-			n.log.Error("Can't release datadir lock", "err", err)
+			n.logger.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
 	}
@@ -280,16 +274,6 @@ func (n *Node) RegisterLifecycle(lifecycle Lifecycle) {
 	n.lifecycles = append(n.lifecycles, lifecycle)
 }
 
-// RegisterProtocols adds backend's protocols to the node's p2p server.
-func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state != initializingState {
-		panic("can't register protocols on running/stopped node")
-	}
-}
-
 // Config returns the configuration of node.
 func (n *Node) Config() *nodecfg.Config {
 	return n.config
@@ -300,42 +284,61 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
-	var name string
+func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"
 	case kv.TxPoolDB:
 		name = "txpool"
+	case kv.ConsensusDB:
+		if len(name) == 0 {
+			return nil, fmt.Errorf("Expected a consensus name")
+		}
 	default:
 		name = "test"
 	}
+
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New()
+		db = memdb.New("")
 		return db, nil
 	}
 
 	dbPath := filepath.Join(config.Dirs.DataDir, name)
-	var openFunc func(exclusive bool) (kv.RwDB, error)
-	log.Info("Opening Database", "label", name, "path", dbPath)
-	openFunc = func(exclusive bool) (kv.RwDB, error) {
+
+	logger.Info("Opening Database", "label", name, "path", dbPath)
+	openFunc := func(exclusive bool) (kv.RwDB, error) {
 		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
+		opts := mdbx.NewMDBX(log.Root()).
 			Path(dbPath).Label(label).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
+
+		if readonly {
+			opts = opts.Readonly()
+		}
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-		if label == kv.ChainDB {
-			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
-		} else {
+
+		switch label {
+		case kv.ChainDB, kv.ConsensusDB:
+			if config.MdbxPageSize.Bytes() > 0 {
+				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			}
+			if config.MdbxDBSizeLimit > 0 {
+				opts = opts.MapSize(config.MdbxDBSizeLimit)
+			}
+			if config.MdbxGrowthStep > 0 {
+				opts = opts.GrowthStep(config.MdbxGrowthStep)
+			}
+		default:
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
+
 		return opts.Open()
 	}
 	var err error
@@ -353,13 +356,13 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		return nil, err
 	}
 	if has {
-		log.Info("Re-Opening DB in exclusive mode to apply migrations")
+		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
 		db.Close()
 		db, err = openFunc(true)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir, logger); err != nil {
 			return nil, err
 		}
 		db.Close()
@@ -381,4 +384,12 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 // ResolvePath returns the absolute path of a resource in the instance directory.
 func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
+}
+
+func StartNode(stack *Node) {
+	if err := stack.Start(); err != nil {
+		utils.Fatalf("Error starting protocol stack: %v", err)
+	}
+
+	go debug.ListenSignals(stack, stack.logger)
 }

@@ -3,7 +3,7 @@ package state
 import (
 	"bytes"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -22,7 +22,7 @@ func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state
-func (cr *CachedReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addrBytes := address.Bytes()
 	if a, ok := cr.cache.GetAccount(addrBytes); ok {
 		return a, nil
@@ -40,7 +40,7 @@ func (cr *CachedReader) ReadAccountData(address libcommon.Address) (*accounts.Ac
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
 	if s, ok := cr.cache.GetStorage(addrBytes, incarnation, key.Bytes()); ok {
 		return s, nil
@@ -59,7 +59,7 @@ func (cr *CachedReader) ReadAccountStorage(address libcommon.Address, incarnatio
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
-func (cr *CachedReader) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -76,13 +76,13 @@ func (cr *CachedReader) ReadAccountCode(address libcommon.Address, incarnation u
 	return c, nil
 }
 
-func (cr *CachedReader) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (cr *CachedReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	c, err := cr.ReadAccountCode(address, incarnation, codeHash)
 	return len(c), err
 }
 
 // ReadAccountIncarnation is called when incarnation of the account is required (to create and recreate contract)
-func (cr *CachedReader) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (cr *CachedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	deleted := cr.cache.GetDeletedAccount(address.Bytes())
 	if deleted != nil {
 		return deleted.Incarnation, nil

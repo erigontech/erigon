@@ -2,7 +2,7 @@ Add flag `--metrics` to Erigon or any other process (add `--metrics.addr` if nee
 
 Add hosts to collecting metrics in: `./cmd/prometheus/prometheus.yml`
 
-Run Grafana and Prometheus: `docker-compose up -d prometheus grafana` or `make prometheus`
+Run Grafana and Prometheus: `docker compose up -d prometheus grafana` or `make prometheus`
 
 Go to: [localhost:3000](localhost:3000), admin/admin
 
@@ -13,7 +13,7 @@ Env variables:
 - `ERIGON_GRAFANA_CONFIG` path to custom `grafana.ini file`. Default is: `./cmd/prometheus/grafana.ini`
 
 To add custom Erigon host: copy `./cmd/prometheus/prometheus.yml`, modify, pass new location by:
-`ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker-compose up prometheus grafana`
+`ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker compose up prometheus grafana`
 
 ## For developers
 

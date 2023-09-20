@@ -4,7 +4,7 @@ Block Bodies Compression: Snappy
 
 Issue
 =====
-Block bodies repressent the biggest portion of the database as a bucket and they we need to make such space more efficient. Thus, we use compression through snappy.
+Block bodies represent the biggest portion of the database as a bucket and they we need to make such space more efficient. Thus, we use compression through snappy.
 
 Snappy
 ======

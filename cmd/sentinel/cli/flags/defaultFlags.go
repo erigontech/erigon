@@ -1,17 +1,37 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/urfave/cli/v2"
+)
 
 var CLDefaultFlags = []cli.Flag{
 	&SentinelDiscoveryPort,
 	&SentinelDiscoveryAddr,
 	&SentinelServerPort,
 	&SentinelServerAddr,
+	&NoBeaconApi,
+	&BeaconApiReadTimeout,
+	&BeaconApiWriteTimeout,
+	&BeaconApiPort,
+	&BeaconApiAddr,
 	&Chain,
-	&Verbosity,
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&ChaindataFlag,
-	&ELEnabledFlag,
 	&BeaconDBModeFlag,
+	&BootnodesFlag,
+	&BeaconConfigFlag,
+	&GenesisSSZFlag,
+	&CheckpointSyncUrlFlag,
+	&SentinelStaticPeersFlag,
+	&TransitionChainFlag,
+	&InitSyncFlag,
+	&RecordModeDir,
+	&RecordModeFlag,
+	&RunEngineAPI,
+	&EngineApiHostFlag,
+	&EngineApiPortFlag,
+	&JwtSecret,
+	&utils.DataDirFlag,
 }

@@ -1,11 +1,13 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.19-alpine3.16 AS builder
+FROM docker.io/library/golang:1.20-alpine3.17 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
 WORKDIR /app
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN go mod download
 ADD . .
@@ -16,7 +18,7 @@ RUN --mount=type=cache,target=/root/.cache \
     make all
 
 
-FROM docker.io/library/golang:1.19-alpine3.16 AS tools-builder
+FROM docker.io/library/golang:1.20-alpine3.17 AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 
@@ -24,12 +26,17 @@ ADD Makefile Makefile
 ADD tools.go tools.go
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN mkdir -p /app/build/bin
 
-RUN make db-tools
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make db-tools
 
-FROM docker.io/library/alpine:3.16
+FROM docker.io/library/alpine:3.17
 
 # install required runtime libs, along with some helpers for debugging
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
@@ -59,11 +66,9 @@ COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
 COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
 COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
 COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
-COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
-COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
 COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
 COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
 COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
@@ -73,7 +78,8 @@ COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
-
+COPY --from=builder /app/build/bin/caplin-phase1 /usr/local/bin/caplin-phase1
+COPY --from=builder /app/build/bin/caplin-regression /usr/local/bin/caplin-regression
 
 
 EXPOSE 8545 \
@@ -100,3 +106,5 @@ LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.vcs-url="https://github.com/ledgerwatch/erigon.git" \
       org.label-schema.vendor="Torquem" \
       org.label-schema.version=$VERSION
+
+ENTRYPOINT ["erigon"]

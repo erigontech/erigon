@@ -1,4 +1,4 @@
-// Copyright 2018 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -19,6 +19,7 @@ package dnsdisc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -26,20 +27,23 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
 
 // Client discovers nodes by querying DNS servers.
 type Client struct {
-	cfg     Config
-	clock   mclock.Clock
-	entries *lru.Cache
+	cfg          Config
+	clock        mclock.Clock
+	entries      *lru.Cache[string, entry]
+	ratelimit    *rate.Limiter
+	singleflight singleflight.Group
 }
 
 // Config holds configuration options for the client.
@@ -50,7 +54,7 @@ type Config struct {
 	RateLimit       float64            // maximum DNS requests / second (default 3)
 	ValidSchemes    enr.IdentityScheme // acceptable ENR identity schemes (default enode.ValidSchemes)
 	Resolver        Resolver           // the DNS resolver to use (defaults to system DNS)
-	Log             log.Logger         // destination of client log messages (defaults to root logger)
+	Logger          log.Logger         // destination of client log messages (defaults to root logger)
 }
 
 // Resolver is a DNS resolver that can query TXT records.
@@ -83,8 +87,8 @@ func (cfg Config) withDefaults() Config {
 	if cfg.Resolver == nil {
 		cfg.Resolver = new(net.Resolver)
 	}
-	if cfg.Log == nil {
-		cfg.Log = log.Root()
+	if cfg.Logger == nil {
+		cfg.Logger = log.Root()
 	}
 	return cfg
 }
@@ -92,20 +96,25 @@ func (cfg Config) withDefaults() Config {
 // NewClient creates a client.
 func NewClient(cfg Config) *Client {
 	cfg = cfg.withDefaults()
-	cache, err := lru.New(cfg.CacheLimit)
-	if err != nil {
-		panic(err)
-	}
 	rlimit := rate.NewLimiter(rate.Limit(cfg.RateLimit), 10)
-	cfg.Resolver = &rateLimitResolver{cfg.Resolver, rlimit}
-	return &Client{cfg: cfg, entries: cache, clock: mclock.System{}}
+
+	entries, err := lru.New[string, entry](cfg.CacheLimit)
+	if err != nil {
+		log.Warn("can't create lru", "err", err)
+	}
+	return &Client{
+		cfg:       cfg,
+		entries:   entries,
+		clock:     mclock.System{},
+		ratelimit: rlimit,
+	}
 }
 
 // SyncTree downloads the entire node tree at the given URL.
 func (c *Client) SyncTree(url string) (*Tree, error) {
 	le, err := parseLink(url)
 	if err != nil {
-		return nil, fmt.Errorf("invalid enrtree URL: %w", err)
+		return nil, fmt.Errorf("invalid enrtree URL: %v", err)
 	}
 	ct := newClientTree(c, new(linkCache), le)
 	t := &Tree{entries: make(map[string]entry)}
@@ -130,17 +139,20 @@ func (c *Client) NewIterator(urls ...string) (enode.Iterator, error) {
 
 // resolveRoot retrieves a root entry via DNS.
 func (c *Client) resolveRoot(ctx context.Context, loc *linkEntry) (rootEntry, error) {
-	txts, err := c.cfg.Resolver.LookupTXT(ctx, loc.domain)
-	c.cfg.Log.Trace("Updating DNS discovery root", "tree", loc.domain, "err", err)
-	if err != nil {
-		return rootEntry{}, err
-	}
-	for _, txt := range txts {
-		if strings.HasPrefix(txt, rootPrefix) {
-			return parseAndVerifyRoot(txt, loc)
+	e, err, _ := c.singleflight.Do(loc.str, func() (interface{}, error) {
+		txts, err := c.cfg.Resolver.LookupTXT(ctx, loc.domain)
+		c.cfg.Logger.Trace("Updating DNS discovery root", "tree", loc.domain, "err", err)
+		if err != nil {
+			return rootEntry{}, err
 		}
-	}
-	return rootEntry{}, nameError{loc.domain, errNoRoot}
+		for _, txt := range txts {
+			if strings.HasPrefix(txt, rootPrefix) {
+				return parseAndVerifyRoot(txt, loc)
+			}
+		}
+		return rootEntry{}, nameError{loc.domain, errNoRoot}
+	})
+	return e.(rootEntry), err
 }
 
 func parseAndVerifyRoot(txt string, loc *linkEntry) (rootEntry, error) {
@@ -157,16 +169,27 @@ func parseAndVerifyRoot(txt string, loc *linkEntry) (rootEntry, error) {
 // resolveEntry retrieves an entry from the cache or fetches it from the network
 // if it isn't cached.
 func (c *Client) resolveEntry(ctx context.Context, domain, hash string) (entry, error) {
-	cacheKey := truncateHash(hash)
-	if e, ok := c.entries.Get(cacheKey); ok {
-		return e.(entry), nil
-	}
-	e, err := c.doResolveEntry(ctx, domain, hash)
-	if err != nil {
+	// The rate limit always applies, even when the result might be cached. This is
+	// important because it avoids hot-spinning in consumers of node iterators created on
+	// this client.
+	if err := c.ratelimit.Wait(ctx); err != nil {
 		return nil, err
 	}
-	c.entries.Add(cacheKey, e)
-	return e, nil
+	cacheKey := truncateHash(hash)
+	if e, ok := c.entries.Get(cacheKey); ok {
+		return e, nil
+	}
+
+	ei, err, _ := c.singleflight.Do(cacheKey, func() (interface{}, error) {
+		e, err := c.doResolveEntry(ctx, domain, hash)
+		if err != nil {
+			return nil, err
+		}
+		c.entries.Add(cacheKey, e)
+		return e, nil
+	})
+	e, _ := ei.(entry)
+	return e, err
 }
 
 // doResolveEntry fetches an entry via DNS.
@@ -177,13 +200,13 @@ func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry
 	}
 	name := hash + "." + domain
 	txts, err := c.cfg.Resolver.LookupTXT(ctx, hash+"."+domain)
-	c.cfg.Log.Trace("DNS discovery lookup", "name", name, "err", err)
+	c.cfg.Logger.Trace("DNS discovery lookup", "name", name, "err", err)
 	if err != nil {
 		return nil, err
 	}
 	for _, txt := range txts {
 		e, err := parseEntry(txt, c.cfg.ValidSchemes)
-		if err == errUnknownEntry {
+		if errors.Is(err, errUnknownEntry) {
 			continue
 		}
 		if !bytes.HasPrefix(crypto.Keccak256([]byte(txt)), wantHash) {
@@ -194,19 +217,6 @@ func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry
 		return e, err
 	}
 	return nil, nameError{name, errNoEntry}
-}
-
-// rateLimitResolver applies a rate limit to a Resolver.
-type rateLimitResolver struct {
-	r       Resolver
-	limiter *rate.Limiter
-}
-
-func (r *rateLimitResolver) LookupTXT(ctx context.Context, domain string) ([]string, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return nil, err
-	}
-	return r.r.LookupTXT(ctx, domain)
 }
 
 // randomIterator traverses a set of trees and returns nodes found in them.
@@ -258,7 +268,7 @@ func (it *randomIterator) Next() bool {
 func (it *randomIterator) addTree(url string) error {
 	le, err := parseLink(url)
 	if err != nil {
-		return fmt.Errorf("invalid enrtree URL: %w", err)
+		return fmt.Errorf("invalid enrtree URL: %v", err)
 	}
 	it.lc.addLink("", le.str)
 	return nil
@@ -273,10 +283,10 @@ func (it *randomIterator) nextNode() *enode.Node {
 		}
 		n, err := ct.syncRandom(it.ctx)
 		if err != nil {
-			if err == it.ctx.Err() {
+			if errors.Is(err, it.ctx.Err()) {
 				return nil // context canceled.
 			}
-			it.c.cfg.Log.Trace("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
+			it.c.cfg.Logger.Debug("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
 			continue
 		}
 		if n != nil {
@@ -290,6 +300,12 @@ func (it *randomIterator) pickTree() *clientTree {
 	it.mu.Lock()
 	defer it.mu.Unlock()
 
+	// First check if iterator was closed.
+	// Need to do this here to avoid nil map access in rebuildTrees.
+	if it.trees == nil {
+		return nil
+	}
+
 	// Rebuild the trees map if any links have changed.
 	if it.lc.changed {
 		it.rebuildTrees()
@@ -301,7 +317,7 @@ func (it *randomIterator) pickTree() *clientTree {
 		switch {
 		case canSync:
 			// Pick a random tree.
-			return trees[rand.Intn(len(trees))] //nolint:gosec
+			return trees[rand.Intn(len(trees))]
 		case len(trees) > 0:
 			// No sync action can be performed on any tree right now. The only meaningful
 			// thing to do is waiting for any root record to get updated.
@@ -349,7 +365,7 @@ func (it *randomIterator) waitForRootUpdates(trees []*clientTree) bool {
 	}
 
 	sleep := nextCheck.Sub(it.c.clock.Now())
-	it.c.cfg.Log.Trace("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
+	it.c.cfg.Logger.Debug("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
 	timeout := it.c.clock.NewTimer(sleep)
 	defer timeout.Stop()
 	select {

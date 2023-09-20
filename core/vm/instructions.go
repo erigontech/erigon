@@ -718,7 +718,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
 	// We can use this as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -756,7 +756,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	stack := scope.Stack
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -790,7 +790,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -820,7 +820,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	stack := scope.Stack
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -882,6 +882,26 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
+	return nil, errStopToken
+}
+
+func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	beneficiary := scope.Stack.Pop()
+	callerAddr := scope.Contract.Address()
+	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
+	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	if interpreter.evm.Config().Debug {
+		if interpreter.cfg.Debug {
+			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
+			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
+		}
+	}
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance)
+	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	return nil, errStopToken
 }
 

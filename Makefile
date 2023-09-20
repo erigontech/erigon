@@ -18,32 +18,31 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
-CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
-CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
+#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
-CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
-DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb,disable_libutp
+# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
+BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
-		echo "minimum required Golang version is 1.18"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 19 ]; then \
+		echo "minimum required Golang version is 1.19"; \
 		exit 1 ;\
 	fi
 
@@ -86,7 +85,7 @@ setup_xdg_data_home:
 
 ## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
 docker-compose: validate_docker_build_args setup_xdg_data_home
-	docker-compose up
+	docker compose up
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
@@ -107,7 +106,6 @@ erigon: go-version erigon.cmd
 
 COMMANDS += devnet
 COMMANDS += downloader
-COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -119,9 +117,10 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
-COMMANDS += lightclient
 COMMANDS += sentinel
-COMMANDS += erigon-el
+COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -134,24 +133,25 @@ db-tools:
 	@echo "Building db-tools"
 
 	go mod vendor
-	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
-	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	mkdir -p $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-## test:                              run unit tests with a 50s timeout
+## test:                              run unit tests with a 100s timeout
 test:
-	$(GOTEST) --timeout 50s
+	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 50s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -165,7 +165,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.50.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.54.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -178,12 +178,12 @@ clean:
 ## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
+	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
-	PATH=$(GOBIN):$(PATH) go generate ./core/types
+#	PATH=$(GOBIN):$(PATH) go generate ./core/types
+	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
@@ -197,7 +197,7 @@ bindings:
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
-	docker-compose up prometheus grafana
+	docker compose up prometheus grafana
 
 ## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:
@@ -213,7 +213,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.19.1
+GOLANG_CROSS_VERSION  ?= v1.20.7
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -227,8 +227,8 @@ release-dry-run: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate --skip-publish
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate --skip-publish
 
 .PHONY: release
 release: git-submodules
@@ -242,14 +242,16 @@ release: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate
+
+	@docker image push --all-tags thorax/erigon
+	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
-ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
 
 ## user_linux:                        create "erigon" user (Linux)
 user_linux:
@@ -263,7 +265,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /home/$(ERIGON_USER)/.local/share
 
 ## user_macos:                        create "erigon" user (MacOS)
 user_macos:
@@ -273,7 +275,7 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
 
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage

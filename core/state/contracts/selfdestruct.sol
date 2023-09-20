@@ -27,6 +27,6 @@ contract Selfdestruct {
 
     /* Self-destructs */
     function destruct() public {
-        selfdestruct(address(this));
+        selfdestruct(payable(this));
     }
 }

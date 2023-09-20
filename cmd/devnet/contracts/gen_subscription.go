@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = common.Big1
+	_ = libcommon.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )

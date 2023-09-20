@@ -1,6 +1,8 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (execution client), on the efficiency frontier, written in Go.
+Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
+frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
+by default.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -13,7 +15,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Getting Started](#getting-started)
     + [Logging](#logging)
     + [Testnets](#testnets)
-    + [Mining](#mining)
+    + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
@@ -36,13 +38,13 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 
 <!--te-->
 
+**Disclaimer**: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
+changes but we don't guarantee anything. Things can and will break.
 
-NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
+**Important defaults**: Erigon is an Archive Node by default (to remove history see: `--prune` flags
+in `erigon --help`). We don't allow change this flag after first start.
 
-**Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
-changes but we don't guarantee anything. Things can and will break.**
-
-<code>🔬 Alpha/Beta Designation has been discontinued. For release version numbering, please see [this blog post](https://erigon.substack.com/p/post-merge-release-of-erigon-dropping)</code>
+<code>In-depth links are marked by the microscope sign (🔬) </code>
 
 System Requirements
 ===================
@@ -53,18 +55,16 @@ System Requirements
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* BSC Archive: 7TB. BSC Full: 1TB.
+* Gnosis Chain Archive: 370GB (January 2023).
 
-* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
+* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.18](https://golang.org/doc/install).
-
-GCC 10+.
+[Golang version >= 1.19](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -74,10 +74,10 @@ Usage
 
 ### Getting Started
 
-For building the latest stable release (this will be suitable for most users just wanting to run a node):
+For building the latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone --branch stable --single-branch https://github.com/ledgerwatch/erigon.git
+git clone --branch release/<x.xx> --single-branch https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon
@@ -95,29 +95,42 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase
+Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
+Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
+and `--chain=mumbai` for Polygon Mumbai.
+For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
+Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended.
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable. must have ~100gb free space (for merge recent files to bigger one).
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
 ### Logging
 
-_Flags:_ 
+_Flags:_
 
-  - `verbosity`
-  - `log.console.verbosity` (overriding alias for `verbosity`)
-  - `log.json`
-  - `log.console.json` (alias for `log.json`)
-  - `log.dir.path`
-  - `log.dir.verbosity`
-  - `log.dir.json`
+- `verbosity`
+- `log.console.verbosity` (overriding alias for `verbosity`)
+- `log.json`
+- `log.console.json` (alias for `log.json`)
+- `log.dir.path`
+- `log.dir.prefix`
+- `log.dir.verbosity`
+- `log.dir.json`
 
-
-In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an int value specifying the highest output log level:
+In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
+int value specifying the highest output log level:
 
 ```
   LvlCrit = 0
@@ -128,9 +141,12 @@ In order to log only to the stdout/stderr the `--verbosity` (or `log.console.ver
   LvlTrace = 5
 ```
 
-To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. 'debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
+To set an output dir for logs to be collected on disk, please set `--log.dir.path` If you want to change the filename prodiced from `erigon` you should also set the `--log.dir.prefix` flag to an alternate name. The flag `--log.dir.verbosity` is
+also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. '
+debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
-Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk output `--log.dir.json`.
+Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
+output `--log.dir.json`.
 
 ### Modularity
 
@@ -142,16 +158,10 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded Consensus Layer.
-If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
-_Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
-
-### Optional stages
-
-There is an optional stage that can be enabled through flags:
-
-* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to
-  use `erigon_watchTheBurn`.
+On Ethereum Mainnet, Görli, and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
+Consensus Layer.
+If you want to use the internal Consensus Layer, run Erigon with flag `--internalcl`.
+_Warning:_ Staking (block production) is not possible with the embedded CL.
 
 ### Testnets
 
@@ -169,9 +179,9 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Mining
+### Block Production (PoW Miner or PoS Validator)
 
-**Disclaimer: Not supported/tested for Polygon Network (In Progress)**
+**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
 
 Support only remote-miners.
 
@@ -188,7 +198,7 @@ Support only remote-miners.
     + eth_newFilter
     + websocket Logs
 
-<code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
 ### Windows
 
@@ -200,7 +210,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.18
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.19
     * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -239,9 +249,9 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli
+`./build/bin/erigon --config ./config.yaml --chain=goerli`
 
-Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
 flag inside
 of the yaml configuration file and sets the chain to goerli
 
@@ -278,9 +288,9 @@ http.api : ["eth","debug","net"]
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK.
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
-as well as `--authrpc.vhosts <CL host>`.
+as well as `--authrpc.vhosts <CL host>` where `<CL host>` is your source host or `any`.
 
-[Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
+[Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine
 
 In order to establish a secure connection between the Consensus Layer and the Execution Layer, a JWT secret key is
 automatically generated.
@@ -305,8 +315,8 @@ Example of multiple chains on the same machine:
 ./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --authrpc.port=8551 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
-# rinkeby
-./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --authrpc.port=8552 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+# sepolia
+./build/bin/erigon --datadir="<your_sepolia_data_path>" --chain=sepolia --port=30304 --http.port=8546 --authrpc.port=8552 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
@@ -367,7 +377,8 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process.
+Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
+independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
@@ -488,9 +499,11 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 ### Grafana dashboard
 
-`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+`docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-### Prune old data
+###
+
+old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 
@@ -515,71 +528,72 @@ FAQ
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Default Ports and Protocols / Firewalls?
+### Default Ports and Firewalls
+
+
 
 #### `erigon` ports
 
-| Port  | Protocol  |        Purpose         | Expose  |
-|:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP |     eth/66 peering     | Public  |
-| 30304 | TCP & UDP |     eth/67 peering     | Public  |
-| 9090  |    TCP    |    gRPC Connections    | Private |
-| 42069 | TCP & UDP | Snap sync (Bittorrent) | Public  |
-| 6060  |    TCP    |    Metrics or Pprof    | Private |
-| 8551  |    TCP    | Engine API (JWT auth)  | Private |
+
+| Component | Port  | Protocol  | Purpose                     | Should Expose |
+| --------- | ----- | --------- | --------------------------- | ------------- |
+| engine    | 9090  | TCP       | gRPC Server                 | Private       |
+| engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
+| engine    | 6060  | TCP       | Metrics or Pprof            | Private       |
+| engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
+| sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
+| sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
+| sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
+| rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+
+
+
 
 Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
 
-#### `RPC` ports
-
-| Port | Protocol |      Purpose      | Expose  |
-|:----:|:--------:|:-----------------:|:-------:|
-| 8545 |   TCP    | HTTP & WebSockets | Private |
-
-Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same
-port.
-
-#### `sentry` ports
-
-| Port  | Protocol  |     Purpose      | Expose  |
-|:-----:|:---------:|:----------------:|:-------:|
-| 30303 | TCP & UDP |     Peering      | Public  |
-| 9091  |    TCP    | gRPC Connections | Private |
-
-Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will be exposed to the internet on 30303.
-Port
-9091 is for internal gRCP connections (e.g erigon -> sentry).
-
-#### `sentinel` ports
-
-| Port  | Protocol  |     Purpose      | Expose  |
-|:-----:|:---------:|:----------------:|:-------:|
-| 4000  |    UDP    |     Peering      | Public  |
-| 4001  |    TCP    |     Peering      | Public  |
-| 7777  |    TCP    | gRPC Connections | Private |
 
 
-#### Other ports
 
-| Port | Protocol | Purpose | Expose  |
-|:----:|:--------:|:-------:|:-------:|
-| 6060 |   TCP    |  pprof  | Private |
-| 6060 |   TCP    | metrics | Private |
+
+#### `caplin` ports
+| Component | Port | Protocol | Purpose          | Should Expose |
+| --------- | ---- | -------- | ---------------- | ------------- |
+| sentinel  | 4000 | UDP      | Peering          | Public        |
+| sentinel  | 4000 | UDP      | Peering          | Public        |
+| sentinel  | 4001 | TCP      | Peering          | Public        |
+| sentinel  | 7777 | TCP      | gRPC Connections | Private       |
+
+
+If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
+
+
+#### `shared` ports
+
+| Component | Port  | Protocol  | Purpose                     | Should Expose |
+| --------- | ----- | --------- | --------------------------- | ------------- |
+| all       | 6060 | TCP      | pprof            | Private       |
+| all       | 6060 | TCP      | metrics          | Private       |
+
 
 Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
+
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+
+
+#### `other` ports
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
-Hetzner may want strict firewall rules, like: 
+#### Hetzner expecting strict firewall rules
+
 ```
 0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
 10.0.0.0/8            Private-Use Networks       RFC 1918
 100.64.0.0/10         Carrier-Grade NAT (CGN)    RFC 6598, Section 7
-127.0.0.0/8           Loopback                   RFC 1122, Section 3.2.1.3
+127.16.0.0/12         Private-Use Networks       RFC 1918
 169.254.0.0/16        Link Local                 RFC 3927
 172.16.0.0/12         Private-Use Networks       RFC 1918
 192.0.0.0/24          IETF Protocol Assignments  RFC 5736
@@ -587,22 +601,24 @@ Hetzner may want strict firewall rules, like:
 192.88.99.0/24        6to4 Relay Anycast         RFC 3068
 192.168.0.0/16        Private-Use Networks       RFC 1918
 198.18.0.0/15         Network Interconnect
-                      Device Benchmark Testing   RFC 2544
+Device Benchmark Testing   RFC 2544
 198.51.100.0/24       TEST-NET-2                 RFC 5737
 203.0.113.0/24        TEST-NET-3                 RFC 5737
 224.0.0.0/4           Multicast                  RFC 3171
 240.0.0.0/4           Reserved for Future Use    RFC 1112, Section 4
 255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
-                                                 RFC 922, Section 7
+RFC 922, Section 7
 ```
+
+Same in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
 
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
 - Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+    run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+    run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 ### How to run local devnet?
 
@@ -620,52 +636,22 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
+### How to change db pagesize
+
+[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+
+
 Getting in touch
 ================
 
 ### Erigon Discord Server
 
-The main discussions are happening on our Discord server. To get an invite, send an email to `tg [at] torquem.ch` with
+The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me` with
 your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
-
-### Team
-
-Core contributors (in alphabetical order of first names):
-
-* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
-
-* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
-
-* Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
-
-* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
-
-* Boris Petrov ([b00ris](https://github.com/b00ris))
-
-* Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
-
-* Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
-
-* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
-
-* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
-
-Thanks to:
-
-* All contributors of Erigon
-
-* All contributors of Go-Ethereum
-
-* Our special respect and gratitude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
-  up the great job!
-
-Happy testing! 🥤
 
 Known issues
 ============
@@ -687,20 +673,20 @@ Next tools show correct memory usage of Erigon:
 
 - `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
     - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
-      shows OS pages cache size.
+        shows OS pages cache size.
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
-  browser `localhost:3000`, credentials `admin/admin`)
+    browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
-memory.
+    Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
+    memory.
 
-**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
-"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-running
-multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same
-Disk.
+    **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
+    main Erigon optimisations: "reduce Disk random access".
+    "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
+    running
+    multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same
+    Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 

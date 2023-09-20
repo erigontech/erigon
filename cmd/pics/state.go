@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/visual"
 )
@@ -72,8 +72,8 @@ import (
 var bucketLabels = map[string]string{
 	kv.Receipts:          "Receipts",
 	kv.Log:               "Event Logs",
-	kv.AccountsHistory:   "History Of Accounts",
-	kv.StorageHistory:    "History Of Storage",
+	kv.E2AccountsHistory: "History Of Accounts",
+	kv.E2StorageHistory:  "History Of Storage",
 	kv.Headers:           "Headers",
 	kv.HeaderCanonical:   "Canonical headers",
 	kv.HeaderTD:          "Headers TD",
@@ -273,9 +273,9 @@ func initialState1() error {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = libcommon.Address{1}
-		gspec    = &core.Genesis{
+		gspec    = &types.Genesis{
 			Config: params.AllProtocolChanges,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
@@ -283,9 +283,9 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1)
+		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
 	)
-	m := stages.MockWithGenesis(nil, gspec, key, false)
+	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -410,18 +410,18 @@ func initialState1() error {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
-	m2 := stages.MockWithGenesis(nil, gspec, key, false)
+	m2 := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {
 		return err
 	}
 
-	emptyKv := memdb.New()
+	emptyKv := memdb.New("")
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
@@ -430,13 +430,13 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m2.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 	}

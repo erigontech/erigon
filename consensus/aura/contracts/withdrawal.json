@@ -1,0 +1,23 @@
+[
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "maxNumberOfFailedWithdrawalsToProcess",
+                "type": "uint256"
+            },
+            {
+                "name": "amounts",
+                "type": "uint64[]"
+            },
+            {
+                "name": "addresses",
+                "type": "address[]"
+            }
+        ],
+        "name": "executeSystemWithdrawals",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]

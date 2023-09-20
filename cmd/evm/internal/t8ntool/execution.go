@@ -28,14 +28,14 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 type Prestate struct {
-	Env stEnv             `json:"env"`
-	Pre core.GenesisAlloc `json:"pre"`
+	Env stEnv              `json:"env"`
+	Pre types.GenesisAlloc `json:"pre"`
 }
 
 type ommer struct {
@@ -48,6 +48,7 @@ type stEnv struct {
 	Coinbase         libcommon.Address                      `json:"currentCoinbase"   gencodec:"required"`
 	Difficulty       *big.Int                               `json:"currentDifficulty"`
 	Random           *big.Int                               `json:"currentRandom"`
+	MixDigest        libcommon.Hash                         `json:"mixHash,omitempty"`
 	ParentDifficulty *big.Int                               `json:"parentDifficulty"`
 	GasLimit         uint64                                 `json:"currentGasLimit"   gencodec:"required"`
 	Number           uint64                                 `json:"currentNumber"     gencodec:"required"`
@@ -57,7 +58,9 @@ type stEnv struct {
 	Ommers           []ommer                                `json:"ommers,omitempty"`
 	BaseFee          *big.Int                               `json:"currentBaseFee,omitempty"`
 	ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
+	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
 }
 
 type stEnvMarshaling struct {
@@ -72,9 +75,9 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
-	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)

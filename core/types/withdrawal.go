@@ -23,8 +23,9 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -39,6 +40,11 @@ type Withdrawal struct {
 	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
 	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
+}
+
+func (obj *Withdrawal) Equal(other *Withdrawal) bool {
+	return obj.Index == other.Index && obj.Validator == other.Validator &&
+		obj.Address == other.Address && obj.Amount == other.Amount
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -78,23 +84,22 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	return rlp.EncodeInt(obj.Amount, w, b[:])
 }
 
-func (obj *Withdrawal) EncodeSSZ() []byte {
-	buf := make([]byte, obj.EncodingSizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, obj.Index)
-	ssz_utils.MarshalUint64SSZ(buf[8:], obj.Validator)
-	copy(buf[16:], obj.Address[:])
-	ssz_utils.MarshalUint64SSZ(buf[36:], obj.Amount)
-	return buf
+func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
+	buf = append(buf, ssz.Uint64SSZ(obj.Index)...)
+	buf = append(buf, ssz.Uint64SSZ(obj.Validator)...)
+	buf = append(buf, obj.Address[:]...)
+	buf = append(buf, ssz.Uint64SSZ(obj.Amount)...)
+	return buf, nil
 }
 
-func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
+func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return fmt.Errorf("[Withdrawal] err: %s", ssz.ErrLowBufferSize)
 	}
-	obj.Index = ssz_utils.UnmarshalUint64SSZ(buf)
-	obj.Validator = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	obj.Index = ssz.UnmarshalUint64SSZ(buf)
+	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
 	copy(obj.Address[:], buf[16:])
-	obj.Amount = ssz_utils.UnmarshalUint64SSZ(buf[36:])
+	obj.Amount = ssz.UnmarshalUint64SSZ(buf[36:])
 	return nil
 }
 
@@ -104,14 +109,7 @@ func (obj *Withdrawal) EncodingSizeSSZ() int {
 }
 
 func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
-	var addressLeaf [32]byte
-	copy(addressLeaf[:], obj.Address[:])
-	return merkle_tree.ArraysRoot([][32]byte{
-		merkle_tree.Uint64Root(obj.Index),
-		merkle_tree.Uint64Root(obj.Validator),
-		addressLeaf,
-		merkle_tree.Uint64Root(obj.Amount),
-	}, 4)
+	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address[:], obj.Amount)
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
@@ -143,6 +141,10 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
+func (*Withdrawal) Clone() clonable.Clonable {
+	return &Withdrawal{}
+}
+
 // field type overrides for gencodec
 type withdrawalMarshaling struct {
 	Index     hexutil.Uint64
@@ -160,27 +162,4 @@ func (s Withdrawals) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
 	rlp.Encode(w, s[i])
-}
-
-// HashSSZ hash a serie of withdrawals together given certain limit (16 for ETH1).
-func (obj Withdrawals) HashSSZ(limit uint64) ([32]byte, error) { // the [32]byte is temporary
-	leaves := make([][32]byte, len(obj))
-	var err error
-	// Compute trees of each withdrawal.
-	for i, withdrawal := range obj {
-		leaves[i], err = withdrawal.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	// Compute merklized base root.
-	baseRoot, err := merkle_tree.MerkleizeVector(leaves, limit)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	// Mix with length
-	return merkle_tree.ArraysRoot([][32]byte{
-		baseRoot,
-		merkle_tree.Uint64Root(uint64(len(obj))),
-	}, 2)
 }

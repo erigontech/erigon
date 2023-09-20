@@ -24,6 +24,8 @@ import (
 	"reflect"
 	"testing"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -50,6 +52,33 @@ func TestKeccak256Hasher(t *testing.T) {
 	exp, _ := hex.DecodeString("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
 	hasher := NewKeccakState()
 	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashData(hasher, in); return h[:] }, msg, exp)
+}
+
+func TestKeccak256HasherNew(t *testing.T) {
+	msg := []byte("abc")
+	exp, _ := hex.DecodeString("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
+	hasher := sha3.New256()
+	hasher.Write(msg)
+	var h libcommon.Hash
+	if !bytes.Equal(exp, hasher.Sum(h[:0])) {
+		t.Fatalf("hash %s mismatch: want: %x have: %x", "new", exp, h[:])
+	}
+}
+
+func TestKeccak256HasherMulti(t *testing.T) {
+	exp1, _ := hex.DecodeString("d341f310fa772d37e6966b84b37ad760811d784729b641630f6a03f729e1e20e")
+	exp2, _ := hex.DecodeString("6de9c0166df098306abb98b112c0834c29eedee6fcba804c7c4f4568204c9d81")
+	hasher := NewKeccakState()
+	d1, _ := hex.DecodeString("1234")
+	hasher.Write(d1)
+	d2, _ := hex.DecodeString("cafe")
+	hasher.Write(d2)
+	d3, _ := hex.DecodeString("babe")
+	hasher.Write(d3)
+	checkhash(t, "multi1", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp1)
+	d4, _ := hex.DecodeString("5678")
+	hasher.Write(d4)
+	checkhash(t, "multi2", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp2)
 }
 
 func TestToECDSAErrors(t *testing.T) {

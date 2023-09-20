@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"reflect"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 )
@@ -29,8 +30,8 @@ import (
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation
 // bytes slice.
 func packBytesSlice(bytes []byte, l int) []byte {
-	len := packNum(reflect.ValueOf(l))
-	return append(len, common.RightPadBytes(bytes, (l+31)/32*32)...)
+	packedLen := packNum(reflect.ValueOf(l))
+	return append(packedLen, common.RightPadBytes(bytes, (l+31)/32*32)...)
 }
 
 // packElement packs the given reflect value according to the abi specification in
@@ -49,9 +50,9 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 		return common.LeftPadBytes(reflectValue.Bytes(), 32), nil
 	case BoolTy:
 		if reflectValue.Bool() {
-			return math.PaddedBigBytes(common.Big1, 32), nil
+			return math.PaddedBigBytes(common2.Big1, 32), nil
 		}
-		return math.PaddedBigBytes(common.Big0, 32), nil
+		return math.PaddedBigBytes(common2.Big0, 32), nil
 	case BytesTy:
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)

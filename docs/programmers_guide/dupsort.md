@@ -145,7 +145,7 @@ feature DupFixed (can add this flag to table configuration).
 
 It means in 1 db call you can Get/Put up to 4Kb of sub-table keys.
 
-[see mdbx.h](https://github.com/torquem-ch/libmdbx/blob/master/mdbx.h)
+[see mdbx.h](https://github.com/erigontech/libmdbx/blob/master/mdbx.h)
 
 Erigon
 ---------
@@ -153,7 +153,8 @@ Erigon
 This article target is to show tricky concepts on examples. Future
 reading [here](./db_walkthrough.MD#table-history-of-accounts)
 
-Erigon supports multiple typed cursors, see [AbstractKV.md](./../../ethdb/AbstractKV.md)
+Erigon supports multiple typed cursors, see the [KV
+Readme.md](https://github.com/ledgerwatch/erigon-lib/tree/main/kv)
 
 
 
