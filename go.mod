@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/erigontech/mdbx-go v0.33.1
+	github.com/erigontech/mdbx-go v0.27.14
 	github.com/ledgerwatch/erigon-lib v0.0.0-20230920112310-93d9c9d9fe4b
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230911054727-4e865b051314
 	github.com/ledgerwatch/log/v3 v3.9.0
@@ -212,7 +212,7 @@ require (
 	github.com/pion/ice/v2 v2.2.6 // indirect
 	github.com/pion/interceptor v0.1.11 // indirect
 	github.com/pion/logging v0.2.2 // indirect
-	github.com/pion/mdns v0.0.5 // indirect
+	github.com/pion/mdns v0.0.5 // indirectw
 	github.com/pion/rtcp v1.2.9 // indirect
 	github.com/pion/rtp v1.7.13 // indirect
 	github.com/pion/sctp v1.8.2 // indirect
