@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -23,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *Aggregator) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *AggregatorV3) {
 	b.Helper()
 	logger := log.New()
 	path := b.TempDir()
@@ -32,7 +31,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *A
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
+	agg, err := NewAggregatorV3(context.Background(), path, path+"_tmp", aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return path, db, agg
@@ -56,22 +55,33 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		}
 	}()
 
-	agg.SetTx(tx)
-	defer agg.StartWrites().FinishWrites()
 	require.NoError(b, err)
+	ac := agg.MakeContext()
+	defer ac.Close()
+
+	domains := agg.SharedDomains(ac)
+	defer agg.CloseSharedDomains()
+	defer agg.StartWrites().FinishWrites()
+
+	domains.SetTx(tx)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
+	var prev []byte
 	for i := 0; i < b.N; i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		agg.SetTxNum(txNum)
-		err := agg.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val)
+		domains.SetTxNum(txNum)
+		err := domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val, prev)
+		prev = val
 		require.NoError(b, err)
-		err = agg.FinishTx()
-		require.NoError(b, err)
+
+		if i%100000 == 0 {
+			_, err := domains.Commit(true, false)
+			require.NoError(b, err)
+		}
 	}
 }
 
@@ -98,7 +108,7 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
 		count := rnd.Intn(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true)
+		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))
 	}
@@ -112,24 +122,23 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, logger)
+	comp := CompressKeys | CompressVals
+	err := BuildBtreeIndex(dataPath, indexPath, comp, 1, logger)
 	require.NoError(b, err)
 
 	M := 1024
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), comp, false)
 
 	require.NoError(b, err)
-
-	idx := NewBtIndexReader(bt)
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
-		cur, err := idx.Seek(keys[p])
+		cur, err := bt.SeekDeprecated(keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.key)
+		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 	}
 
@@ -143,9 +152,9 @@ func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
 	tmp := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
-	dataPath := generateCompressedKV(b, tmp, 52, 10, 1000000, logger)
+	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
-	bt, err := CreateBtreeIndex(indexPath, dataPath, M, logger)
+	bt, err := CreateBtreeIndex(indexPath, dataPath, M, CompressNone, 1, logger)
 	require.NoError(b, err)
 
 	keys, err := pivotKeysFromKV(dataPath)
@@ -164,7 +173,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.SeekDeprecated(keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
@@ -175,7 +184,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			p := rnd.Intn(len(keys))
 
-			cur, err := bt.Seek(keys[p])
+			cur, err := bt.SeekDeprecated(keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)

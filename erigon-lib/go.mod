@@ -3,13 +3,14 @@ module github.com/ledgerwatch/erigon-lib
 go 1.19
 
 require (
-	github.com/erigontech/mdbx-go v0.27.14
 	github.com/ledgerwatch/interfaces v0.0.0-20230912104607-5501cfd6e5af
+	github.com/erigontech/mdbx-go v0.33.1
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.1.3
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/dht/v2 v2.19.2-0.20221121215055-066ad8494444
@@ -23,10 +24,12 @@ require (
 	github.com/go-stack/stack v1.8.1
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/hashicorp/golang-lru/v2 v2.0.6
+	github.com/hashicorp/golang-lru/v2 v2.0.4
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
 	github.com/matryer/moq v0.3.2
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
+	github.com/pkg/errors v0.9.1
 	github.com/pelletier/go-toml/v2 v2.1.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
@@ -95,7 +98,6 @@ require (
 	github.com/pion/turn/v2 v2.0.8 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	github.com/pion/webrtc/v3 v3.1.42 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
@@ -116,4 +118,9 @@ require (
 	modernc.org/sqlite v1.21.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
+)
+
+replace (
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

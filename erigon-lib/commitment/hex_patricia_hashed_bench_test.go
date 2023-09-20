@@ -28,7 +28,7 @@ func Benchmark_HexPatriciaHahsed_ReviewKeys(b *testing.B) {
 		builder.Balance(hex.EncodeToString(key), rnd.Uint64())
 	}
 
-	pk, hk, _ := builder.Build()
+	pk, _ := builder.Build()
 
 	b.Run("review_keys", func(b *testing.B) {
 		for i, j := 0, 0; i < b.N; i, j = i+1, j+1 {
@@ -36,7 +36,7 @@ func Benchmark_HexPatriciaHahsed_ReviewKeys(b *testing.B) {
 				j = 0
 			}
 
-			hph.ReviewKeys(pk[j:j+1], hk[j:j+1])
+			hph.ProcessKeys(pk[j : j+1])
 		}
 	})
 }

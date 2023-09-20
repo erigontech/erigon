@@ -128,7 +128,7 @@ type RecSplitArgs struct {
 	BucketSize  int
 	BaseDataID  uint64
 	EtlBufLimit datasize.ByteSize
-	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	Salt        *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
 }
 
@@ -144,21 +144,22 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
-	rs.salt = args.Salt
-	if rs.salt == 0 {
-		seedBytes := make([]byte, 4)
-		if _, err := rand.Read(seedBytes); err != nil {
-			return nil, err
-		}
-		rs.salt = binary.BigEndian.Uint32(seedBytes)
-	}
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
 	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
+	if args.Salt == nil {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return nil, err
+		}
+		rs.salt = binary.BigEndian.Uint32(seedBytes)
+	} else {
+		rs.salt = *args.Salt
+	}
+	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		rs.etlBufLimit = etl.BufferOptimalSize
@@ -190,6 +191,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
+func (rs *RecSplit) Salt() uint32 { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
@@ -210,8 +212,8 @@ func (rs *RecSplit) SetTrace(trace bool) {
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
 // distributed over the range [0..n)
-func remap(x uint64, n uint64) uint64 {
-	hi, _ := bits.Mul64(x, n)
+func remap(x uint64, n uint64) (hi uint64) {
+	hi, _ = bits.Mul64(x, n)
 	return hi
 }
 
@@ -260,6 +262,8 @@ func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fano
 	return
 }
 
+var golombBaseLog2 = -math.Log((math.Sqrt(5) + 1.0) / 2.0)
+
 func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, secondaryAggrBound uint16) {
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
@@ -273,7 +277,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
-	golombRiceLength := uint32(math.Ceil(math.Log2(-math.Log((math.Sqrt(5)+1.0)/2.0) / math.Log1p(-p)))) // log2 Golomb modulus
+	golombRiceLength := uint32(math.Ceil(math.Log2(golombBaseLog2 / math.Log1p(-p)))) // log2 Golomb modulus
 	if golombRiceLength > 0x1F {
 		panic("golombRiceLength > 0x1F")
 	}
@@ -299,8 +303,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	s := uint16(len(rs.golombRice))
-	for m >= s {
+	for s := uint16(len(rs.golombRice)); m >= s; s++ {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
 		if s == 0 {
@@ -310,7 +313,6 @@ func (rs *RecSplit) golombParam(m uint16) int {
 		} else {
 			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
-		s++
 	}
 	return int(rs.golombRice[m] >> 27)
 }

@@ -281,3 +281,67 @@ func StopAfterReconst() bool {
 	})
 	return stopAfterReconst
 }
+
+var (
+	discardCommitment     bool
+	discardCommitmentOnce sync.Once
+)
+
+func DiscardCommitment() bool {
+	discardCommitmentOnce.Do(func() {
+		v, _ := os.LookupEnv("DISCARD_COMMITMENT")
+		if v == "true" {
+			discardCommitment = true
+			log.Info("[Experiment]", "DISCARD_COMMITMENT", discardCommitment)
+		}
+	})
+	return discardCommitment
+}
+
+var (
+	noPrune     bool
+	noPruneOnce sync.Once
+)
+
+func NoPrune() bool {
+	noPruneOnce.Do(func() {
+		v, _ := os.LookupEnv("NO_PRUNE")
+		if v == "true" {
+			noPrune = true
+			log.Info("[Experiment]", "NO_PRUNE", noPrune)
+		}
+	})
+	return noPrune
+}
+
+var (
+	snMadvNormal     bool
+	snMadvNormalOnce sync.Once
+)
+
+func SnMadvNormal() bool {
+	snMadvNormalOnce.Do(func() {
+		v, _ := os.LookupEnv("SN_MADV_NORMAL")
+		if v == "true" {
+			snMadvNormal = true
+			log.Info("[Experiment]", "SN_MADV_NORMAL", snMadvNormal)
+		}
+	})
+	return snMadvNormal
+}
+
+var (
+	mdbxLockInRam     bool
+	mdbxLockInRamOnce sync.Once
+)
+
+func MdbxLockInRam() bool {
+	mdbxLockInRamOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_LOCK_IN_RAM")
+		if v == "true" {
+			mdbxLockInRam = true
+			log.Info("[Experiment]", "MDBX_LOCK_IN_RAM", mdbxLockInRam)
+		}
+	})
+	return mdbxLockInRam
+}

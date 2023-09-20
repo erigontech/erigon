@@ -676,7 +676,8 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	TblAccountKeys:           {Flags: DupSort},
+	TblAccountKeys: {Flags: DupSort},
+	//TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
 	TblAccountHistoryVals:    {Flags: DupSort},
 	TblAccountIdx:            {Flags: DupSort},
@@ -689,21 +690,22 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeIdx:               {Flags: DupSort},
 	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
-	TblCommitmentIdx:         {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
-	RAccountKeys:             {Flags: DupSort},
-	RAccountIdx:              {Flags: DupSort},
-	RStorageKeys:             {Flags: DupSort},
-	RStorageIdx:              {Flags: DupSort},
-	RCodeKeys:                {Flags: DupSort},
-	RCodeIdx:                 {Flags: DupSort},
+	//TblCommitmentHistoryVals: {Flags: DupSort},
+	TblCommitmentIdx:  {Flags: DupSort},
+	TblLogAddressKeys: {Flags: DupSort},
+	TblLogAddressIdx:  {Flags: DupSort},
+	TblLogTopicsKeys:  {Flags: DupSort},
+	TblLogTopicsIdx:   {Flags: DupSort},
+	TblTracesFromKeys: {Flags: DupSort},
+	TblTracesFromIdx:  {Flags: DupSort},
+	TblTracesToKeys:   {Flags: DupSort},
+	TblTracesToIdx:    {Flags: DupSort},
+	RAccountKeys:      {Flags: DupSort},
+	RAccountIdx:       {Flags: DupSort},
+	RStorageKeys:      {Flags: DupSort},
+	RStorageIdx:       {Flags: DupSort},
+	RCodeKeys:         {Flags: DupSort},
+	RCodeIdx:          {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
@@ -791,15 +793,17 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain Domain = "AccountsDomain"
-	StorageDomain  Domain = "StorageDomain"
-	CodeDomain     Domain = "CodeDomain"
+	AccountsDomain   Domain = "AccountsDomain"
+	StorageDomain    Domain = "StorageDomain"
+	CodeDomain       Domain = "CodeDomain"
+	CommitmentDomain Domain = "CommitmentDomain"
 )
 
 const (
-	AccountsHistory History = "AccountsHistory"
-	StorageHistory  History = "StorageHistory"
-	CodeHistory     History = "CodeHistory"
+	AccountsHistory   History = "AccountsHistory"
+	StorageHistory    History = "StorageHistory"
+	CodeHistory       History = "CodeHistory"
+	CommitmentHistory History = "CommitmentHistory"
 )
 
 const (

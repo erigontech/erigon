@@ -580,6 +580,7 @@ func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
 
+func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
 func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
@@ -629,9 +630,16 @@ func (tx *MdbxTx) CollectMetrics() {
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ListBuckets() ([]string, error) {
-	return tx.tx.ListDBI()
+func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
+
+func (tx *MdbxTx) WarmupDB(force bool) error {
+	if force {
+		return tx.tx.EnvWarmup(mdbx.WarmupForce|mdbx.WarmupOomSafe, time.Hour)
+	}
+	return tx.tx.EnvWarmup(mdbx.WarmupDefault, time.Hour)
 }
+func (tx *MdbxTx) LockDBInRam() error     { return tx.tx.EnvWarmup(mdbx.WarmupLock, time.Hour) }
+func (tx *MdbxTx) UnlockDBFromRam() error { return tx.tx.EnvWarmup(mdbx.WarmupRelease, time.Hour) }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	// can't use db.env.View method - because it calls commit for read transactions - it conflicts with write transactions.

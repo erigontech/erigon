@@ -2,7 +2,6 @@ package commitment
 
 import (
 	"encoding/hex"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -78,6 +77,27 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	}
 }
 
+func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
+	// Create a BranchMerger instance with sufficient capacity for testing.
+	merger := NewHexBranchMerger(1024)
+
+	// Test merging when one branch is empty.
+	branch1 := BranchData{}
+	branch2 := BranchData{0x02, 0x02, 0x03, 0x03, 0x0C, 0x02, 0x04, 0x0C}
+	mergedBranch, err := merger.Merge(branch1, branch2)
+	require.NoError(t, err)
+	require.Equal(t, branch2, mergedBranch)
+
+	// Test merging when both branches are empty.
+	branch1 = BranchData{}
+	branch2 = BranchData{}
+	mergedBranch, err = merger.Merge(branch1, branch2)
+	require.NoError(t, err)
+	require.Equal(t, branch1, mergedBranch)
+}
+
+// Additional tests for error cases, edge cases, and other scenarios can be added here.
+
 func TestBranchData_MergeHexBranches3(t *testing.T) {
 	encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
 	enc, err := hex.DecodeString(encs)
@@ -91,37 +111,27 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 }
 
 // helper to decode row of cells from string
-func Test_UTIL_UnfoldBranchDataFromString(t *testing.T) {
-	t.Skip()
+func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint16) {
+	t.Helper()
 
 	//encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
-	encs := "37ad10eb75ea0fc1c363db0dda0cd2250426ee2c72787155101ca0e50804349a94b649deadcc5cddc0d2fd9fb358c2edc4e7912d165f88877b1e48c69efacf418e923124506fbb2fd64823fd41cbc10427c423"
+	//encs := "37ad10eb75ea0fc1c363db0dda0cd2250426ee2c72787155101ca0e50804349a94b649deadcc5cddc0d2fd9fb358c2edc4e7912d165f88877b1e48c69efacf418e923124506fbb2fd64823fd41cbc10427c423"
 	enc, err := hex.DecodeString(encs)
 	require.NoError(t, err)
 
-	bfn := func(pref []byte) ([]byte, error) {
-		return enc, nil
-	}
-	sfn := func(pref []byte, c *Cell) error {
-		return nil
-	}
-
-	hph := NewHexPatriciaHashed(20, bfn, nil, sfn)
-	hph.unfoldBranchNode(1, false, 0)
 	tm, am, origins, err := BranchData(enc).DecodeCells()
 	require.NoError(t, err)
-	t.Logf("%s", BranchData(enc).String())
-	//require.EqualValues(t, tm, am)
 	_, _ = tm, am
 
-	i := 0
-	for _, c := range origins {
-		if c == nil {
-			continue
-		}
-		fmt.Printf("i %d, c %#+v\n", i, c)
-		i++
-	}
+	t.Logf("%s", BranchData(enc).String())
+	//require.EqualValues(t, tm, am)
+	//for i, c := range origins {
+	//	if c == nil {
+	//		continue
+	//	}
+	//	fmt.Printf("i %d, c %#+v\n", i, c)
+	//}
+	return origins[:], am
 }
 
 func TestBranchData_ExtractPlainKeys(t *testing.T) {

@@ -34,7 +34,6 @@ func NewTemporaryMdbx(tempdir string) (kv.RwDB, error) {
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
-
 	db, err := Open(path, log.Root(), false)
 	if err != nil {
 		return &TemporaryMdbx{}, err

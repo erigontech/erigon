@@ -21,9 +21,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -33,14 +39,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 )
 
-func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, kv.RwDB, *History) {
+func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	path := tb.TempDir()
+	dir := filepath.Join(path, "snapshots", "history")
+	require.NoError(tb, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
+	require.NoError(tb, os.MkdirAll(dir, 0740))
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
@@ -53,12 +59,18 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (strin
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, false, logger)
+	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
+	salt := uint32(1)
+	cfg := histCfg{
+		iiCfg:             iiCfg{salt: &salt, dir: dir, tmpdir: dir},
+		withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: largeValues,
+	}
+	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
-	return path, db, h
+	return db, h
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
@@ -165,11 +177,11 @@ func TestHistoryCollationBuild(t *testing.T) {
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, true, logger)
+		db, h := testDbAndHistory(t, true, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, false, logger)
+		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
 	})
 }
@@ -220,7 +232,10 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 		h.integrateFiles(sf, 0, 16)
 
-		err = h.prune(ctx, 0, 16, math.MaxUint64, logEvery)
+		hc := h.MakeContext()
+		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
+		hc.Close()
+
 		require.NoError(err)
 		h.SetTx(tx)
 
@@ -236,24 +251,24 @@ func TestHistoryAfterPrune(t *testing.T) {
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, true, logger)
+		db, h := testDbAndHistory(t, true, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, false, logger)
+		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
 	})
 }
 
-func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, kv.RwDB, *History, uint64) {
+func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
-	path, db, h := testDbAndHistory(tb, largeValues, logger)
+	db, h := testDbAndHistory(tb, largeValues, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites()
+	h.StartUnbufferedWrites()
 	defer h.FinishWrites()
 
 	txs := uint64(1000)
@@ -295,7 +310,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, 
 	err = tx.Commit()
 	require.NoError(tb, err)
 
-	return path, db, h, txs
+	return db, h, txs
 }
 
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
@@ -349,18 +364,21 @@ func TestHistoryHistory(t *testing.T) {
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-				err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+
+				hc := h.MakeContext()
+				err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+				hc.Close()
 				require.NoError(err)
 			}()
 		}
 		checkHistoryHistory(t, h, txs)
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 
@@ -385,20 +403,23 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-		err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+
+		hc := h.MakeContext()
+		err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+		hc.Close()
 		require.NoError(err)
 	}
 
 	var r HistoryRanges
 	maxEndTxNum := h.endTxNumMinimax()
 
-	maxSpan := h.aggregationStep * StepsInBiggestFile
+	maxSpan := h.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {
 			hc := h.MakeContext()
 			defer hc.Close()
-			r = h.findMergeRange(maxEndTxNum, maxSpan)
+			r = hc.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -415,7 +436,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	hc := h.MakeContext()
 	defer hc.Close()
-	err = hc.BuildOptionalMissedIndices(ctx)
+	err = hc.ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 	require.NoError(err)
 
 	err = tx.Commit()
@@ -431,11 +452,11 @@ func TestHistoryMergeFiles(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -458,11 +479,11 @@ func TestHistoryScanFiles(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -606,11 +627,11 @@ func TestIterateChanged(t *testing.T) {
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -798,20 +819,18 @@ func TestIterateChanged2(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
 
 func TestScanStaticFilesH(t *testing.T) {
-	logger := log.New()
-	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger},
-		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
-		logger: logger,
+	h := &History{InvertedIndex: emptyTestInvertedIndex(1),
+		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
 		"test.0-1.v",

@@ -52,7 +52,7 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 		return nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("accountFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		ms.t.Fatalf("accountFn key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
 		return nil
 	}
 	if ex.Flags&StorageUpdate != 0 {
@@ -154,6 +154,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 				if update.Flags&StorageUpdate != 0 {
 					ex.Flags |= StorageUpdate
 					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
+					ex.ValLength = update.ValLength
 				}
 				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {
@@ -328,7 +329,7 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 // 1. Plain keys
 // 2. Corresponding hashed keys
 // 3. Corresponding updates
-func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Update) {
+func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
@@ -371,10 +372,8 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 	}
 	slices.Sort(hashed)
 	plainKeys = make([][]byte, len(hashed))
-	hashedKeys = make([][]byte, len(hashed))
 	updates = make([]Update, len(hashed))
 	for i, hashedKey := range hashed {
-		hashedKeys[i] = []byte(hashedKey)
 		key := preimages[hashedKey]
 		key2 := preimages2[hashedKey]
 		plainKey := make([]byte, len(key)+len(key2))

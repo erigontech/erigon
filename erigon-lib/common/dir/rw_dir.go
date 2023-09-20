@@ -21,10 +21,12 @@ import (
 	"path/filepath"
 )
 
-func MustExist(path string) {
+func MustExist(path ...string) {
 	const perm = 0764 // user rwx, group rw, other r
-	if err := os.MkdirAll(path, perm); err != nil {
-		panic(err)
+	for _, p := range path {
+		if err := os.MkdirAll(p, perm); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -45,6 +47,23 @@ func FileExist(path string) bool {
 		return false
 	}
 	return true
+}
+
+func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 func Recreate(dir string) {

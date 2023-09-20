@@ -21,15 +21,17 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"sync/atomic"
-	"time"
 
+	_ "github.com/FastFilter/xorfilter"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
@@ -37,7 +39,7 @@ import (
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
 
-// LocalityIndex - has info in which .ef files exists given key
+// LocalityIndex - has info in which .ef or .kv files exists given key
 // Format: key -> bitmap(step_number_list)
 // step_number_list is list of .ef files where exists given key
 type LocalityIndex struct {
@@ -45,36 +47,38 @@ type LocalityIndex struct {
 	dir, tmpdir     string // Directory where static files are created
 	aggregationStep uint64 // immutable
 
-	file *filesItem
-	bm   *bitmapdb.FixedSizeBitmaps
+	salt *uint32
+	// preferSmallerFiles forcing files like `32-40.l` have higher priority than `0-40.l`.
+	// It's used by "warm data indexing": new small "warm index" created after old data
+	// merged and indexed by "cold index"
+	preferSmallerFiles bool
 
-	roFiles  atomic.Pointer[ctxItem]
-	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
-	logger   log.Logger
+	file *filesItem
+
+	roFiles atomic.Pointer[ctxItem]
+	logger  log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewLocalityIndex(
-	dir, tmpdir string,
-	aggregationStep uint64,
-	filenameBase string,
-	logger log.Logger,
-) (*LocalityIndex, error) {
-	li := &LocalityIndex{
-		dir:             dir,
-		tmpdir:          tmpdir,
-		aggregationStep: aggregationStep,
-		filenameBase:    filenameBase,
-		logger:          logger,
+func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, salt *uint32, logger log.Logger) *LocalityIndex {
+	return &LocalityIndex{
+		preferSmallerFiles: preferSmallerFiles,
+		dir:                dir,
+		salt:               salt,
+		tmpdir:             tmpdir,
+		aggregationStep:    aggregationStep,
+		filenameBase:       filenameBase,
+		logger:             logger,
 	}
-	return li, nil
 }
 func (li *LocalityIndex) closeWhatNotInList(fNames []string) {
-	if li == nil || li.bm == nil {
+	if li == nil || li.file == nil {
 		return
 	}
 
 	for _, protectName := range fNames {
-		if li.bm.FileName() == protectName {
+		if li.file.bm.FileName() == protectName {
 			return
 		}
 	}
@@ -88,7 +92,7 @@ func (li *LocalityIndex) OpenList(fNames []string) error {
 	li.closeWhatNotInList(fNames)
 	_ = li.scanStateFiles(fNames)
 	if err := li.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %s, %w", li.filenameBase, err)
+		return fmt.Errorf("LocalityIndex.openFiles: %s, %w", li.filenameBase, err)
 	}
 	return nil
 }
@@ -98,7 +102,7 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 		return nil
 	}
 
-	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).li$")
+	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).l$")
 	var err error
 	for _, name := range fNames {
 		subs := re.FindStringSubmatch(name)
@@ -122,21 +126,17 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 			continue
 		}
 
-		if startStep != 0 {
-			li.logger.Warn("LocalityIndex must always starts from step 0")
-			continue
-		}
-		if endStep > StepsInBiggestFile*LocalityIndexUint64Limit {
+		if endStep-startStep > StepsInColdFile*LocalityIndexUint64Limit {
 			li.logger.Warn("LocalityIndex does store bitmaps as uint64, means it can't handle > 2048 steps. But it's possible to implement")
 			continue
 		}
 
 		startTxNum, endTxNum := startStep*li.aggregationStep, endStep*li.aggregationStep
-		if li.file == nil {
-			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
-			li.file.frozen = false // LocalityIndex files are never frozen
-		} else if li.file.endTxNum < endTxNum {
-			uselessFiles = append(uselessFiles, li.file)
+		useThisFile := li.file == nil ||
+			(li.file.endTxNum < endTxNum) || // newer
+			(li.preferSmallerFiles && li.file.endTxNum == endTxNum && li.file.startTxNum < startTxNum) ||
+			(!li.preferSmallerFiles && li.file.startTxNum == startTxNum && li.file.endTxNum < endTxNum)
+		if useThisFile {
 			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
 			li.file.frozen = false // LocalityIndex files are never frozen
 		}
@@ -150,10 +150,10 @@ func (li *LocalityIndex) openFiles() (err error) {
 	}
 
 	fromStep, toStep := li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep
-	if li.bm == nil {
+	if li.file.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(dataPath) {
-			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInBiggestFile))
+			li.file.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
 			if err != nil {
 				return err
 			}
@@ -168,25 +168,42 @@ func (li *LocalityIndex) openFiles() (err error) {
 			}
 		}
 	}
+	if li.file.bloom == nil {
+		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep))
+		if dir.FileExist(idxPath) {
+			li.file.bloom, err = OpenBloom(idxPath)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	li.reCalcRoFiles()
 	return nil
 }
 
 func (li *LocalityIndex) closeFiles() {
-	if li == nil {
+	if li == nil || li.file == nil {
 		return
 	}
-	if li.file != nil && li.file.index != nil {
+	if li.file.index != nil {
 		li.file.index.Close()
-		li.file = nil
+		li.file.index = nil
 	}
-	if li.bm != nil {
-		li.bm.Close()
-		li.bm = nil
+	if li.file.bm != nil {
+		li.file.bm.Close()
+		li.file.bm = nil
+	}
+	if li.file.bloom != nil {
+		li.file.bloom = nil
 	}
 }
 func (li *LocalityIndex) reCalcRoFiles() {
-	if li == nil || li.file == nil {
+	if li == nil {
+		return
+	}
+
+	if li.file == nil {
+		li.roFiles.Store(nil)
 		return
 	}
 	li.roFiles.Store(&ctxItem{
@@ -195,45 +212,39 @@ func (li *LocalityIndex) reCalcRoFiles() {
 		i:          0,
 		src:        li.file,
 	})
-	li.roBmFile.Store(li.bm)
 }
 
 func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	if li == nil {
 		return nil
 	}
-	x := &ctxLocalityIdx{
-		file: li.roFiles.Load(),
-		bm:   li.roBmFile.Load(),
+	file := li.roFiles.Load()
+	if file != nil && file.src != nil {
+		file.src.refcount.Add(1)
 	}
-	if x.file != nil && x.file.src != nil {
-		x.file.src.refcount.Add(1)
+	return &ctxLocalityIdx{
+		file:            file,
+		aggregationStep: li.aggregationStep,
 	}
-	return x
 }
 
-func (out *ctxLocalityIdx) Close(logger log.Logger) {
-	if out == nil || out.file == nil || out.file.src == nil {
+func (lc *ctxLocalityIdx) Close() {
+	if lc == nil || lc.file == nil || lc.file.src == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	refCnt := out.file.src.refcount.Add(-1)
-	if refCnt == 0 && out.file.src.canDelete.Load() {
-		closeLocalityIndexFilesAndRemove(out, logger)
+	refCnt := lc.file.src.refcount.Add(-1)
+	if refCnt == 0 && lc.file.src.canDelete.Load() {
+		closeLocalityIndexFilesAndRemove(lc)
 	}
+	lc.file = nil
 }
 
-func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx, logger log.Logger) {
-	if i.file.src != nil {
-		i.file.src.closeFilesAndRemove()
-		i.file.src = nil
+func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
+	if i.file == nil || i.file.src == nil {
+		return
 	}
-	if i.bm != nil {
-		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			logger.Trace("os.Remove", "err", err, "file", i.bm.FileName())
-		}
-		i.bm = nil
-	}
+	i.file.src.closeFilesAndRemove()
+	i.file.src = nil
 }
 
 func (li *LocalityIndex) Close() {
@@ -250,102 +261,180 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if li == nil || loc == nil || loc.bm == nil {
+func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
+	if lc == nil || lc.file == nil {
 		return 0, 0, 0, false, false
 	}
-	if loc.reader == nil {
-		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
 
-	if fromTxNum >= loc.file.endTxNum {
+	if fromTxNum >= lc.file.endTxNum {
 		return 0, 0, fromTxNum, false, false
 	}
 
-	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
+	fromFileNum := fromTxNum / lc.aggregationStep / StepsInColdFile
+	fn1, fn2, ok1, ok2, err := lc.file.src.bm.First2At(lc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
+	return fn1 * StepsInColdFile, fn2 * StepsInColdFile, lc.file.endTxNum, ok1, ok2
 }
 
-func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndexContext) (toStep uint64, idxExists bool) {
-	if len(ii.files) == 0 {
-		return 0, true
+// indexedTo - [from, to)
+func (lc *ctxLocalityIdx) indexedTo() uint64 {
+	if lc == nil || lc.file == nil {
+		return 0
 	}
-	var item *ctxItem
-	for i := len(ii.files) - 1; i >= 0; i-- {
-		if ii.files[i].src.frozen {
-			item = &ii.files[i]
-			break
-		}
-	}
-	if item != nil {
-		toStep = item.endTxNum / li.aggregationStep
-	}
-	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
-	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
+	return lc.file.endTxNum
 }
-func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContext, toStep uint64) (files *LocalityIndexFiles, err error) {
-	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
+func (lc *ctxLocalityIdx) indexedFrom() (uint64, bool) {
+	if lc == nil || lc.file == nil {
+		return 0, false
+	}
+	return lc.file.startTxNum, true
+}
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
+// lookupLatest return latest file (step)
+// prevents searching key in many files
+func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool, err error) {
+	if lc == nil || lc.file == nil || lc.file.src.index == nil {
+		return 0, false, nil
+	}
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
+	}
+	if lc.reader.Empty() {
+		return 0, false, nil
+	}
 
-	fromStep := uint64(0)
-	count := 0
-	it := ic.iterateKeysLocality(toStep * li.aggregationStep)
-	for it.HasNext() {
-		_, _ = it.Next()
-		count++
+	hi, lo := lc.reader.Sum(key)
+	if lc.file.src.bloom != nil && !lc.file.src.bloom.ContainsHash(hi) {
+		return 0, false, nil
+	}
+
+	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
+	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
+	//	l, _, _ := lc.file.src.bm.LastAt(lc.reader.Lookup(key))
+	//	fmt.Printf("idx: %x, %d, last: %d\n", key, res, l)
+	//}
+	return lc.file.src.bm.LastAt(lc.reader.LookupHash(hi, lo))
+}
+
+func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep))) &&
+		dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep)))
+}
+
+func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+	if li == nil {
+		return nil, nil
+	}
+	if toStep < fromStep {
+		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
 	}
 
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(li.dir, fName)
 	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 
+	p := ps.AddNew(fName, uint64(1))
+	defer ps.Delete(p)
+
+	count := 0
+	it := makeIter()
+	defer it.Close()
+	//if it.FilesAmount() == 1 { // optimization: no reason to create LocalityIndex for 1 file
+	//	return nil, nil
+	//}
+
+	for it.HasNext() {
+		_, _, _ = it.Next()
+		count++
+	}
+	it.Close()
+
+	p.Total.Store(uint64(count))
+
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   count,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     li.tmpdir,
-		IndexFile:  idxPath,
+		KeyCount:    count,
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      li.tmpdir,
+		IndexFile:   idxPath,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
+		Salt:        li.salt,
 	}, li.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	if li.noFsync {
+		rs.DisableFsync()
+	}
 
-	i := uint64(0)
+	//statelessHasher := murmur3.New128WithSeed(rs.Salt())
+	var bloom *bloomFilter
 	for {
-		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
+		p.Processed.Store(0)
+		i := uint64(0)
+		maxPossibleValue := int(toStep - fromStep)
+		baseDataID := fromStep
+		if convertStepsToFileNums {
+			maxPossibleValue = int(it.FilesAmount())
+			baseDataID = uint64(0)
+		}
+		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
 		}
 		defer dense.Close()
+		if li.noFsync {
+			dense.DisableFsync()
+		}
 
-		it = ic.iterateKeysLocality(toStep * li.aggregationStep)
+		//if count > 0 {
+		//	bloom, err = NewBloom(uint64(count), idxPath+".lb")
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//}
+
+		it = makeIter()
+		defer it.Close()
 		for it.HasNext() {
-			k, inFiles := it.Next()
-			if err := dense.AddArray(i, inFiles); err != nil {
+			k, inSteps, err := it.Next()
+			if err != nil {
 				return nil, err
 			}
-			if err = rs.AddKey(k, 0); err != nil {
+			//if bytes.HasPrefix(k, common.FromHex("5e7d")) {
+			//	fmt.Printf("build: %x, %d\n", k, inSteps)
+			//}
+
+			if convertStepsToFileNums {
+				for j := range inSteps {
+					inSteps[j] = inSteps[j] / StepsInColdFile
+				}
+			}
+
+			//statelessHasher.Reset()
+			//statelessHasher.Write(k) //nolint:errcheck
+			//hi, _ := statelessHasher.Sum128()
+			//bloom.AddHash(hi)
+
+			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
+			if err := dense.AddArray(i, inSteps); err != nil {
+				return nil, err
+			}
+			if err = rs.AddKey(k, i); err != nil {
 				return nil, err
 			}
 			i++
-
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-logEvery.C:
-				li.logger.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
-			default:
-			}
+			p.Processed.Add(1)
 		}
+		it.Close()
 
 		if err := dense.Build(); err != nil {
 			return nil, err
@@ -353,7 +442,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
-				li.logger.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
+				li.logger.Warn("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
 				return nil, fmt.Errorf("build idx: %w", err)
@@ -363,51 +452,69 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 		}
 	}
 
+	//if bloom != nil {
+	//	if err := bloom.Build(); err != nil {
+	//		return nil, err
+	//	}
+	//	bloom.Close() //TODO: move to defer, and move building and opennig to different funcs
+	//}
+
 	idx, err := recsplit.OpenIndex(idxPath)
 	if err != nil {
 		return nil, err
 	}
-	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath, int(it.FilesAmount()))
+	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath)
 	if err != nil {
 		return nil, err
 	}
-	return &LocalityIndexFiles{index: idx, bm: bm}, nil
+	//if dir.FileExist(idxPath + ".lb") {
+	//	bloom, err = OpenBloom(idxPath + ".lb")
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//}
+	return &LocalityIndexFiles{index: idx, bm: bm, bloom: bloom, fromStep: fromStep, toStep: toStep}, nil
 }
 
-func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumTo uint64) {
+func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
+	if li == nil {
+		return
+	}
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
-	li.file = &filesItem{
-		startTxNum: txNumFrom,
-		endTxNum:   txNumTo,
-		index:      sf.index,
-		frozen:     false,
+	if sf == nil {
+		return //TODO: support non-indexing of single file
+		//li.file = nil
+		//li.bm = nil
+	} else {
+		li.file = &filesItem{
+			startTxNum: sf.fromStep * li.aggregationStep,
+			endTxNum:   sf.toStep * li.aggregationStep,
+			index:      sf.index,
+			bm:         sf.bm,
+			bloom:      sf.bloom,
+			frozen:     false,
+		}
 	}
-	li.bm = sf.bm
 	li.reCalcRoFiles()
 }
 
-func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedIndexContext) error {
-	if li == nil {
-		return nil
-	}
-	toStep, idxExists := li.missedIdxFiles(ii)
-	if idxExists || toStep == 0 {
-		return nil
-	}
-	fromStep := uint64(0)
-	f, err := li.buildFiles(ctx, ii, toStep)
+func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) error {
+	f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, ps, makeIter)
 	if err != nil {
 		return err
 	}
-	li.integrateFiles(*f, fromStep*li.aggregationStep, toStep*li.aggregationStep)
+	li.integrateFiles(f)
 	return nil
 }
 
 type LocalityIndexFiles struct {
 	index *recsplit.Index
 	bm    *bitmapdb.FixedSizeBitmaps
+	bloom *bloomFilter
+
+	fromStep, toStep uint64
 }
 
 func (sf LocalityIndexFiles) Close() {
@@ -417,81 +524,115 @@ func (sf LocalityIndexFiles) Close() {
 	if sf.bm != nil {
 		sf.bm.Close()
 	}
+	if sf.bloom != nil {
+		sf.bloom.Close()
+	}
 }
 
 type LocalityIterator struct {
-	hc               *InvertedIndexContext
-	h                ReconHeapOlderFirst
-	files, nextFiles []uint64
-	key, nextKey     []byte
-	progress         uint64
-	hasNext          bool
+	aggStep           uint64
+	compressVals      bool
+	h                 ReconHeapOlderFirst
+	v, nextV, vBackup []uint64
+	k, nextK, kBackup []byte
+	progress          uint64
 
 	totalOffsets, filesAmount uint64
+	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
+	ctx                       context.Context
 }
 
 func (si *LocalityIterator) advance() {
 	for si.h.Len() > 0 {
 		top := heap.Pop(&si.h).(*ReconItem)
 		key := top.key
-		_, offset := top.g.NextUncompressed()
+		var offset uint64
+		//if si.compressVals {
+		offset, _ = top.g.Skip()
+		//} else {
+		//	offset, _ = top.g.SkipUncompressed()
+		//}
 		si.progress += offset - top.lastOffset
 		top.lastOffset = offset
-		inStep := uint32(top.startTxNum / si.hc.ii.aggregationStep)
+		inStep := top.startTxNum / si.aggStep
 		if top.g.HasNext() {
-			top.key, _ = top.g.NextUncompressed()
+			top.key, _ = top.g.Next(nil)
 			heap.Push(&si.h, top)
 		}
 
-		inFile := inStep / StepsInBiggestFile
+		if si.k == nil {
+			si.k = key
+			si.v = append(si.v, inStep)
+			continue
+		}
 
-		if !bytes.Equal(key, si.key) {
-			if si.key == nil {
-				si.key = key
-				si.files = append(si.files, uint64(inFile))
-				continue
-			}
+		if !bytes.Equal(key, si.k) {
+			si.nextV, si.v = si.v, si.nextV[:0]
+			si.nextK = si.k
 
-			si.nextFiles, si.files = si.files, si.nextFiles[:0]
-			si.nextKey = si.key
-
-			si.files = append(si.files, uint64(inFile))
-			si.key = key
-			si.hasNext = true
+			si.v = append(si.v, inStep)
+			si.k = key
 			return
 		}
-		si.files = append(si.files, uint64(inFile))
+		si.v = append(si.v, inStep)
 	}
-	si.nextFiles, si.files = si.files, si.nextFiles[:0]
-	si.nextKey = si.key
-	si.hasNext = false
+	si.nextV, si.v = si.v, si.nextV[:0]
+	si.nextK = si.k
+	si.k = nil
 }
 
-func (si *LocalityIterator) HasNext() bool { return si.hasNext }
+func (si *LocalityIterator) HasNext() bool { return si.nextK != nil }
 func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 
-func (si *LocalityIterator) Next() ([]byte, []uint64) {
+func (si *LocalityIterator) Next() ([]byte, []uint64, error) {
+	select {
+	case <-si.ctx.Done():
+		return nil, nil, si.ctx.Err()
+	default:
+	}
+
+	//if hi.err != nil {
+	//	return nil, nil, hi.err
+	//}
+	//hi.limit--
+
+	// Satisfy iter.Dual Invariant 2
+	si.nextK, si.kBackup, si.nextV, si.vBackup = si.kBackup, si.nextK, si.vBackup, si.nextV
 	si.advance()
-	return si.nextKey, si.nextFiles
+	return si.kBackup, si.vBackup, nil
 }
 
-func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
-	si := &LocalityIterator{hc: ic}
+// Close - safe to call multiple times
+func (si *LocalityIterator) Close() {
+	for _, f := range si.involvedFiles {
+		f.DisableReadAhead()
+	}
+	si.involvedFiles = nil
+}
+
+// iterateKeysLocality [from, to)
+func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
+	fromTxNum, toTxNum := fromStep*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
+	si := &LocalityIterator{ctx: ctx, aggStep: ic.ii.aggregationStep, compressVals: false}
+
 	for _, item := range ic.files {
-		if !item.src.frozen || item.startTxNum > uptoTxNum {
+		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
 			continue
 		}
 		if assert.Enable {
-			if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
+			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 			}
 		}
-		g := item.src.decompressor.MakeGetter()
+		item.src.decompressor.EnableReadAhead() // disable in destructor of iterator
+		si.involvedFiles = append(si.involvedFiles, item.src.decompressor)
+
+		g := NewArchiveGetter(item.src.decompressor.MakeGetter(), ic.ii.compression)
 		if g.HasNext() {
-			key, offset := g.NextUncompressed()
+			key, offset := g.Next(nil)
 
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
@@ -499,6 +640,23 @@ func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityI
 		si.totalOffsets += uint64(g.Size())
 		si.filesAmount++
 	}
+
+	if last != nil {
+		//add last one
+		last.EnableReadAhead() // disable in destructor of iterator
+		si.involvedFiles = append(si.involvedFiles, last)
+		g := NewArchiveGetter(last.MakeGetter(), ic.ii.compression)
+		if g.HasNext() {
+			key, offset := g.Next(nil)
+
+			startTxNum, endTxNum := (toStep-1)*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
+			heapItem := &ReconItem{startTxNum: startTxNum, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
+			heap.Push(&si.h, heapItem)
+		}
+		si.totalOffsets += uint64(g.Size())
+		si.filesAmount++
+	}
+
 	si.advance()
 	return si
 }

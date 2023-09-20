@@ -24,9 +24,10 @@ type Trie interface {
 	// Reset Drops everything from the trie
 	Reset()
 
-	ReviewKeys(pk, hk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	// Reads updates from storage
+	ProcessKeys(pk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
-	ProcessUpdates(pk, hk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	ProcessUpdates(pk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
 	ResetFns(
 		branchFn func(prefix []byte) ([]byte, error),
@@ -70,6 +71,9 @@ const (
 type BranchData []byte
 
 func (branchData BranchData) String() string {
+	if len(branchData) == 0 {
+		return ""
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -260,6 +264,9 @@ func (branchData BranchData) ReplacePlainKeys(accountPlainKeys [][]byte, storage
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	if touchMap&afterMap == 0 {
+		return branchData, nil
+	}
 	pos := 4
 	newData = append(newData, branchData[:4]...)
 	var accountI, storageI int
@@ -468,10 +475,10 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if branch2 == nil {
+	if len(branch2) == 0 {
 		return branch1, nil
 	}
-	if branch1 == nil {
+	if len(branch1) == 0 {
 		return branch2, nil
 	}
 
