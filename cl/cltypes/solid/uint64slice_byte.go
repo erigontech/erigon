@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-const treeCacheDepthUint64Slice = 3
+const treeCacheDepthUint64Slice = 0
 
 func convertDepthToChunkSize(d int) int {
 	return (1 << d) // just power of 2
@@ -189,29 +189,32 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	depth := GetDepth((uint64(arr.c)*8 + length.Hash - 1) / length.Hash)
 	emptyHashBytes := make([]byte, length.Hash)
 
-	layerBuffer := make([]byte, chunkSize*length.Hash)
+	layerBuffer := make([]byte, chunkSize)
 	maxTo := length.Hash*((arr.l-1)/4) + length.Hash
 
-	for i := 0; i < len(arr.u); i += chunkSize {
-		offset := (i / chunkSize) * length.Hash
+	offset := 0
+	for i := 0; i < maxTo; i += chunkSize {
+		offset = (i / chunkSize) * length.Hash
 		from := i
-		to := int(utils.Min64(uint64(from+(chunkSize*length.Hash)), uint64(maxTo)))
+		to := int(utils.Min64(uint64(from+chunkSize), uint64(maxTo)))
 
 		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
 			continue
 		}
+		layerBuffer = layerBuffer[:to-from]
 		copy(layerBuffer, arr.u[from:to])
-
-		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer[:to-from], arr.treeCacheBuffer[offset:]); err != nil {
+		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
 	}
-	if treeCacheDepthUint64Slice <= depth {
+	if treeCacheDepthUint64Slice >= depth {
 		return common.BytesToHash(arr.treeCacheBuffer[:32]), nil
 	}
 
-	elements := arr.treeCacheBuffer
-	for i := uint8(treeCacheDepthUint64Slice + 1); i < depth; i++ {
+	arr.makeBuf(offset + length.Hash)
+	copy(arr.buf, arr.treeCacheBuffer[:offset+length.Hash])
+	elements := arr.buf
+	for i := uint8(treeCacheDepthUint64Slice); i < depth; i++ {
 		layerLen := len(elements)
 		if layerLen%64 == 32 {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
