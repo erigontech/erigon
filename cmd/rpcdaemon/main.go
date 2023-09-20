@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ func main() {
 		// TODO: Replace with correct consensus Engine
 		engine := ethash.NewFaker()
 		apiList := jsonrpc.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, logger)
+		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())
 			return nil
