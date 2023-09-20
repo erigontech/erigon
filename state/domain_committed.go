@@ -317,7 +317,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	}
 
 	if d.trace {
-		fmt.Printf("[commitment] put tx %d rh %x\n", d.txNum, rh)
+		fmt.Printf("[commitment] put txn %d block %d rh %x\n", d.txNum, blockNum, rh)
 	}
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
@@ -511,6 +511,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	return rootHash, branchNodeUpdates, err
 }
 
+// by that key stored latest root hash and tree state
 var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
@@ -523,7 +524,9 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
+	if d.trace {
+		fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
+	}
 	var latestState []byte
 	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		if len(value) < 8 {

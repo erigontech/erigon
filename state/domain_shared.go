@@ -102,10 +102,11 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
-	if bn > 0 {
-		//we set bn+1  to correctly start from the next block
-		bn++
-	}
+	//if bn > 0 { TODO Shall we move block and tx to next right here?
+	//	//we set bn+1  to correctly start from the next block
+	//	//bn++
+	//}
+	////txn++
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
 	return

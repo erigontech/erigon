@@ -264,6 +264,9 @@ func (branchData BranchData) ReplacePlainKeys(accountPlainKeys [][]byte, storage
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	if touchMap&afterMap == 0 {
+		return branchData, nil
+	}
 	pos := 4
 	newData = append(newData, branchData[:4]...)
 	var accountI, storageI int
