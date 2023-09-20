@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"fmt"
 	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -15,7 +14,6 @@ import (
 func TestChangeInfoHashOfSameFile(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	defer fmt.Printf("[dbg] last defer")
 	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, "")
 	require.NoError(err)
 	d, err := New(context.Background(), cfg)

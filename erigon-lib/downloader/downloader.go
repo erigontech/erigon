@@ -571,7 +571,6 @@ func (d *Downloader) Close() {
 		log.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
 	d.db.Close()
-	fmt.Printf("[dbg] closed downloader's db\n")
 }
 
 func (d *Downloader) PeerID() []byte {
