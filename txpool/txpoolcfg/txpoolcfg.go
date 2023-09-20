@@ -40,7 +40,7 @@ type Config struct {
 	QueuedSubPoolLimit    int
 	MinFeeCap             uint64
 	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
-	BlobSlots             uint64 // Number of blobs allowed per account
+	BlobSlots             uint64 // Total number of blobs (not txs) allowed per account
 	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump         uint64 //Price bump percentage to replace an existing 4844 blob tx (type-3)
 	OverrideCancunTime    *big.Int
@@ -61,7 +61,7 @@ var DefaultConfig = Config{
 
 	MinFeeCap:     1,
 	AccountSlots:  16, //TODO: to choose right value (16 to be compatible with Geth)
-	BlobSlots:     48, // Allows 8 txs of 6 blobs each - for hive tests
+	BlobSlots:     48, // Default for a total of 8 txs for 6 blobs each - for hive tests
 	PriceBump:     10, // Price bump percentage to replace an already existing transaction
 	BlobPriceBump: 100,
 }

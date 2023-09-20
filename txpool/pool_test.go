@@ -733,19 +733,21 @@ func TestBlobTxReplacement(t *testing.T) {
 	require.True(pool != nil)
 	ctx := context.Background()
 	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200_000)
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
+		StateVersionId:       stateVersionID,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        1000000,
+		PendingBlobFeePerGas: 100_000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
 	var addr [20]byte
 	addr[0] = 1
+
+	// Add 1 eth to the user account, as a part of change
 	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
 	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 
@@ -767,9 +769,6 @@ func TestBlobTxReplacement(t *testing.T) {
 		txSlots := types.TxSlots{}
 		blobTxn := makeBlobTx()
 
-		blobTxn.Tip = *tip
-		blobTxn.FeeCap = *feeCap
-		blobTxn.BlobFeeCap = *blobFeeCap
 		blobTxn.IDHash[0] = 0x00
 		blobTxn.Nonce = 0x2
 		txSlots.Append(&blobTxn, addr[:], true)
@@ -823,25 +822,55 @@ func TestBlobTxReplacement(t *testing.T) {
 		}
 	}
 
-	//try to replace it with required extra gas - should pass\
+	// Try to replace it with required price bump (configured in pool.cfg.BlobPriceBump for blob txns) to all transaction fields - should be successful only if all are bumped
 	{
 		blobTxn := makeBlobTx()
+		origTip := blobTxn.Tip
+		origFee := blobTxn.FeeCap
 		blobTxn.Nonce = 0x2
-		txSlots := types.TxSlots{}
-
-		//Get the config of the pool for BlobPriceBump and bump all prices
-		requiredPriceBump := pool.cfg.BlobPriceBump
-		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		blobTxn.BlobFeeCap.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		blobTxn.IDHash[0] = 0x03
+		txSlots := types.TxSlots{}
 		txSlots.Append(&blobTxn, addr[:], true)
+
+		// Get the config of the pool for BlobPriceBump and bump prices
+		requiredPriceBump := pool.cfg.BlobPriceBump
+
+		// Bump the tip only
+		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
-		t.Logf("Reasons %v", reasons)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
-		}
+		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
+
+		// Bump the fee + tip
+		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
+
+		// Bump only Feecap
+		blobTxn.Tip = origTip
+		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
+
+		// Bump fee cap + blobFee cap
+		blobTxn.BlobFeeCap.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
+
+		// Bump only blobFee cap
+		blobTxn.FeeCap = origFee
+		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
+
+		// Bump all prices
+		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		assert.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
 	}
 }
 
@@ -862,8 +891,8 @@ func makeBlobTx() types.TxSlot {
 	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
 
 	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
-	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1))
-	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2))
+	copy(blob0[:], hexutility.MustDecodeHex(validBlob1))
+	copy(blob1[:], hexutility.MustDecodeHex(validBlob2))
 
 	var err error
 	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
@@ -897,6 +926,8 @@ func makeBlobTx() types.TxSlot {
 	wrapperRlp = append(wrapperRlp, 0xb0)
 	wrapperRlp = append(wrapperRlp, proof1[:]...)
 
+	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
+
 	blobTx := types.TxSlot{}
 	tctx := types.NewTxParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)
@@ -904,5 +935,9 @@ func makeBlobTx() types.TxSlot {
 	blobTx.BlobHashes = make([]common.Hash, 2)
 	blobTx.BlobHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
 	blobTx.BlobHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
+
+	blobTx.Tip = *tip
+	blobTx.FeeCap = *feeCap
+	blobTx.BlobFeeCap = *blobFeeCap
 	return blobTx
 }
