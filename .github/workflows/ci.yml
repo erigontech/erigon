@@ -4,12 +4,12 @@ on:
     branches:
       - devel
       - alpha
-      - stable
+      - 'release/**'
   pull_request:
     branches:
       - devel
       - alpha
-      - stable
+      - 'release/**'
     types:
       - opened
       - reopened
