@@ -1,0 +1,3 @@
+go test fuzz v1
+int(13)
+[]byte("@\x00\xfc0jj\xff\x00\t\t\xff0j\xff\x00\td\t\xff\x00\x00")

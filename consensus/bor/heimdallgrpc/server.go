@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/log/v3"
 	proto "github.com/maticnetwork/polyproto/heimdall"
 	"google.golang.org/grpc"
@@ -19,7 +19,7 @@ import (
 
 type HeimdallGRPCServer struct {
 	proto.UnimplementedHeimdallServer
-	heimdall bor.HeimdallServer
+	heimdall heimdall.HeimdallServer
 	logger   log.Logger
 }
 
@@ -204,7 +204,7 @@ func (h *HeimdallGRPCServer) StateSyncEvents(req *proto.StateSyncEventsRequest, 
 // StartHeimdallServer creates a heimdall GRPC server - which is implemented via the passed in client
 // interface.  It is intended for use in testing where more than a single test validator is required rather
 // than to replace the maticnetwork implementation
-func StartHeimdallServer(shutDownCtx context.Context, heimdall bor.HeimdallServer, addr string, logger log.Logger) error {
+func StartHeimdallServer(shutDownCtx context.Context, heimdall heimdall.HeimdallServer, addr string, logger log.Logger) error {
 	grpcServer := grpc.NewServer(withLoggingUnaryInterceptor(logger))
 	proto.RegisterHeimdallServer(grpcServer,
 		&HeimdallGRPCServer{

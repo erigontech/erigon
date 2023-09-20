@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -24,14 +24,14 @@ var (
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
-func fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
+func fetchWhitelistCheckpoint(ctx context.Context, heimdall heimdall.IHeimdallClient, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		blockNum  uint64
 		blockHash common.Hash
 	)
 
 	// fetch the latest checkpoint from Heimdall
-	checkpoint, err := bor.HeimdallClient.FetchCheckpoint(ctx, -1)
+	checkpoint, err := heimdall.FetchCheckpoint(ctx, -1)
 	if err != nil {
 		log.Debug("Failed to fetch latest checkpoint for whitelisting", "err", err)
 		return blockNum, blockHash, errCheckpoint
@@ -56,14 +56,14 @@ func fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVe
 
 // fetchWhitelistMilestone fetches the latest milestone from it's local heimdall
 // and verifies the data against bor data.
-func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
+func fetchWhitelistMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		num  uint64
 		hash common.Hash
 	)
 
 	// fetch latest milestone
-	milestone, err := bor.HeimdallClient.FetchMilestone(ctx)
+	milestone, err := heimdall.FetchMilestone(ctx)
 	if err != nil {
 		log.Error("Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, errMilestone
@@ -86,13 +86,13 @@ func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVer
 	return num, hash, nil
 }
 
-func fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
+func fetchNoAckMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient) (string, error) {
 	var (
 		milestoneID string
 	)
 
 	// fetch latest milestone
-	milestoneID, err := bor.HeimdallClient.FetchLastNoAckMilestone(ctx)
+	milestoneID, err := heimdall.FetchLastNoAckMilestone(ctx)
 	if err != nil {
 		log.Error("Failed to fetch latest no-ack milestone", "err", err)
 		return milestoneID, errMilestone
@@ -101,9 +101,9 @@ func fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
 	return milestoneID, nil
 }
 
-func fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
+func fetchNoAckMilestoneByID(ctx context.Context, heimdall heimdall.IHeimdallClient, milestoneID string) error {
 	// fetch latest milestone
-	err := bor.HeimdallClient.FetchNoAckMilestone(ctx, milestoneID)
+	err := heimdall.FetchNoAckMilestone(ctx, milestoneID)
 
 	// fixme: handle different types of errors
 	if errors.Is(err, ErrNotInRejectedList) {

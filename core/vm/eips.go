@@ -24,10 +24,12 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
+	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
 	4844: enable4844,
@@ -301,5 +303,27 @@ func enable6780(jt *JumpTable) {
 		constantGas: params.SelfdestructGasEIP150,
 		numPop:      1,
 		numPush:     0,
+	}
+}
+
+// opBlobBaseFee implements the BLOBBASEFEE opcode
+func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
+	excessBlobGas := interpreter.evm.Context().ExcessBlobGas
+	blobBaseFee, err := misc.GetBlobGasPrice(*excessBlobGas)
+	if err != nil {
+		return nil, err
+	}
+	callContext.Stack.Push(blobBaseFee)
+	return nil, nil
+}
+
+// enable7516 applies EIP-7516 (BLOBBASEFEE opcode)
+// - Adds an opcode that returns the current block's blob base fee.
+func enable7516(jt *JumpTable) {
+	jt[BLOBBASEFEE] = &operation{
+		execute:     opBlobBaseFee,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
 	}
 }

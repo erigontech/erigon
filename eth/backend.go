@@ -96,6 +96,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -103,6 +104,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
@@ -457,14 +459,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	var heimdallClient bor.IHeimdallClient
-	if chainConfig.Bor != nil && !config.WithoutHeimdall {
-		if config.HeimdallgRPCAddress != "" {
-			heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
-		} else {
-			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+	var heimdallClient heimdall.IHeimdallClient
+	if chainConfig.Bor != nil {
+		if !config.WithoutHeimdall {
+			if config.HeimdallgRPCAddress != "" {
+				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
+			} else {
+				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			}
 		}
+
+		flags.Milestone = config.WithHeimdallMilestones
 	}
+
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
@@ -498,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		maxBlockBroadcastPeers = func(header *types.Header) uint {
 			isValidator, err := borEngine.IsValidator(header)
 			if err != nil {
-				logger.Error("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
+				logger.Warn("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
 				return defaultValue
 			}
 			if isValidator {
@@ -561,7 +568,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(backend.chainDB, miner, *backend.chainConfig, heimdallClient, backend.blockReader),
+			stagedsync.StageBorHeimdallCfg(backend.chainDB, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, backend.txPoolDB, blockReader),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
@@ -581,7 +588,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPoolDB, param, tmpdir, backend.blockReader),
-				stagedsync.StageBorHeimdallCfg(backend.chainDB, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader),
+				stagedsync.StageBorHeimdallCfg(backend.chainDB, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, backend.txPoolDB, blockReader),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
@@ -639,11 +646,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		time.Sleep(10 * time.Millisecond)
 		baseFee := uint64(0)
 		if currentBlock.BaseFee() != nil {
-			baseFee = currentBlock.BaseFee().Uint64()
+			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
+		}
+		blobFee := uint64(params.MinBlobGasPrice)
+		if currentBlock.Header().ExcessBlobGas != nil {
+			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()))
+			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
+				blobFee = b.Uint64()
+			}
 		}
 		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
-		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit(), 0)
-
+		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, blobFee, currentBlock.GasLimit(), 0)
 	}()
 
 	if !config.DeprecatedTxPool.Disable {
@@ -1199,11 +1212,16 @@ func (s *Ethereum) Start() error {
 		}
 		return currentTD
 	}
+
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
+	}
+
+	if s.chainConfig.Bor != nil {
+		s.engine.(*bor.Bor).Start(s.apiList, s.chainDB, s.blockReader)
 	}
 
 	return nil
