@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("f\x03\xcc\x16\x92\x95\x80\x00")
+[]byte("\x9a")
+[]byte("Y")
+[]byte("\x8c")
+[]byte("0X")
+byte('\x02')

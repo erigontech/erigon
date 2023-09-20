@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("A")
+[]byte("0")
+[]byte("0")
+[]byte("0C000000")
+[]byte("\xc7\xc7\xc7\xc7\xc7\xc7\xc7\xc700")
+byte('{')
