@@ -65,7 +65,7 @@ jobs:
       - name: Lint erigon-lib
         if: runner.os == 'Linux'
         env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+          CGO_CXXFLAGS: "-g -O2"
         run: cd erigon-lib && golangci-lint run --config ./.golangci.yml
 
       - name: Lint source code licenses
@@ -74,7 +74,7 @@ jobs:
 
       - name: Test erigon-lib
         env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+          CGO_CXXFLAGS: "-g -O2"
         run: cd erigon-lib && make test
 
       - name: Test
@@ -116,7 +116,7 @@ jobs:
 
       - name: Test erigon-lib
         env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
+          CGO_CXXFLAGS: "-g -O2"
         run: cd erigon-lib && make test-no-fuzz
 
   docker-build-check:

@@ -12,7 +12,7 @@ on:
       - alpha
 env:
   CGO_ENABLED: "1"
-  CGO_CXXFLAGS: "-g -O2 -std=c++17"
+  CGO_CXXFLAGS: "-g -O2"
   GO111MODULE: "on"
 jobs:
   tests:
