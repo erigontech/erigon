@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -116,7 +117,7 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	val := binary.LittleEndian.Uint64(arr.u[offset : offset+8])
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
 	arr.l = arr.l - 1
-	arr.treeCacheBuffer = arr.treeCacheBuffer[:getTreeCacheSize(arr.l/4, treeCacheDepthUint64Slice)*length.Hash]
+	arr.treeCacheBuffer = arr.treeCacheBuffer[:getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash]
 	return val
 }
 
@@ -132,6 +133,7 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 	treeBufferExpectCache := getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice) * length.Hash
 	if len(arr.treeCacheBuffer) < treeBufferExpectCache {
 		arr.treeCacheBuffer = append(arr.treeCacheBuffer, make([]byte, treeBufferExpectCache-len(arr.treeCacheBuffer))...)
+		fmt.Println(len(arr.treeCacheBuffer))
 	}
 }
 
@@ -198,9 +200,12 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 			continue
 		}
 		copy(layerBuffer, arr.u[from:to])
-		if err := computeFlatRootsToBuffer(treeCacheDepthUint64Slice, layerBuffer[:to-from], arr.treeCacheBuffer[offset:]); err != nil {
+		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer[:to-from], arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
+	}
+	if treeCacheDepthUint64Slice <= depth {
+		return common.BytesToHash(arr.treeCacheBuffer[:32]), nil
 	}
 
 	elements := arr.treeCacheBuffer
