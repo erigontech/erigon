@@ -282,7 +282,11 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	outputTxNum.Store(inputTxNum)
 	doms.SetTxNum(inputTxNum)
+	if blockNum == 0 && inputTxNum != 0 {
+		// commitment has been rebuilt?
+	}
 	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.

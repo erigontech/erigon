@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("1")
+[]byte("0")
+[]byte("0")
+[]byte("0")
+[]byte("122089710z1210AAX901b9200108")
+byte('*')

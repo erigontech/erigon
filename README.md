@@ -74,10 +74,10 @@ Usage
 
 ### Getting Started
 
-For building the latest stable release (this will be suitable for most users just wanting to run a node):
+For building the latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone --branch stable --single-branch https://github.com/ledgerwatch/erigon.git
+git clone --branch release/<x.xx> --single-branch https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon

@@ -81,14 +81,14 @@ func (c *collector) writeTimer(name string, m *metrics.Summary, withType bool) {
 
 func (c *collector) writeGauge(name string, value interface{}, withType bool) {
 	if withType {
-		c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, stripLabels(name)))
+		//c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, stripLabels(name)))
 	}
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }
 
 func (c *collector) writeCounter(name string, value interface{}, withType bool) {
 	if withType {
-		c.buff.WriteString(fmt.Sprintf(typeCounterTpl, stripLabels(name)))
+		//c.buff.WriteString(fmt.Sprintf(typeCounterTpl, stripLabels(name)))
 	}
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }

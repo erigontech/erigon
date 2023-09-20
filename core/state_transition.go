@@ -194,15 +194,15 @@ func (st *StateTransition) to() libcommon.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	mgval := st.sharedBuyGas
-	mgval.SetUint64(st.msg.Gas())
-	mgval, overflow := mgval.MulOverflow(mgval, st.gasPrice)
+	gasVal := st.sharedBuyGas
+	gasVal.SetUint64(st.msg.Gas())
+	gasVal, overflow := gasVal.MulOverflow(gasVal, st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
 
 	// compute blob fee for eip-4844 data blobs if any
-	dgval := new(uint256.Int)
+	blobGasVal := new(uint256.Int)
 	if st.evm.ChainRules().IsCancun {
 		if st.evm.Context().ExcessBlobGas == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
@@ -211,16 +211,16 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		_, overflow = dgval.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
+		blobGasVal, overflow = blobGasVal.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
 		if overflow {
-			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, dgval)
+			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
 		}
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
 		}
 	}
 
-	balanceCheck := mgval
+	balanceCheck := gasVal
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
 		balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.gasFeeCap)
@@ -231,7 +231,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
-		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, dgval)
+		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, blobGasVal)
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
@@ -253,8 +253,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	st.initialGas = st.msg.Gas()
 
 	if subBalance {
-		st.state.SubBalance(st.msg.From(), mgval)
-		st.state.SubBalance(st.msg.From(), dgval)
+		st.state.SubBalance(st.msg.From(), gasVal)
+		st.state.SubBalance(st.msg.From(), blobGasVal)
 	}
 	return nil
 }

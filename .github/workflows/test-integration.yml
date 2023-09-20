@@ -6,6 +6,7 @@ on:
       - alpha
       - stable
       - e35
+      - 'release/**'
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:

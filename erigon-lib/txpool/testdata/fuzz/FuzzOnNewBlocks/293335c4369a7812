@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("+\x01XM\x8d\xde=\xf1\\\xc9\xf1\t'4ׅ\ue538\x95\xb1\"\r_\xbfGL\x1c%\t\xa3\x84\x04")
+[]byte("2")
+[]byte("\xcb")
+[]byte("\xcbX\x01M\x8d\"\x04")
+[]byte("20")
+byte('\a')
