@@ -1,0 +1,64 @@
+name: Continuous integration
+on:
+  push:
+    branches:
+      - main
+      - stable
+      - alpha
+  pull_request:
+    branches:
+      - main
+      - stable
+      - alpha
+env:
+  CGO_ENABLED: "1"
+  CGO_CXXFLAGS: "-g -O2 -std=c++17"
+  GO111MODULE: "on"
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-20.04, macos-11, windows-2022 ] # list of os: https://github.com/actions/virtual-environments
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: configure Pagefile
+        if: matrix.os == 'windows-2022'
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 8GB
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0 # fetch git tags for "git describe"
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
+
+      - name: Install deps
+        if: matrix.os == 'ubuntu-20.04'
+        run: sudo apt update && sudo apt install build-essential
+        shell: bash
+      - name: Install deps
+        if: matrix.os == 'windows-2022'
+        run: |
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
+
+      - name: Lint
+        if: matrix.os == 'ubuntu-20.04'
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: v1.54
+          skip-build-cache: true
+
+      - name: Lint source code licenses
+        if: matrix.os == 'ubuntu-20.04'
+        run: make lint-licenses-deps lint-licenses
+
+      - name: Test win
+        if: matrix.os == 'windows-2022'
+        run: make test-no-fuzz
+      - name: Test
+        if: matrix.os != 'windows-2022'
+        run: make test

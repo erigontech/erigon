@@ -386,7 +386,6 @@ func checkpointCountURL(urlString string) (*url.URL, error) {
 func milestoneCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchMilestoneCount, "")
 }
-
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchLastNoAckMilestone, "")
 }
@@ -427,7 +426,7 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 
 	// check status code
 	if res.StatusCode != 200 && res.StatusCode != 204 {
-		return nil, fmt.Errorf("%w: response code %d", ErrNotSuccessfulResponse, res.StatusCode)
+		return nil, fmt.Errorf("%w: %s:response code %d", ErrNotSuccessfulResponse, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer
