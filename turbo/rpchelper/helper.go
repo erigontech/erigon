@@ -2,6 +2,7 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -11,6 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -52,6 +55,16 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
+			if whitelist.GetWhitelistingService() != nil {
+				num := borfinality.GetFinalizedBlockNumber(tx)
+				if num == 0 {
+					return 0, libcommon.Hash{}, false, errors.New("no finalized block")
+				}
+
+				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
+				blockHash := rawdb.ReadHeaderByNumber(tx, blockNum).Hash()
+				return blockNum, blockHash, false, nil
+			}
 			blockNumber, err = GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, libcommon.Hash{}, false, err
