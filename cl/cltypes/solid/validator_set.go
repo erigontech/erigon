@@ -52,18 +52,17 @@ func NewValidatorSet(c int) *ValidatorSet {
 }
 
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
-	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
 	size := newValidatorSetLength * validatorSize
-	treeCacheSize := ((newValidatorSetLength + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize) * length.Hash
+	treeCacheSize := getTreeCacheSize(newValidatorSetLength, validatorTreeCacheGroupLayer) * length.Hash
 
 	if size <= cap(v.buffer) {
 		v.treeCacheBuffer = v.treeCacheBuffer[:treeCacheSize]
 		v.buffer = v.buffer[:size]
 		return
 	}
-	buffer := make([]byte, size, int(float64(size)*validatorSetCapacityMultiplier))
-	increaseValidatorCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
-	cacheBuffer := make([]byte, treeCacheSize, int(increaseValidatorCapacity*length.Hash))
+	increasedValidatorsCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
+	buffer := make([]byte, size, increasedValidatorsCapacity*validatorSize)
+	cacheBuffer := make([]byte, treeCacheSize, increasedValidatorsCapacity*length.Hash)
 	copy(buffer, v.buffer)
 	copy(cacheBuffer, v.treeCacheBuffer)
 	v.treeCacheBuffer = cacheBuffer
@@ -157,7 +156,7 @@ func (v *ValidatorSet) Get(idx int) Validator {
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
-	validatorsLeafChunkSize := 1 << validatorTreeCacheGroupLayer
+	validatorsLeafChunkSize := convertDepthToChunkSize(validatorTreeCacheGroupLayer)
 	hashBuffer := make([]byte, 8*32)
 	depth := GetDepth(uint64(v.c))
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))

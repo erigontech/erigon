@@ -146,12 +146,9 @@ func (arr *byteBasedUint64Slice) Get(index int) uint64 {
 
 // Set replaces the element at the given index with a new value.
 func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
-	if index >= arr.l {
-		panic("index out of range")
-	}
 	offset := index * 8
-	ihIdx := (offset / length.Hash) / convertDepthToChunkSize(treeCacheDepthUint64Slice)
-	for i := ihIdx * length.Hash; i < ihIdx*length.Hash+length.Hash; i++ {
+	ihIdx := ((index / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
+	for i := ihIdx; i < ihIdx+length.Hash; i++ {
 		arr.treeCacheBuffer[i] = 0
 	}
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
