@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -82,12 +83,11 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 
 	aggStep := uint64(100)
 	blockSize := uint64(10) // lets say that each block contains 10 tx, after each block we do commitment
+	ctx := context.Background()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
-
 	defer agg.Close()
 
-	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 
@@ -111,21 +111,25 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
-	txs := aggStep * 20 // we do 20 steps, 1 left in db.
-	t.Logf("step=%d tx_count=%d", aggStep, txs)
+	var (
+		aux     [8]byte
+		loc     = libcommon.Hash{}
+		maxStep = uint64(20)
+		txs     = aggStep*maxStep + aggStep/2 // we do 20.5 steps, 1.5 left in db.
 
-	var aux [8]byte
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	loc := libcommon.Hash{}
+		// list of hashes and txNum when i'th block was committed
+		hashedTxs = make([]uint64, 0)
+		hashes    = make([][]byte, 0)
 
-	hashedTxs := make([]uint64, 0)
-	hashes := make([][]byte, 0)
-	addrs := make([]libcommon.Address, 0)
-	accs := make([]*accounts.Account, 0)
-	locs := make([]libcommon.Hash, 0)
+		// list of inserted accounts and storage locations
+		firstAddrTx uint64
+		addrs       = make([]libcommon.Address, 0)
+		accs        = make([]*accounts.Account, 0)
+		locs        = make([]libcommon.Hash, 0)
 
-	writer := state2.NewWriterV4(tx.(*temporal.Tx), domains)
+		writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
+	)
+
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		domains.SetTxNum(txNum)
 		domains.SetBlockNum(txNum / blockSize)
@@ -136,7 +140,11 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		acc, addr := randomAccount(t)
-		if txNum > txs-aggStep {
+		interesting := txNum/aggStep > maxStep-1
+		if interesting { // one and half step will be left in db
+			if firstAddrTx == 0 {
+				firstAddrTx = txNum
+			}
 			addrs = append(addrs, addr)
 			accs = append(accs, acc)
 			locs = append(locs, loc)
@@ -151,7 +159,7 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 		//err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
 		require.NoError(t, err)
 
-		if txNum%blockSize == 0 && txNum >= txs-aggStep {
+		if txNum%blockSize == 0 && interesting {
 			rh, err := writer.Commitment(true, false)
 			require.NoError(t, err)
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
@@ -160,14 +168,23 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 			hashedTxs = append(hashedTxs, txNum)
 		}
 	}
-	//_, err = writer.Commitment(true, false)
-	//require.NoError(t, err)
 
-	err = agg.Flush(context.Background(), tx)
+	rh, err := writer.Commitment(true, false)
+	require.NoError(t, err)
+	t.Logf("executed tx %d root %x datadir %q\n", txs, rh, datadir)
+
+	err = agg.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	//bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	//bn-- we set bn+1 in domains.SeekCommitment to correctly start from the next block
+	COMS := make(map[string][]byte)
+	{
+		cct := domains.Commitment.MakeContext()
+		err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
+			COMS[string(k)] = v
+			//fmt.Printf("k %x v %x\n", k, v)
+		})
+		cct.Close()
+	}
 
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -176,30 +193,25 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	maxStep := (txs - 1) / aggStep
 	domains.Close()
 	agg.FinishWrites()
 	agg.Close()
-	//fmt.Printf("before reset found commit bn %d\n", bn)
-
 	db.Close()
 	db = nil
 
-	fmt.Printf("maxStep %d tx %d hashed %d\n", maxStep, txs, len(hashedTxs))
-
-	// remove db
+	// ======== delete DB, reset domains ========
 	ffs := os.DirFS(datadir)
 	dirs, err := fs.ReadDir(ffs, ".")
 	require.NoError(t, err)
 	for _, d := range dirs {
 		if strings.HasPrefix(d.Name(), "db") {
 			err = os.RemoveAll(path.Join(datadir, d.Name()))
+			t.Logf("remove DB %q err %v", d.Name(), err)
 			require.NoError(t, err)
 			break
 		}
 	}
 
-	// ======== reset domains ========
 	db, agg, datadir = testDbAndAggregatorv3(t, datadir, aggStep)
 	defer db.Close()
 	defer agg.Close()
@@ -210,6 +222,18 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+
+	cct := domains.Commitment.MakeContext()
+	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
+		cv, _ := COMS[string(k)]
+		if !bytes.Equal(cv, v) {
+			ftx, fb := binary.BigEndian.Uint64(cv[0:8]), binary.BigEndian.Uint64(cv[8:16])
+			ntx, nb := binary.BigEndian.Uint64(v[0:8]), binary.BigEndian.Uint64(v[8:16])
+			fmt.Printf("before rm DB tx %d block %d len %d\n", ftx, fb, len(cv))
+			fmt.Printf("after  rm DB tx %d block %d len %d\n", ntx, nb, len(v))
+		}
+	})
+	cct.Close()
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	require.NoError(t, err)
@@ -233,23 +257,25 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	domains.SetTx(tx)
 	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 
-	rh, err := writer.Commitment(true, false)
+	bn, txToStart, err := domains.SeekCommitment(0, math.MaxUint64)
+	txToStart++ // block and tx from seek commitment is already committed, have to start from next one
 	require.NoError(t, err)
-	fmt.Printf("restart rh %x\n", rh)
 
-	var i int
-	for txNum := (txs - aggStep) + 1; txNum <= txs; txNum++ {
+	rh, err = writer.Commitment(false, false)
+	require.NoError(t, err)
+	t.Logf("restart hash %x\n", rh)
+
+	var i, j int
+	for txNum := txToStart; txNum <= txs; txNum++ {
 		domains.SetTxNum(txNum)
+		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
-		fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
+		//fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
 		err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])
-		//buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
-		//err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
 		err = writer.WriteAccountStorage(addrs[i], 0, &locs[i], &uint256.Int{}, uint256.NewInt(txNum))
-		//err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
 		require.NoError(t, err)
 		i++
 
@@ -257,11 +283,8 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 			rh, err := writer.Commitment(true, false)
 			require.NoError(t, err)
 			fmt.Printf("tx %d rh %x\n", txNum, rh)
-
-			require.EqualValues(t, hashes[i], rh)
-
-			//hashes = append(hashes, rh)
-			//hashedTxs = append(hashedTxs, txNum)
+			require.EqualValues(t, hashes[j], rh)
+			j++
 		}
 	}
 }
