@@ -195,7 +195,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 
 	offset := length.Hash * ((v.l + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize)
 	elements := v.treeCacheBuffer[:offset]
-	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
+	for i := uint8(validatorTreeCacheGroupLayer) + 1; i < depth; i++ {
 		// Sequential
 		if len(elements)%64 != 0 {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
@@ -212,7 +212,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 }
 
 func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
-	for i := uint8(0); i < depth; i++ {
+	for i := uint8(0); i <= depth; i++ {
 		// Sequential
 		if len(layerBuffer)%64 != 0 {
 			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-const treeCacheDepthUint64Slice = 2
+const treeCacheDepthUint64Slice = 3
 
 func convertDepthToChunkSize(d int) int {
 	return (1 << d) // just power of 2
@@ -185,21 +185,23 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
-	chunkSize := convertDepthToChunkSize(treeCacheDepthUint64Slice)
-	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
+	chunkSize := convertDepthToChunkSize(treeCacheDepthUint64Slice) * length.Hash
+	depth := GetDepth((uint64(arr.c)*8 + length.Hash - 1) / length.Hash)
 	emptyHashBytes := make([]byte, length.Hash)
 
 	layerBuffer := make([]byte, chunkSize*length.Hash)
+	maxTo := length.Hash*((arr.l-1)/4) + length.Hash
 
-	for i := 0; i < len(arr.u); i += chunkSize * length.Hash {
-		offset := (i / (chunkSize * length.Hash)) * length.Hash
+	for i := 0; i < len(arr.u); i += chunkSize {
+		offset := (i / chunkSize) * length.Hash
 		from := i
-		to := int(utils.Min64(uint64(from+(chunkSize*length.Hash)), uint64(len(arr.u))))
+		to := int(utils.Min64(uint64(from+(chunkSize*length.Hash)), uint64(maxTo)))
 
-		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+32], emptyHashBytes) {
+		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
 			continue
 		}
 		copy(layerBuffer, arr.u[from:to])
+
 		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer[:to-from], arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
@@ -209,7 +211,7 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	}
 
 	elements := arr.treeCacheBuffer
-	for i := uint8(treeCacheDepthUint64Slice); i < depth; i++ {
+	for i := uint8(treeCacheDepthUint64Slice + 1); i < depth; i++ {
 		layerLen := len(elements)
 		if layerLen%64 == 32 {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
@@ -235,10 +237,10 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%8 > 0 {
 		return ssz.ErrBadDynamicLength
 	}
-	bufferLength := ((len(buf) + length.Hash - 1) / length.Hash) * length.Hash
+	arr.l = len(buf) / 8
+	bufferLength := length.Hash*((arr.l-1)/4) + length.Hash
 	arr.u = make([]byte, bufferLength)
 	copy(arr.u, buf)
-	arr.l = len(buf) / 8
 	arr.treeCacheBuffer = make([]byte, getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash)
 	return nil
 }
