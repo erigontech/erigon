@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -133,7 +132,6 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 	treeBufferExpectCache := getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice) * length.Hash
 	if len(arr.treeCacheBuffer) < treeBufferExpectCache {
 		arr.treeCacheBuffer = append(arr.treeCacheBuffer, make([]byte, treeBufferExpectCache-len(arr.treeCacheBuffer))...)
-		fmt.Println(len(arr.treeCacheBuffer))
 	}
 }
 
