@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math"
 	"os"
 	"path/filepath"
@@ -40,6 +39,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -247,6 +247,7 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
 		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
+			fmt.Printf("skip by integrity check: %s\n", name)
 			continue
 		}
 
