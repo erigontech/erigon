@@ -937,7 +937,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if reset {
 		var bn uint64
 		if castedDB, ok := db.(*temporal.DB); ok {
-			castedDB.View(ctx, func(tx kv.Tx) error {
+			if err := castedDB.View(ctx, func(tx kv.Tx) error {
 				doms := tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx())
 				defer doms.Close()
 				var err error
@@ -946,7 +946,9 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 					return err
 				}
 				return nil
-			})
+			}); err != nil {
+				return err
+			}
 		}
 
 		if err := reset2.ResetExec(ctx, db, chain, "", bn); err != nil {
