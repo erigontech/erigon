@@ -15,7 +15,7 @@ if ! which go-licenses > /dev/null
 then
 	echo "go-licenses tool is not found, install it with:"
 	echo "    go install github.com/google/go-licenses@$goLicensesVersion"
-	exit
+	exit 2
 fi
 
 # enable build tags to cover maximum .go files

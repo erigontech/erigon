@@ -90,8 +90,11 @@ lint-licenses-deps:
 lint-licenses:
 	@./tools/licenses_check.sh
 
+lint-mod-tidy:
+	@./tools/mod_tidy_check.sh
+
 lint-deps: lintci-deps lint-licenses-deps
-lint: lintci lint-licenses
+lint: lintci lint-licenses lint-mod-tidy
 
 test:
 	$(GOTEST) --count 1 -p 2 ./...
