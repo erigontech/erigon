@@ -67,8 +67,6 @@ jobs:
         run: make lint
 
       - name: Test erigon-lib
-        env:
-          CGO_CXXFLAGS: "-g -O2"
         run: cd erigon-lib && make test
 
       - name: Test
@@ -109,8 +107,6 @@ jobs:
         run: .\wmake.ps1 test
 
       - name: Test erigon-lib
-        env:
-          CGO_CXXFLAGS: "-g -O2"
         run: cd erigon-lib && make test-no-fuzz
 
   docker-build-check:

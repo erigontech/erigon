@@ -1,9 +1,18 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
+
 BUILD_TAGS = nosqlite,noboltdb,disable_libutp
-GOBUILD = go build -trimpath -tags $(BUILD_TAGS)
-GOTEST = go test -trimpath -tags $(BUILD_TAGS)
-GOTEST_NOFUZZ = go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
+GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath -tags $(BUILD_TAGS)
+GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath -tags $(BUILD_TAGS)
+GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
@@ -74,7 +83,7 @@ mocks: $(GOBINREL)/moq
 lintci-deps:
 	@./tools/golangci_lint.sh --install-deps
 lintci:
-	@CGO_CXXFLAGS="-g -O2" ./tools/golangci_lint.sh
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 lint-licenses-deps:
 	@./tools/licenses_check.sh --install-deps
