@@ -487,7 +487,7 @@ func (d *Domain) openFiles() (err error) {
 			}
 
 			if item.index == nil && !UseBpsTree {
-				idxPath := filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+				idxPath := d.kvAccessorFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 						err = errors.Wrap(err, "recsplit index")
