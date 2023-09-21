@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -319,7 +318,7 @@ func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) btIdxFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
@@ -498,7 +497,7 @@ func (d *Domain) openFiles() (err error) {
 				}
 			}
 			if item.bindex == nil {
-				bidxPath := d.btIdxFilePath(fromStep, toStep)
+				bidxPath := d.kvBtFilePath(fromStep, toStep)
 				if dir.FileExist(bidxPath) {
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
 						err = errors.Wrap(err, "btree index")
@@ -1187,7 +1186,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	var bt *BtIndex
 	{
-		btPath := d.btIdxFilePath(step, step+1)
+		btPath := d.kvBtFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
@@ -1217,7 +1216,7 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			fPath := d.btIdxFilePath(fromStep, toStep)
+			fPath := d.kvBtFilePath(fromStep, toStep)
 			if !dir.FileExist(fPath) {
 				l = append(l, item)
 			}
@@ -1259,8 +1258,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	for _, item := range d.missedBtreeIdxFiles() {
 		fitem := item
 		g.Go(func() error {
-			idxPath := fitem.decompressor.FilePath()
-			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
+			idxPath := d.kvBtFilePath(fitem.startTxNum/d.aggregationStep, fitem.endTxNum/d.aggregationStep)
 			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.dirs.Tmp, *d.salt, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
@@ -1274,8 +1272,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 				return nil
 			}
 
-			idxPath := fitem.decompressor.FilePath()
-			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
+			idxPath := d.kvAccessorFilePath(fitem.startTxNum/d.aggregationStep, fitem.endTxNum/d.aggregationStep)
 			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
