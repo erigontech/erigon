@@ -112,11 +112,6 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "locality_idx",
-			Action: doLocalityIdx,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}),
-		},
-		{
 			Name: "rm_all_state_snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -354,45 +349,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	return nil
-}
-
-func doLocalityIdx(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
-	ctx := cliCtx.Context
-
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-
-	if rebuild {
-		panic("not implemented")
-	}
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	//chainConfig := fromdb.ChainConfig(chainDB)
-	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-	//	return err
-	//}
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	err = agg.OpenFolder()
-	if err != nil {
-		return err
-	}
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
 	return nil
 }
 
