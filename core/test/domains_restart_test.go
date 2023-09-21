@@ -1,7 +1,6 @@
 package test
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -72,8 +71,6 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 }
 
 func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
-	//t.Helper()
-	//logger := log.New()
 	// generate some updates on domains.
 	// record all roothashes on those updates after some POINT which will be stored in db and never fall to files
 	// remove db
@@ -176,15 +173,15 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	err = agg.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	COMS := make(map[string][]byte)
-	{
-		cct := domains.Commitment.MakeContext()
-		err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
-			COMS[string(k)] = v
-			//fmt.Printf("k %x v %x\n", k, v)
-		})
-		cct.Close()
-	}
+	//COMS := make(map[string][]byte)
+	//{
+	//	cct := domains.Commitment.MakeContext()
+	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
+	//		COMS[string(k)] = v
+	//		//fmt.Printf("k %x v %x\n", k, v)
+	//	})
+	//	cct.Close()
+	//}
 
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -223,17 +220,19 @@ func Test_AggregatorV3_RestartOnDatadirWithoutDB(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 
-	cct := domains.Commitment.MakeContext()
-	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
-		cv, _ := COMS[string(k)]
-		if !bytes.Equal(cv, v) {
-			ftx, fb := binary.BigEndian.Uint64(cv[0:8]), binary.BigEndian.Uint64(cv[8:16])
-			ntx, nb := binary.BigEndian.Uint64(v[0:8]), binary.BigEndian.Uint64(v[8:16])
-			fmt.Printf("before rm DB tx %d block %d len %d\n", ftx, fb, len(cv))
-			fmt.Printf("after  rm DB tx %d block %d len %d\n", ntx, nb, len(v))
-		}
-	})
-	cct.Close()
+	//{
+	//	cct := domains.Commitment.MakeContext()
+	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
+	//		cv, _ := COMS[string(k)]
+	//		if !bytes.Equal(cv, v) {
+	//			ftx, fb := binary.BigEndian.Uint64(cv[0:8]), binary.BigEndian.Uint64(cv[8:16])
+	//			ntx, nb := binary.BigEndian.Uint64(v[0:8]), binary.BigEndian.Uint64(v[8:16])
+	//			fmt.Printf("before rm DB tx %d block %d len %d\n", ftx, fb, len(cv))
+	//			fmt.Printf("after  rm DB tx %d block %d len %d\n", ntx, nb, len(v))
+	//		}
+	//	})
+	//	cct.Close()
+	//}
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	require.NoError(t, err)
