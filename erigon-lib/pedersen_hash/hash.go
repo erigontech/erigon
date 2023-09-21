@@ -4,6 +4,7 @@
 package hash
 
 /*
+#cgo CXXFLAGS: -std=c++17
 #include <stdlib.h>
 #include "hash.h"
 */

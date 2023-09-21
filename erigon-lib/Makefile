@@ -1,9 +1,18 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
+
 BUILD_TAGS = nosqlite,noboltdb,disable_libutp
-GOBUILD = env GO111MODULE=on go build -trimpath -tags $(BUILD_TAGS)
-GOTEST = go test -trimpath -tags $(BUILD_TAGS)
-GOTEST_NOFUZZ = go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
+GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath -tags $(BUILD_TAGS)
+GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath -tags $(BUILD_TAGS)
+GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=$(BUILD_TAGS),nofuzz
+
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
@@ -71,19 +80,10 @@ mocks: $(GOBINREL)/moq
 	rm -f gointerfaces/sentry/mocks.go
 	PATH="$(GOBIN):$(PATH)" go generate ./...
 
-lintci: $(GOBINREL)/golangci-lint
-	@"$(GOBIN)/golangci-lint" run --config ./.golangci.yml
-
-# force re-make golangci-lint
-lintci-deps: lintci-deps-clean $(GOBINREL)/golangci-lint
-lintci-deps-clean: golangci-lint-clean
-
-# download and build golangci-lint (https://golangci-lint.run)
-$(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.54.2
-
-golangci-lint-clean:
-	rm -f "$(GOBIN)/golangci-lint"
+lintci-deps:
+	@./tools/golangci_lint.sh --install-deps
+lintci:
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 lint-licenses-deps:
 	@./tools/licenses_check.sh --install-deps

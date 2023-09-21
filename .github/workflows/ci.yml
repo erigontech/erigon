@@ -54,28 +54,17 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.54
+          version: v1.54.2
           skip-build-cache: true
           args: --help
 
-      - name: Lint erigon
+      - name: Install go-licenses
         if: runner.os == 'Linux'
-        run: golangci-lint run --config ./.golangci.yml
+        run: cd erigon-lib && make lint-licenses-deps
 
-      - name: Lint erigon-lib
+      - name: Lint
         if: runner.os == 'Linux'
-        env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
-        run: cd erigon-lib && golangci-lint run --config ./.golangci.yml
-
-      - name: Lint source code licenses
-        if: runner.os == 'Linux'
-        run: cd erigon-lib && make lint-licenses-deps lint-licenses
-
-      - name: Test erigon-lib
-        env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
-        run: cd erigon-lib && make test
+        run: make lint
 
       - name: Test
         run: make test
@@ -115,8 +104,6 @@ jobs:
         run: .\wmake.ps1 test
 
       - name: Test erigon-lib
-        env:
-          CGO_CXXFLAGS: "-g -O2 -std=c++17"
         run: cd erigon-lib && make test-no-fuzz
 
   docker-build-check:
