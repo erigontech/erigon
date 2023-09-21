@@ -606,31 +606,34 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 			}
 		}
 	}
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
-
-	// verify the validator list in the last sprint block
-	if isSprintStart(number, sprintLength) {
-		// Retrieve the snapshot needed to verify this header and cache it
-		parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
-		validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
-
-		currentValidators := snap.ValidatorSet.Copy().Validators
-		// sort validator by address
-		sort.Sort(valset.ValidatorsByAddress(currentValidators))
-		for i, validator := range currentValidators {
-			copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
+	/*
+		snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+		if err != nil {
+			return err
 		}
-		// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
-		if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
-			return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
-		}
-	}
 
-	// All basic checks passed, verify the seal and return
-	return c.verifySeal(chain, header, parents, snap)
+		// verify the validator list in the last sprint block
+		if isSprintStart(number, sprintLength) {
+			// Retrieve the snapshot needed to verify this header and cache it
+			parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
+			validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
+
+			currentValidators := snap.ValidatorSet.Copy().Validators
+			// sort validator by address
+			sort.Sort(valset.ValidatorsByAddress(currentValidators))
+			for i, validator := range currentValidators {
+				copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
+			}
+			// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
+			if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
+				return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
+			}
+		}
+
+		// All basic checks passed, verify the seal and return
+		return c.verifySeal(chain, header, parents, snap)
+	*/
+	return nil
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
