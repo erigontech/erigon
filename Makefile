@@ -141,16 +141,20 @@ db-tools:
 
 ## test:                              run unit tests with a 100s timeout
 test:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 100s
 
 test3:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies

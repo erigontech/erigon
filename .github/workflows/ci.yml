@@ -66,9 +66,6 @@ jobs:
         if: runner.os == 'Linux'
         run: make lint
 
-      - name: Test erigon-lib
-        run: cd erigon-lib && make test
-
       - name: Test
         run: make test
 
