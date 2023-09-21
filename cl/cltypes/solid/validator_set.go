@@ -76,6 +76,7 @@ func (v *ValidatorSet) Append(val Validator) {
 		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
+	v.zeroTreeHash(v.l)
 	copy(v.buffer[offset:], val)
 	v.phase0Data[v.l] = Phase0Data{} // initialize to empty.
 	v.attesterBits = append(v.attesterBits, 0x0)
@@ -109,7 +110,6 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	offset := v.EncodingSizeSSZ()
 	if offset > len(t.buffer) {
 		t.expandBuffer(v.l)
-		t.buffer = append(t.buffer, make([]byte, len(v.buffer)-len(t.buffer))...)
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
 	// skip copying (unsupported for phase0)
