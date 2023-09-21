@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"math"
 	"strings"
 	"sync"
@@ -934,16 +935,19 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		ct := agg.MakeContext()
-		doms := agg.SharedDomains(ct)
-
-		bn, _, err := doms.SeekCommitment(0, math.MaxUint64)
-		if err != nil {
-			return err
+		var bn uint64
+		if castedDB, ok := db.(*temporal.DB); ok {
+			castedDB.View(ctx, func(tx kv.Tx) error {
+				doms := tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx())
+				defer doms.Close()
+				var err error
+				bn, _, err = doms.SeekCommitment(0, math.MaxUint64)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
 		}
-
-		ct.Close()
-		doms.Close()
 
 		if err := reset2.ResetExec(ctx, db, chain, "", bn); err != nil {
 			return err
