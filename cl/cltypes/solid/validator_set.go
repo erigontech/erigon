@@ -115,6 +115,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
+	copy(t.treeCacheBuffer, v.treeCacheBuffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.attesterBits = t.attesterBits[:v.l]
 }
@@ -203,11 +204,10 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
 		}
 		outputLen := len(elements) / 2
-		v.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(v.buf, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(elements, elements); err != nil {
 			return [32]byte{}, err
 		}
-		elements = v.buf
+		elements = elements[:outputLen]
 	}
 
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
