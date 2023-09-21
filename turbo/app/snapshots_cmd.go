@@ -112,11 +112,6 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "locality_idx",
-			Action: doLocalityIdx,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}),
-		},
-		{
 			Name: "rm_all_state_snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
