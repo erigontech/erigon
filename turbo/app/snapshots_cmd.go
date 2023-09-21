@@ -117,6 +117,14 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}),
 		},
 		{
+			Name: "rm_all_state_snapshots",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				return dir.DeleteFiles(dirs.SnapHistory, dirs.SnapWarm)
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
