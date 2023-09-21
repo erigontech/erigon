@@ -128,11 +128,16 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
+	ihIdx := ((arr.l / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
+	for i := ihIdx; i < ihIdx+length.Hash; i++ {
+		arr.treeCacheBuffer[i] = 0
+	}
 	arr.l = arr.l + 1
 	treeBufferExpectCache := getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice) * length.Hash
 	if len(arr.treeCacheBuffer) < treeBufferExpectCache {
 		arr.treeCacheBuffer = append(arr.treeCacheBuffer, make([]byte, treeBufferExpectCache-len(arr.treeCacheBuffer))...)
 	}
+
 }
 
 // Get returns the element at the given index.
