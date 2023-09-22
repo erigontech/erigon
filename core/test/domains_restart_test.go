@@ -232,8 +232,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//}
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	require.NoError(t, err)
 	tx.Rollback()
+	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()
@@ -407,8 +407,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	require.NoError(t, err)
 	tx.Rollback()
+	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()
