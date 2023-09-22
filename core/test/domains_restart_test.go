@@ -9,12 +9,12 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -41,18 +41,15 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	if fpath != "" {
 		path = fpath
 	}
+	dirs := datadir.New(path)
 
 	logger := log.New()
-	histDir := filepath.Join(path, "snapshots", "history")
-	require.NoError(t, os.MkdirAll(filepath.Join(path, "db"), 0740))
-	require.NoError(t, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
-	require.NoError(t, os.MkdirAll(histDir, 0740))
-	db := mdbx.NewMDBX(logger).Path(filepath.Join(path, "db")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).Path(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), histDir, filepath.Join(path, "e3", "tmp"), aggStep, db, logger)
+	agg, err := state.NewAggregatorV3(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
