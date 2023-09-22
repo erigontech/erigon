@@ -247,7 +247,6 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
 		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
-			fmt.Printf("skip by integrity check: %s\n", name)
 			continue
 		}
 
