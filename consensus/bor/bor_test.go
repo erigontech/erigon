@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core"
@@ -102,6 +103,26 @@ func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) 
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h test_heimdall) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
+	return fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
+	return "", fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
+	return fmt.Errorf("TODO")
+}
+
 func (h test_heimdall) Close() {}
 
 type test_genesisContract struct {
@@ -185,8 +206,6 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
-	sealResults := make(chan *types.Block)
-
 	hr := headerReader{v}
 
 	for _, block := range blocks {
@@ -199,6 +218,8 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 		if parent := hr.GetHeaderByNumber(header.Number.Uint64() - 1); parent != nil {
 			header.ParentHash = parent.Hash()
 		}
+
+		sealResults := make(chan *types.Block, 1)
 
 		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
 			return nil, err

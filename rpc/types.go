@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,15 @@ const (
 	EarliestBlockNumber       = BlockNumber(0)
 )
 
+var (
+	LatestExecutedBlock = LatestExecutedBlockNumber.AsBlockReference()
+	FinalizedBlock      = FinalizedBlockNumber.AsBlockReference()
+	SafeBlock           = SafeBlockNumber.AsBlockReference()
+	PendingBlock        = PendingBlockNumber.AsBlockReference()
+	LatestBlock         = LatestBlockNumber.AsBlockReference()
+	EarliestBlock       = EarliestBlockNumber.AsBlockReference()
+)
+
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
 // - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
 // - the block number
@@ -131,8 +141,81 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (bn BlockNumber) MarshalText() ([]byte, error) {
+	switch {
+	case bn < LatestExecutedBlockNumber:
+		return nil, fmt.Errorf("Invalid block number %d", bn)
+	case bn < 0:
+		return []byte(bn.String()), nil
+	default:
+		return []byte(bn.string(16)), nil
+	}
+}
+
 func (bn BlockNumber) Int64() int64 {
 	return int64(bn)
+}
+
+func (bn BlockNumber) Uint64() uint64 {
+	return uint64(bn)
+}
+
+func (bn BlockNumber) String() string {
+	return bn.string(10)
+}
+
+func (bn BlockNumber) AsBlockReference() BlockReference {
+	return AsBlockReference(bn)
+}
+
+func (bn BlockNumber) string(base int) string {
+	switch bn {
+	case EarliestBlockNumber:
+		return "earliest"
+	case LatestBlockNumber:
+		return "latest"
+	case PendingBlockNumber:
+		return "pending"
+	case SafeBlockNumber:
+		return "safe"
+	case FinalizedBlockNumber:
+		return "finalized"
+	case LatestExecutedBlockNumber:
+		return "latestExecuted"
+	}
+
+	if base == 16 {
+		return "0x" + strconv.FormatUint(bn.Uint64(), base)
+	}
+
+	return strconv.FormatUint(bn.Uint64(), base)
+}
+
+func AsBlockNumber(no interface{}) BlockNumber {
+	switch no := no.(type) {
+	case *big.Int:
+		return BlockNumber(no.Int64())
+	case BlockNumber:
+		return no
+	case *BlockNumber:
+		return *no
+	case int64:
+		return BlockNumber(no)
+	case uint64:
+		return BlockNumber(no)
+	case string:
+		var bn BlockNumber
+		if err := json.Unmarshal([]byte(strconv.Quote(no)), &bn); err == nil {
+			return bn
+		}
+	case fmt.Stringer:
+		var bn BlockNumber
+		if err := json.Unmarshal([]byte(strconv.Quote(no.String())), &bn); err == nil {
+			return bn
+		}
+	}
+
+	return LatestExecutedBlockNumber - 1
 }
 
 type BlockNumberOrHash struct {
@@ -242,6 +325,88 @@ func BlockNumberOrHashWithHash(hash libcommon.Hash, canonical bool) BlockNumberO
 		BlockNumber:      nil,
 		BlockHash:        &hash,
 		RequireCanonical: canonical,
+	}
+}
+
+type BlockReference BlockNumberOrHash
+
+func (br *BlockReference) UnmarshalJSON(data []byte) error {
+	return ((*BlockNumberOrHash)(br)).UnmarshalJSON(data)
+}
+
+func (br BlockReference) Number() (BlockNumber, bool) {
+	return ((*BlockNumberOrHash)(&br)).Number()
+}
+
+func (br BlockReference) Hash() (libcommon.Hash, bool) {
+	return ((*BlockNumberOrHash)(&br)).Hash()
+}
+
+func (br BlockReference) String() string {
+	if br.BlockNumber != nil {
+		return br.BlockNumber.String()
+	}
+
+	if br.BlockHash != nil {
+		return br.BlockHash.String()
+	}
+
+	return ""
+}
+
+func AsBlockReference(ref interface{}) BlockReference {
+	switch ref := ref.(type) {
+	case *big.Int:
+		return IntBlockReference(ref)
+	case BlockNumber:
+		return BlockReference{BlockNumber: &ref}
+	case *BlockNumber:
+		return BlockReference{BlockNumber: ref}
+	case int64:
+		bn := BlockNumber(ref)
+		return BlockReference{BlockNumber: &bn}
+	case uint64:
+		return Uint64BlockReference(ref)
+	case libcommon.Hash:
+		return HashBlockReference(ref)
+	case *libcommon.Hash:
+		return HashBlockReference(*ref)
+	}
+
+	return BlockReference{}
+}
+
+func IntBlockReference(blockNr *big.Int) BlockReference {
+	if blockNr == nil {
+		return BlockReference{}
+	}
+
+	bn := BlockNumber(blockNr.Int64())
+	return BlockReference{
+		BlockNumber:      &bn,
+		BlockHash:        nil,
+		RequireCanonical: false,
+	}
+}
+
+func Uint64BlockReference(blockNr uint64) BlockReference {
+	bn := BlockNumber(blockNr)
+	return BlockReference{
+		BlockNumber:      &bn,
+		BlockHash:        nil,
+		RequireCanonical: false,
+	}
+}
+
+func HashBlockReference(hash libcommon.Hash, canonical ...bool) BlockReference {
+	if len(canonical) == 0 {
+		canonical = []bool{false}
+	}
+
+	return BlockReference{
+		BlockNumber:      nil,
+		BlockHash:        &hash,
+		RequireCanonical: canonical[0],
 	}
 }
 

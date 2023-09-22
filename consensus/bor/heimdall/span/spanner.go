@@ -68,19 +68,9 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 }
 
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
-	// Use signer as validator in case of bor devent
-	if c.withoutHeimdall {
-		c.logger.Info("Spanner returning pre-set validator set")
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
-
-		return validators, nil
+	// Use hardcoded bor devnet valset if chain-name = bor-devnet
+	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
+		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
 	span, err := getSpanForBlock(blockNumber)
@@ -92,18 +82,9 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 }
 
 func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
-	// Use signer as validator in case of bor devent
-	if c.withoutHeimdall {
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
-
-		return validators, nil
+	// Use hardcoded bor devnet valset if chain-name = bor-devnet
+	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
+		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
 	span, err := getSpanForBlock(blockNumber)

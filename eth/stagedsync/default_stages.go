@@ -65,7 +65,9 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
-				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, logger)
+				//fmt.Println("BorHeimdallForward", "validate")
+				//defer fmt.Println("BorHeimdallForward", "validate", "DONE")
+				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, false, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return BorHeimdallUnwind(u, ctx, s, tx, borHeimdallCfg)

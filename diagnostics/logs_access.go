@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
-func SetupLogsAccess(ctx *cli.Context) {
+func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	dirPath := ctx.String(logging.LogDirPathFlag.Name)
 	if dirPath == "" {
 		datadir := ctx.String("datadir")
@@ -26,11 +26,11 @@ func SetupLogsAccess(ctx *cli.Context) {
 	if dirPath == "" {
 		return
 	}
-	http.HandleFunc("/debug/metrics/logs/list", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/metrics/logs/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsList(w, dirPath)
 	})
-	http.HandleFunc("/debug/metrics/logs/read", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/metrics/logs/read", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsRead(w, r, dirPath)
 	})

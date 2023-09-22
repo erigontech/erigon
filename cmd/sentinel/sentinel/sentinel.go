@@ -21,8 +21,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -68,7 +68,7 @@ type Sentinel struct {
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
-	db kv.RoDB
+	db persistence.RawBeaconBlockChain
 
 	discoverConfig       discover.Config
 	pubsub               *pubsub.PubSub
@@ -230,7 +230,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
-	db kv.RoDB,
+	db persistence.RawBeaconBlockChain,
 	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
@@ -370,10 +370,6 @@ func (s *Sentinel) GossipManager() *GossipManager {
 
 func (s *Sentinel) Config() *SentinelConfig {
 	return s.cfg
-}
-
-func (s *Sentinel) DB() kv.RoDB {
-	return s.db
 }
 
 func (s *Sentinel) Status() *cltypes.Status {

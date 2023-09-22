@@ -892,15 +892,15 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
-	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if interpreter.evm.Config().Debug {
 		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, balance, nil /* code */)
+			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
 	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	return nil, errStopToken
 }

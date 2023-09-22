@@ -115,6 +115,10 @@ func (b *Big) String() string {
 	return EncodeBig(b.ToInt())
 }
 
+func (b *Big) Uint64() uint64 {
+	return ((*big.Int)(b)).Uint64()
+}
+
 // Uint64 marshals/unmarshals as a JSON string with 0x prefix.
 // The zero value marshals as "0x0".
 type Uint64 uint64
@@ -160,6 +164,10 @@ func (b *Uint64) UnmarshalText(input []byte) error {
 // String returns the hex encoding of b.
 func (b Uint64) String() string {
 	return EncodeUint64(uint64(b))
+}
+
+func (b Uint64) Uint64() uint64 {
+	return (uint64)(b)
 }
 
 // Uint marshals/unmarshals as a JSON string with 0x prefix.

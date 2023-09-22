@@ -21,7 +21,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	for _, block := range req.Blocks {
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)

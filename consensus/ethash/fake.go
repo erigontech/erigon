@@ -3,7 +3,7 @@ package ethash
 import (
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/log/v3"
@@ -87,7 +87,7 @@ func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, header *types.Hea
 	return nil
 }
 
-func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[libcommon.Hash]*types.Header, seal bool) error {
+func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
 	err := f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
 	if err != nil {
 		return err

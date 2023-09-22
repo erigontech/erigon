@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -41,6 +43,14 @@ func NewStaticListSSZ[T encodableHashableSSZ](limit int, bytesPerElement int) *L
 		static:          true,
 		bytesPerElement: bytesPerElement,
 	}
+}
+
+func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(l.list)
+}
+
+func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &l.list)
 }
 
 func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *ListSSZ[T] {

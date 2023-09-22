@@ -153,19 +153,19 @@ func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	return genesis, err
 }
 
-func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
-	return api._txnReader.TxnLookup(ctx, tx, txnHash)
+func (api *BaseAPI) txnLookup(tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
+	return api._txnReader.TxnLookup(context.Background(), tx, txnHash)
 }
 
-func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
+func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, hashErr := api._blockReader.CanonicalHash(context.Background(), tx, number)
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	return api.blockWithSenders(ctx, tx, hash, number)
+	return api.blockWithSenders(tx, hash, number)
 }
 
-func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
+func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
@@ -176,16 +176,16 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 		return nil, nil
 	}
 
-	return api.blockWithSenders(ctx, tx, hash, *number)
+	return api.blockWithSenders(tx, hash, *number)
 }
 
-func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
 		}
 	}
-	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -228,14 +228,14 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return cc, genesisBlock, nil
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(tx, 0)
+	genesisBlock, err := api.blockByRPCNumber(0, tx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err != nil {
-		return nil, nil, err
+	if genesisBlock == nil {
+		return nil, nil, fmt.Errorf("genesis block not found in database")
 	}
-	cc, err = rawdb.ReadChainConfig(tx, hash)
+	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -250,13 +250,14 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, h, n)
+	// it's ok to use context.Background(), because in "Remote RPCDaemon" `tx` already contains internal ctx
+	block, err := api.blockWithSenders(tx, h, n)
 	return block, err
 }
 

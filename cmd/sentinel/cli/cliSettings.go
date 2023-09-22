@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"strings"
 	"time"
@@ -132,10 +133,10 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
-		cfg.NetworkCfg.BootNodes = utils.SplitAndTrim(ctx.String(flags.BootnodesFlag.Name))
+		cfg.NetworkCfg.BootNodes = common2.CliString2Array(ctx.String(flags.BootnodesFlag.Name))
 	}
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
-		cfg.NetworkCfg.StaticPeers = utils.SplitAndTrim(ctx.String(flags.SentinelStaticPeersFlag.Name))
+		cfg.NetworkCfg.StaticPeers = common2.CliString2Array(ctx.String(flags.SentinelStaticPeersFlag.Name))
 		fmt.Println(cfg.NetworkCfg.StaticPeers)
 	}
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)

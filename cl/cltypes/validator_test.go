@@ -47,7 +47,6 @@ func TestDepositData(t *testing.T) {
 		WithdrawalCredentials: [32]byte{4, 5, 6},
 		Amount:                100,
 		Signature:             [96]byte{7, 8, 9},
-		Root:                  [32]byte{10, 11, 12},
 	}
 
 	// Encode DepositData to SSZ

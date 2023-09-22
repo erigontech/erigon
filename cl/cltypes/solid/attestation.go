@@ -1,6 +1,10 @@
 package solid
 
 import (
+	"encoding/json"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -42,6 +46,33 @@ func NewAttestionFromParameters(
 	a.SetSignature(signature)
 	a.SetAggregationBits(aggregationBits)
 	return a
+}
+
+func (a Attestation) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		AggregationBits hexutility.Bytes
+		Signature       libcommon.Bytes96
+		Data            AttestationData
+	}{
+		AggregationBits: a.aggregationBitsBuffer,
+		Signature:       a.Signature(),
+		Data:            a.AttestantionData(),
+	})
+}
+
+func (a *Attestation) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		AggregationBits hexutility.Bytes
+		Signature       libcommon.Bytes96
+		Data            AttestationData
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	a.SetAggregationBits(tmp.AggregationBits)
+	a.SetSignature(tmp.Signature)
+	a.SetAttestationData(tmp.Data)
+	return nil
 }
 
 // AggregationBits returns the aggregation bits buffer of the Attestation instance.

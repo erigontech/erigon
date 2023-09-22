@@ -141,31 +141,36 @@ db-tools:
 
 ## test:                              run unit tests with a 100s timeout
 test:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 100s
 
 test3:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
+	@cd erigon-lib && $(MAKE) test
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
-## lint:                              run golangci-lint with .golangci.yml config file
-lint:
-	@./build/bin/golangci-lint run --config ./.golangci.yml
+## lint-deps:                         install lint dependencies
+lint-deps:
+	@cd erigon-lib && $(MAKE) lint-deps
 
-## lintci:                            run golangci-lint (additionally outputs message before run)
+## lintci:                            run golangci-lint linters
 lintci:
-	@echo "--> Running linter for code"
-	@./build/bin/golangci-lint run --config ./.golangci.yml
+	@cd erigon-lib && $(MAKE) lintci
+	@./erigon-lib/tools/golangci_lint.sh
 
-## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
-lintci-deps:
-	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.54.1
+## lint:                              run all linters
+lint:
+	@cd erigon-lib && $(MAKE) lint
+	@./erigon-lib/tools/golangci_lint.sh
+	@./erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -252,7 +257,6 @@ release: git-submodules
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
-ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
 
 ## user_linux:                        create "erigon" user (Linux)
 user_linux:
@@ -266,7 +270,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /home/$(ERIGON_USER)/.local/share
 
 ## user_macos:                        create "erigon" user (MacOS)
 user_macos:
@@ -276,7 +280,7 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
 
 ## coverage:                          run code coverage report and output total coverage %
 .PHONY: coverage

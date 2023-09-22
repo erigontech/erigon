@@ -101,7 +101,6 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
-	DropUselessPeers: false,
 }
 
 func init() {
@@ -235,6 +234,8 @@ type Config struct {
 
 	// No heimdall service
 	WithoutHeimdall bool
+	// Heimdall services active
+	WithHeimdallMilestones bool
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -247,7 +248,7 @@ type Config struct {
 
 	OverrideCancunTime *big.Int `toml:",omitempty"`
 
-	DropUselessPeers bool
+	ForcePartialCommit bool
 }
 
 type Sync struct {

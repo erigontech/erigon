@@ -221,8 +221,7 @@ type peerOpFunc func(map[enode.ID]*Peer)
 
 type peerDrop struct {
 	*Peer
-	err       error
-	requested bool // true if signaled by the peer
+	err *PeerError
 }
 
 type connFlag int32
@@ -362,7 +361,7 @@ func (srv *Server) RemovePeer(node *enode.Node) {
 		if peer := peers[node.ID()]; peer != nil {
 			ch = make(chan *PeerEvent, 1)
 			sub = srv.peerFeed.Subscribe(ch)
-			peer.Disconnect(DiscRequested)
+			peer.Disconnect(NewPeerError(PeerErrorDiscReason, DiscRequested, nil, "Server.RemovePeer Disconnect"))
 		}
 	})
 	// Wait for the peer connection to end.
@@ -815,7 +814,7 @@ running:
 				// The handshakes are done and it passed all checks.
 				p := srv.launchPeer(c, c.pubkey)
 				peers[c.node.ID()] = p
-				srv.logger.Trace("Adding p2p peer", "peercount", len(peers), "id", p.ID(), "conn", c.flags, "addr", p.RemoteAddr(), "name", p.Name())
+				srv.logger.Trace("Adding p2p peer", "peercount", len(peers), "url", p.Node(), "conn", c.flags, "name", p.Fullname())
 				srv.dialsched.peerAdded(c)
 				if p.Inbound() {
 					inboundCount++
@@ -827,7 +826,7 @@ running:
 			// A peer disconnected.
 			d := common.PrettyDuration(mclock.Now() - pd.created)
 			delete(peers, pd.ID())
-			srv.logger.Trace("Removing p2p peer", "peercount", len(peers), "id", pd.ID(), "duration", d, "req", pd.requested, "err", pd.err)
+			srv.logger.Trace("Removing p2p peer", "peercount", len(peers), "url", pd.Node(), "duration", d, "err", pd.err)
 			srv.dialsched.peerRemoved(pd.rw)
 			if pd.Inbound() {
 				inboundCount--
@@ -846,7 +845,7 @@ running:
 	}
 	// Disconnect all peers.
 	for _, p := range peers {
-		p.Disconnect(DiscQuitting)
+		p.Disconnect(NewPeerError(PeerErrorDiscReason, DiscQuitting, nil, "Server.run() spindown"))
 	}
 	// Wait for peers to shut down. Pending connections and tasks are
 	// not handled here and will terminate soon-ish because srv.quit
@@ -1090,12 +1089,12 @@ func (srv *Server) runPeer(p *Peer) {
 	})
 
 	// Run the per-peer main loop.
-	remoteRequested, err := p.run()
+	err := p.run()
 
 	// Announce disconnect on the main loop to update the peer set.
 	// The main loop waits for existing peers to be sent on srv.delpeer
 	// before returning, so this send should not select on srv.quit.
-	srv.delpeer <- peerDrop{p, err, remoteRequested}
+	srv.delpeer <- peerDrop{p, err}
 
 	// Broadcast peer drop to external subscribers. This needs to be
 	// after the send to delpeer so subscribers have a consistent view of

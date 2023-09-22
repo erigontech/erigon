@@ -2,11 +2,8 @@ package forkchoice
 
 import (
 	"fmt"
-	"runtime"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -33,6 +30,17 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	}
 
 	config := f.forkGraph.Config()
+	var invalidBlock bool
+	if newPayload && f.engine != nil {
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
+			if invalidBlock {
+				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+			}
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
+	}
+
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
@@ -49,16 +57,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
-	}
-	var invalidBlock bool
-	if newPayload && f.engine != nil {
-		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
-			log.Warn("newPayload failed", "err", err)
-			return err
-		}
-	}
-	if invalidBlock {
-		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 	}
 
 	if block.Block.Slot > f.highestSeen {
@@ -100,9 +98,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	log.Debug("OnBlock", "elapsed", time.Since(start), "alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys))
+	log.Debug("OnBlock", "elapsed", time.Since(start))
 	return nil
 }

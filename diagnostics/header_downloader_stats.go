@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/dataflow"
 )
 
-func SetupHeaderDownloadStats() {
-	http.HandleFunc("/debug/metrics/headers_download", func(w http.ResponseWriter, r *http.Request) {
+func SetupHeaderDownloadStats(metricsMux *http.ServeMux) {
+	metricsMux.HandleFunc("/debug/metrics/headers_download", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeHeaderDownload(w, r)
 	})

@@ -48,7 +48,7 @@ type Server struct {
 	methodAllowList AllowList
 	idgen           func() ID
 	run             int32
-	codecs          mapset.Set
+	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
 
 	batchConcurrency uint
 	disableStreaming bool

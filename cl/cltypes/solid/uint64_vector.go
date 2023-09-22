@@ -1,6 +1,9 @@
 package solid
 
 import (
+	"encoding/json"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 )
 
@@ -10,13 +13,22 @@ type uint64VectorSSZ struct {
 
 func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	o := &byteBasedUint64Slice{
-		c: size,
-		l: size,
-		u: make([]byte, size*8),
+		c:               size,
+		l:               size,
+		u:               make([]byte, size*8),
+		treeCacheBuffer: make([]byte, getTreeCacheSize((size+3)/4, treeCacheDepthUint64Slice)*length.Hash),
 	}
 	return &uint64VectorSSZ{
 		u: o,
 	}
+}
+
+func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.u)
+}
+
+func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, h.u)
 }
 
 func (arr *uint64VectorSSZ) Clear() {

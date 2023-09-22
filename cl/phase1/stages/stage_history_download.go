@@ -2,7 +2,9 @@ package stages
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -10,8 +12,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
@@ -21,32 +25,34 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg        *clparams.GenesisConfig
-	beaconCfg         *clparams.BeaconChainConfig
-	downloader        *network.BackwardBeaconDownloader
-	startingRoot      libcommon.Hash
-	startingSlot      uint64
-	backFillingAmount uint64
-	tmpdir            string
-	db                persistence.BeaconChainDatabase
-	engine            execution_client.ExecutionEngine
-	logger            log.Logger
+	genesisCfg   *clparams.GenesisConfig
+	beaconCfg    *clparams.BeaconChainConfig
+	downloader   *network.BackwardBeaconDownloader
+	startingRoot libcommon.Hash
+	dbCfg        db_config.DatabaseConfiguration
+	startingSlot uint64
+	tmpdir       string
+	db           persistence.BeaconChainDatabase
+	indiciesDB   *sql.DB
+	engine       execution_client.ExecutionEngine
+	logger       log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backFillingAmount uint64, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB *sql.DB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:        genesisCfg,
-		beaconCfg:         beaconCfg,
-		downloader:        downloader,
-		startingRoot:      startingRoot,
-		tmpdir:            tmpdir,
-		startingSlot:      startinSlot,
-		logger:            logger,
-		backFillingAmount: backFillingAmount,
-		db:                db,
-		engine:            engine,
+		genesisCfg:   genesisCfg,
+		beaconCfg:    beaconCfg,
+		downloader:   downloader,
+		startingRoot: startingRoot,
+		tmpdir:       tmpdir,
+		startingSlot: startinSlot,
+		logger:       logger,
+		dbCfg:        dbCfg,
+		indiciesDB:   indiciesDB,
+		db:           db,
+		engine:       engine,
 	}
 }
 
@@ -80,8 +86,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	blockRoot := cfg.startingRoot
 	destinationSlot := uint64(0)
 	currentSlot := cfg.startingSlot
-	if currentSlot > cfg.backFillingAmount {
-		destinationSlot = currentSlot - cfg.backFillingAmount
+	if currentSlot > cfg.dbCfg.PruneDepth {
+		destinationSlot = currentSlot - cfg.dbCfg.PruneDepth
 	}
 
 	executionBlocksCollector := etl.NewCollector("SpawnStageHistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
@@ -96,27 +102,44 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		foundLatestEth1ValidHash = true // skip this if we are not using an engine supporting direct insertion
 	}
 
+	var currEth1Progress atomic.Int64
+
+	tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		if blk.Version() >= clparams.BellatrixVersion {
+			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
+		}
 		if !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
-			encodedPayload = append(encodedPayload, byte(blk.Version()))
+			// Use snappy compression that the temporary files do not take too much disk.
+			encodedPayload = utils.CompressSnappy(append(encodedPayload, byte(blk.Version())))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
-				return false, err
+				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
 
-			foundLatestEth1ValidHash, err = cfg.engine.IsCanonicalHash(payload.BlockHash)
+			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
-				return false, err
+				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
+			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
 		}
 
 		slot := blk.Block.Slot
-		return slot <= destinationSlot && foundLatestEth1ValidHash, cfg.db.WriteBlock(ctx, blk, true)
+		if destinationSlot <= blk.Block.Slot {
+			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+				return false, err
+			}
+		}
+		return slot <= destinationSlot && foundLatestEth1ValidHash, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -136,7 +159,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return
 				}
 				logArgs = append(logArgs,
-					"progress", currProgress,
+					"slot", currProgress,
+					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount)
 				logger.Info("Downloading History", logArgs...)
@@ -152,29 +176,36 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}
 	close(finishCh)
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
-	db := memdb.New(cfg.tmpdir)
-	tx, err := db.BeginRw(ctx)
+	db2 := memdb.New(cfg.tmpdir)
+	defer db2.Close()
+	tx2, err := db2.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer tx2.Rollback()
 
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
 
-	if err := executionBlocksCollector.Load(tx, kv.Headers, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := executionBlocksCollector.Load(tx2, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
 			return next(k, nil, nil)
 		}
+		var err error
+		var v []byte
+		if v, err = utils.DecompressSnappy(vComp); err != nil {
+			return fmt.Errorf("error decompressing dump during collection: %s", err)
+		}
+
 		version := clparams.StateVersion(v[len(v)-1])
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
 		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
-			return err
+			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
 		body := executionPayload.Body()
 		header, err := executionPayload.RlpHeader()
 		if err != nil {
-			return err
+			return fmt.Errorf("error parsing rlp header during collection: %s", err)
 		}
 
 		txs, err := types.DecodeTransactions(body.Transactions)
@@ -186,7 +217,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		blockBatch = append(blockBatch, block)
 		if len(blockBatch) >= blockBatchMaxSize {
 			if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
-				return err
+				return fmt.Errorf("error inserting block during collection: %s", err)
 			}
 			blockBatch = blockBatch[:0]
 		}
@@ -195,7 +226,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	if cfg.engine != nil && cfg.engine.SupportInsertion() {
-		return cfg.engine.InsertBlocks(blockBatch)
+		if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
+			return fmt.Errorf("error doing last block insertion during collection: %s", err)
+		}
 	}
-	return nil
+	return tx.Commit()
 }

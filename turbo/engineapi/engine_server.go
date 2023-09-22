@@ -1,7 +1,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -363,7 +362,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 }
 
 // EngineGetPayload retrieves previously assembled payload (Validators only)
-func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engine_types.GetPayloadResponse, error) {
+func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -393,6 +392,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 
 	}
 	data := resp.Data
+
+	ts := data.ExecutionPayload.Timestamp
+	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(ts) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 
 	return &engine_types.GetPayloadResponse{
 		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
@@ -435,8 +440,16 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if (!s.config.IsCancun(timestamp) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(timestamp) && version < clparams.DenebVersion) {
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		if payloadAttributes.ParentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
+		}
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		if payloadAttributes.ParentBeaconBlockRoot != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
+		}
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -491,57 +504,38 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
+	bodies := s.chainRW.GetBodiesByHases(request)
 
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, len(request))
-
-	for hashIdx, hash := range request {
-		block := s.chainRW.GetBlockByHash(hash)
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		bodies[hashIdx] = body
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range request {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
-func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPayloadBodyV1, error) {
-	if block == nil {
-		return nil, nil
+func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBodyV1 {
+	if body == nil {
+		return nil
 	}
 
-	txs := block.Transactions()
-	bdTxs := make([]hexutility.Bytes, len(txs))
-	for idx, tx := range txs {
-		var buf bytes.Buffer
-		if err := tx.MarshalBinary(&buf); err != nil {
-			return nil, err
-		} else {
-			bdTxs[idx] = buf.Bytes()
-		}
+	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	for idx := range body.Transactions {
+		bdTxs[idx] = body.Transactions[idx]
 	}
 
-	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: block.Withdrawals()}, nil
+	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: body.Withdrawals}
 }
 
 func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
+	bodies := s.chainRW.GetBodiesByRange(start, count)
 
-	for i := uint64(0); i < count; i++ {
-		block := s.chainRW.GetBlockByNumber(start + i)
-
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			break
-		}
-		bodies = append(bodies, body)
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
 	}
 
-	return bodies, nil
+	return resp, nil
 }
 
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
@@ -549,7 +543,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
 	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
-	response, err := e.getPayload(ctx, decodedPayloadId)
+	response, err := e.getPayload(ctx, decodedPayloadId, clparams.BellatrixVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -560,13 +554,13 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
-	return e.getPayload(ctx, decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.CapellaVersion)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
-	return e.getPayload(ctx, decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
@@ -643,6 +637,7 @@ func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, cou
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
+	"engine_forkchoiceUpdatedV3",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",

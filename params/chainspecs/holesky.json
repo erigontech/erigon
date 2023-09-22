@@ -1,0 +1,17 @@
+{
+  "chainId": 17000,
+  "homesteadBlock": 0,
+  "eip150Block": 0,
+  "eip155Block": 0,
+  "eip158Block": 0,
+  "byzantiumBlock": 0,
+  "constantinopleBlock": 0,
+  "petersburgBlock": 0,
+  "istanbulBlock": 0,
+  "berlinBlock": 0,
+  "londonBlock": 0,
+  "mergeForkBlock": 0,
+  "terminalTotalDifficulty": 0,
+  "terminalTotalDifficultyPassed": true,
+  "shanghaiTime": 1696000704
+}

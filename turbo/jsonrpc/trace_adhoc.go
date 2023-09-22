@@ -476,7 +476,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			// Set the "mem" of the last operation
 			var setMem bool
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY, vm.EXTCODECOPY:
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
@@ -540,6 +540,11 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			if st.Len() > 2 {
 				ot.lastMemOff = st.Back(0).Uint64()
 				ot.lastMemLen = st.Back(2).Uint64()
+			}
+		case vm.EXTCODECOPY:
+			if st.Len() > 3 {
+				ot.lastMemOff = st.Back(1).Uint64()
+				ot.lastMemLen = st.Back(3).Uint64()
 			}
 		case vm.STATICCALL, vm.DELEGATECALL:
 			if st.Len() > 5 {
@@ -721,7 +726,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +744,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		}
 		blockNum = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -816,7 +821,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
+	block, bErr := api.blockWithSenders(tx, blockHash, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -898,7 +903,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	ibs := state.New(stateReader)
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,7 +1065,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 
 	// TODO: can read here only parent header
-	parentBlock, err := api.blockWithSenders(ctx, dbtx, hash, blockNumber)
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1114,7 +1119,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	ibs := state.New(cachedReader)
 
 	// TODO: can read here only parent header
-	parentBlock, err := api.blockWithSenders(ctx, dbtx, hash, blockNumber)
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}

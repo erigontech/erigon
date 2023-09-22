@@ -1,7 +1,10 @@
 package solid
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -10,6 +13,27 @@ import (
 type TransactionsSSZ struct {
 	underlying [][]byte       // underlying tranaction list
 	root       libcommon.Hash // root
+}
+
+func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
+	tmp := []hexutility.Bytes{}
+	t.root = libcommon.Hash{}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	t.underlying = nil
+	for _, tx := range tmp {
+		t.underlying = append(t.underlying, tx)
+	}
+	return nil
+}
+
+func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
+	tmp := []hexutility.Bytes{}
+	for _, tx := range t.underlying {
+		tmp = append(tmp, tx)
+	}
+	return json.Marshal(tmp)
 }
 
 func (*TransactionsSSZ) Clone() clonable.Clonable {

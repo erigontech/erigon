@@ -11,6 +11,7 @@ import (
 
 // TODO(enriavil1): Make this configurable via flags
 type RouterConfiguration struct {
+	Active   bool
 	Protocol string
 	Address  string
 
@@ -22,7 +23,7 @@ type RouterConfiguration struct {
 func ListenAndServe(api *handler.ApiHandler, routerCfg *RouterConfiguration) {
 	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
 	server := &http.Server{
-		Handler:      api,
+		Handler:      newBeaconMiddleware(api),
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
 		IdleTimeout:  routerCfg.IdleTimeout,
 		WriteTimeout: routerCfg.IdleTimeout,

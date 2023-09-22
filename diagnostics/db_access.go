@@ -13,22 +13,22 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func SetupDbAccess(ctx *cli.Context) {
+func SetupDbAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 	var dataDir string
 	if ctx.IsSet("datadir") {
 		dataDir = ctx.String("datadir")
 	} else {
 		dataDir = paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String("chain"))
 	}
-	http.HandleFunc("/debug/metrics/db/list", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/metrics/db/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbList(w, dataDir)
 	})
-	http.HandleFunc("/debug/metrics/db/tables", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/metrics/db/tables", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbTables(w, r, dataDir)
 	})
-	http.HandleFunc("/debug/metrics/db/read", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/debug/metrics/db/read", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeDbRead(w, r, dataDir)
 	})

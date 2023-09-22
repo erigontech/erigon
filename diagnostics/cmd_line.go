@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-func SetupCmdLineAccess() {
-	http.HandleFunc("/debug/metrics/cmdline", func(w http.ResponseWriter, r *http.Request) {
+func SetupCmdLineAccess(metricsMux *http.ServeMux) {
+	metricsMux.HandleFunc("/debug/metrics/cmdline", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeCmdLine(w)
 	})

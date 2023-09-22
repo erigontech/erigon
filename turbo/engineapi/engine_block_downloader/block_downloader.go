@@ -130,7 +130,7 @@ func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.Syn
 // waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
 func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uint64, toBlock uint64, fromHash libcommon.Hash, err error) {
 	var lastValidHash libcommon.Hash
-	var badChainError error
+	var badChainError error // TODO(yperbasis): this is not set anywhere
 	var foundPow bool
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {

@@ -8,8 +8,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func SetupFlagsAccess(ctx *cli.Context) {
-	http.HandleFunc("/debug/metrics/flags", func(w http.ResponseWriter, r *http.Request) {
+func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
+	metricsMux.HandleFunc("/debug/metrics/flags", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeFlags(w, ctx)
 	})

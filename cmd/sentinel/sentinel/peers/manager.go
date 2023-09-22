@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/metrics/methelp"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -120,7 +120,7 @@ func (m *Manager) run(ctx context.Context) {
 func (m *Manager) gc() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := methelp.NewHistTimer("beacon_peer_manager_gc_time")
+	t := metrics.NewHistTimer("beacon_peer_manager_gc_time")
 	defer t.PutSince()
 	deleted := 0
 	saw := 0

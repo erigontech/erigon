@@ -184,3 +184,43 @@ func (cc *ExecutionClientRpc) IsCanonicalHash(libcommon.Hash) (bool, error) {
 func (cc *ExecutionClientRpc) Ready() (bool, error) {
 	return true, nil // Engine API is always ready
 }
+
+// Range methods
+
+// GetBodiesByRange gets block bodies in given block range
+func (cc *ExecutionClientRpc) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
+	result := []*engine_types.ExecutionPayloadBodyV1{}
+
+	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
+		return nil, err
+	}
+	ret := make([]*types.RawBody, len(result))
+	for i := range result {
+		ret[i] = &types.RawBody{
+			Withdrawals: result[i].Withdrawals,
+		}
+		for _, txn := range result[i].Transactions {
+			ret[i].Transactions = append(ret[i].Transactions, txn)
+		}
+	}
+	return ret, nil
+}
+
+// GetBodiesByHashes gets block bodies with given hashes
+func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
+	result := []*engine_types.ExecutionPayloadBodyV1{}
+
+	if err := cc.client.CallContext(cc.ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
+		return nil, err
+	}
+	ret := make([]*types.RawBody, len(result))
+	for i := range result {
+		ret[i] = &types.RawBody{
+			Withdrawals: result[i].Withdrawals,
+		}
+		for _, txn := range result[i].Transactions {
+			ret[i].Transactions = append(ret[i].Transactions, txn)
+		}
+	}
+	return ret, nil
+}

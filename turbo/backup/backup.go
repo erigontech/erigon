@@ -28,7 +28,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Label(label).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return flags | mdbx.Readonly | mdbx.Accede }).
+		Flags(func(flags uint) uint { return flags | mdbx.Accede }).
 		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = datasize.ByteSize(src.PageSize())
@@ -99,12 +99,16 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	total, _ = srcC.Count()
 
+	if err := dst.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ClearBucket(table)
+	}); err != nil {
+		return err
+	}
 	dstTx, err := dst.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer dstTx.Rollback()
-	_ = dstTx.ClearBucket(table)
 
 	c, err := dstTx.RwCursor(table)
 	if err != nil {
@@ -188,9 +192,15 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 						return err
 					}
 					for it.HasNext() {
-						_, _, err = it.Next()
+						k, v, err := it.Next()
 						if err != nil {
 							return err
+						}
+						if len(k) > 0 {
+							_, _ = k[0], k[len(k)-1]
+						}
+						if len(v) > 0 {
+							_, _ = v[0], v[len(v)-1]
 						}
 						progress.Add(1)
 						select {
@@ -217,9 +227,15 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					return err
 				}
 				for it.HasNext() {
-					_, _, err = it.Next()
+					k, v, err := it.Next()
 					if err != nil {
 						return err
+					}
+					if len(k) > 0 {
+						_, _ = k[0], k[len(k)-1]
+					}
+					if len(v) > 0 {
+						_, _ = v[0], v[len(v)-1]
 					}
 					select {
 					case <-ctx.Done():

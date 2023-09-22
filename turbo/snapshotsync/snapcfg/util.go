@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	Mainnet    = fromToml(snapshothashes.Mainnet)
+	Mainnet = fromToml(snapshothashes.Mainnet)
+	// Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
 	Goerli     = fromToml(snapshothashes.Goerli)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
@@ -22,7 +23,8 @@ var (
 	Gnosis     = fromToml(snapshothashes.Gnosis)
 	Chiado     = fromToml(snapshothashes.Chiado)
 
-	MainnetHistory    = fromToml(snapshothashes.MainnetHistory)
+	MainnetHistory = fromToml(snapshothashes.MainnetHistory)
+	// HoleskyHistory    = fromToml(snapshothashes.HoleskyHistory)
 	SepoliaHistory    = fromToml(snapshothashes.SepoliaHistory)
 	GoerliHistory     = fromToml(snapshothashes.GoerliHistory)
 	MumbaiHistory     = fromToml(snapshothashes.MumbaiHistory)
@@ -55,7 +57,8 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotCfg    = newCfg(Mainnet, MainnetHistory)
+	MainnetChainSnapshotCfg = newCfg(Mainnet, MainnetHistory)
+	// HoleskyChainSnapshotCfg    = newCfg(Holesky, HoleskyHistory)
 	SepoliaChainSnapshotCfg    = newCfg(Sepolia, SepoliaHistory)
 	GoerliChainSnapshotCfg     = newCfg(Goerli, GoerliHistory)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai, MumbaiHistory)
@@ -105,7 +108,8 @@ type Cfg struct {
 }
 
 var KnownCfgs = map[string]*Cfg{
-	networkname.MainnetChainName:    MainnetChainSnapshotCfg,
+	networkname.MainnetChainName: MainnetChainSnapshotCfg,
+	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
 	networkname.SepoliaChainName:    SepoliaChainSnapshotCfg,
 	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,

@@ -121,6 +121,10 @@ func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{
 
 	case networkname.BorDevnetChainName:
 		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+
+		if len(m.HttpApi) == 0 {
+			m.HttpApi = "admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots,bor"
+		}
 	}
 
 	if m.account != nil {

@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
@@ -13,7 +14,7 @@ import (
 type AggregateAndProof struct {
 	AggregatorIndex uint64
 	Aggregate       *solid.Attestation
-	SelectionProof  [96]byte
+	SelectionProof  libcommon.Bytes96
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -35,7 +36,7 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof
-	Signature [96]byte
+	Signature libcommon.Bytes96
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -56,8 +57,8 @@ func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
-	SyncCommiteeBits      [64]byte
-	SyncCommiteeSignature [96]byte
+	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_commitee_bits"`
+	SyncCommiteeSignature libcommon.Bytes96 `json:"signature"`
 }
 
 // return sum of the committee bits

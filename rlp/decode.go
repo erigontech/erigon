@@ -171,6 +171,10 @@ func wrapStreamError(err error, typ reflect.Type) error {
 	return err
 }
 
+func WrapStreamError(err error, typ reflect.Type) error {
+	return wrapStreamError(err, typ)
+}
+
 func addErrorContext(err error, ctx string) error {
 	if decErr, ok := err.(*decodeError); ok {
 		decErr.ctx = append(decErr.ctx, ctx)

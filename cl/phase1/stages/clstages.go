@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -34,7 +37,8 @@ type Cfg struct {
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
 	indiciesDB      *sql.DB
-	dirs            datadir.Dirs
+	tmpdir          string
+	dbConfig        db_config.DatabaseConfiguration
 }
 
 type Args struct {
@@ -53,8 +57,9 @@ func ClStagesCfg(
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
-	dirs datadir.Dirs,
 	indiciesDB *sql.DB,
+	tmpdir string,
+	dbConfig db_config.DatabaseConfiguration,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -64,9 +69,10 @@ func ClStagesCfg(
 		executionClient: executionClient,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
+		tmpdir:          tmpdir,
 		beaconDB:        beaconDB,
-		dirs:            dirs,
 		indiciesDB:      indiciesDB,
+		dbConfig:        dbConfig,
 	}
 }
 
@@ -156,14 +162,14 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
-	processBlock := func(block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
+	processBlock := func(tx *sql.Tx, block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
 			cfg.rpc.BanPeer(block.Peer)
 			return err
 		}
 		// Write block to database optimistically if we are very behind.
-		return cfg.beaconDB.WriteBlock(ctx, block.Data, false)
+		return cfg.beaconDB.WriteBlock(tx, ctx, block.Data, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -240,7 +246,11 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					return SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, 0, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger)
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.dbConfig, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
+						downloaded = false
+						return err
+					}
+					return nil
 				},
 			},
 			CatchUpEpochs: {
@@ -255,23 +265,22 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
 					currentEpoch := args.seenEpoch
 					blockBatch := []*types.Block{}
-					blockBatchMaxSize := 1000
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
+					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
 				MainLoop:
-					for currentEpoch <= args.targetEpoch {
+					for currentEpoch <= args.targetEpoch+1 {
 						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
-						blocks, err := rpcSource.GetRange(ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
+						blocks, err := rpcSource.GetRange(tx, ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
 
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
-							if err := processBlock(block, false, false); err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-								continue MainLoop
-							}
 							if shouldInsert && block.Data.Version() >= clparams.BellatrixVersion {
 								executionPayload := block.Data.Block.Body.ExecutionPayload
 								body := executionPayload.Body()
@@ -288,18 +297,23 @@ func ConsensusClStages(ctx context.Context,
 									continue MainLoop
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-								if len(blockBatch) >= blockBatchMaxSize {
-									if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-										return err
-									}
-									blockBatch = blockBatch[:0]
-								}
+							}
+							if err := processBlock(tx, block, false, true); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								continue MainLoop
 							}
 						}
+						if len(blockBatch) > 0 {
+							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								blockBatch = blockBatch[:0]
+								continue MainLoop
+							}
+							blockBatch = blockBatch[:0]
+						}
 						currentEpoch++
-					}
-					if shouldInsert {
-						return cfg.executionClient.InsertBlocks(blockBatch)
 					}
 					return nil
 				},
@@ -325,11 +339,17 @@ func ConsensusClStages(ctx context.Context,
 					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()
+
+					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
-							blocks, err := sourceFunc(ctx, args.seenSlot+1, totalRequest)
+							blocks, err := sourceFunc(tx, ctx, args.seenSlot+1, totalRequest)
 							if err != nil {
 								errCh <- err
 								return
@@ -344,14 +364,14 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					case blocks := <-respCh:
 						for _, block := range blocks {
-							if err := processBlock(block, true, true); err != nil {
+							if err := processBlock(tx, block, true, true); err != nil {
 								return err
 							}
 						}
 					case <-logTimer.C:
 						logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenEpoch, "to", args.targetSlot)
 					}
-					return nil
+					return tx.Commit()
 				},
 			},
 			ForkChoice: {
@@ -395,7 +415,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					tx, err := cfg.indiciesDB.Begin()
+					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
 					if err != nil {
 						return err
 					}
@@ -429,7 +449,13 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					logger.Debug("Imported chain segment", "hash", headRoot, "slot", headSlot)
+
+					var m runtime.MemStats
+					dbg.ReadMemStats(&m)
+					logger.Debug("Imported chain segment",
+						"hash", headRoot, "slot", headSlot,
+						"alloc", common.ByteCount(m.Alloc),
+						"sys", common.ByteCount(m.Sys))
 					return tx.Commit()
 				},
 			},
@@ -444,10 +470,8 @@ func ConsensusClStages(ctx context.Context,
 					if shouldForkChoiceSinceReorg {
 						return ForkChoice
 					}
-					if args.seenSlot%cfg.beaconCfg.SlotsPerEpoch == 0 {
-						return CleanupAndPruning
-					}
-					return SleepForSlot
+					return CleanupAndPruning
+
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
@@ -456,16 +480,22 @@ func ConsensusClStages(ctx context.Context,
 					waitDur := slotTime.Sub(time.Now())
 					ctx, cn := context.WithTimeout(ctx, waitDur)
 					defer cn()
+					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
 					// try to get the current block
-					blocks, err := gossipSource.GetRange(ctx, args.seenSlot, 1)
+					blocks, err := gossipSource.GetRange(tx, ctx, args.seenSlot, 1)
 					if err != nil {
 						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 							return nil
 						}
 						return err
 					}
+
 					for _, block := range blocks {
-						err := processBlock(block, false, true)
+						err := processBlock(tx, block, true, true)
 						if err != nil {
 							// its okay if block processing fails
 							logger.Warn("extra block failed validation", "err", err)
@@ -474,7 +504,7 @@ func ConsensusClStages(ctx context.Context,
 						shouldForkChoiceSinceReorg = true
 						logger.Debug("extra block received", "slot", args.seenSlot)
 					}
-					return nil
+					return tx.Commit()
 				},
 			},
 			CleanupAndPruning: {
@@ -486,13 +516,22 @@ func ConsensusClStages(ctx context.Context,
 					return SleepForSlot
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
 					// clean up some old ranges
-					err := gossipSource.PurgeRange(ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
+					err = gossipSource.PurgeRange(tx, ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
+					if err != nil {
+						return err
+					}
+					err = cfg.beaconDB.PurgeRange(tx, ctx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
 					if err != nil {
 						return err
 					}
 					//TODO: probably can clear old superepoch in fs here as well!
-					return nil
+					return tx.Commit()
 				},
 			},
 			SleepForSlot: {

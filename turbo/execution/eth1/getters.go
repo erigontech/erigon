@@ -62,6 +62,13 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
 	}
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+	}
+	if td == nil {
+		return &execution.GetBodyResponse{Body: nil}, nil
+	}
 	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: coild not read body: %s", err)
@@ -89,6 +96,13 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	if err == errNotFound {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
+	}
+	if td == nil {
+		return &execution.GetHeaderResponse{Header: nil}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
 	}
@@ -101,6 +115,71 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 
 	return &execution.GetHeaderResponse{Header: eth1_utils.HeaderToHeaderRPC(header)}, nil
+}
+
+func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *execution.GetBodiesByHashesRequest) (*execution.GetBodiesBatchResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	bodies := make([]*execution.BlockBody, 0, len(req.Hashes))
+
+	for _, hash := range req.Hashes {
+		h := gointerfaces.ConvertH256ToHash(hash)
+		number := rawdb.ReadHeaderNumber(tx, h)
+		if number == nil {
+			break
+		}
+		body, err := e.getBody(ctx, tx, h, *number)
+		if err != nil {
+			return nil, err
+		}
+		if body == nil {
+			break
+		}
+		bodies = append(bodies, &execution.BlockBody{
+			Transactions: body.RawBody().Transactions,
+			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+		})
+	}
+
+	return &execution.GetBodiesBatchResponse{Bodies: bodies}, nil
+}
+
+func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *execution.GetBodiesByRangeRequest) (*execution.GetBodiesBatchResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	bodies := make([]*execution.BlockBody, 0, req.Count)
+
+	for i := uint64(0); i < req.Count; i++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, req.Start+i)
+		if err != nil {
+			return nil, err
+		}
+		if hash == (libcommon.Hash{}) {
+			// break early if beyond the last known canonical header
+			break
+		}
+
+		body, err := e.getBody(ctx, tx, hash, req.Start+i)
+		if err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, &execution.BlockBody{
+			Transactions: body.RawBody().Transactions,
+			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
+		})
+	}
+
+	return &execution.GetBodiesBatchResponse{
+		Bodies: bodies,
+	}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {
@@ -124,6 +203,13 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+	}
+	td, err := rawdb.ReadTd(tx, hash, *blockNumber)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+	}
+	if td == nil {
+		return false, nil
 	}
 	return expectedHash == hash, nil
 }

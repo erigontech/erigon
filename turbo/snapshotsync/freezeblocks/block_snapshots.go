@@ -548,9 +548,8 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, err := snaptype.ParseFileName(s.dir, fName)
-		if err != nil {
-			s.logger.Warn("invalid segment name", "err", err, "name", fName)
+		f, ok := snaptype.ParseFileName(s.dir, fName)
+		if !ok {
 			continue
 		}
 		var processed bool = true
@@ -882,8 +881,28 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
+	finish := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			case <-finish:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	for _, t := range snaptype.AllSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
@@ -902,26 +921,19 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			})
 		}
 	}
-	finish := make(chan struct{})
 	go func() {
 		defer close(finish)
 		g.Wait()
 	}()
 
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	for {
-		select {
-		case <-finish:
-			return g.Wait()
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		}
+	// Block main thread
+	select {
+	case <-finish:
+		return g.Wait()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+
 }
 
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
@@ -2230,7 +2242,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		for _, t := range snaptype.AllSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
-			f, _ := snaptype.ParseFileName(snapDir, segName)
+			f, ok := snaptype.ParseFileName(snapDir, segName)
+			if !ok {
+				continue
+			}
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}

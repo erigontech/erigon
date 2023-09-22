@@ -92,6 +92,7 @@
     ],
     "logs": [
       {
+        "index": 0,
         "address": "0xcf1476387d780169410d4e936d75a206fda2a68c",
         "topics": [
           "0x92ca3a80853e6663fa31fa10b99225f18d4902939b4c53a9caae9043f6efd004"

@@ -72,7 +72,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return h
 	}
 	engine := api.engine()
-	block, err := api.blockByNumberWithSenders(ctx, dbtx, blockNum)
+	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -25,7 +26,7 @@ import (
 )
 
 func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
-	heimdallClient bor.IHeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
+	heimdallClient heimdall.IHeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger,
 ) consensus.Engine {
 	var eng consensus.Engine
@@ -132,9 +133,9 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 	if chainConfig.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if chainConfig.Aura != nil {
-		consensusConfig = &chainConfig.Aura
+		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &chainConfig.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake

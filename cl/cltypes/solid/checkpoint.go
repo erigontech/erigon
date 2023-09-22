@@ -3,6 +3,7 @@ package solid
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -30,6 +31,26 @@ func NewCheckpointFromParameters(
 // NewCheckpoint returns a new Checkpoint with the underlying byte slice initialized to zeros
 func NewCheckpoint() Checkpoint {
 	return make([]byte, checkpointSize)
+}
+
+func (c Checkpoint) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Epoch uint64
+		Root  libcommon.Hash
+	}{Epoch: c.Epoch(), Root: c.BlockRoot()})
+}
+
+func (c Checkpoint) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		Epoch uint64
+		Root  libcommon.Hash
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	c.SetEpoch(tmp.Epoch)
+	c.SetBlockRoot(tmp.Root)
+	return nil
 }
 
 // SetBlockRoot copies the given blockRoot into the correct location within the Checkpoint

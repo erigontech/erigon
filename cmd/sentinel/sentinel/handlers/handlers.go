@@ -17,9 +17,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/log/v3"
@@ -37,7 +37,7 @@ type ConsensusHandlers struct {
 	genesisConfig *clparams.GenesisConfig
 	ctx           context.Context
 
-	db kv.RoDB // Read stuff from database to answer
+	beaconDB persistence.RawBeaconBlockChain
 }
 
 const (
@@ -45,13 +45,13 @@ const (
 	ResourceUnavaiablePrefix = 0x03
 )
 
-func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
 	peers *peers.Manager, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:         peers,
 		host:          host,
 		metadata:      metadata,
-		db:            db,
+		beaconDB:      db,
 		genesisConfig: genesisConfig,
 		beaconConfig:  beaconConfig,
 		ctx:           ctx,

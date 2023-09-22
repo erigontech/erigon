@@ -66,20 +66,20 @@ func (st *Stack) Cap() int {
 }
 
 func (st *Stack) Swap(n int) {
-	st.Data[st.Len()-n], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-n]
+	st.Data[len(st.Data)-n], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-n]
 }
 
 func (st *Stack) Dup(n int) {
-	st.Push(&st.Data[st.Len()-n])
+	st.Data = append(st.Data, st.Data[len(st.Data)-n])
 }
 
 func (st *Stack) Peek() *uint256.Int {
-	return &st.Data[st.Len()-1]
+	return &st.Data[len(st.Data)-1]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.Data[st.Len()-n-1]
+	return &st.Data[len(st.Data)-n-1]
 }
 
 func (st *Stack) Reset() {

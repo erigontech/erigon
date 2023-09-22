@@ -113,7 +113,9 @@ func (t *prestateTracer) CaptureStart(env vm.VMInterface, from libcommon.Address
 	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
 	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
 	t.pre[from].Balance = fromBal
-	t.pre[from].Nonce--
+	if t.pre[from].Nonce > 0 {
+		t.pre[from].Nonce--
+	}
 
 	if create && t.config.DiffMode {
 		t.created[to] = true

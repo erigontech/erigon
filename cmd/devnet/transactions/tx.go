@@ -13,8 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
+	"github.com/ledgerwatch/erigon/rpc"
 
 	"github.com/holiman/uint256"
 
@@ -219,7 +219,7 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 		return nil, libcommon.Address{}, fmt.Errorf("Unknown from account: %s", from)
 	}
 
-	res, err := node.GetTransactionCount(fromAccount.Address, requests.BlockNumbers.Pending)
+	res, err := node.GetTransactionCount(fromAccount.Address, rpc.PendingBlock)
 
 	if err != nil {
 		return nil, libcommon.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAccount.Address, err)
@@ -241,7 +241,7 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, amountHigher int, baseFeePerGas uint64, toAddress libcommon.Address, fromAddress libcommon.Address) ([]types.Transaction, []types.Transaction, error) {
 	node := devnet.SelectNode(ctx)
 
-	res, err := node.GetTransactionCount(fromAddress, requests.BlockNumbers.Pending)
+	res, err := node.GetTransactionCount(fromAddress, rpc.PendingBlock)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)

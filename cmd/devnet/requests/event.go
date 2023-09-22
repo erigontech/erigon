@@ -33,11 +33,6 @@ func Compare(expected types.Log, actual types.Log) ([]error, bool) {
 	return errs, len(errs) == 0
 }
 
-type EthGetLogs struct {
-	CommonResponse
-	Result []types.Log `json:"result"`
-}
-
 func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) types.Log {
 	return types.Log{
 		Address:     address,
@@ -53,14 +48,13 @@ func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, top
 }
 
 func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	var b EthGetLogs
+	var result []types.Log
 
-	method, body := reqGen.getLogs(query)
-	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("failed to fetch logs: %v", res.Err)
+	if err := reqGen.callCli(&result, Methods.ETHGetLogs, query); err != nil {
+		return nil, err
 	}
 
-	return b.Result, nil
+	return result, nil
 }
 
 func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
@@ -89,19 +83,4 @@ func hashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 	}
 
 	return true
-}
-
-func (req *requestGenerator) getLogs(query ethereum.FilterQuery) (RPCMethod, string) {
-	if len(query.Addresses) == 0 {
-		const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x"}],"id":%d}`
-		return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, query.FromBlock.Uint64(), query.ToBlock.Uint64(), req.reqID)
-	}
-
-	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
-	return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, query.FromBlock.Uint64(), query.ToBlock.Uint64(), query.Addresses[0], req.reqID)
-}
-
-func (req *requestGenerator) subscribeLogs(query ethereum.FilterQuery) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
-	return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, query.FromBlock.Uint64(), query.ToBlock.Uint64(), query.Addresses[0], req.reqID)
 }

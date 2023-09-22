@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.TransactOpts, error) {
@@ -21,7 +23,7 @@ func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.Transact
 		return nil, err
 	}
 
-	count, err := node.GetTransactionCount(sender, requests.BlockNumbers.Pending)
+	count, err := node.GetTransactionCount(sender, rpc.PendingBlock)
 
 	if err != nil {
 		return nil, err
@@ -57,7 +59,7 @@ func Deploy[C any](ctx context.Context, deployer libcommon.Address, deploy func(
 func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *C, error)) (libcommon.Address, types.Transaction, *C, error) {
 	node := devnet.SelectNode(ctx)
 
-	count, err := node.GetTransactionCount(auth.From, requests.BlockNumbers.Pending)
+	count, err := node.GetTransactionCount(auth.From, rpc.PendingBlock)
 
 	if err != nil {
 		return libcommon.Address{}, nil, nil, err
@@ -72,7 +74,7 @@ func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy f
 }
 
 var DeploymentChecker = blocks.BlockHandlerFunc(
-	func(ctx context.Context, node devnet.Node, block *requests.BlockResult, transaction *requests.Transaction) error {
+	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
 		if err := blocks.CompletionChecker(ctx, node, block, transaction); err != nil {
 			return nil
 		}

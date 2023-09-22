@@ -19,11 +19,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -48,6 +49,7 @@ func StageLoop(ctx context.Context,
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	hook *Hook,
+	forcePartialCommit bool,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -63,7 +65,7 @@ func StageLoop(ctx context.Context,
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook, forcePartialCommit)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -94,7 +96,7 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook, forcePartialCommit bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -116,6 +118,9 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
 		canRunCycleInOneTransaction = true
+	}
+	if forcePartialCommit {
+		canRunCycleInOneTransaction = false
 	}
 
 	// Main steps:
@@ -258,7 +263,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 
 	// Update sentry status for peers to see our sync status
 	var headTd *big.Int
-	var plainStateVersion uint64
+	var plainStateVersion, finalizedBlock uint64
 	head, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
@@ -272,7 +277,10 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 	headHeader = rawdb.ReadHeader(tx, headHash, head)
 	currentHeder = rawdb.ReadCurrentHeader(tx)
-
+	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
+	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
+		finalizedBlock = *fb
+	}
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
 	if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
@@ -301,8 +309,19 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
+		var pendingBlobFee uint64 = params.MinBlobGasPrice
+		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
+		if currentHeder.ExcessBlobGas != nil {
+			f, err := misc.GetBlobGasPrice(excessBlobGas)
+			if err != nil {
+				return err
+			}
+			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {
+				pendingBlobFee = f.Uint64()
+			}
+		}
 
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit)
+		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeder.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END
 	return nil
@@ -346,6 +365,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 			return err
 		}
 	}
+	if err := rawdb.TruncateCanonicalChain(ctx, batch, header.Number.Uint64()+1); err != nil {
+		return err
+	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {
 		currentHeader := headersChain[i]
@@ -355,7 +377,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if chainReader != nil {
 			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				return err
+				return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 			}
 		}
 
@@ -388,7 +410,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	}
 	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
 		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 
 	// Setup
@@ -428,7 +450,7 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	agg *state.AggregatorV3,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient bor.IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
@@ -441,7 +463,7 @@ func NewDefaultStages(ctx context.Context,
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator),
-		stagedsync.StageBorHeimdallCfg(db, *controlServer.ChainConfig, heimdallClient, blockReader),
+		stagedsync.StageBorHeimdallCfg(db, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, blockReader, controlServer.Hd, controlServer.Penalize),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
@@ -529,7 +551,7 @@ func NewPipelineStages(ctx context.Context,
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
-	logger log.Logger) (*stagedsync.Sync, error) {
+	logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
@@ -560,5 +582,5 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
-	), nil
+	)
 }

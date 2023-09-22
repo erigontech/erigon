@@ -22,7 +22,7 @@ func (r estimatedRamPerWorker) WorkersHalf() int    { return cmp.Max(1, r.Worker
 func (r estimatedRamPerWorker) WorkersQuarter() int { return cmp.Max(1, r.Workers()/4) }
 
 const (
-	IndexSnapshot     = estimatedRamPerWorker(2 * datasize.GB)   //elias-fano index building is single-threaded
+	IndexSnapshot     = estimatedRamPerWorker(3 * datasize.GB)   //elias-fano index building is single-threaded
 	CompressSnapshot  = estimatedRamPerWorker(1 * datasize.GB)   //1-file-compression is multi-threaded
 	ReconstituteState = estimatedRamPerWorker(512 * datasize.MB) //state-reconstitution is multi-threaded
 )

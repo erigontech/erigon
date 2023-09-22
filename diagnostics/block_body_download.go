@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/dataflow"
 )
 
-func SetupBlockBodyDownload() {
-	http.HandleFunc("/debug/metrics/block_body_download", func(w http.ResponseWriter, r *http.Request) {
+func SetupBlockBodyDownload(metricsMux *http.ServeMux) {
+	metricsMux.HandleFunc("/debug/metrics/block_body_download", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeBlockBodyDownload(w, r)
 	})
