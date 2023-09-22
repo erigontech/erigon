@@ -1,10 +1,12 @@
 # Downloader
 
-Service to seed/download historical data (snapshots, immutable .seg files) by Bittorrent protocol
+Service to seed/download historical data (snapshots, immutable .seg files) by
+Bittorrent protocol
 
 ## Start Erigon with snapshots support
 
-As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process.
+As many other Erigon components (txpool, sentry, rpc daemon) it may be
+built-into Erigon or run as separated process.
 
 ```shell
 # 1. Downloader by default run inside Erigon, by `--snapshots` flag:
@@ -28,8 +30,10 @@ Use `--snap.keepblocks=true` to don't delete retired blocks from DB
 
 Any network/chain can start with snapshot sync:
 
-- node will download only snapshots registered in next repo https://github.com/ledgerwatch/erigon-snapshot
-- node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
+- node will download only snapshots registered in next
+  repo https://github.com/ledgerwatch/erigon-snapshot
+- node will move old blocks from DB to snapshots of 1K blocks size, then merge
+  snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
 
 Flag `--snapshots` is compatible with `--prune` flag
@@ -67,33 +71,45 @@ erigon snapshots index --datadir=<your_datadir>
 
 ## Architecture
 
-Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
+Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files
+can be created 4 ways:
 
-- Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger creation of .torrent files
-- Erigon can create new .seg file, Downloader will scan .seg file and create .torrent
-- operator can manually copy .torrent files (rsync from other server or restore from backup)
-- operator can manually copy .seg file, Downloader will scan .seg file and create .torrent
+- Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger
+  creation of .torrent files
+- Erigon can create new .seg file, Downloader will scan .seg file and create
+  .torrent
+- operator can manually copy .torrent files (rsync from other server or restore
+  from backup)
+- operator can manually copy .seg file, Downloader will scan .seg file and
+  create .torrent
 
 Erigon does:
 
 - connect to Downloader
 - share list of hashes (see https://github.com/ledgerwatch/erigon-snapshot )
 - wait for download of all snapshots
-- when .seg available - automatically create .idx files - secondary indices, for example to find block by hash
-- then switch to normal staged sync (which doesn't require connection to Downloader)
-- ensure that snapshot downloading happens only once: even if new Erigon version does include new pre-verified snapshot
-  hashes, Erigon will not download them (to avoid unpredictable downtime) - but Erigon may produce them by self.
+- when .seg available - automatically create .idx files - secondary indices, for
+  example to find block by hash
+- then switch to normal staged sync (which doesn't require connection to
+  Downloader)
+- ensure that snapshot downloading happens only once: even if new Erigon version
+  does include new pre-verified snapshot
+  hashes, Erigon will not download them (to avoid unpredictable downtime) - but
+  Erigon may produce them by self.
 
 Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
-- Use https://github.com/ngosang/trackerslist see [./trackers/embed.go](../../../erigon-lib/downloader/trackers/embed.go)
+- Use https://github.com/ngosang/trackerslist
+  see [./trackers/embed.go](../../../erigon-lib/downloader/trackers/embed.go)
 - automatically seeding
 
 Technical details:
 
-- To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
-- If you add/remove any .seg file manually, also need remove `<your_datadir>/snapshots/db` folder
+- To prevent attack - .idx creation using random Seed - all nodes will have
+  different .idx file (and same .seg files)
+- If you add/remove any .seg file manually, also need
+  remove `<your_datadir>/snapshots/db` folder
 
 ## How to verify that .seg files have the same checksum as current .torrent files
 
@@ -118,3 +134,27 @@ crontab -e
 ```
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
+
+## Create seedbox to support network
+
+```
+# Can run on empty datadir
+downloader --datadir=<your> --chain=mainnet
+```
+
+## Launch new network or new type of snapshots
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seedingsnapshots. But new network or new type of snapshots need Bootstraping
+step - no peers yet have this files.
+
+**WebSeed** - is centralized file-storage - used to Bootstrap network. For
+example S3 with signed_url.
+
+Erigon dev team can share existing **webseed_url**. Or you can create own.
+
+```
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+```

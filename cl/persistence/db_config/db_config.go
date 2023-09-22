@@ -5,15 +5,11 @@ import (
 	"database/sql"
 )
 
-type DatabaseConfiguration struct {
-	PruneDepth uint64
-	FullBlocks bool
-}
+type DatabaseConfiguration struct{ PruneDepth uint64 }
 
-var DefaultDatabaseConfiguration = DatabaseConfiguration{
-	PruneDepth: 1000, // should be 1_000_000
-	FullBlocks: false,
-}
+var DefaultDatabaseConfiguration = DatabaseConfiguration{PruneDepth: 1000}
+
+// should be 1_000_000
 
 func WriteConfigurationIfNotExist(ctx context.Context, tx *sql.Tx, cfg DatabaseConfiguration) error {
 	var count int
@@ -24,7 +20,7 @@ func WriteConfigurationIfNotExist(ctx context.Context, tx *sql.Tx, cfg DatabaseC
 	if count > 0 {
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO data_config (prune_depth, full_blocks) VALUES (?, ?);", cfg.PruneDepth, cfg.FullBlocks)
+	_, err = tx.ExecContext(ctx, "INSERT INTO data_config (prune_depth) VALUES (?);", cfg.PruneDepth)
 	if err != nil {
 		return err
 	}
@@ -32,14 +28,11 @@ func WriteConfigurationIfNotExist(ctx context.Context, tx *sql.Tx, cfg DatabaseC
 }
 
 func ReadConfiguration(ctx context.Context, tx *sql.Tx) (DatabaseConfiguration, error) {
-	var (
-		pruneDepth uint64
-		fullBlocks bool
-	)
+	var pruneDepth uint64
 
-	err := tx.QueryRowContext(ctx, "SELECT prune_depth, full_blocks FROM data_config").Scan(&pruneDepth, &fullBlocks)
+	err := tx.QueryRowContext(ctx, "SELECT prune_depth FROM data_config").Scan(&pruneDepth)
 	if err != nil {
 		return DatabaseConfiguration{}, err
 	}
-	return DatabaseConfiguration{PruneDepth: pruneDepth, FullBlocks: fullBlocks}, nil
+	return DatabaseConfiguration{PruneDepth: pruneDepth}, nil
 }

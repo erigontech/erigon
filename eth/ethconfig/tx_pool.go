@@ -70,6 +70,7 @@ var DefaultTxPool2Config = func(fullCfg *Config) txpoolcfg.Config {
 	cfg.BlobPriceBump = fullCfg.TxPool.BlobPriceBump
 	cfg.MinFeeCap = pool1Cfg.PriceLimit
 	cfg.AccountSlots = pool1Cfg.AccountSlots
+	cfg.BlobSlots = fullCfg.TxPool.BlobSlots
 	cfg.LogEvery = 1 * time.Minute
 	cfg.CommitEvery = 5 * time.Minute
 	cfg.TracedSenders = pool1Cfg.TracedSenders

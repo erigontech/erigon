@@ -18,23 +18,27 @@ var _ = (*btHeaderMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (b btHeader) MarshalJSON() ([]byte, error) {
 	type btHeader struct {
-		Bloom            types.Bloom
-		Coinbase         libcommon.Address
-		MixHash          libcommon.Hash
-		Nonce            types.BlockNonce
-		Number           *math.HexOrDecimal256
-		Hash             libcommon.Hash
-		ParentHash       libcommon.Hash
-		ReceiptTrie      libcommon.Hash
-		StateRoot        libcommon.Hash
-		TransactionsTrie libcommon.Hash
-		UncleHash        libcommon.Hash
-		ExtraData        hexutility.Bytes
-		Difficulty       *math.HexOrDecimal256
-		GasLimit         math.HexOrDecimal64
-		GasUsed          math.HexOrDecimal64
-		Timestamp        math.HexOrDecimal64
-		BaseFee          *math.HexOrDecimal256
+		Bloom                 types.Bloom
+		Coinbase              libcommon.Address
+		MixHash               libcommon.Hash
+		Nonce                 types.BlockNonce
+		Number                *math.HexOrDecimal256
+		Hash                  libcommon.Hash
+		ParentHash            libcommon.Hash
+		ReceiptTrie           libcommon.Hash
+		StateRoot             libcommon.Hash
+		TransactionsTrie      libcommon.Hash
+		UncleHash             libcommon.Hash
+		ExtraData             hexutility.Bytes
+		Difficulty            *math.HexOrDecimal256
+		GasLimit              math.HexOrDecimal64
+		GasUsed               math.HexOrDecimal64
+		Timestamp             math.HexOrDecimal64
+		BaseFeePerGas         *math.HexOrDecimal256
+		WithdrawalsRoot       *libcommon.Hash
+		BlobGasUsed           *math.HexOrDecimal64
+		ExcessBlobGas         *math.HexOrDecimal64
+		ParentBeaconBlockRoot *libcommon.Hash
 	}
 	var enc btHeader
 	enc.Bloom = b.Bloom
@@ -53,30 +57,38 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.GasLimit = math.HexOrDecimal64(b.GasLimit)
 	enc.GasUsed = math.HexOrDecimal64(b.GasUsed)
 	enc.Timestamp = math.HexOrDecimal64(b.Timestamp)
-	enc.BaseFee = (*math.HexOrDecimal256)(b.BaseFee)
+	enc.BaseFeePerGas = (*math.HexOrDecimal256)(b.BaseFeePerGas)
+	enc.WithdrawalsRoot = b.WithdrawalsRoot
+	enc.BlobGasUsed = (*math.HexOrDecimal64)(b.BlobGasUsed)
+	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
+	enc.ParentBeaconBlockRoot = b.ParentBeaconBlockRoot
 	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
 func (b *btHeader) UnmarshalJSON(input []byte) error {
 	type btHeader struct {
-		Bloom            *types.Bloom
-		Coinbase         *libcommon.Address
-		MixHash          *libcommon.Hash
-		Nonce            *types.BlockNonce
-		Number           *math.HexOrDecimal256
-		Hash             *libcommon.Hash
-		ParentHash       *libcommon.Hash
-		ReceiptTrie      *libcommon.Hash
-		StateRoot        *libcommon.Hash
-		TransactionsTrie *libcommon.Hash
-		UncleHash        *libcommon.Hash
-		ExtraData        *hexutility.Bytes
-		Difficulty       *math.HexOrDecimal256
-		GasLimit         *math.HexOrDecimal64
-		GasUsed          *math.HexOrDecimal64
-		Timestamp        *math.HexOrDecimal64
-		BaseFee          *math.HexOrDecimal256 `json:"baseFeePerGas"`
+		Bloom                 *types.Bloom
+		Coinbase              *libcommon.Address
+		MixHash               *libcommon.Hash
+		Nonce                 *types.BlockNonce
+		Number                *math.HexOrDecimal256
+		Hash                  *libcommon.Hash
+		ParentHash            *libcommon.Hash
+		ReceiptTrie           *libcommon.Hash
+		StateRoot             *libcommon.Hash
+		TransactionsTrie      *libcommon.Hash
+		UncleHash             *libcommon.Hash
+		ExtraData             *hexutility.Bytes
+		Difficulty            *math.HexOrDecimal256
+		GasLimit              *math.HexOrDecimal64
+		GasUsed               *math.HexOrDecimal64
+		Timestamp             *math.HexOrDecimal64
+		BaseFeePerGas         *math.HexOrDecimal256
+		WithdrawalsRoot       *libcommon.Hash
+		BlobGasUsed           *math.HexOrDecimal64
+		ExcessBlobGas         *math.HexOrDecimal64
+		ParentBeaconBlockRoot *libcommon.Hash
 	}
 	var dec btHeader
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -130,8 +142,20 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp != nil {
 		b.Timestamp = uint64(*dec.Timestamp)
 	}
-	if dec.BaseFee != nil {
-		b.BaseFee = (*big.Int)(dec.BaseFee)
+	if dec.BaseFeePerGas != nil {
+		b.BaseFeePerGas = (*big.Int)(dec.BaseFeePerGas)
+	}
+	if dec.WithdrawalsRoot != nil {
+		b.WithdrawalsRoot = dec.WithdrawalsRoot
+	}
+	if dec.BlobGasUsed != nil {
+		b.BlobGasUsed = (*uint64)(dec.BlobGasUsed)
+	}
+	if dec.ExcessBlobGas != nil {
+		b.ExcessBlobGas = (*uint64)(dec.ExcessBlobGas)
+	}
+	if dec.ParentBeaconBlockRoot != nil {
+		b.ParentBeaconBlockRoot = dec.ParentBeaconBlockRoot
 	}
 	return nil
 }

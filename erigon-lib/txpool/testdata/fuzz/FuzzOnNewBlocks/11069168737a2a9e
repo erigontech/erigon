@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("20$X")
+[]byte("y")
+[]byte("0")
+[]byte("0127")
+[]byte("*0.0.2")
+byte('©')

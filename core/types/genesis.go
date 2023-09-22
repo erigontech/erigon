@@ -41,27 +41,30 @@ var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
 type Genesis struct {
-	Config                *chain.Config  `json:"config"`
-	Nonce                 uint64         `json:"nonce"`
-	Timestamp             uint64         `json:"timestamp"`
-	ExtraData             []byte         `json:"extraData"`
-	GasLimit              uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty            *big.Int       `json:"difficulty" gencodec:"required"`
-	Mixhash               common.Hash    `json:"mixHash"`
-	Coinbase              common.Address `json:"coinbase"`
-	BaseFee               *big.Int       `json:"baseFeePerGas"`
-	BlobGasUsed           *uint64        `json:"blobGasUsed"`
-	ExcessBlobGas         *uint64        `json:"excessBlobGas"`
-	Alloc                 GenesisAlloc   `json:"alloc"      gencodec:"required"`
-	AuRaStep              uint64         `json:"auRaStep"`
-	AuRaSeal              []byte         `json:"auRaSeal"`
-	ParentBeaconBlockRoot *common.Hash   `json:"parentBeaconBlockRoot"`
+	Config     *chain.Config  `json:"config"`
+	Nonce      uint64         `json:"nonce"`
+	Timestamp  uint64         `json:"timestamp"`
+	ExtraData  []byte         `json:"extraData"`
+	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
+	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
+	Mixhash    common.Hash    `json:"mixHash"`
+	Coinbase   common.Address `json:"coinbase"`
+	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+
+	AuRaStep uint64 `json:"auRaStep"`
+	AuRaSeal []byte `json:"auRaSeal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
 	Number     uint64      `json:"number"`
 	GasUsed    uint64      `json:"gasUsed"`
 	ParentHash common.Hash `json:"parentHash"`
+
+	// Header fields added in London and later hard forks
+	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
+	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
+	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.

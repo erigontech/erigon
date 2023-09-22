@@ -22,8 +22,7 @@ var migrations = []string{
 	`CREATE INDEX idx_state_root ON beacon_indicies (state_root);`,
 	`CREATE INDEX idx_parent_block_root ON beacon_indicies (parent_block_root);`,
 	`CREATE TABLE IF NOT EXISTS data_config (
-		prune_depth INTEGER NOT NULL,
-		full_blocks BOOLEAN NOT NULL
+		prune_depth INTEGER NOT NULL
 	);`,
 }
 

@@ -196,21 +196,23 @@ Loop:
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
 					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-					//continue
+					continue
 				}
 				dbg.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
-				log.Info(fmt.Sprintf("[%s] download", logPrefix),
+				suffix := "downloading archives"
+				if stats.Progress > 0 && stats.DownloadRate == 0 {
+					suffix += "verifying archives"
+				}
+				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-					"download-time-left", downloadTimeLeft,
-					"total-download-time", time.Since(downloadStartTime).Round(time.Second).String(),
+					"time-left", downloadTimeLeft,
+					"total-time", time.Since(downloadStartTime).Round(time.Second).String(),
 					"download", common.ByteCount(stats.DownloadRate)+"/s",
 					"upload", common.ByteCount(stats.UploadRate)+"/s",
-				)
-				log.Info(fmt.Sprintf("[%s] download", logPrefix),
 					"peers", stats.PeersUnique,
-					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
+					"connections", stats.ConnectionsTotal,
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 				)
 			}

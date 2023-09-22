@@ -6,8 +6,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -19,7 +19,7 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB, logger log.Logger) (*sentinel.Sentinel, error) {
+func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, logger log.Logger) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(context.Background(), cfg, db, logger)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB, logger log.Logger)
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := createSentinel(cfg, db, logger)
 	if err != nil {

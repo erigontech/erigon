@@ -29,6 +29,7 @@ import (
 )
 
 // Handler returns an HTTP handler which dump metrics in Prometheus format.
+// Output format can be cheched here: https://o11y.tools/metricslint/
 func Handler(reg Registry) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Gather and pre-sort the metrics to avoid random listings
@@ -56,27 +57,34 @@ func Handler(reg Registry) http.Handler {
 		c := newCollector()
 		c.buff.WriteRune('\n')
 
+		var typeName string
+		var prevTypeName string
+
 		for _, name := range names {
 			i := reg.Get(name)
+
+			typeName = stripLabels(name)
 
 			switch m := i.(type) {
 			case *metrics2.Counter:
 				if m.IsGauge() {
-					c.writeGauge(name, m.Get())
+					c.writeGauge(name, m.Get(), typeName != prevTypeName)
 				} else {
-					c.writeCounter(name, m.Get())
+					c.writeCounter(name, m.Get(), typeName != prevTypeName)
 				}
 			case *metrics2.Gauge:
-				c.addGauge(name, m)
+				c.writeGauge(name, m, typeName != prevTypeName)
 			case *metrics2.FloatCounter:
-				c.addFloatCounter(name, m)
+				c.writeFloatCounter(name, m, typeName != prevTypeName)
 			case *metrics2.Histogram:
-				c.addHistogram(name, m)
+				c.writeHistogram(name, m, typeName != prevTypeName)
 			case *metrics2.Summary:
-				c.addTimer(name, m)
+				c.writeTimer(name, m, typeName != prevTypeName)
 			default:
 				log.Warn("Unknown Prometheus metric type", "type", fmt.Sprintf("%T", i))
 			}
+
+			prevTypeName = typeName
 		}
 		w.Header().Add("Content-Type", "text/plain")
 		w.Header().Add("Content-Length", fmt.Sprint(c.buff.Len()))
