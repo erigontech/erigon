@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("\xdfuQ\b\x00\x00Ǔ \xd2\x00 aG\xdeGa")
+[]byte("u")
+[]byte("u]Qa\x16\xb66\xf6\x13}\xddRx[f?\xae\x1fo\aB\xf7")
+[]byte("\xdf")
+[]byte("\xdfutQ\b\x16\xb6")
+byte('\r')

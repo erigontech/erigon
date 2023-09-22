@@ -420,7 +420,6 @@ $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
 $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
-$env:GO111MODULE = "on"
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null

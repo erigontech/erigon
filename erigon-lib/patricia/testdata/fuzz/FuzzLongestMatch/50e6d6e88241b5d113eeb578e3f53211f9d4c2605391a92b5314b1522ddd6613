@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("q}")
+[]byte("q}}}u\xa9\xa9\xa9")

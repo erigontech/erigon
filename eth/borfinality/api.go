@@ -1,49 +1,46 @@
 package borfinality
 
 import (
-	"context"
-	"errors"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-func GetFinalizedBlockNumber(tx kv.Tx, blockReader services.FullBlockReader) (uint64, error) {
+func GetFinalizedBlockNumber(tx kv.Tx) uint64 {
 	currentBlockNum := rawdb.ReadCurrentHeader(tx)
 
 	service := whitelist.GetWhitelistingService()
 
 	doExist, number, hash := service.GetWhitelistedMilestone()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := blockReader.BlockByNumber(context.Background(), tx, number)
 
-		if err != nil {
-			return 0, err
+		blockHeader := rawdb.ReadHeaderByNumber(tx, number)
+
+		if blockHeader == nil {
+			return 0
 		}
 
-		if block.Hash() == hash {
-			return number, nil
+		if blockHeader.Hash() == hash {
+			return number
 		}
 	}
 
 	doExist, number, hash = service.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := blockReader.BlockByNumber(context.Background(), tx, number)
+		blockHeader := rawdb.ReadHeaderByNumber(tx, number)
 
-		if err != nil {
-			return 0, err
+		if blockHeader == nil {
+			return 0
 		}
 
-		if block.Hash() == hash {
-			return number, nil
+		if blockHeader.Hash() == hash {
+			return number
 		}
 	}
 
-	return 0, errors.New("no finalized block")
+	return 0
 }
 
 // CurrentFinalizedBlock retrieves the current finalized block of the canonical

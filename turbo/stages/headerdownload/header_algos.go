@@ -763,6 +763,15 @@ func (hd *HeaderDownload) HasLink(linkHash libcommon.Hash) bool {
 	return false
 }
 
+func (hd *HeaderDownload) SourcePeerId(linkHash libcommon.Hash) [64]byte {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	if link, ok := hd.getLink(linkHash); ok {
+		return link.peerId
+	}
+	return [64]byte{}
+}
+
 // SaveExternalAnnounce - does mark hash as seen in external announcement
 // only such hashes will broadcast further after
 func (hd *HeaderDownload) SaveExternalAnnounce(hash libcommon.Hash) {

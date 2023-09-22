@@ -117,7 +117,7 @@ func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, executio
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 	engine := newMockEngine()
-	return NewBeaconChainDatabaseFilesystem(fs, engine, &clparams.MainnetBeaconConfig), db, engine
+	return NewBeaconChainDatabaseFilesystem(NewAferoRawBlockSaver(fs, &clparams.MainnetBeaconConfig), engine, &clparams.MainnetBeaconConfig), db, engine
 }
 
 func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {

@@ -234,6 +234,8 @@ type Config struct {
 
 	// No heimdall service
 	WithoutHeimdall bool
+	// Heimdall services active
+	WithHeimdallMilestones bool
 	// Ethstats service
 	Ethstats string
 	// Consensus layer

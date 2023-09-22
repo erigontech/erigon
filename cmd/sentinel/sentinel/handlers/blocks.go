@@ -19,6 +19,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
+// func (c *ConsensusHandlers) blocksByRangeHandlerPROTODONOTTOUCH69(stream network.Stream) error {
+// 	log.Trace("Got block by range handler call")
+// 	return ssz_snappy.EncodeAndWrite(stream, &emptyString{}, ResourceUnavaiablePrefix)
+// }
+
 func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) error {
 	log.Trace("Got block by range handler call")
 	return ssz_snappy.EncodeAndWrite(stream, &emptyString{}, ResourceUnavaiablePrefix)
