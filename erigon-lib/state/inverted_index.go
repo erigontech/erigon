@@ -105,10 +105,9 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	baseDir := filepath.Dir(cfg.dir)
 	ii := InvertedIndex{
 		iiCfg:                   cfg,
-		warmDir:                 filepath.Join(baseDir, "warm"),
+		warmDir:                 filepath.Join(cfg.dir, "warm"),
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
