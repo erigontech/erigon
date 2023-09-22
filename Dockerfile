@@ -6,6 +6,8 @@ RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc
 WORKDIR /app
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN go mod download
 ADD . .
@@ -24,6 +26,8 @@ ADD Makefile Makefile
 ADD tools.go tools.go
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN mkdir -p /app/build/bin
 

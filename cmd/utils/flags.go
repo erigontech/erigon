@@ -173,6 +173,11 @@ var (
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
 		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
 	}
+	TxPoolBlobSlotsFlag = cli.Uint64Flag{
+		Name:  "txpool.blobslots",
+		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
+		Value: txpoolcfg.DefaultConfig.BlobSlots,
+	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
@@ -736,6 +741,7 @@ var (
 		Usage: "URL of Heimdall service",
 		Value: "http://localhost:1317",
 	}
+
 	WebSeedsFlag = cli.StringFlag{
 		Name:  "webseeds",
 		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
@@ -756,6 +762,12 @@ var (
 	BorBlockSizeFlag = cli.BoolFlag{
 		Name:  "bor.minblocksize",
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
+	}
+
+	WithHeimdallMilestones = cli.BoolFlag{
+		Name:  "bor.milestone",
+		Usage: "Enabling bor milestone processing",
+		Value: false,
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
@@ -1243,8 +1255,14 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)
 	}
+	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
+		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
 	if ctx.IsSet(TxPoolAccountSlotsFlag.Name) {
 		cfg.AccountSlots = ctx.Uint64(TxPoolAccountSlotsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
+		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
@@ -1362,6 +1380,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.HeimdallgRPCAddress = ctx.String(HeimdallgRPCAddressFlag.Name)
+	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

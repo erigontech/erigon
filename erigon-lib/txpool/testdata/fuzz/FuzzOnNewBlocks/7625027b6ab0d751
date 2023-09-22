@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("3")
+[]byte("7")
+[]byte("2")
+[]byte("1")
+[]byte("88%ca0Y7a$B2")
+byte('\a')

@@ -350,7 +350,7 @@ func HoleskyGenesisBlock() *types.Genesis {
 		Nonce:      4660,
 		GasLimit:   25000000,
 		Difficulty: big.NewInt(1),
-		Timestamp:  1694786100,
+		Timestamp:  1695902100,
 		Alloc:      readPrealloc("allocs/holesky.json"),
 	}
 }

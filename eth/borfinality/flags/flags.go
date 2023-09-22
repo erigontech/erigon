@@ -1,3 +1,3 @@
 package flags
 
-const Milestone = true
+var Milestone = true

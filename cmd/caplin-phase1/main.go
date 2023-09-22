@@ -20,6 +20,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -122,7 +124,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer, cfg.Dirs, beacon.RouterConfiguration{
+	beaconDB, sqlDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{}, cfg.BeaconCfg, persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.Tmp), cfg.Dirs.Tmp, executionEngine)
+	if err != nil {
+		return err
+	}
+	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, sqlDB, beaconDB, cfg.Dirs.Tmp, beacon.RouterConfiguration{
 		Protocol:        cfg.BeaconProtocol,
 		Address:         cfg.BeaconAddr,
 		ReadTimeTimeout: cfg.BeaconApiReadTimeout,

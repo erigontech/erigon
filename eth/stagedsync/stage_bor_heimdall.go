@@ -12,12 +12,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/dataflow"
+	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -30,8 +34,10 @@ type BorHeimdallCfg struct {
 	db               kv.RwDB
 	miningState      MiningState
 	chainConfig      chain.Config
-	heimdallClient   bor.IHeimdallClient
+	heimdallClient   heimdall.IHeimdallClient
 	blockReader      services.FullBlockReader
+	hd               *headerdownload.HeaderDownload
+	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
 }
 
@@ -39,8 +45,10 @@ func StageBorHeimdallCfg(
 	db kv.RwDB,
 	miningState MiningState,
 	chainConfig chain.Config,
-	heimdallClient bor.IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	blockReader services.FullBlockReader,
+	hd *headerdownload.HeaderDownload,
+	penalize func(context.Context, []headerdownload.PenaltyItem),
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
@@ -48,6 +56,8 @@ func StageBorHeimdallCfg(
 		chainConfig:      chainConfig,
 		heimdallClient:   heimdallClient,
 		blockReader:      blockReader,
+		hd:               hd,
+		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
 	}
 }
@@ -80,15 +90,59 @@ func BorHeimdallForward(
 	var header *types.Header
 	var headNumber uint64
 
+	headNumber, err = stages.GetStageProgress(tx, stages.Headers)
+
+	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headNumber)
+
+	if err != nil {
+		return err
+	}
+
+	if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
+		s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
+
+		return fmt.Errorf("milestone block mismatch at %d", headNumber)
+
+		/*
+			This is the code from the original PR - it has been removed in favour of having the outer
+			stage loop perform the unwind which is the standard erigon operating model
+
+			err := s.state.RunUnwind(nil, tx)
+			if err != nil {
+				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind.Load()))
+				return err
+			}
+
+			var reset uint64 = 0
+			generics.BorMilestoneRewind.Store(&reset)
+
+			// Update highest in db field after the rewind
+			if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+				return err
+			}
+		*/
+	}
+
+	service := whitelist.GetWhitelistingService()
+
 	if mine {
 		header = cfg.miningState.MiningBlock.Header
-		headNumber = header.Number.Uint64()
-	} else {
-		headNumber, err = stages.GetStageProgress(tx, stages.Headers)
 
-		if err != nil {
-			return fmt.Errorf("getting headers progress: %w", err)
+		if minedHeadNumber := header.Number.Uint64(); minedHeadNumber > headNumber {
+			// Whitelist service is called to check if the bor chain is
+			// on the cannonical chain according to milestones
+
+			if !service.IsValidChain(headNumber, []*types.Header{header}) {
+				logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", header.Hash(), "height", minedHeadNumber, "err", err)
+				return err
+			}
+		} else {
+			return fmt.Errorf("attempting to mine %d, which is behind current head: %d", minedHeadNumber, headNumber)
 		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
 	if s.BlockNumber == headNumber {
@@ -121,14 +175,29 @@ func BorHeimdallForward(
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
+
 	for blockNum := lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
-		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
-			if !mine {
-				header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum)
-				if err != nil {
+		if !mine {
+			header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum)
+			if err != nil {
+				return err
+			}
+
+			// Whitelist service is called to check if the bor chain is
+			// on the cannonical chain according to milestones
+			if service != nil {
+				if !service.IsValidChain(headNumber, []*types.Header{header}) {
+					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum, "err", err)
+					cfg.penalize(ctx, []headerdownload.PenaltyItem{
+						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
+					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderEvicted)
 					return err
 				}
 			}
+		}
+
+		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+
 			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
@@ -139,9 +208,11 @@ func BorHeimdallForward(
 			}
 		}
 	}
+
 	if err = s.Update(tx, headNumber); err != nil {
 		return err
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -158,7 +229,7 @@ func fetchAndWriteBorEvents(
 	lastEventId uint64,
 	chainID string,
 	tx kv.RwTx,
-	heimdallClient bor.IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
@@ -263,7 +334,7 @@ func fetchAndWriteSpans(
 	ctx context.Context,
 	blockNum uint64,
 	tx kv.RwTx,
-	heimdallClient bor.IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	logPrefix string,
 	logger log.Logger,
 ) error {

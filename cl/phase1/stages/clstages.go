@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -35,7 +34,7 @@ type Cfg struct {
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
 	indiciesDB      *sql.DB
-	dirs            datadir.Dirs
+	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
 }
 
@@ -55,8 +54,8 @@ func ClStagesCfg(
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
-	dirs datadir.Dirs,
 	indiciesDB *sql.DB,
+	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 ) *Cfg {
 	return &Cfg{
@@ -67,8 +66,8 @@ func ClStagesCfg(
 		executionClient: executionClient,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
+		tmpdir:          tmpdir,
 		beaconDB:        beaconDB,
-		dirs:            dirs,
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
 	}
@@ -244,7 +243,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.dbConfig, startingRoot, startingSlot, cfg.dirs.Tmp, logger), ctx, logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.dbConfig, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
 						downloaded = false
 						return err
 					}
@@ -263,7 +262,6 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
 					currentEpoch := args.seenEpoch
 					blockBatch := []*types.Block{}
-					blockBatchMaxSize := 1000
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
 					if err != nil {
@@ -296,12 +294,6 @@ func ConsensusClStages(ctx context.Context,
 									continue MainLoop
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-								if len(blockBatch) >= blockBatchMaxSize {
-									if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-										return err
-									}
-									blockBatch = blockBatch[:0]
-								}
 							}
 							if err := processBlock(tx, block, false, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
@@ -309,10 +301,16 @@ func ConsensusClStages(ctx context.Context,
 								continue MainLoop
 							}
 						}
+						if len(blockBatch) > 0 {
+							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
+								blockBatch = blockBatch[:0]
+								continue MainLoop
+							}
+							blockBatch = blockBatch[:0]
+						}
 						currentEpoch++
-					}
-					if shouldInsert {
-						return cfg.executionClient.InsertBlocks(blockBatch)
 					}
 					return nil
 				},
