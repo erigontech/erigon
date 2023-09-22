@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -102,12 +103,35 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
-	//if bn > 0 { TODO Shall we move block and tx to next right here?
-	//	//we set bn+1  to correctly start from the next block
-	//	//bn++
+	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
+	if err != nil || !ok {
+		return 0, 0, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+	}
+
+	firstTxInBlock, err := rawdbv3.TxNums.Min(sd.roTx, blockNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+	}
+	lastTxInBlock, err := rawdbv3.TxNums.Max(sd.roTx, blockNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
+	}
+	fmt.Printf("[commitment] found block %d tx %d. Based on that, db found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+	//if txn == lastTxInBlock-1 {
+	//	blockNum++
 	//}
-	////txn++
-	sd.SetBlockNum(bn)
+	if txn == lastTxInBlock {
+		blockNum++
+	}
+	//if txn < lastTxInBlock-1 {
+	//	//blockNum++
+	//} else {
+	if blockNum != 0 {
+		txn++
+	}
+	//}
+
+	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txn)
 	return
 }
@@ -507,9 +531,9 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.LogTopics.SetTxNum(txNum)
 }
 
-func (sd *SharedDomains) TxNum() uint64 {
-	return sd.txNum.Load()
-}
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
+
+func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)

@@ -527,20 +527,21 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 	if d.trace {
 		fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
 	}
+
 	var latestState []byte
-	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
-		if len(value) < 8 {
-			fmt.Printf("[commitment] SeekCommitment invalid value size %d [%x]\n", len(value), value)
-			return
+	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) error {
+		if len(value) < 16 {
+			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
-		txn := binary.BigEndian.Uint64(value)
-		fmt.Printf("[commitment] Seek txn=%d %x\n", txn, value[:16])
+		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
+		fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}
+		return nil
 	})
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("failed to seek commitment state: %w", err)
 	}
 	return d.Restore(latestState)
 }

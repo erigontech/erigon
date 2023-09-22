@@ -278,16 +278,15 @@ func ExecV3(ctx context.Context,
 
 	rs := state.NewStateV3(doms, logger)
 	fmt.Printf("input tx %d\n", inputTxNum)
-	blockNum, inputTxNum, err = doms.SeekCommitment(0, math.MaxUint64)
+	_, _, err = doms.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return err
 	}
+	inputTxNum = doms.TxNum()
+	blockNum = doms.BlockNum()
 	outputTxNum.Store(inputTxNum)
-	doms.SetTxNum(inputTxNum)
-	if blockNum == 0 && inputTxNum != 0 {
-		// commitment has been rebuilt?
-	}
-	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
+	fmt.Printf("restored commitment tx %d block %d\n", inputTxNum, blockNum)
+	//log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
