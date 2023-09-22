@@ -104,32 +104,30 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
-	if err != nil || !ok {
-		return 0, 0, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+	if ok {
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+		}
+
+		firstTxInBlock, err := rawdbv3.TxNums.Min(sd.roTx, blockNum)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+		}
+		lastTxInBlock, err := rawdbv3.TxNums.Max(sd.roTx, blockNum)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
+		}
+		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+		if txn == lastTxInBlock {
+			blockNum++
+		}
+	} else {
+		blockNum = bn
 	}
 
-	firstTxInBlock, err := rawdbv3.TxNums.Min(sd.roTx, blockNum)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
-	}
-	lastTxInBlock, err := rawdbv3.TxNums.Max(sd.roTx, blockNum)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
-	}
-	fmt.Printf("[commitment] found block %d tx %d. Based on that, db found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
-	//if txn == lastTxInBlock-1 {
-	//	blockNum++
-	//}
-	if txn == lastTxInBlock {
-		blockNum++
-	}
-	//if txn < lastTxInBlock-1 {
-	//	//blockNum++
-	//} else {
 	if blockNum != 0 {
 		txn++
 	}
-	//}
 
 	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txn)

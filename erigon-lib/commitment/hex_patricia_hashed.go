@@ -833,13 +833,17 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 			fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
 		}
 		if cell.apl > 0 {
-			hph.accountFn(cell.apk[:cell.apl], cell)
+			if err = hph.accountFn(cell.apk[:cell.apl], cell); err != nil {
+				return false, fmt.Errorf("unfoldBranchNode accountFn: %w", err)
+			}
 			if hph.trace {
 				fmt.Printf("accountFn[%x] return balance=%d, nonce=%d code=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash[:])
 			}
 		}
 		if cell.spl > 0 {
-			hph.storageFn(cell.spk[:cell.spl], cell)
+			if err = hph.storageFn(cell.spk[:cell.spl], cell); err != nil {
+				return false, fmt.Errorf("unfoldBranchNode accountFn: %w", err)
+			}
 		}
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
 			return false, err
@@ -1223,7 +1227,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 			fmt.Printf("left downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
 		}
 	}
-	if len(hashedKey) == 2*length.Hash {
+	if len(plainKey) == hph.accountKeyLen {
 		cell.apl = len(plainKey)
 		copy(cell.apk[:], plainKey)
 		copy(cell.CodeHash[:], EmptyCodeHash)
