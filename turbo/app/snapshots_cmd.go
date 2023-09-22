@@ -112,7 +112,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name: "rm_all_state_snapshots",
+			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 				return dir.DeleteFiles(dirs.SnapHistory, dirs.SnapWarm)

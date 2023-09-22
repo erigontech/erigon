@@ -377,11 +377,7 @@ func (d *Decompressor) DisableReadAhead() {
 	}
 	leftReaders := d.readAheadRefcnt.Add(-1)
 	if leftReaders == 0 {
-		if dbg.SnMadvNormal() {
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-		} else {
-			_ = mmap.MadviseRandom(d.mmapHandle1)
-		}
+		_ = mmap.MadviseNormal(d.mmapHandle1)
 	} else if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", d.FileName())
 	}
