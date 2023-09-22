@@ -57,7 +57,7 @@ System Requirements
 
 * Gnosis Chain Archive: 370GB (January 2023).
 
-* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB. (April 2022).
+* Polygon Mainnet Archive: 5TB. (April 2022). `--prune.*.older 15768000`: 5.1Tb (Sept 2023). Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
