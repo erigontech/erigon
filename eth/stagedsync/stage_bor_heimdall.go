@@ -100,8 +100,9 @@ func BorHeimdallForward(
 
 	if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
 		s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
-
-		return fmt.Errorf("milestone block mismatch at %d", headNumber)
+		var reset uint64 = 0
+		generics.BorMilestoneRewind.Store(&reset)
+		return fmt.Errorf("milestone block mismatch at %d", *generics.BorMilestoneRewind.Load())
 
 		/*
 			This is the code from the original PR - it has been removed in favour of having the outer
