@@ -960,15 +960,15 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			return err
 		}
 
-		br, bw := blocksIO(db, logger)
-		chainConfig := fromdb.ChainConfig(db)
-
-		return db.Update(ctx, func(tx kv.RwTx) error {
-			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
-				return err
-			}
-			return nil
-		})
+		//br, bw := blocksIO(db, logger)
+		//chainConfig := fromdb.ChainConfig(db)
+		//return db.Update(ctx, func(tx kv.RwTx) error {
+		//	if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
+		//		return err
+		//	}
+		//	return nil
+		//})
+		return nil
 	}
 
 	if txtrace {
