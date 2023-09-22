@@ -1223,7 +1223,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 			fmt.Printf("left downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
 		}
 	}
-	if len(hashedKey) == 2*hph.accountKeyLen {
+	if len(hashedKey) == 2*length.Hash {
 		cell.apl = len(plainKey)
 		copy(cell.apk[:], plainKey)
 		copy(cell.CodeHash[:], EmptyCodeHash)
