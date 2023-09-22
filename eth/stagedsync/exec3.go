@@ -533,7 +533,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if blockNum < cfg.blockReader.FrozenBlocks() {
-		//defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
+		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {

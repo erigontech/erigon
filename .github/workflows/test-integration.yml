@@ -4,7 +4,6 @@ on:
     branches:
       - devel
       - alpha
-      - stable
       - e35
       - 'release/**'
   schedule:
