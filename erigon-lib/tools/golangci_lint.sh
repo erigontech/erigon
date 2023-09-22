@@ -15,7 +15,7 @@ then
 	echo "golangci-lint tool is not found, install it with:"
 	echo "    $scriptName --install-deps"
 	echo "or follow https://golangci-lint.run/usage/install/"
-	exit
+	exit 2
 fi
 
 golangci-lint run --config ./.golangci.yml
