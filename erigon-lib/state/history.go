@@ -108,6 +108,13 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	return &h, nil
 }
 
+func (h *History) vFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+}
+func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+}
+
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.

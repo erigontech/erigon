@@ -21,10 +21,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -39,13 +39,10 @@ import (
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 	tb.Helper()
-	path := tb.TempDir()
-	dir := filepath.Join(path, "snapshots", "history")
-	require.NoError(tb, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
-	require.NoError(tb, os.MkdirAll(dir, 0740))
+	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:  kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable: kv.TableCfgItem{Flags: kv.DupSort},
@@ -53,7 +50,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dir: dir, tmpdir: dir}
+	cfg := iiCfg{salt: &salt, dirs: dirs}
 	ii, err := NewInvertedIndex(cfg, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, true, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -437,12 +434,11 @@ func TestInvIndexMerge(t *testing.T) {
 func TestInvIndexScanFiles(t *testing.T) {
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
-	path := ii.dir
 
 	// Recreate InvertedIndex to scan the files
 	var err error
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dir: path, tmpdir: path}
+	cfg := iiCfg{salt: &salt, dirs: ii.dirs}
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, false, true, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()

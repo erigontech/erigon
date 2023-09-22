@@ -88,17 +88,12 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:   "ram",
-			Action: doRam,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
-		},
-		{
-			Name:   "decompress_speed",
+			Name:   "decompress-speed",
 			Action: doDecompressSpeed,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:   "bt_search",
+			Name:   "bt-search",
 			Action: doBtSearch,
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{
@@ -115,7 +110,7 @@ var snapshotCommand = cli.Command{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				return dir.DeleteFiles(dirs.SnapHistory, dirs.SnapWarm)
+				return dir.DeleteFiles(dirs.SnapHistory, dirs.SnapDomain)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -270,32 +265,6 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}()
 	return nil
 }
-func doRam(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
-		return err
-	}
-	defer logger.Info("Done")
-	args := cliCtx.Args()
-	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
-	}
-	f := args.First()
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	runtime.ReadMemStats(&m)
-	before := m.Alloc
-	logger.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	decompressor, err := compress.NewDecompressor(f)
-	if err != nil {
-		return err
-	}
-	defer decompressor.Close()
-	runtime.ReadMemStats(&m)
-	logger.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
-	return nil
-}
 
 func doIndicesCommand(cliCtx *cli.Context) error {
 	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
@@ -311,7 +280,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapDomain)
 
 	if rebuild {
 		panic("not implemented")
@@ -328,7 +297,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
 	//	return err
 	//}
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -484,7 +453,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
 	}

@@ -39,6 +39,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -93,6 +94,7 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt        *uint32
 	dir, tmpdir string
+	dirs        datadir.Dirs
 }
 
 func NewInvertedIndex(
@@ -105,10 +107,13 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	baseDir := filepath.Dir(cfg.dir)
+	if cfg.dir == "" {
+		cfg.dir = cfg.dirs.SnapHistory
+		cfg.tmpdir = cfg.dirs.Tmp
+	}
 	ii := InvertedIndex{
 		iiCfg:                   cfg,
-		warmDir:                 filepath.Join(baseDir, "warm"),
+		warmDir:                 cfg.dirs.SnapDomain,
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
@@ -130,6 +135,16 @@ func NewInvertedIndex(
 	return &ii, nil
 }
 
+func (ii *InvertedIndex) efExistenceIdxFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+}
+
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
 	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.salt, ii.logger)
@@ -143,6 +158,20 @@ func (ii *InvertedIndex) enableLocalityIndex() error {
 	return nil
 }
 
+func filesFromDir(dir string) ([]string, error) {
+	allFiles, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
+	}
+	filtered := make([]string, 0, len(allFiles))
+	for _, f := range allFiles {
+		if f.IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		filtered = append(filtered, f.Name())
+	}
+	return filtered, nil
+}
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	files, err := os.ReadDir(ii.dir)
 	if err != nil {
@@ -423,7 +452,6 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 
 func (ii *InvertedIndex) openFiles() error {
 	var err error
-	var totalKeys uint64
 	var invalidFileItems []*filesItem
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -449,7 +477,6 @@ func (ii *InvertedIndex) openFiles() error {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 			if item.bloom == nil && ii.withExistenceIndex {
@@ -459,7 +486,6 @@ func (ii *InvertedIndex) openFiles() error {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 		}
@@ -920,7 +946,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}
 
-	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 
@@ -1679,7 +1705,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 		return nil
 	}
 
-	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 

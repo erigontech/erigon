@@ -291,8 +291,11 @@ type domainCfg struct {
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
+		panic("empty `dirs` varialbe")
+	}
 	d := &Domain{
-		dir:         filepath.Join(filepath.Dir(cfg.hist.iiCfg.dir), "warm"),
+		dir:         cfg.hist.iiCfg.dirs.SnapDomain,
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
@@ -309,6 +312,18 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 	}
 
 	return d, nil
+}
+func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
 // LastStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -330,16 +345,16 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
 	// can't discard domain wal - it required, but can discard history
-	d.wal = d.newWriter(d.tmpdir, true, false)
+	d.wal = d.newWriter(d.dirs.Tmp, true, false)
 }
 
 func (d *Domain) StartUnbufferedWrites() {
-	d.wal = d.newWriter(d.tmpdir, false, false)
+	d.wal = d.newWriter(d.dirs.Tmp, false, false)
 	d.History.StartUnbufferedWrites()
 }
 
 func (d *Domain) StartWrites() {
-	d.wal = d.newWriter(d.tmpdir, true, false)
+	d.wal = d.newWriter(d.dirs.Tmp, true, false)
 	d.History.StartWrites()
 }
 
@@ -457,8 +472,6 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 }
 
 func (d *Domain) openFiles() (err error) {
-	//var totalKeys uint64
-
 	invalidFileItems := make([]*filesItem, 0)
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -466,7 +479,7 @@ func (d *Domain) openFiles() (err error) {
 				continue
 			}
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+			datPath := d.kvFilePath(fromStep, toStep)
 			if !dir.FileExist(datPath) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
@@ -478,14 +491,13 @@ func (d *Domain) openFiles() (err error) {
 			}
 
 			if item.index == nil && !UseBpsTree {
-				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+				idxPath := d.kvAccessorFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 						err = errors.Wrap(err, "recsplit index")
 						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
 						return false
 					}
-					//totalKeys += item.index.KeyCount()
 				}
 			}
 			if item.bindex == nil {
@@ -497,7 +509,6 @@ func (d *Domain) openFiles() (err error) {
 						return false
 					}
 				}
-				//totalKeys += item.bindex.KeyCount()
 			}
 			if item.bloom == nil {
 				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
