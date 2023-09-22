@@ -81,17 +81,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	ctx := context.Background()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
-	defer agg.Close()
-
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-
 	defer func() {
 		if tx != nil {
 			tx.Rollback()
-		}
-		if db != nil {
-			db.Close()
 		}
 	}()
 
@@ -204,8 +198,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	}
 
 	db, agg, datadir = testDbAndAggregatorv3(t, datadir, aggStep)
-	defer db.Close()
-	defer agg.Close()
 
 	agg.StartWrites()
 	domCtx = agg.MakeContext()
@@ -295,17 +287,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	ctx := context.Background()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
-	defer agg.Close()
-
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-
 	defer func() {
 		if tx != nil {
 			tx.Rollback()
-		}
-		if db != nil {
-			db.Close()
 		}
 	}()
 
@@ -393,8 +379,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	t.Logf("datadir has been removed")
 
 	db, agg, datadir = testDbAndAggregatorv3(t, datadir, aggStep)
-	defer db.Close()
-	defer agg.Close()
 
 	agg.StartWrites()
 	domCtx = agg.MakeContext()
