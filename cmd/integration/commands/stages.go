@@ -16,6 +16,14 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -28,13 +36,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -44,14 +48,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -935,24 +936,27 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		var bn uint64
-		if castedDB, ok := db.(*temporal.DB); ok {
-			if err := castedDB.Update(ctx, func(tx kv.RwTx) error {
-				doms := tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx())
+		var blockNum uint64
+		var err error
+
+		if v3db, ok := db.(*temporal.DB); ok {
+			agg := v3db.Agg()
+			err = v3db.Update(ctx, func(tx kv.RwTx) error {
+				ct := agg.MakeContext()
+				doms := agg.SharedDomains(ct)
 				defer doms.Close()
+				defer ct.Close()
+
 				doms.SetTx(tx)
-				var err error
-				bn, _, err = doms.SeekCommitment(0, math.MaxUint64)
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
+				blockNum, _, err = doms.SeekCommitment(0, math.MaxUint64)
+				return err
+			})
+			if err != nil {
 				return err
 			}
 		}
 
-		if err := reset2.ResetExec(ctx, db, chain, "", bn); err != nil {
+		if err := reset2.ResetExec(ctx, db, chain, "", blockNum); err != nil {
 			return err
 		}
 
