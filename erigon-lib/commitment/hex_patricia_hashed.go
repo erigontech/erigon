@@ -21,12 +21,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"hash"
 	"io"
 	"math/bits"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -1222,7 +1223,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 			fmt.Printf("left downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
 		}
 	}
-	if len(hashedKey) == 2*length.Hash { // set account key
+	if len(hashedKey) == 2*hph.accountKeyLen {
 		cell.apl = len(plainKey)
 		copy(cell.apk[:], plainKey)
 		copy(cell.CodeHash[:], EmptyCodeHash)
