@@ -17,6 +17,7 @@
 package datadir
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"path/filepath"
 )
 
@@ -47,7 +48,7 @@ func New(datadir string) Dirs {
 		datadir = absdatadir
 	}
 
-	return Dirs{
+	dirs := Dirs{
 		RelativeDataDir: relativeDataDir,
 		DataDir:         datadir,
 		Chaindata:       filepath.Join(datadir, "chaindata"),
@@ -58,4 +59,8 @@ func New(datadir string) Dirs {
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
+	dir.MustExist(dirs.Chaindata, dirs.Tmp,
+		dirs.SnapHistory, dirs.SnapWarm,
+		dirs.TxPool, dirs.Nodes)
+	return dirs
 }

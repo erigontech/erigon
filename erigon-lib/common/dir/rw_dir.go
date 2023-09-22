@@ -89,30 +89,31 @@ func HasFileOfType(dir, ext string) bool {
 	return false
 }
 
-func DeleteFilesOfType(dir string, exts ...string) {
-	d, err := os.Open(dir)
+func deleteFiles(dir string) error {
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return
+			return nil
 		}
-		panic(err)
+		return err
 	}
-	defer d.Close()
-
-	files, err := d.Readdir(-1)
-	if err != nil {
-		panic(err)
-	}
-
 	for _, file := range files {
-		if !file.Mode().IsRegular() {
+		if file.IsDir() || !file.Type().IsRegular() {
 			continue
 		}
 
-		for _, ext := range exts {
-			if filepath.Ext(file.Name()) == ext {
-				_ = os.Remove(filepath.Join(dir, file.Name()))
-			}
+		if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func DeleteFiles(dirs ...string) error {
+	for _, dir := range dirs {
+		if err := deleteFiles(dir); err != nil {
+			return err
+		}
+	}
+	return nil
 }

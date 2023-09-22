@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -935,18 +936,27 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		ct := agg.MakeContext()
-		doms := agg.SharedDomains(ct)
+		var blockNum uint64
+		var err error
 
-		bn, _, err := doms.SeekCommitment(0, math.MaxUint64)
-		if err != nil {
-			return err
+		if v3db, ok := db.(*temporal.DB); ok {
+			agg := v3db.Agg()
+			err = v3db.Update(ctx, func(tx kv.RwTx) error {
+				ct := agg.MakeContext()
+				doms := agg.SharedDomains(ct)
+				defer doms.Close()
+				defer ct.Close()
+
+				doms.SetTx(tx)
+				blockNum, _, err = doms.SeekCommitment(0, math.MaxUint64)
+				return err
+			})
+			if err != nil {
+				return err
+			}
 		}
 
-		ct.Close()
-		doms.Close()
-
-		if err := reset2.ResetExec(ctx, db, chain, "", bn); err != nil {
+		if err := reset2.ResetExec(ctx, db, chain, "", blockNum); err != nil {
 			return err
 		}
 

@@ -65,28 +65,34 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const (
 		ThreadsLimit = 9_000
-		DBSizeLimit  = 4 * datasize.TB
+		DBSizeLimit  = 3 * datasize.TB
 		DBPageSize   = 8 * datasize.KB
+		GrowthStep   = 2 * datasize.GB
 	)
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 	if label == kv.ChainDB {
 		opts = opts.MapSize(DBSizeLimit)
 		opts = opts.PageSize(DBPageSize.Bytes())
+		opts = opts.GrowthStep(GrowthStep)
 	} else {
 		opts = opts.GrowthStep(16 * datasize.MB)
 	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
+
+	// if db is not exists, we dont want to pass this flag since it will create db with maplimit of 1mb
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
+		// to read all options from DB, instead of overriding them
+		opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
+	}
+
 	return opts
 }
 
 func openDBDefault(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists bool, logger log.Logger) (kv.RwDB, error) {
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
-
 	db := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())
