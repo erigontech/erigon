@@ -52,7 +52,7 @@ func doSort(in preverified) Preverified {
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	slices.SortFunc(out, func(i, j PreverifiedItem) int { return cmp.Compare(i.Name, j.Name) })
+	slices.SortFunc(out, func(i, j PreverifiedItem) int { return cmp.Less(i.Name, j.Name) })
 	return out
 }
 

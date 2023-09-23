@@ -44,3 +44,10 @@ func Max[T constraints.Ordered](a, b T) T {
 	}
 	return b
 }
+
+func Less[T constraints.Ordered](a, b T) int {
+	if a < b {
+		return -1
+	}
+	return 1
+}
