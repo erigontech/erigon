@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
@@ -69,9 +70,9 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		}
 	case rpc.FinalizedBlockNumber:
 		if whitelist.GetWhitelistingService() != nil {
-			num, err := borfinality.GetFinalizedBlockNumber(tx, api._blockReader)
-			if err != nil {
-				return 0, err
+			num := borfinality.GetFinalizedBlockNumber(tx)
+			if num == 0 {
+				return 0, errors.New("no finalized block")
 			}
 
 			blockNum = borfinality.CurrentFinalizedBlock(tx, num).NumberU64()

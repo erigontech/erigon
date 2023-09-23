@@ -628,7 +628,9 @@ Loop:
 						gasUsed += txTask.UsedGas
 						if gasUsed != txTask.Header.GasUsed {
 							if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-								return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x", gasUsed, txTask.Header.GasUsed, txTask.Header.Number.Uint64(), txTask.Header.Hash())
+								return fmt.Errorf("%w: gas used by execution: %d, in header: %d, headerNum=%d, %x",
+									consensus.ErrInvalidBlock, gasUsed, txTask.Header.GasUsed,
+									txTask.Header.Number.Uint64(), txTask.Header.Hash())
 							}
 						}
 						gasUsed = 0
