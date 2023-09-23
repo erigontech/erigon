@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -40,6 +41,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
+		GrowthStep(4 * datasize.GB).
 		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
@@ -172,10 +174,10 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 	if total < 10_000 {
 		return
 	}
-	//progress := atomic.Int64{}
+	progress := atomic.Int64{}
 
-	//logEvery := time.NewTicker(20 * time.Second)
-	//defer logEvery.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(ThreadsLimit)
@@ -207,9 +209,6 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 						case <-logEvery.C:
 							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
-						}
-						if len(v) > 0 {
-							_, _ = v[0], v[len(v)-1]
 						}
 					}
 					return nil
@@ -244,9 +243,6 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					case <-logEvery.C:
 						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 					default:
-					}
-					if len(v) > 0 {
-						_, _ = v[0], v[len(v)-1]
 					}
 				}
 				return nil
