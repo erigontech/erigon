@@ -1196,7 +1196,6 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
-		fmt.Printf("domain valuesIn: %s, %t\n", valuesIn.decompressor.FileName(), valuesIn.bloom != nil)
 		d.files.Set(valuesIn)
 
 		// `kill -9` may leave some garbage
