@@ -92,7 +92,7 @@ func withNoCommit(cmd *cobra.Command) {
 }
 
 func withBtreePlus(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&useBtreePlus, "btree.plus", false, "use alternative btree indexes instead recsplit for warm files read")
+	cmd.Flags().BoolVar(&useBtreePlus, "btree.plus", true, "use alternative btree indexes instead recsplit for warm files read")
 }
 
 func withPruneTo(cmd *cobra.Command) {
