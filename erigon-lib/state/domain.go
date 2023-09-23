@@ -174,7 +174,6 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
-		log.Warn("[dbg] remove file", "file", i.decompressor.FileName())
 		if !i.frozen {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
@@ -208,7 +207,6 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 	if i.bloom != nil {
 		i.bloom.Close()
-		log.Warn("[dbg] remove bloom", "file", i.bloom.FileName)
 		if err := os.Remove(i.bloom.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bloom.FileName)
 		}
