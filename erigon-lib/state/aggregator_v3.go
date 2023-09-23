@@ -119,7 +119,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		tmpdir:           tmpdir,
 		aggregationStep:  aggregationStep,
 		db:               db,
-		keepInDB:         2 * aggregationStep,
+		keepInDB:         1 * aggregationStep,
 		leakDetector:     dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:               background.NewProgressSet(),
 		backgroundResult: &BackgroundResult{},
@@ -390,6 +390,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 		}
 		return err
 	}
+	a.OpenFolder()
 	return nil
 }
 
@@ -930,7 +931,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 		return nil
 	}
 
-	txTo := step * ac.a.aggregationStep
+	txTo := (step + 1) * ac.a.aggregationStep
 	var txFrom uint64
 
 	logEvery := time.NewTicker(30 * time.Second)
@@ -1438,7 +1439,7 @@ func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
-	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.keepInDB {
 		return fin
 	}
 

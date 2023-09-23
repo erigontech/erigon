@@ -342,7 +342,7 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
-func (ii *InvertedIndex) missedIdxFilterFiles() (l []*filesItem) {
+func (ii *InvertedIndex) missedExistenceFilterFiles() (l []*filesItem) {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
@@ -360,7 +360,10 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	return buildIndex(ctx, item.decompressor, CompressNone, idxPath, ii.dirs.Tmp, false, ii.salt, ps, ii.logger, ii.noFsync)
 }
-func (ii *InvertedIndex) buildOpenExistenceIdx(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+	if !ii.withExistenceIndex {
+		return nil
+	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
 	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
@@ -419,10 +422,10 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 		})
 	}
 
-	for _, item := range ii.missedIdxFilterFiles() {
+	for _, item := range ii.missedExistenceFilterFiles() {
 		item := item
 		g.Go(func() error {
-			return ii.buildOpenExistenceIdx(ctx, item, ps)
+			return ii.buildExistenceFilter(ctx, item, ps)
 		})
 	}
 

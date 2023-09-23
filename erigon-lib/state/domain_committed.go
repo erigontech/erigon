@@ -641,5 +641,5 @@ func shortenedKey(apk []byte) (step uint16, offset uint64) {
 func encodeShortenedKey(buf []byte, step uint16, offset uint64) []byte {
 	binary.BigEndian.PutUint16(buf[:2], step)
 	encodeU64(offset, buf[2:])
-	return buf[:]
+	return buf
 }

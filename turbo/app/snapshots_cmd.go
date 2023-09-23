@@ -6,13 +6,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
@@ -491,7 +492,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	agg.KeepStepsInDB(0)
+	{
+		//TODO: remove it before release!
+		agg.KeepStepsInDB(0)
+		db.Update(ctx, func(tx kv.RwTx) error {
+			return tx.(*mdbx.MdbxTx).LockDBInRam()
+		})
+	}
+
 	db.View(ctx, func(tx kv.Tx) error {
 		blockSnapshots.LogStat()
 		ac := agg.MakeContext()
