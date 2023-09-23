@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ledgerwatch/interfaces v0.0.0-20230912104607-5501cfd6e5af
-	github.com/erigontech/mdbx-go v0.33.1
+	github.com/erigontech/mdbx-go v0.34.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
