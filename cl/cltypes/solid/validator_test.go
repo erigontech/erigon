@@ -1,10 +1,12 @@
 package solid
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidator(t *testing.T) {
@@ -48,4 +50,28 @@ func TestValidator(t *testing.T) {
 	copiedValidator := NewValidator()
 	validator.CopyTo(copiedValidator)
 	assert.Equal(t, validator, copiedValidator)
+}
+
+func TestValidatorSetTest(t *testing.T) {
+	num := 1000
+	vset := NewValidatorSet(1000000)
+	vset2 := NewValidatorSet(1000000)
+	for i := 0; i < num; i++ {
+		var pk [48]byte
+		var wk [32]byte
+		binary.BigEndian.PutUint32(pk[:], uint32(i))
+		binary.BigEndian.PutUint32(wk[:], uint32(i))
+		vset.Append(NewValidatorFromParameters(
+			pk, wk, uint64(1), true, uint64(1), uint64(1), uint64(1), uint64(1),
+		))
+		vset.HashSSZ()
+	}
+	firstHash, err := vset.HashSSZ()
+	require.NoError(t, err)
+
+	vset.CopyTo(vset2)
+	secondHash, err := vset2.HashSSZ()
+	require.NoError(t, err)
+
+	require.Equal(t, firstHash, secondHash)
 }

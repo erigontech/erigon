@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -30,6 +29,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
@@ -1651,9 +1652,6 @@ func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, fro
 	}
 }
 
-func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(key, value []byte)) error {
-	return ac.accounts.IteratePrefix(tx, pref, fn)
-}
 func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsDomain:

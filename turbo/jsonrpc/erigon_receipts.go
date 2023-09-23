@@ -218,26 +218,50 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
-	var latest uint64
 	var err error
-	if crit.ToBlock != nil {
-		if crit.ToBlock.Sign() >= 0 {
-			latest = crit.ToBlock.Uint64()
-		} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-			return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
-		}
-	} else {
-		latest, err = rpchelper.GetLatestBlockNumber(tx)
-		//to fetch latest
-		latest += 1
+	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
+
+	if crit.BlockHash != nil {
+		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
+		if header == nil {
+			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
+		}
+		begin = header.Number.Uint64()
+		end = header.Number.Uint64()
+	} else {
+		// Convert the RPC block numbers into internal representations
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		begin = 0
+		if crit.FromBlock != nil {
+			if crit.FromBlock.Sign() >= 0 {
+				begin = crit.FromBlock.Uint64()
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+			}
+		}
+		end = latest
+		if crit.ToBlock != nil {
+			if crit.ToBlock.Sign() >= 0 {
+				end = crit.ToBlock.Uint64()
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+			}
+		}
+	}
+	if end < begin {
+		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return erigonLogs, err
 	}
 	if blockNumbers.IsEmpty() {
@@ -301,9 +325,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				blockLogs = append(blockLogs, filtered[i])
 				logCount++
 			}
-			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-				continue
+			if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
+				break
 			}
+
 		}
 		blockCount++
 		if len(blockLogs) == 0 {
@@ -342,14 +367,15 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog.Topics = log.Topics
 			erigonLog.Data = log.Data
 			erigonLog.Index = log.Index
+			erigonLog.TxIndex = log.TxIndex
 			erigonLog.Removed = log.Removed
 			erigonLogs = append(erigonLogs, erigonLog)
 		}
 
-		if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 			return erigonLogs, nil
 		}
-		if logOptions.BlockCount != 0 && logOptions.BlockCount == blockCount {
+		if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
 			return erigonLogs, nil
 		}
 	}

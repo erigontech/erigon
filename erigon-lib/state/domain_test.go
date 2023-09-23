@@ -22,13 +22,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math"
 	"math/rand"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -293,9 +294,10 @@ func TestDomain_IterationBasic(t *testing.T) {
 
 	{
 		var keys, vals []string
-		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) {
+		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) error {
 			keys = append(keys, string(k))
 			vals = append(vals, string(v))
+			return nil
 		})
 		require.NoError(t, err)
 		require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
@@ -575,9 +577,10 @@ func TestIterationMultistep(t *testing.T) {
 
 	{
 		var keys, vals []string
-		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) {
+		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) error {
 			keys = append(keys, string(k))
 			vals = append(vals, string(v))
+			return nil
 		})
 		require.NoError(t, err)
 		require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
@@ -1179,26 +1182,28 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 	defer dctx.Close()
 
 	counter := 0
-	err = dctx.IteratePrefix(tx, other, func(kx, vx []byte) {
+	err = dctx.IteratePrefix(tx, other, func(kx, vx []byte) error {
 		if !bytes.HasPrefix(kx, other) {
-			return
+			return nil
 		}
 		fmt.Printf("%x \n", kx)
 		counter++
 		v, ok := values[hex.EncodeToString(kx)]
 		require.True(t, ok)
 		require.Equal(t, v, vx)
+		return nil
 	})
 	require.NoError(t, err)
-	err = dctx.IteratePrefix(tx, first, func(kx, vx []byte) {
+	err = dctx.IteratePrefix(tx, first, func(kx, vx []byte) error {
 		if !bytes.HasPrefix(kx, first) {
-			return
+			return nil
 		}
 		fmt.Printf("%x \n", kx)
 		counter++
 		v, ok := values[hex.EncodeToString(kx)]
 		require.True(t, ok)
 		require.Equal(t, v, vx)
+		return nil
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, len(values), counter)
@@ -1240,14 +1245,15 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 
 	{
 		counter := 0
-		err = dctx.IteratePrefix(tx, key[:2], func(kx, vx []byte) {
+		err = dctx.IteratePrefix(tx, key[:2], func(kx, vx []byte) error {
 			if !bytes.HasPrefix(kx, key[:2]) {
-				return
+				return nil
 			}
 			counter++
 			v, ok := values[hex.EncodeToString(kx)]
 			require.True(t, ok)
 			require.Equal(t, v, vx)
+			return nil
 		})
 		require.NoError(t, err)
 		require.EqualValues(t, len(values), counter)
@@ -1420,9 +1426,13 @@ func TestDomain_Unwind(t *testing.T) {
 	dc.Close()
 
 	require.NoError(t, err)
-	d.MakeContext().IteratePrefix(tx, []byte("key1"), func(k, v []byte) {
+	ct := d.MakeContext()
+	err = ct.IteratePrefix(tx, []byte("key1"), func(k, v []byte) error {
 		fmt.Printf("%s: %s\n", k, v)
+		return nil
 	})
+	require.NoError(t, err)
+	ct.Close()
 	return
 }
 
@@ -1630,7 +1640,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer dc.Close()
 
 	prefixes := 0
-	err = dc.IteratePrefix(tx, nil, func(k, v []byte) {
+	err = dc.IteratePrefix(tx, nil, func(k, v []byte) error {
 		upds, ok := data[string(k)]
 		require.True(t, ok)
 		prefixes++
@@ -1650,6 +1660,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		}
 
 		require.EqualValuesf(t, latest.value, v, "key %x txnum %d", k, latest.txNum)
+		return nil
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, len(data), prefixes, "seen less keys than expected")
