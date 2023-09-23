@@ -57,7 +57,7 @@ System Requirements
 
 * Gnosis Chain Archive: 370GB (January 2023).
 
-* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB. (April 2022).
+* Polygon Mainnet Archive: 5TB. (April 2022). `--prune.*.older 15768000`: 5.1Tb (Sept 2023). Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -539,7 +539,6 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 | --------- | ----- | --------- | --------------------------- | ------------- |
 | engine    | 9090  | TCP       | gRPC Server                 | Private       |
 | engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
-| engine    | 6060  | TCP       | Metrics or Pprof            | Private       |
 | engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
 | sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
 | sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
@@ -561,7 +560,6 @@ node.
 #### `caplin` ports
 | Component | Port | Protocol | Purpose          | Should Expose |
 | --------- | ---- | -------- | ---------------- | ------------- |
-| sentinel  | 4000 | UDP      | Peering          | Public        |
 | sentinel  | 4000 | UDP      | Peering          | Public        |
 | sentinel  | 4001 | TCP      | Peering          | Public        |
 | sentinel  | 7777 | TCP      | gRPC Connections | Private       |

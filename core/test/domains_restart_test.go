@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/ledgerwatch/erigon/core/state"
@@ -152,6 +153,10 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		err = writer.WriteAccountStorage(addr, 0, &loc, &uint256.Int{}, uint256.NewInt(txNum))
 		//err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
 		require.NoError(t, err)
+		if txNum%blockSize == 0 {
+			err = rawdbv3.TxNums.Append(tx, domains.BlockNum(), domains.TxNum())
+			require.NoError(t, err)
+		}
 
 		if txNum%blockSize == 0 && interesting {
 			rh, err := writer.Commitment(true, false)
@@ -232,8 +237,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//}
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	require.NoError(t, err)
 	tx.Rollback()
+	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()
@@ -367,6 +372,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 			hashes = append(hashes, rh)
 			hashedTxs = append(hashedTxs, txNum)
+			err = rawdbv3.TxNums.Append(tx, domains.BlockNum(), domains.TxNum())
+			require.NoError(t, err)
 		}
 	}
 
@@ -407,8 +414,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 
 	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	require.NoError(t, err)
 	tx.Rollback()
+	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()

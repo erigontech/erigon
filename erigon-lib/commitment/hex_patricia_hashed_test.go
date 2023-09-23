@@ -63,7 +63,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	// More updates
 	hph.Reset()
-	hph.SetTrace(true)
+	//hph.SetTrace(true)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050506").
 		Build()
@@ -73,6 +73,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	secondRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	require.NotEqualValues(t, firstRootHash, secondRootHash)
+	t.Logf("second root hash %x\n", secondRootHash)
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	fmt.Printf("2. Generated single update\n")
@@ -80,7 +81,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 
 	// More updates
 	hph.Reset()
-	hph.SetTrace(true)
+	//hph.SetTrace(true)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "020807").
 		Build()
@@ -89,6 +90,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	require.NoError(t, err)
 
 	thirdRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	t.Logf("third root hash %x\n", secondRootHash)
 	require.NoError(t, err)
 	require.NotEqualValues(t, secondRootHash, thirdRootHash)
 	renderUpdates(branchNodeUpdates)

@@ -205,7 +205,7 @@ var (
 	}
 	TxPoolTraceSendersFlag = cli.StringFlag{
 		Name:  "txpool.trace.senders",
-		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
+		Usage: "Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing",
 		Value: "",
 	}
 	TxPoolCommitEveryFlag = cli.DurationFlag{
@@ -368,7 +368,7 @@ var (
 	}
 	RpcStreamingDisableFlag = cli.BoolFlag{
 		Name:  "rpc.streaming.disable",
-		Usage: "Erigon has enalbed json streaming for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+		Usage: "Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
 	}
 	RpcBatchLimit = cli.IntFlag{
 		Name:  "rpc.batch.limit",
@@ -550,14 +550,14 @@ var (
 	NATFlag = cli.StringFlag{
 		Name: "nat",
 		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
-	     "" or "none"         default - do not nat
-	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-	     "any"                uses the first auto-detected mechanism
-	     "upnp"               uses the Universal Plug and Play protocol
-	     "pmp"                uses NAT-PMP with an auto-detected gateway address
-	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
-	     "stun"               uses STUN to detect an external IP using a default server
-	     "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
+			 "" or "none"         default - do not nat
+			 "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+			 "any"                uses the first auto-detected mechanism
+			 "upnp"               uses the Universal Plug and Play protocol
+			 "pmp"                uses NAT-PMP with an auto-detected gateway address
+			 "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+			 "stun"               uses STUN to detect an external IP using a default server
+			 "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 `,
 		Value: "",
 	}
@@ -659,7 +659,7 @@ var (
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 2,
-		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has defeault: 3)",
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",

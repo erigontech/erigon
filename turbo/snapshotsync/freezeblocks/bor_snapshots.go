@@ -789,8 +789,8 @@ func (s *BorRoSnapshots) Files() (list []string) {
 func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	s.Events.lock.Lock()
 	defer s.Events.lock.Unlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
+	s.Spans.lock.Lock()
+	defer s.Spans.lock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
@@ -948,6 +948,8 @@ func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
 func (s *BorRoSnapshots) Close() {
 	s.Events.lock.Lock()
 	defer s.Events.lock.Unlock()
+	s.Spans.lock.Lock()
+	defer s.Spans.lock.Unlock()
 	s.closeWhatNotInList(nil)
 }
 
