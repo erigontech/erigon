@@ -199,7 +199,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	//renderUpdates(branchNodeUpdates)
 
 	// More updates
-	hph.Reset()
+	//hph.Reset() // one update - no need to reset
 	hph.SetTrace(false)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").

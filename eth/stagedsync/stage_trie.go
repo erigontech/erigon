@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg, bn uint64) ([]byte, error) {
+func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) ([]byte, error) {
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
@@ -34,10 +34,12 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	defer ccc.Close()
 	defer stc.Close()
 
-	domains.SetTxNum(agg.EndTxNumNoCommitment())
-	domains.SetBlockNum(bn)
+	_, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	if err != nil {
+		return nil, err
+	}
 
-	logger := log.New("stage", "patricia_trie", "block", s.BlockNumber)
+	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger.Info("Collecting account keys")
 	collector := etl.NewCollector("collect_keys", cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
 	defer collector.Close()
@@ -45,15 +47,12 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	var totalKeys atomic.Uint64
 	for _, dc := range []*state.DomainContext{acc, ccc, stc} {
 		logger.Info("Collecting keys")
-		err := dc.IteratePrefix(tx, nil, func(k []byte, _ []byte) {
+		err := dc.IteratePrefix(tx, nil, func(k []byte, _ []byte) error {
 			if err := collector.Collect(k, nil); err != nil {
-				panic(err)
+				return err
 			}
 			totalKeys.Add(1)
-
-			if ctx.Err() != nil {
-				panic(ctx.Err())
-			}
+			return ctx.Err()
 		})
 		if err != nil {
 			return nil, err
@@ -81,7 +80,7 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 
 		return nil
 	}
-	err := collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
+	err = collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +99,7 @@ func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx,
 	return rh, nil
 }
 
-func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
+func SpawnPatriciaTrieStage(tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -111,19 +110,15 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 		defer tx.Rollback()
 	}
 
-	to, err := s.ExecutionAt(tx)
-	if err != nil {
-		return trie.EmptyRoot, err
-	}
+	//to, err := s.ExecutionAt(tx)
+	//if err != nil {
+	//	return trie.EmptyRoot, err
+	//}
 	//if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
 	//	return trie.EmptyRoot, nil
 	//}
 	agg := tx.(*temporal.Tx).Agg()
-	toTx := agg.EndTxNumNoCommitment()
-	_ = toTx
-	if to == 0 {
-		cfg.checkRoot = false
-	}
+	to := agg.EndTxNumNoCommitment()
 
 	//var err error
 	//if s.BlockNumber == to {
@@ -135,6 +130,7 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 	var expectedRootHash libcommon.Hash
 	var headerHash libcommon.Hash
 	var syncHeadHeader *types.Header
+	var err error
 	if cfg.checkRoot {
 		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, to)
 		if err != nil {
@@ -146,82 +142,32 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
 	}
-	logPrefix := s.LogPrefix()
+
+	//logPrefix := s.LogPrefix()
 	var foundHash bool
-	var txCounter uint64 = 0 // genesis?
-	var blockNum uint64
-	latestTxInFiles := agg.EndTxNumNoCommitment()
-
-	for i := uint64(0); i < math.MaxUint64; i++ {
-		if i%100000 == 0 {
-			fmt.Printf("\r [%s] Counting block for tx %d: cur block %d cur tx %d\n", logPrefix, latestTxInFiles, i, txCounter)
-		}
-
-		h, err := cfg.blockReader.HeaderByNumber(ctx, tx, uint64(i))
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-
-		txCounter++
-		b, err := cfg.blockReader.BodyWithTransactions(ctx, tx, h.Hash(), uint64(i))
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-		txCounter += uint64(len(b.Transactions))
-		txCounter++
-		blockNum = uint64(i)
-
-		if txCounter == latestTxInFiles {
-			//if bytes.Equal(h.Root.Bytes(), rh) {
-			foundHash = true
-			expectedRootHash = h.Root
-			to = h.Number.Uint64()
-			headerHash = h.Hash()
-			//} else {
-			//	logger.Error(fmt.Sprintf("[%s]1 Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, h.Number.Uint64(), rh, h.Root.Bytes(), h.Hash().Bytes()))
-			//}
-		}
-
-		if txCounter > latestTxInFiles {
-			break
-		}
-	}
-	if err != nil /*&& !errors.Is(err, errExitRange) */ {
-		return trie.EmptyRoot, err
-	}
-	fmt.Printf("counted to block %d, tx=%d, fileTx=%d\n", blockNum, txCounter, latestTxInFiles)
-	rh, err := collectAndComputeCommitment(s, ctx, tx, cfg, blockNum)
+	rh, err := collectAndComputeCommitment(ctx, tx, cfg)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	//doms := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
-	//doms.StartWrites()
-	//doms.SetBlockNum(blockNum) // NEED TO WRITE BLOCK NUM TO SEEK COMM ON RESTART
-	//rh, err = doms.Commit(true, false)
-	//if err != nil {
-	//	return trie.EmptyRoot, err
-	//}
-	//doms.
-
 	//if !foundHash { // tx could be in the middle of block so no header match will be found
 	//	return trie.EmptyRoot, fmt.Errorf("no header found with root %x", rh)
 	//}
 
 	if (foundHash || cfg.checkRoot) && !bytes.Equal(rh, expectedRootHash[:]) {
-		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, rh, expectedRootHash, headerHash))
+		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", to, rh, expectedRootHash, headerHash))
 		if cfg.badBlockHalt {
 			return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 		}
 		//if cfg.hd != nil {
 		//	cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
 		//}
-		if to > s.BlockNumber {
-			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-			logger.Warn("Unwinding (should to) due to incorrect root hash", "to", unwindTo)
-			//u.UnwindTo(unwindTo, headerHash)
-		}
-	} else if err = s.Update(tx, to); err != nil {
-		return trie.EmptyRoot, err
+		//if to > s.BlockNumber {
+		//	unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
+		//	logger.Warn("Unwinding (should to) due to incorrect root hash", "to", unwindTo)
+		//	//u.UnwindTo(unwindTo, headerHash)
+		//}
+		//} else if err = s.Update(tx, to); err != nil {
+		//	return trie.EmptyRoot, err
 	}
 
 	if !useExternalTx {

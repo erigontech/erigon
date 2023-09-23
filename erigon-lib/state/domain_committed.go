@@ -217,6 +217,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 type DomainCommitted struct {
 	*Domain
 	trace        bool
+	shortenKeys  bool
 	updates      *UpdateTree
 	mode         CommitmentMode
 	patriciaTrie commitment.Trie
@@ -352,43 +353,51 @@ func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 }
 
 // nolint
-func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, typeAS string, list ...*filesItem) bool {
-	numBuf := [2]byte{}
-	var found bool
+func (d *DomainCommitted) findShortenKey(fullKey []byte, list ...*filesItem) (shortened []byte, found bool) {
+	shortened = make([]byte, 2, 10)
+
+	//dc := d.MakeContext()
+	//defer dc.Close()
+
 	for _, item := range list {
 		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
-		//index := recsplit.NewIndexReader(item.index)
+		//index := recsplit.NewIndexReader(item.index) // TODO is support recsplt is needed?
+		// TODO: bloom filter existence should be checked for domain which filesItem list is provided, not in commitmnet
+		//if d.withExistenceIndex && item.bloom != nil {
+		//	hi, _ := dc.hc.ic.hashKey(fullKey)
+		//	if !item.bloom.ContainsHash(hi) {
+		//		continue
+		//		//return nil, false, nil
+		//	}
+		//}
 
 		cur, err := item.bindex.Seek(g, fullKey)
 		if err != nil {
+			d.logger.Warn("commitment branch key replacement seek failed", "key", fmt.Sprintf("%x", fullKey), "err", err, "file", item.decompressor.FileName())
 			continue
 		}
 		if cur == nil {
 			continue
 		}
 		step := uint16(item.endTxNum / d.aggregationStep)
-		binary.BigEndian.PutUint16(numBuf[:], step)
-
-		shortKey = encodeU64(cur.Di(), numBuf[:])
-
+		shortened = encodeShortenedKey(shortened[:], step, cur.Di())
 		if d.trace {
-			fmt.Printf("replacing %s [%x] => {%x} [step=%d, offset=%d, file=%s.%d-%d]\n", typeAS, fullKey, shortKey, step, cur.Di(), typeAS, item.startTxNum, item.endTxNum)
+			fmt.Printf("replacing [%x] => {%x} step=%d, di=%d file=%s\n", fullKey, shortened, step, cur.Di(), item.decompressor.FileName())
 		}
 		found = true
 		break
 	}
 	//if !found {
-	//	log.Warn("bt index key replacement seek failed", "key", fmt.Sprintf("%x", fullKey))
+	//	d.logger.Warn("failed to find key reference", "key", fmt.Sprintf("%x", fullKey))
 	//}
-	return found
+	return shortened, found
 }
 
 // nolint
-func (d *DomainCommitted) lookupShortenedKey(shortKey, fullKey []byte, typAS string, list []*filesItem) bool {
+func (d *DomainCommitted) lookupByShortenedKey(shortKey []byte, list []*filesItem) (fullKey []byte, found bool) {
 	fileStep, offset := shortenedKey(shortKey)
 	expected := uint64(fileStep) * d.aggregationStep
 
-	var found bool
 	for _, item := range list {
 		if item.startTxNum > expected || item.endTxNum < expected {
 			continue
@@ -397,28 +406,26 @@ func (d *DomainCommitted) lookupShortenedKey(shortKey, fullKey []byte, typAS str
 		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		fullKey, _, err := item.bindex.dataLookup(offset, g)
 		if err != nil {
-			return false
+			return nil, false
 		}
-
-		// cur := item.bindex.OrdinalLookup(offset)
-		// //nolint
-		// fullKey = cur.Key()
 		if d.trace {
-			fmt.Printf("offsetToKey %s [%x]=>{%x} step=%d offset=%d, file=%s.%d-%d.kv\n", typAS, fullKey, shortKey, fileStep, offset, typAS, item.startTxNum, item.endTxNum)
+			fmt.Printf("shortenedKey [%x]=>{%x} step=%d offset=%d, file=%s\n", shortKey, fullKey, fileStep, offset, item.decompressor.FileName())
 		}
 		found = true
 		break
 	}
-	return found
+	return fullKey, found
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, merged *MergedFiles, val commitment.BranchData) ([]byte, error) {
-	if len(val) == 0 {
-		return nil, nil
+	if /*!d.shortenKeys ||*/ len(val) == 0 {
+		return val, nil
 	}
+	d.logger.Info("commitmentValTransform")
+
 	accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
 	if err != nil {
 		return nil, err
@@ -426,17 +433,22 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 
 	transAccountPks := make([][]byte, 0, len(accountPlainKeys))
 	var apkBuf, spkBuf []byte
+	var found bool
 	for _, accountPlainKey := range accountPlainKeys {
 		if len(accountPlainKey) == length.Addr {
 			// Non-optimised key originating from a database record
 			apkBuf = append(apkBuf[:0], accountPlainKey...)
 		} else {
-			f := d.lookupShortenedKey(accountPlainKey, apkBuf, "account", files.accounts)
-			if !f {
-				fmt.Printf("lost key %x\n", accountPlainKeys)
+			var found bool
+			apkBuf, found = d.lookupByShortenedKey(accountPlainKey, files.accounts)
+			if !found {
+				d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
 			}
 		}
-		d.replaceKeyWithReference(apkBuf, accountPlainKey, "account", merged.accounts)
+		accountPlainKey, found = d.findShortenKey(apkBuf, merged.accounts)
+		if !found {
+			d.logger.Crit("replacement for full account key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+		}
 		transAccountPks = append(transAccountPks, accountPlainKey)
 	}
 
@@ -447,13 +459,17 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 			spkBuf = append(spkBuf[:0], storagePlainKey...)
 		} else {
 			// Optimised key referencing a state file record (file number and offset within the file)
-			f := d.lookupShortenedKey(storagePlainKey, spkBuf, "storage", files.storage)
-			if !f {
-				fmt.Printf("lost skey %x\n", storagePlainKey)
+			var found bool
+			spkBuf, found = d.lookupByShortenedKey(storagePlainKey, files.storage)
+			if !found {
+				d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
 			}
 		}
 
-		d.replaceKeyWithReference(spkBuf, storagePlainKey, "storage", merged.storage)
+		storagePlainKey, found = d.findShortenKey(spkBuf, merged.storage)
+		if !found {
+			d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+		}
 		transStoragePks = append(transStoragePks, storagePlainKey)
 	}
 
@@ -527,20 +543,21 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 	if d.trace {
 		fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
 	}
+
 	var latestState []byte
-	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
-		if len(value) < 8 {
-			fmt.Printf("[commitment] SeekCommitment invalid value size %d [%x]\n", len(value), value)
-			return
+	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) error {
+		if len(value) < 16 {
+			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
-		txn := binary.BigEndian.Uint64(value)
-		fmt.Printf("[commitment] Seek txn=%d %x\n", txn, value[:16])
+		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
+		fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}
+		return nil
 	})
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("failed to seek commitment state: %w", err)
 	}
 	return d.Restore(latestState)
 }
@@ -618,4 +635,10 @@ func encodeU64(i uint64, to []byte) []byte {
 func shortenedKey(apk []byte) (step uint16, offset uint64) {
 	step = binary.BigEndian.Uint16(apk[:2])
 	return step, decodeU64(apk[1:])
+}
+
+func encodeShortenedKey(buf []byte, step uint16, offset uint64) []byte {
+	binary.BigEndian.PutUint16(buf[:2], step)
+	encodeU64(offset, buf[2:])
+	return buf[:]
 }

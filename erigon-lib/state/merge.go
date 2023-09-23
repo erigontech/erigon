@@ -784,9 +784,11 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			return nil, nil, nil, err
 		}
 		//fmt.Printf("last heap key %x\n", keyBuf)
-		valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
+		if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+			valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
+			}
 		}
 		if err = comp.AddWord(valBuf); err != nil {
 			return nil, nil, nil, err

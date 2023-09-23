@@ -242,12 +242,18 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	cancun := chain.Config().IsCancun(header.Time)
-	if cancun {
-		return misc.VerifyPresenceOfCancunHeaderFields(header)
-	} else {
+	if !chain.Config().IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
+
+	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
+		return err
+	}
+	expectedExcessBlobGas := misc.CalcExcessBlobGas(parent)
+	if *header.ExcessBlobGas != expectedExcessBlobGas {
+		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
+	}
+	return nil
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {

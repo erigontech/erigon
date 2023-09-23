@@ -1942,7 +1942,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	return v, found, nil
 }
 
-func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
+func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
@@ -2070,7 +2070,9 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 			}
 		}
 		if len(lastVal) > 0 {
-			it(lastKey, lastVal)
+			if err := it(lastKey, lastVal); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
