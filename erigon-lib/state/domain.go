@@ -1210,6 +1210,13 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 			fname := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep)
 			if !dir.FileExist(filepath.Join(d.dir, fname)) {
 				l = append(l, item)
+				continue
+			}
+			fname = fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep)
+			fmt.Printf("exists: %s, %t\n", fname, dir.FileExist(filepath.Join(d.dir, fname)))
+			if !dir.FileExist(filepath.Join(d.dir, fname)) {
+				l = append(l, item)
+				continue
 			}
 		}
 		return true
@@ -1230,66 +1237,52 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	return l
 }
 
-func (d *Domain) missedExistenceFilter() (l []*filesItem) {
-	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			fPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
-			if !dir.FileExist(fPath) {
-				l = append(l, item)
-			}
-		}
-		return true
-	})
-	return l
-}
+//func (d *Domain) missedExistenceFilter() (l []*filesItem) {
+//	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+//		for _, item := range items {
+//			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+//			fPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+//			if !dir.FileExist(fPath) {
+//				l = append(l, item)
+//			}
+//		}
+//		return true
+//	})
+//	return l
+//}
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedIndices(ctx, g, ps)
-	if UseBpsTree {
-		for _, item := range d.missedBtreeIdxFiles() {
-			item := item
-			g.Go(func() error {
-				idxPath := item.decompressor.FilePath()
-				idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-				if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
-					return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
-				}
-				return nil
-			})
+	for _, item := range d.missedBtreeIdxFiles() {
+		if !UseBpsTree {
+			continue
 		}
-		for _, item := range d.missedExistenceFilter() {
-			item := item
-			g.Go(func() error {
-				idxPath := item.decompressor.FilePath()
-				idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-				if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
-					return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
-				}
-				return nil
-			})
-		}
+		item := item
+		g.Go(func() error {
+			idxPath := item.decompressor.FilePath()
+			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
+			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
+				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
+			}
+			return nil
+		})
 	}
-
-	if !UseBpsTree {
-		for _, item := range d.missedKviIdxFiles() {
-			item := item
-			g.Go(func() error {
-				if UseBpsTree {
-					return nil
-				}
-
-				idxPath := item.decompressor.FilePath()
-				idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-				ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
-				if err != nil {
-					return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
-				}
-				ix.Close()
-				return nil
-			})
+	for _, item := range d.missedKviIdxFiles() {
+		if UseBpsTree {
+			continue
 		}
+		item := item
+		g.Go(func() error {
+			idxPath := item.decompressor.FilePath()
+			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
+			ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
+			if err != nil {
+				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
+			}
+			ix.Close()
+			return nil
+		})
 	}
 }
 
@@ -1621,9 +1614,9 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.d.withExistenceIndex {
-			if dc.files[i].src.bloom == nil {
-				panic(dc.files[i].src.decompressor.FileName())
-			}
+			//if dc.files[i].src.bloom == nil {
+			//	panic(dc.files[i].src.decompressor.FileName())
+			//}
 			if dc.files[i].src.bloom != nil && !dc.files[i].src.bloom.ContainsHash(hi) {
 				continue
 			}

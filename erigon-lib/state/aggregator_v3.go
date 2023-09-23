@@ -387,6 +387,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 		}
 		return err
 	}
+	a.OpenFolder()
 	return nil
 }
 
