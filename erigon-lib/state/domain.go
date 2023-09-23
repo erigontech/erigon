@@ -1213,7 +1213,6 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 				continue
 			}
 			fname = fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep)
-			fmt.Printf("exists: %s, %t\n", fname, dir.FileExist(filepath.Join(d.dir, fname)))
 			if !dir.FileExist(filepath.Join(d.dir, fname)) {
 				l = append(l, item)
 				continue
