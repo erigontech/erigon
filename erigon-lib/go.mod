@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon-lib
 go 1.19
 
 require (
+	github.com/erigontech/mdbx-go v0.34.0
 	github.com/ledgerwatch/interfaces v0.0.0-20230912104607-5501cfd6e5af
-	github.com/erigontech/mdbx-go v0.33.1
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -29,8 +29,8 @@ require (
 	github.com/holiman/uint256 v1.2.3
 	github.com/matryer/moq v0.3.2
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/pkg/errors v0.9.1
 	github.com/pelletier/go-toml/v2 v2.1.0
+	github.com/pkg/errors v0.9.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
