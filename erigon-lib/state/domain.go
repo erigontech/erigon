@@ -1249,23 +1249,23 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	d.History.BuildMissedIndices(ctx, g, ps)
 	if UseBpsTree {
 		for _, item := range d.missedBtreeIdxFiles() {
-			fitem := item
+			item := item
 			g.Go(func() error {
-				idxPath := fitem.decompressor.FilePath()
+				idxPath := item.decompressor.FilePath()
 				idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-				if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
-					return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
+				if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
+					return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 				}
 				return nil
 			})
 		}
 		for _, item := range d.missedExistenceFilter() {
-			fitem := item
+			item := item
 			g.Go(func() error {
-				idxPath := fitem.decompressor.FilePath()
+				idxPath := item.decompressor.FilePath()
 				idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-				if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
-					return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
+				if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.tmpdir, *d.salt, d.logger); err != nil {
+					return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 				}
 				return nil
 			})
@@ -1274,15 +1274,15 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 
 	if !UseBpsTree {
 		for _, item := range d.missedKviIdxFiles() {
-			fitem := item
+			item := item
 			g.Go(func() error {
 				if UseBpsTree {
 					return nil
 				}
 
-				idxPath := fitem.decompressor.FilePath()
+				idxPath := item.decompressor.FilePath()
 				idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-				ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
+				ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.tmpdir, false, d.salt, ps, d.logger, d.noFsync)
 				if err != nil {
 					return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 				}
