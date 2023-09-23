@@ -200,14 +200,17 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 						if len(v) > 0 {
 							_, _ = v[0], v[len(v)-1]
 						}
-						//progress.Add(1)
-						//select {
-						//case <-ctx.Done():
-						//	return ctx.Err()
-						//case <-logEvery.C:
-						//	log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-						//default:
-						//}
+						progress.Add(1)
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-logEvery.C:
+							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						default:
+						}
+						if len(v) > 0 {
+							_, _ = v[0], v[len(v)-1]
+						}
 					}
 					return nil
 				})
@@ -235,13 +238,16 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if len(v) > 0 {
 						_, _ = v[0], v[len(v)-1]
 					}
-					//select {
-					//case <-ctx.Done():
-					//	return ctx.Err()
-					//case <-logEvery.C:
-					//	log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-					//default:
-					//}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+					default:
+					}
+					if len(v) > 0 {
+						_, _ = v[0], v[len(v)-1]
+					}
 				}
 				return nil
 			})

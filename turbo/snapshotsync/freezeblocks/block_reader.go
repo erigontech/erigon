@@ -963,6 +963,9 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		if sn.IdxBorTxnHash == nil {
 			continue
 		}
+		if sn.IdxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
@@ -1039,6 +1042,9 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		if sn.IdxBorTxnHash == nil {
+			continue
+		}
+		if sn.IdxBorTxnHash.KeyCount() == 0 {
 			continue
 		}
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
