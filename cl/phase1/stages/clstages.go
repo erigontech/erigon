@@ -315,7 +315,7 @@ func ConsensusClStages(ctx context.Context,
 						}
 						currentEpoch++
 					}
-					return nil
+					return tx.Commit()
 				},
 			},
 			CatchUpBlocks: {

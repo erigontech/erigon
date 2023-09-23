@@ -36,6 +36,7 @@ func OpenCaplinDatabase(ctx context.Context,
 ) (persistence.BeaconChainDatabase, *sql.DB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
 	os.Remove(dataDirIndexer)
+	os.MkdirAll(dbPath, 0700)
 
 	db, err := sql.Open("sqlite", dataDirIndexer)
 	if err != nil {
@@ -69,7 +70,7 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
-	caplinFreezer freezer.Freezer, db *sql.DB, beaconDB persistence.BeaconChainDatabase, tmpdir string, cfg beacon.RouterConfiguration) error {
+	caplinFreezer freezer.Freezer, db *sql.DB, rawDB persistence.RawBeaconBlockChain, beaconDB persistence.BeaconChainDatabase, tmpdir string, cfg beacon.RouterConfiguration) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
@@ -113,7 +114,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, beaconDB, db, forkChoice)
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice)
 		go beacon.ListenAndServe(apiHandler, &cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
