@@ -959,6 +959,16 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err := reset2.ResetExec(ctx, db, chain, "", blockNum); err != nil {
 			return err
 		}
+
+		//br, bw := blocksIO(db, logger)
+		//chainConfig := fromdb.ChainConfig(db)
+		//return db.Update(ctx, func(tx kv.RwTx) error {
+		//	if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
+		//		return err
+		//	}
+		//	return nil
+		//})
+		return nil
 	}
 
 	if txtrace {
@@ -1090,20 +1100,21 @@ func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
+	_ = pm
 	sn, _, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
-	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
-	must(sync.SetCurrentStage(stages.PatriciaTrie))
+	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
+	//must(sync.SetCurrentStage(stages.PatriciaTrie))
 	if !ethconfig.EnableHistoryV4InTest {
 		panic("this method for v3 only")
 	}
 
 	if warmup {
-		return reset2.Warmup(ctx, db, log.LvlInfo, stages.PatriciaTrie)
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.Execution)
 	}
 	if reset {
-		return reset2.Reset(ctx, db, stages.PatriciaTrie)
+		return reset2.Reset(ctx, db, stages.Execution)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1111,43 +1122,42 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	}
 	defer tx.Rollback()
 
-	s := stage(sync, tx, nil, stages.PatriciaTrie)
+	//s := stage(sync, tx, nil, stages.PatriciaTrie)
+	//
+	//if pruneTo > 0 {
+	//	pm.History = prune.Distance(s.BlockNumber - pruneTo)
+	//	pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
+	//	pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
+	//	pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
+	//}
 
-	if pruneTo > 0 {
-		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
-		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
-		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
-	}
-
-	logger.Info("StageTrie", "progress", s.BlockNumber)
+	//logger.Info("StageTrie", "progress", s.BlockNumber)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
-	if unwind > 0 {
-		fmt.Printf("unwind to %d\n", s.BlockNumber-unwind)
-		//u := sync.NewUnwindState(stages.PatriciaTrie, s.BlockNumber-unwind, s.BlockNumber)
-		//if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx, logger); err != nil {
-		//	return err
-		//}
-	} else if pruneTo > 0 {
-		fmt.Printf("prune to %d\n", pruneTo)
-		//p, err := sync.PruneStageState(stages.PatriciaTrie, s.BlockNumber, tx, db)
-		//if err != nil {
-		//	return err
-		//}
-		//err = stagedsync.PruneIntermediateHashesStage(p, tx, cfg, ctx)
-		//if err != nil {
-		//	return err
-		//}
-		//if err := stagedsync.PrunePatriciaTrie(s, ctx, tx, cfg, logger); err != nil {
-		//	return err
-		//}
-
-	} else {
-		if _, err := stagedsync.SpawnPatriciaTrieStage(s, sync /* Unwinder */, tx, cfg, ctx, logger); err != nil {
-			return err
-		}
+	//if unwind > 0 {
+	//	fmt.Printf("unwind to %d\n", s.BlockNumber-unwind)
+	//	//u := sync.NewUnwindState(stages.PatriciaTrie, s.BlockNumber-unwind, s.BlockNumber)
+	//	//if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx, logger); err != nil {
+	//	//	return err
+	//	//}
+	//} else if pruneTo > 0 {
+	//	fmt.Printf("prune to %d\n", pruneTo)
+	//p, err := sync.PruneStageState(stages.PatriciaTrie, s.BlockNumber, tx, db)
+	//if err != nil {
+	//	return err
+	//}
+	//err = stagedsync.PruneIntermediateHashesStage(p, tx, cfg, ctx)
+	//if err != nil {
+	//	return err
+	//}
+	//if err := stagedsync.PrunePatriciaTrie(s, ctx, tx, cfg, logger); err != nil {
+	//	return err
+	//}
+	//} else {
+	if _, err := stagedsync.SpawnPatriciaTrieStage(tx, cfg, ctx, logger); err != nil {
+		return err
 	}
+	//}
 	//integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }

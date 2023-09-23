@@ -1,6 +1,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 
@@ -11,12 +12,25 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+const treeCacheDepthUint64Slice = 0
+
+func convertDepthToChunkSize(d int) int {
+	return (1 << d) // just power of 2
+}
+
+func getTreeCacheSize(listLen int, cacheDepth int) int {
+	treeChunks := convertDepthToChunkSize(cacheDepth)
+	return (listLen + treeChunks - 1) / treeChunks
+
+}
+
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
 // The underlying storage for the slice is a byte array. This approach allows for efficient
 // memory usage, especially when dealing with large slices.
 type byteBasedUint64Slice struct {
 	// The bytes that back the slice
-	u []byte
+	u               []byte
+	treeCacheBuffer []byte
 
 	// Length of the slice
 	l int
@@ -32,7 +46,6 @@ func NewUint64Slice(limit int) *byteBasedUint64Slice {
 	o := &byteBasedUint64Slice{
 		c: limit,
 	}
-	o.u = make([]byte, 0)
 	return o
 }
 
@@ -41,6 +54,9 @@ func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
 	for i := range arr.u {
 		arr.u[i] = 0
+	}
+	for i := range arr.treeCacheBuffer {
+		arr.treeCacheBuffer[i] = 0
 	}
 }
 
@@ -53,8 +69,13 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 	if len(target.u) < len(arr.u) {
 		target.u = make([]byte, len(arr.u))
 	}
+	if len(target.treeCacheBuffer) < len(arr.treeCacheBuffer) {
+		target.treeCacheBuffer = make([]byte, len(arr.treeCacheBuffer))
+	}
+	target.treeCacheBuffer = target.treeCacheBuffer[:len(arr.treeCacheBuffer)]
 	target.u = target.u[:len(arr.u)]
 	copy(target.u, arr.u)
+	copy(target.treeCacheBuffer, arr.treeCacheBuffer)
 }
 
 func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
@@ -95,6 +116,7 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	val := binary.LittleEndian.Uint64(arr.u[offset : offset+8])
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
 	arr.l = arr.l - 1
+	arr.treeCacheBuffer = arr.treeCacheBuffer[:getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash]
 	return val
 }
 
@@ -103,9 +125,18 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 	if len(arr.u) <= arr.l*8 {
 		arr.u = append(arr.u, make([]byte, 32)...)
 	}
+
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
 	arr.l = arr.l + 1
+	treeBufferExpectCache := getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice) * length.Hash
+	if len(arr.treeCacheBuffer) < treeBufferExpectCache {
+		arr.treeCacheBuffer = append(arr.treeCacheBuffer, make([]byte, treeBufferExpectCache-len(arr.treeCacheBuffer))...)
+	}
+	ihIdx := (((arr.l - 1) / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
+	for i := ihIdx; i < ihIdx+length.Hash; i++ {
+		arr.treeCacheBuffer[i] = 0
+	}
 }
 
 // Get returns the element at the given index.
@@ -119,10 +150,11 @@ func (arr *byteBasedUint64Slice) Get(index int) uint64 {
 
 // Set replaces the element at the given index with a new value.
 func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
-	if index >= arr.l {
-		panic("index out of range")
-	}
 	offset := index * 8
+	ihIdx := ((index / 4) / convertDepthToChunkSize(treeCacheDepthUint64Slice)) * length.Hash
+	for i := ihIdx; i < ihIdx+length.Hash; i++ {
+		arr.treeCacheBuffer[i] = 0
+	}
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
 }
 
@@ -155,10 +187,36 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
-	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
-	offset := 32*((arr.l-1)/4) + 32
-	elements := arr.u[:offset]
-	for i := uint8(0); i < depth; i++ {
+	chunkSize := convertDepthToChunkSize(treeCacheDepthUint64Slice) * length.Hash
+	depth := GetDepth((uint64(arr.c)*8 + length.Hash - 1) / length.Hash)
+	emptyHashBytes := make([]byte, length.Hash)
+
+	layerBuffer := make([]byte, chunkSize)
+	maxTo := length.Hash*((arr.l-1)/4) + length.Hash
+
+	offset := 0
+	for i := 0; i < maxTo; i += chunkSize {
+		offset = (i / chunkSize) * length.Hash
+		from := i
+		to := int(utils.Min64(uint64(from+chunkSize), uint64(maxTo)))
+
+		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
+			continue
+		}
+		layerBuffer = layerBuffer[:to-from]
+		copy(layerBuffer, arr.u[from:to])
+		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	if treeCacheDepthUint64Slice >= depth {
+		return common.BytesToHash(arr.treeCacheBuffer[:32]), nil
+	}
+
+	arr.makeBuf(offset + length.Hash)
+	copy(arr.buf, arr.treeCacheBuffer[:offset+length.Hash])
+	elements := arr.buf
+	for i := uint8(treeCacheDepthUint64Slice); i < depth; i++ {
 		layerLen := len(elements)
 		if layerLen%64 == 32 {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
@@ -184,10 +242,11 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%8 > 0 {
 		return ssz.ErrBadDynamicLength
 	}
-	bufferLength := len(buf) + (length.Hash - (len(buf) % length.Hash))
+	arr.l = len(buf) / 8
+	bufferLength := length.Hash*((arr.l-1)/4) + length.Hash
 	arr.u = make([]byte, bufferLength)
 	copy(arr.u, buf)
-	arr.l = len(buf) / 8
+	arr.treeCacheBuffer = make([]byte, getTreeCacheSize((arr.l+3)/4, treeCacheDepthUint64Slice)*length.Hash)
 	return nil
 }
 

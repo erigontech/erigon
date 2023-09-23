@@ -3,10 +3,11 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func DefaultStages(ctx context.Context,
@@ -128,24 +129,26 @@ func DefaultStages(ctx context.Context,
 				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
 			},
 		},
-		{
-			ID:          stages.PatriciaTrie,
-			Description: "evaluate patricia trie commitment",
-			Disabled:    !bodies.historyV3 && !ethconfig.EnableHistoryV4InTest,
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				_, err := SpawnPatriciaTrieStage(s, u, tx, trieCfg, ctx, logger)
-				if err != nil {
-					return err
-				}
-				return nil
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle, logger)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
-			},
-		},
+		//{
+		//	ID:          stages.PatriciaTrie,
+		//	Description: "evaluate patricia trie commitment on existing state files",
+		//	Disabled:    !bodies.historyV3 && !ethconfig.EnableHistoryV4InTest,
+		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+		//		_, err := SpawnPatriciaTrieStage(s, u, tx, trieCfg, ctx, logger)
+		//		if err != nil {
+		//			return err
+		//		}
+		//		return nil
+		//	},
+		//	Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+		//		return nil
+		//		//return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle, logger)
+		//	},
+		//	Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+		//		return nil
+		//		//return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
+		//	},
+		//},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",

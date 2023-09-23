@@ -1651,9 +1651,6 @@ func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, fro
 	}
 }
 
-func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(key, value []byte)) error {
-	return ac.accounts.IteratePrefix(tx, pref, fn)
-}
 func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsDomain:
