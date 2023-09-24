@@ -244,7 +244,7 @@ Loop:
 			return err
 		}
 
-		if test || (cfg.loopBreakCheck != nil && cfg.loopBreakCheck()) {
+		if test {
 			announces := cfg.hd.GrabAnnounces()
 			if len(announces) > 0 {
 				cfg.announceNewHashes(ctx, announces)
