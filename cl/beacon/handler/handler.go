@@ -35,22 +35,22 @@ func (a *ApiHandler) init() {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/events", nil)
 			r.Route("/config", func(r chi.Router) {
-				r.Get("/spec", beaconHandlerWrapper(a.getSpec))
-				r.Get("/deposit_contract", beaconHandlerWrapper(a.getDepositContract))
-				r.Get("/fork_schedule", beaconHandlerWrapper(a.getForkSchedule))
+				r.Get("/spec", beaconHandlerWrapper(a.getSpec, false))
+				r.Get("/deposit_contract", beaconHandlerWrapper(a.getDepositContract, false))
+				r.Get("/fork_schedule", beaconHandlerWrapper(a.getForkSchedule, false))
 			})
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/headers", func(r chi.Router) {
-					r.Get("/", beaconHandlerWrapper(a.getHeaders))
-					r.Get("/{block_id}", beaconHandlerWrapper(a.getHeader))
+					r.Get("/", beaconHandlerWrapper(a.getHeaders, false))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getHeader, false))
 				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
-					r.Get("/{block_id}", beaconHandlerWrapper(a.getBlock))
-					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockAttestations))
-					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getBlock, true))
+					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockAttestations, true))
+					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot, false))
 				})
-				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis))
+				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis, false))
 				r.Post("/binded_blocks", nil)
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
