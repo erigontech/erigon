@@ -42,11 +42,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		)
 
 		evm.IntraBlockState().GetState(contract.Address(), &slot, &current)
-		// Check slot presence in the access list
-		if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
+		// If the caller cannot afford the cost, this change will be rolled back
+		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot); slotMod {
 			cost = params.ColdSloadCostEIP2929
-			// If the caller cannot afford the cost, this change will be rolled back
-			evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot)
 		}
 		var value uint256.Int
 		value.Set(y)
@@ -105,11 +103,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	loc := stack.Peek()
 	slot := libcommon.Hash(loc.Bytes32())
-	// Check slot presence in the access list
-	if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
-		// If the caller cannot afford the cost, this change will be rolled back
-		// If he does afford it, we can skip checking the same thing later on, during execution
-		evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot)
+	// If the caller cannot afford the cost, this change will be rolled back
+	// If he does afford it, we can skip checking the same thing later on, during execution
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot); slotMod {
 		return params.ColdSloadCostEIP2929, nil
 	}
 	return params.WarmStorageReadCostEIP2929, nil
@@ -128,8 +124,7 @@ func gasExtCodeCopyEIP2929(evm VMInterpreter, contract *Contract, stack *stack.S
 	}
 	addr := libcommon.Address(stack.Peek().Bytes20())
 	// Check slot presence in the access list
-	if !evm.IntraBlockState().AddressInAccessList(addr) {
-		evm.IntraBlockState().AddAddressToAccessList(addr)
+	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
 		if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929); overflow {
@@ -149,10 +144,8 @@ func gasExtCodeCopyEIP2929(evm VMInterpreter, contract *Contract, stack *stack.S
 // - (ext) balance
 func gasEip2929AccountCheck(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	addr := libcommon.Address(stack.Peek().Bytes20())
-	// Check slot presence in the access list
-	if !evm.IntraBlockState().AddressInAccessList(addr) {
-		// If the caller cannot afford the cost, this change will be rolled back
-		evm.IntraBlockState().AddAddressToAccessList(addr)
+	// If the caller cannot afford the cost, this change will be rolled back
+	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
 		return params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929, nil
 	}
@@ -228,9 +221,8 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas     uint64
 			address = libcommon.Address(stack.Peek().Bytes20())
 		)
-		if !evm.IntraBlockState().AddressInAccessList(address) {
-			// If the caller cannot afford the cost, this change will be rolled back
-			evm.IntraBlockState().AddAddressToAccessList(address)
+		// If the caller cannot afford the cost, this change will be rolled back
+		if evm.IntraBlockState().AddAddressToAccessList(address) {
 			gas = params.ColdAccountAccessCostEIP2929
 		}
 		// if empty and transfers value
