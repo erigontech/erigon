@@ -40,6 +40,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			current uint256.Int
 			cost    = uint64(0)
 		)
+
 		evm.IntraBlockState().GetState(contract.Address(), &slot, &current)
 		// Check slot presence in the access list
 		if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
