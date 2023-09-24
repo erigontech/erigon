@@ -502,11 +502,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	excl := make(map[libcommon.Address]struct{})
+	for _, pc := range precompiles {
+		excl[pc] = struct{}{}
+	}
 
 	// Create an initial tracer
-	prevTracer := logger.NewAccessListTracer(nil, nil, nil)
+	prevTracer := logger.NewAccessListTracer(nil, excl, nil)
 	if args.AccessList != nil {
-		prevTracer = logger.NewAccessListTracer(*args.AccessList, nil, nil)
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 	for {
 		state := state.New(stateReader)
@@ -537,7 +541,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, nil, state)
+		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
 		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
 		txCtx := core.NewEVMTxContext(msg)
@@ -558,9 +562,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				optimizeWarmAddrInAccessList(accessList, *args.From)
 				optimizeWarmAddrInAccessList(accessList, to)
 				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
-				for _, pc := range precompiles {
-					optimizeWarmAddrInAccessList(accessList, pc)
-				}
 				for addr := range tracer.CreatedContracts() {
 					if !tracer.UsedBeforeCreation(addr) {
 						optimizeWarmAddrInAccessList(accessList, addr)
@@ -573,7 +574,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 }
 
-// some addresses (like sender, recipient, block producer, precompiles, and created contracts)
+// some addresses (like sender, recipient, block producer, and created contracts)
 // are considered warm already, so we can save by adding these to the access list
 // only if we are adding a lot of their respective storage slots as well
 func optimizeWarmAddrInAccessList(accessList *accessListResult, addr libcommon.Address) {
