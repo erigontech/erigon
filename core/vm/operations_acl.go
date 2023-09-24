@@ -155,13 +155,13 @@ func gasEip2929AccountCheck(evm VMInterpreter, contract *Contract, stack *stack.
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		addr := libcommon.Address(stack.Back(1).Bytes20())
-		// Check slot presence in the access list
-		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-		if !warmAccess {
-			evm.IntraBlockState().AddAddressToAccessList(addr)
+
+		addrMod := evm.IntraBlockState().AddAddressToAccessList(addr)
+		warmAccess := !addrMod
+		if addrMod {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if !contract.UseGas(coldCost) {
