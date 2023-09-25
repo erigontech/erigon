@@ -162,6 +162,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 		// First loop drops torrents that were downloaded or are already complete
 		// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
@@ -205,6 +210,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
