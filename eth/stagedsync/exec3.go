@@ -705,7 +705,7 @@ Loop:
 				if txTask.Error != nil {
 					break Loop
 				}
-				applyWorker.RunTxTask(txTask)
+				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if txTask.Error != nil {
 						return txTask.Error

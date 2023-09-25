@@ -46,8 +46,9 @@ type Worker struct {
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
 
-	evm *vm.EVM
-	ibs *state.IntraBlockState
+	evm   *vm.EVM
+	ibs   *state.IntraBlockState
+	vmCfg vm.Config
 }
 
 func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine) *Worker {
@@ -73,6 +74,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		taskGasPool: new(core.GasPool),
 	}
 
+	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
 		if err != nil {
@@ -177,15 +179,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			if rw.callTracer != nil {
-				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
-				txTask.TraceTos = rw.callTracer.Tos()
-			}
 			//incorrect unwind to block 2
 			if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 				txTask.Error = err
 			}
-
 			txTask.TraceTos = map[libcommon.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
@@ -193,25 +190,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
-
-		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
+		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		blockContext := txTask.EvmBlockContext
-		if !rw.background {
-			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-		}
-		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
-		vmenv := rw.evm
-		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 		} else {
