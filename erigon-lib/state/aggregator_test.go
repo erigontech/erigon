@@ -5,13 +5,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math/rand"
 	"os"
 	"path"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"

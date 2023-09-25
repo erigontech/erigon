@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"

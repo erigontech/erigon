@@ -89,17 +89,12 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:   "ram",
-			Action: doRam,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
-		},
-		{
-			Name:   "decompress_speed",
+			Name:   "decompress-speed",
 			Action: doDecompressSpeed,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:   "bt_search",
+			Name:   "bt-search",
 			Action: doBtSearch,
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{
@@ -269,32 +264,6 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		}
 		log.Info("decompress skip speed", "took", time.Since(t))
 	}()
-	return nil
-}
-func doRam(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
-		return err
-	}
-	defer logger.Info("Done")
-	args := cliCtx.Args()
-	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
-	}
-	f := args.First()
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	runtime.ReadMemStats(&m)
-	before := m.Alloc
-	logger.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	decompressor, err := compress.NewDecompressor(f)
-	if err != nil {
-		return err
-	}
-	defer decompressor.Close()
-	runtime.ReadMemStats(&m)
-	logger.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
 	return nil
 }
 

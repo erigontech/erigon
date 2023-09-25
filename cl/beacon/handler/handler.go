@@ -15,14 +15,14 @@ type ApiHandler struct {
 	o   sync.Once
 	mux chi.Router
 
-	blockSource     persistence.BlockSource
+	blockSource     persistence.RawBeaconBlockChain
 	indiciesDB      *sql.DB
 	genesisCfg      *clparams.GenesisConfig
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.BlockSource, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore}
 }
 
@@ -46,8 +46,8 @@ func (a *ApiHandler) init() {
 				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
-					r.Get("/{block_id}", a.getBlock)
-					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockRoot))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getBlock))
+					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockAttestations))
 					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot))
 				})
 				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis))

@@ -17,8 +17,9 @@
 package datadir
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
 // Dirs is the file system folder the node should use for any data storage
