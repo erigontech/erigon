@@ -754,7 +754,7 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *compress.Decompressor
 	efHistoryIdx    *recsplit.Index
-	efExistence     *bloomFilter
+	efExistence     *ExistenceFilter
 
 	warmLocality *LocalityIndexFiles
 	coldLocality *LocalityIndexFiles
@@ -789,7 +789,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var (
 		historyDecomp, efHistoryDecomp *compress.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
-		efExistence                    *bloomFilter
+		efExistence                    *ExistenceFilter
 		efHistoryComp                  *compress.Compressor
 		rs                             *recsplit.RecSplit
 	)

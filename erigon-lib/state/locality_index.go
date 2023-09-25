@@ -168,10 +168,10 @@ func (li *LocalityIndex) openFiles() (err error) {
 			}
 		}
 	}
-	if li.file.bloom == nil {
+	if li.file.existence == nil {
 		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(idxPath) {
-			li.file.bloom, err = OpenBloom(idxPath)
+			li.file.existence, err = OpenExistenceFilter(idxPath)
 			if err != nil {
 				return err
 			}
@@ -193,8 +193,8 @@ func (li *LocalityIndex) closeFiles() {
 		li.file.bm.Close()
 		li.file.bm = nil
 	}
-	if li.file.bloom != nil {
-		li.file.bloom = nil
+	if li.file.existence != nil {
+		li.file.existence = nil
 	}
 }
 func (li *LocalityIndex) reCalcRoFiles() {
@@ -309,7 +309,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	hi, lo := lc.reader.Sum(key)
-	if lc.file.src.bloom != nil && !lc.file.src.bloom.ContainsHash(hi) {
+	if lc.file.src.existence != nil && !lc.file.src.existence.ContainsHash(hi) {
 		return 0, false, nil
 	}
 
@@ -376,7 +376,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 
 	//statelessHasher := murmur3.New128WithSeed(rs.Salt())
-	var bloom *bloomFilter
+	var bloom *ExistenceFilter
 	for {
 		p.Processed.Store(0)
 		i := uint64(0)
@@ -396,7 +396,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 
 		//if count > 0 {
-		//	bloom, err = NewBloom(uint64(count), idxPath+".lb")
+		//	existence, err = NewExistenceFilter(uint64(count), idxPath+".lb")
 		//	if err != nil {
 		//		return nil, err
 		//	}
@@ -422,7 +422,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			//statelessHasher.Reset()
 			//statelessHasher.Write(k) //nolint:errcheck
 			//hi, _ := statelessHasher.Sum128()
-			//bloom.AddHash(hi)
+			//existence.AddHash(hi)
 
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
@@ -452,11 +452,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 	}
 
-	//if bloom != nil {
-	//	if err := bloom.Build(); err != nil {
+	//if existence != nil {
+	//	if err := existence.Build(); err != nil {
 	//		return nil, err
 	//	}
-	//	bloom.Close() //TODO: move to defer, and move building and opennig to different funcs
+	//	existence.Close() //TODO: move to defer, and move building and opennig to different funcs
 	//}
 
 	idx, err := recsplit.OpenIndex(idxPath)
@@ -468,7 +468,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, err
 	}
 	//if dir.FileExist(idxPath + ".lb") {
-	//	bloom, err = OpenBloom(idxPath + ".lb")
+	//	existence, err = OpenExistenceFilter(idxPath + ".lb")
 	//	if err != nil {
 	//		return nil, err
 	//	}
@@ -493,7 +493,7 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 			endTxNum:   sf.toStep * li.aggregationStep,
 			index:      sf.index,
 			bm:         sf.bm,
-			bloom:      sf.bloom,
+			existence:  sf.bloom,
 			frozen:     false,
 		}
 	}
@@ -512,7 +512,7 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toSte
 type LocalityIndexFiles struct {
 	index *recsplit.Index
 	bm    *bitmapdb.FixedSizeBitmaps
-	bloom *bloomFilter
+	bloom *ExistenceFilter
 
 	fromStep, toStep uint64
 }

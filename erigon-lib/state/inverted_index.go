@@ -394,7 +394,7 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 	defer ps.Delete(p)
 	defer d.EnableReadAhead().DisableReadAhead()
 
-	idxFilter, err := NewBloom(uint64(count), idxPath)
+	idxFilter, err := NewExistenceFilter(uint64(count), idxPath)
 	if err != nil {
 		return err
 	}
@@ -482,10 +482,10 @@ func (ii *InvertedIndex) openFiles() error {
 					}
 				}
 			}
-			if item.bloom == nil && ii.withExistenceIndex {
+			if item.existence == nil && ii.withExistenceIndex {
 				idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
 				if dir.FileExist(idxPath) {
-					if item.bloom, err = OpenBloom(idxPath); err != nil {
+					if item.existence, err = OpenExistenceFilter(idxPath); err != nil {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}
@@ -790,8 +790,8 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		if ic.files[i].endTxNum <= txNum {
 			continue
 		}
-		if ic.ii.withExistenceIndex && ic.files[i].src.bloom != nil {
-			if !ic.files[i].src.bloom.ContainsHash(hi) {
+		if ic.ii.withExistenceIndex && ic.files[i].src.existence != nil {
+			if !ic.files[i].src.existence.ContainsHash(hi) {
 				continue
 			}
 		}
@@ -1501,7 +1501,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, r
 type InvertedFiles struct {
 	decomp       *compress.Decompressor
 	index        *recsplit.Index
-	existence    *bloomFilter
+	existence    *ExistenceFilter
 	warmLocality *LocalityIndexFiles
 	coldLocality *LocalityIndexFiles
 }
@@ -1523,7 +1523,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	var (
 		decomp    *compress.Decompressor
 		index     *recsplit.Index
-		existence *bloomFilter
+		existence *ExistenceFilter
 		comp      *compress.Compressor
 		err       error
 	)
@@ -1633,7 +1633,7 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
-	fi.bloom = sf.existence
+	fi.existence = sf.existence
 	ii.files.Set(fi)
 
 	ii.reCalcRoFiles()

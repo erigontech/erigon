@@ -362,10 +362,10 @@ func (d *DomainCommitted) findShortenKey(fullKey []byte, list ...*filesItem) (sh
 	for _, item := range list {
 		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
 		//index := recsplit.NewIndexReader(item.index) // TODO is support recsplt is needed?
-		// TODO: bloom filter existence should be checked for domain which filesItem list is provided, not in commitmnet
-		//if d.withExistenceIndex && item.bloom != nil {
+		// TODO: existence filter existence should be checked for domain which filesItem list is provided, not in commitmnet
+		//if d.withExistenceIndex && item.existence != nil {
 		//	hi, _ := dc.hc.ic.hashKey(fullKey)
-		//	if !item.bloom.ContainsHash(hi) {
+		//	if !item.existence.ContainsHash(hi) {
 		//		continue
 		//		//return nil, false, nil
 		//	}

@@ -660,9 +660,9 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 	{
 		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(filepath.Join(d.dir, fileName)) {
-			valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+			valuesIn.existence, err = OpenExistenceFilter(filepath.Join(d.dir, fileName))
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
 		}
 	}
@@ -834,9 +834,9 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	{
 		fileName := fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(filepath.Join(d.dir, fileName)) {
-			valuesIn.bloom, err = OpenBloom(filepath.Join(d.dir, fileName))
+			valuesIn.existence, err = OpenExistenceFilter(filepath.Join(d.dir, fileName))
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
 		}
 	}
@@ -976,7 +976,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	if ii.withExistenceIndex {
 		idxFileName := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 		idxPath := filepath.Join(ii.dir, idxFileName)
-		if outItem.bloom, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
+		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 			return nil, err
 		}
 	}
