@@ -198,17 +198,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		return nil, nil
 	}
 
-	// Increment the call depth which is restricted to 1024
-	in.depth++
-	defer in.decrementDepth()
-
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	if readOnly && !in.readOnly {
-		in.readOnly = true
-		defer func() { in.readOnly = false }()
-	}
-
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
@@ -241,8 +230,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
 	mem.Reset()
-	defer pool.Put(mem)
-	defer stack.ReturnNormalStack(locStack)
+
 	contract.Input = input
 
 	if contract.IsEOF() {
@@ -251,17 +239,31 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		jt = in.cfg.JumpTable
 	}
 
-	if in.cfg.Debug {
-		defer func() {
-			if err != nil {
-				if !logged {
-					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-				} else {
-					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
-				}
-			}
-		}()
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	restoreReadonly := readOnly && !in.readOnly
+	if restoreReadonly {
+		in.readOnly = true
 	}
+	// Increment the call depth which is restricted to 1024
+	in.depth++
+	defer func() {
+		// first: capture data/memory/state/depth/etc... then clenup them
+		if in.cfg.Debug && err != nil {
+			if !logged {
+				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+			} else {
+				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+			}
+		}
+		// this function must execute _after_: the `CaptureState` needs the stacks before
+		pool.Put(mem)
+		stack.ReturnNormalStack(locStack)
+		if restoreReadonly {
+			in.readOnly = false
+		}
+		in.depth--
+	}()
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -278,7 +280,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(_pc, callContext.CodeSection)
+		op = contract.GetOp(_pc)
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
