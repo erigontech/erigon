@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -28,6 +29,10 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
+
+func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
+func (hr *HistoryReaderV3) ResetReadSet()                     {}
+func (hr *HistoryReaderV3) DiscardReadList()                  {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
@@ -96,6 +101,15 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, a.Incarnation-1)
 	}
 	return a.Incarnation - 1, nil
+}
+
+type ResettableStateReader interface {
+	StateReader
+	SetTx(tx kv.Tx)
+	SetTxNum(txn uint64)
+	DiscardReadList()
+	ReadSet() map[string]*state.KvList
+	ResetReadSet()
 }
 
 /*

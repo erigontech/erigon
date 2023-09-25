@@ -225,7 +225,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	bn, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	tx.Rollback()
 	require.NoError(t, err)
 
@@ -247,7 +247,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains.SetTx(tx)
 	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 
-	bn, txToStart, err := domains.SeekCommitment(0, math.MaxUint64)
+	bn, txToStart, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	txToStart++ // block and tx from seek commitment is already committed, have to start from next one
 	require.NoError(t, err)
 
@@ -394,7 +394,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 
-	bn, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	bn, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	tx.Rollback()
 	require.NoError(t, err)
 
@@ -416,7 +416,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domains.SetTx(tx)
 	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 
-	bn, txToStart, err := domains.SeekCommitment(0, math.MaxUint64)
+	bn, txToStart, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	txToStart++ // block and tx from seek commitment is already committed, have to start from next one
 	require.NoError(t, err)
 

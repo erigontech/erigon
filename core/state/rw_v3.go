@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -90,11 +89,12 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
-	if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
-		if _, err := rs.Commitment(txNum, true); err != nil {
-			panic(fmt.Errorf("txnum %d: %w", txNum, err))
-		}
-	}
+	// this is done by sharedomains.SetTxNum.
+	//if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
+	//	if _, err := rs.Commitment(txNum, true); err != nil {
+	//		panic(fmt.Errorf("txnum %d: %w", txNum, err))
+	//	}
+	//}
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()

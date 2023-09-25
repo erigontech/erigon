@@ -2,8 +2,10 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -34,7 +36,9 @@ type Worker struct {
 	in          *state.QueueWithRetry
 	rs          *state.StateV3
 	stateWriter *state.StateWriterBufferedV3
-	stateReader *state.StateReaderV3
+	//stateReader *state.StateReaderV3
+	stateReader state.ResettableStateReader
+	historyMode atomic.Bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
 
@@ -67,10 +71,11 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
-		ctx:      ctx,
-		genesis:  genesis,
-		resultCh: results,
-		engine:   engine,
+		ctx:         ctx,
+		genesis:     genesis,
+		resultCh:    results,
+		engine:      engine,
+		historyMode: atomic.Bool{},
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
@@ -124,7 +129,33 @@ func (rw *Worker) RunTxTask(txTask *state.TxTask) {
 	rw.RunTxTaskNoLock(txTask)
 }
 
+// Needed to set hisotry reader when need to offset few txs from block beginning and does not break processing,
+// like compute gas used for block and then to set state reader to continue processing on latest data.
+func (rw *Worker) SetReader(reader state.ResettableStateReader) {
+	rw.stateReader = reader
+	rw.stateReader.SetTx(rw.Tx())
+	rw.ibs.Reset()
+	rw.ibs = state.New(rw.stateReader)
+
+	switch reader.(type) {
+	case *state.HistoryReaderV3:
+		rw.historyMode.Store(true)
+	case *state.StateReaderV3:
+		rw.historyMode.Store(false)
+	default:
+		rw.historyMode.Store(false)
+		fmt.Printf("[worker] unknown reader %T: historyMode is set to disabled\n", reader)
+	}
+	fmt.Printf("[worker] set reader %T\n", reader)
+}
+
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
+	if txTask.SkipStateReading && !rw.historyMode.Load() {
+		rw.SetReader(state.NewHistoryReaderV3())
+	} else if !txTask.SkipStateReading && rw.historyMode.Load() {
+		rw.SetReader(state.NewStateReaderV3(rw.rs))
+	}
+
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
