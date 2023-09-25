@@ -50,6 +50,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 			return fmt.Errorf("invalid attestation")
 		}
 	}
+	cache.StoreAttestation(&data, attestation.AggregationBits(), attestationIndicies)
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
 	return nil

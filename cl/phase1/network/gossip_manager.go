@@ -150,6 +150,15 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
+		if err := g.forkChoice.OnAttesterSlashing(object.(*cltypes.AttesterSlashing)); err != nil {
+			l["at"] = "on attestation"
+			g.sentinel.BanPeer(ctx, data.Peer)
+			return err
+		}
+		if err := g.forkChoice.OnAttestation(object.(*cltypes.SignedAggregateAndProof).Message.Aggregate, false); err != nil {
+			return err
+		}
+
 	}
 	return nil
 }
