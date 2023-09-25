@@ -56,6 +56,7 @@ var (
 	ErrInvalidSection0Type    = errors.New("invalid section 0 type, input and output should be zero")
 	ErrTooLargeMaxStackHeight = errors.New("invalid type content, max stack height exceeds limit")
 	ErrInvalidContainerSize   = errors.New("invalid container size")
+	ErrInvalidMemoryAccess    = errors.New("invalid memory access")
 )
 
 var eofMagic = []byte{0xef, 0x00}

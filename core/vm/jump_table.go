@@ -68,7 +68,6 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
-	cancunEOFInstructionSet        = newCancunEOFInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 )
 
@@ -97,13 +96,6 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
-	instructionSet := newCancunInstructionSet()
-	enableEOF(&instructionSet)
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newCancunEOFInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)

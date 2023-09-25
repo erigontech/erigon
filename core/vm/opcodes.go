@@ -205,12 +205,6 @@ const (
 	LOG4
 )
 
-// 0xb0 range - control flow ops.
-const (
-// CALLF OpCode = 0xb0
-// RETF  OpCode = 0xb1
-)
-
 // 0xe0 range - eof ops.
 const (
 	RJUMP OpCode = 0xe0 + iota
@@ -218,6 +212,13 @@ const (
 	RJUMPV
 	CALLF
 	RETF
+
+	DUPN      OpCode = 0xe6
+	SWAPN     OpCode = 0xe7
+	DATALOAD  OpCode = 0xe8
+	DATALOADN OpCode = 0xe9
+	DATASIZE  OpCode = 0xea
+	DATACOPY  OpCode = 0xeb
 )
 
 // 0xf0 range - closures.
@@ -400,6 +401,13 @@ var opCodeToString = map[OpCode]string{
 	CALLF:  "CALLF",
 	RETF:   "RETF",
 
+	DUPN:      "DUPN",
+	SWAPN:     "SWAPN",
+	DATALOAD:  "DATALOAD",
+	DATALOADN: "DATALOADN",
+	DATASIZE:  "DATASIZE",
+	DATACOPY:  "DATACOPY",
+
 	// 0xf0 range.
 	CREATE:       "CREATE",
 	CALL:         "CALL",
@@ -569,6 +577,12 @@ var stringToOp = map[string]OpCode{
 	"RJUMPV":         RJUMPV,
 	"CALLF":          CALLF,
 	"RETF":           RETF,
+	"DUPN":           DUPN,
+	"SWAPN":          SWAPN,
+	"DATALOAD":       DATALOAD,
+	"DATALOADN":      DATALOADN,
+	"DATASIZE":       DATASIZE,
+	"DATACOPY":       DATACOPY,
 	"CREATE":         CREATE,
 	"CREATE2":        CREATE2,
 	"CALL":           CALL,

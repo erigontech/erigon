@@ -121,3 +121,7 @@ func memoryRevert(stack *stack.Stack) (uint64, bool) {
 func memoryLog(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))
 }
+
+func memoryDataCopy(stack *stack.Stack) (uint64, bool) {
+	return calcMemSize64(stack.Back(0), stack.Back(2))
+}

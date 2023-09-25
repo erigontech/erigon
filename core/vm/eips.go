@@ -345,6 +345,7 @@ func enableEOF(jt *JumpTable) {
 	jt[JUMPI] = undefined
 	jt[PC] = undefined
 
+	// TODO(racytech): Make sure everything is correct
 	// New opcodes
 	jt[RJUMP] = &operation{
 		execute:     opRjump,
@@ -377,6 +378,44 @@ func enableEOF(jt *JumpTable) {
 		numPop:      0,
 		numPush:     0,
 		terminal:    true,
+	}
+	jt[DUPN] = &operation{
+		execute:     opDupN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     1,
+	}
+	jt[SWAPN] = &operation{
+		execute:     opSwapN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     0,
+	}
+	jt[DATALOAD] = &operation{
+		execute:     opDataLoad,
+		constantGas: GasFastestStep,
+		numPop:      1,
+		numPush:     1,
+	}
+	jt[DATALOADN] = &operation{
+		execute:     opDataLoad,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+	jt[DATASIZE] = &operation{
+		execute:     opDataSize,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+	jt[DATACOPY] = &operation{
+		execute:     opDataCopy,
+		constantGas: GasFastestStep,
+		dynamicGas:  gasDataCopyEIP7480,
+		numPop:      3,
+		numPush:     0,
+		memorySize:  memoryDataCopy,
 	}
 }
 
@@ -457,5 +496,74 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if len(scope.ReturnStack) == 0 {
 		return nil, errStopToken
 	}
+	return nil, nil
+}
+
+func opDupN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	// TODO(racytech): not yet merged
+	return nil, nil
+}
+
+func opSwapN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	// TODO(racytech): not yet merged
+	return nil, nil
+}
+
+func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		index  = scope.Stack.Pop()
+		data   = scope.Contract.Data()
+		offset = int(index.Uint64()) // with overflow maybe?
+	)
+	if len(data) < 32 || len(data)-32 < offset {
+		return nil, ErrInvalidMemoryAccess
+	}
+	val := new(uint256.Int).SetBytes(data[offset : offset+32])
+	scope.Stack.Push(val)
+	return nil, nil
+}
+
+func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		code   = scope.Contract.CodeAt(scope.CodeSection)
+		data   = scope.Contract.Data()
+		offset = int(binary.BigEndian.Uint16(code[*pc+1:]))
+	)
+	if len(data) < 32 || len(data)-32 < offset {
+		return nil, ErrInvalidMemoryAccess
+	}
+	val := new(uint256.Int).SetBytes(data[offset : offset+32])
+	scope.Stack.Push(val)
+	return nil, nil
+}
+
+func opDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	dataSize := len(scope.Contract.Data())
+	val := new(uint256.Int).SetUint64(uint64(dataSize))
+	scope.Stack.Push(val)
+	return nil, nil
+}
+
+func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		memOffset256 = scope.Stack.Pop()
+		dataIndex256 = scope.Stack.Pop()
+		size256      = scope.Stack.Pop()
+
+		data    = scope.Contract.Data()
+		dataLen = uint64(len(data))
+		src     = dataIndex256.Uint64()
+		dst     = memOffset256.Uint64()
+		size    = size256.Uint64()
+	)
+
+	if dataLen < size || dataLen-size < src {
+		return nil, ErrInvalidMemoryAccess
+	}
+
+	if size > 0 {
+		scope.Memory.Copy(dst, src, size)
+	}
+
 	return nil, nil
 }

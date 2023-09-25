@@ -198,6 +198,13 @@ func (c *Contract) CodeAt(section uint64) []byte {
 	return c.Container.Code[section]
 }
 
+func (c *Contract) Data() []byte {
+	// if c.Container == nil {
+	// 	return nil
+	// }
+	return c.Container.Data
+}
+
 // SetCallCode sets the code of the contract and address of the backing data
 // object
 func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte, container *Container) {
