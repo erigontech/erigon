@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/common/math"
@@ -184,7 +185,7 @@ func ExecuteBlockEphemerally(
 
 		stateSyncReceipt := &types.Receipt{}
 		if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
+			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
 
 			if len(blockLogs) > len(logs) {
 				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
