@@ -87,9 +87,11 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 
 	// move db from datadir/snapshot/db to datadir/downloader
 	if dir.Exist(filepath.Join(cfg.SnapDir, "db", "mdbx.dat")) { // migration from prev versions
-		if err := os.Rename(filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")); err != nil {
-			panic(err)
-		}
+		from, to := filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")
+		copyFile(from, to) //fall back to copy-file if folders are on different disks
+		//if err := os.Rename(from, to); err != nil {
+		//	copyFile(from, to) //fall back to copy-file if folders are on different disks
+		//}
 	}
 
 	db, c, m, torrentClient, err := openClient(cfg.DBDir, cfg.SnapDir, cfg.ClientConfig)
@@ -131,6 +133,19 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		d.applyWebseeds()
 	}()
 	return d, nil
+}
+func copyFile(from, to string) {
+	r, err := os.Open(from)
+	if err != nil {
+		panic(err)
+	}
+	defer r.Close()
+	w, err := os.Create(to)
+	if err != nil {
+		panic(err)
+	}
+	defer w.Close()
+	w.ReadFrom(r)
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
