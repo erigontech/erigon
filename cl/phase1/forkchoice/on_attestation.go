@@ -19,7 +19,6 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 		return err
 	}
 	target := data.Target()
-	fmt.Println("a")
 	if cachedIndicies, ok := cache.LoadAttestatingIndicies(&data, attestation.AggregationBits()); ok {
 		f.processAttestingIndicies(attestation, cachedIndicies)
 		return nil

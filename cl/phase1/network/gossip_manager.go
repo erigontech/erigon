@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -148,13 +147,12 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		object = &cltypes.SignedAggregateAndProof{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 			l["at"] = "decoding proof"
-			fmt.Println(err)
 			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
-		fmt.Println("ON")
 		if err := g.forkChoice.OnAttestation(object.(*cltypes.SignedAggregateAndProof).Message.Aggregate, false); err != nil {
 			l["at"] = "on attestation"
+			log.Trace("Could not process attestation", "reason", err)
 			return err
 		}
 
