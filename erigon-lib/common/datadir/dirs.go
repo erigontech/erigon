@@ -34,6 +34,7 @@ type Dirs struct {
 	Snap            string
 	SnapHistory     string
 	SnapDomain      string
+	Downloader      string
 	TxPool          string
 	Nodes           string
 }
@@ -57,6 +58,7 @@ func New(datadir string) Dirs {
 		Snap:            filepath.Join(datadir, "snapshots"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "warm"),
+		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}

@@ -45,11 +45,11 @@ const DefaultPieceSize = 2 * 1024 * 1024
 const DefaultNetworkChunkSize = 512 * 1024
 
 type Cfg struct {
-	ClientConfig  *torrent.ClientConfig
-	SnapDir       string
-	DownloadSlots int
-	WebSeedUrls   []*url.URL
-	WebSeedFiles  []string
+	ClientConfig   *torrent.ClientConfig
+	SnapDir, DBDir string
+	DownloadSlots  int
+	WebSeedUrls    []*url.URL
+	WebSeedFiles   []string
 }
 
 func Default() *torrent.ClientConfig {
@@ -78,9 +78,9 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dataDir datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers []string, webseeds string) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers []string, webseeds string) (*Cfg, error) {
 	torrentConfig := Default()
-	torrentConfig.DataDir = dataDir.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
+	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
 	torrentConfig.ExtendedHandshakeClientVersion = version
 
@@ -155,12 +155,12 @@ func New(dataDir datadir.Dirs, version string, verbosity lg.Level, downloadRate,
 		}
 		webseedUrls = append(webseedUrls, uri)
 	}
-	localCfgFile := filepath.Join(dataDir.DataDir, "webseeds.toml") // datadir/webseeds.toml allowed
+	localCfgFile := filepath.Join(dirs.DataDir, "webseeds.toml") // datadir/webseeds.toml allowed
 	if dir.FileExist(localCfgFile) {
 		webseedFiles = append(webseedFiles, localCfgFile)
 	}
 
-	return &Cfg{SnapDir: torrentConfig.DataDir,
+	return &Cfg{SnapDir: dirs.Snap, DBDir: dirs.Downloader,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedUrls, WebSeedFiles: webseedFiles,
 	}, nil
