@@ -142,7 +142,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
+func seedableHistorySnapshots(dir string) ([]string, error) {
 	l, err := seedableSnapshotsBySubDir(dir, "history")
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 			continue
 		}
 		ext := filepath.Ext(f.Name())
-		if ext != ".v" && ext != ".ef" { // filter out only compressed files
+		if ext != ".kv" && ext != ".v" && ext != ".ef" { // filter out only compressed files
 			continue
 		}
 

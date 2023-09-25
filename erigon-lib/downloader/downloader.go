@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,18 +85,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	// Application must never see partially-downloaded files
-	// To provide such consistent view - downloader does:
-	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
-	// and App only work with <datadir>/snapshot s folder
-	if dir.FileExist(cfg.SnapDir + "_tmp") { // migration from prev versions
-		_ = os.Rename(cfg.SnapDir+"_tmp", filepath.Join(cfg.SnapDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
-	}
-	if err := moveFromTmp(cfg.SnapDir); err != nil {
-		return nil, err
+	// move db from datadir/snapshot/db to datadir/downloader
+	if dir.Exist(filepath.Join(cfg.SnapDir, "db", "mdbx.dat")) { // migration from prev versions
+		if err := os.Rename(filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")); err != nil {
+			panic(err)
+		}
 	}
 
-	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(cfg.SnapDir, cfg.DBDir, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -162,6 +157,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 		// First loop drops torrents that were downloaded or are already complete
 		// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
@@ -205,6 +205,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
@@ -347,37 +352,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.FilesTotal = int32(len(torrents))
 
 	d.stats = stats
-}
-
-func moveFromTmp(snapDir string) error {
-	tmpDir := filepath.Join(snapDir, "tmp")
-	if !dir.FileExist(tmpDir) {
-		return nil
-	}
-
-	snFs := os.DirFS(tmpDir)
-	paths, err := fs.ReadDir(snFs, ".")
-	if err != nil {
-		return err
-	}
-	for _, p := range paths {
-		if p.IsDir() || !p.Type().IsRegular() {
-			continue
-		}
-		if p.Name() == "tmp" {
-			continue
-		}
-		src := filepath.Join(tmpDir, p.Name())
-		if err := os.Rename(src, filepath.Join(snapDir, p.Name())); err != nil {
-			if os.IsExist(err) {
-				_ = os.Remove(src)
-				continue
-			}
-			return err
-		}
-	}
-	_ = os.Remove(tmpDir)
-	return nil
 }
 
 func (d *Downloader) verifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
@@ -534,12 +508,7 @@ func seedableFiles(snapDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(snapDir, "history")
-	if err != nil {
-		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
-	}
-	files = append(files, files2...)
-	files2, err = seedableHistorySnapshots(snapDir, "warm")
+	files2, err := seedableHistorySnapshots(snapDir)
 	if err != nil {
 		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
 	}
@@ -591,13 +560,12 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	snapDir := cfg.DataDir
+func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	db, err = mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapDir, "db")).
+		Path(dbDir).
 		Open()
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
