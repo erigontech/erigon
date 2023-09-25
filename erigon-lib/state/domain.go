@@ -96,7 +96,7 @@ type filesItem struct {
 	index        *recsplit.Index
 	bindex       *BtIndex
 	bm           *bitmapdb.FixedSizeBitmaps
-	bloom        *bloomFilter
+	existence    *ExistenceFilter
 	startTxNum   uint64
 	endTxNum     uint64
 
@@ -110,13 +110,14 @@ type filesItem struct {
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
 }
-type bloomFilter struct {
+
+type ExistenceFilter struct {
 	*bloomfilter.Filter
 	FileName, FilePath string
 	f                  *os.File
 }
 
-func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
+func NewBloom(keysCount uint64, filePath string) (*ExistenceFilter, error) {
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
@@ -124,9 +125,9 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w, %s", err, fileName)
 	}
-	return &bloomFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
+	return &ExistenceFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
 }
-func (b *bloomFilter) Build() error {
+func (b *ExistenceFilter) Build() error {
 	log.Trace("[agg] write file", "file", b.FileName)
 	//TODO: fsync and tmp-file rename
 	if _, err := b.Filter.WriteFile(b.FilePath); err != nil {
@@ -135,9 +136,9 @@ func (b *bloomFilter) Build() error {
 	return nil
 }
 
-func OpenBloom(filePath string) (*bloomFilter, error) {
+func OpenBloom(filePath string) (*ExistenceFilter, error) {
 	_, fileName := filepath.Split(filePath)
-	f := &bloomFilter{FilePath: filePath, FileName: fileName}
+	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
 	var err error
 	f.Filter, _, err = bloomfilter.ReadFile(filePath)
 	if err != nil {
@@ -145,7 +146,7 @@ func OpenBloom(filePath string) (*bloomFilter, error) {
 	}
 	return f, nil
 }
-func (b *bloomFilter) Close() {
+func (b *ExistenceFilter) Close() {
 	if b.f != nil {
 		b.f.Close()
 		b.f = nil
@@ -204,12 +205,12 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.bm = nil
 	}
-	if i.bloom != nil {
-		i.bloom.Close()
-		if err := os.Remove(i.bloom.FilePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bloom.FileName)
+	if i.existence != nil {
+		i.existence.Close()
+		if err := os.Remove(i.existence.FilePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
 		}
-		i.bloom = nil
+		i.existence = nil
 	}
 }
 
@@ -506,10 +507,10 @@ func (d *Domain) openFiles() (err error) {
 					}
 				}
 			}
-			if item.bloom == nil {
+			if item.existence == nil {
 				idxPath := d.kvExistenceIdxFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
-					if item.bloom, err = OpenBloom(idxPath); err != nil {
+					if item.existence, err = OpenBloom(idxPath); err != nil {
 						return false
 					}
 				}
@@ -864,9 +865,9 @@ type DomainContext struct {
 func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if UseBtree || UseBpsTree {
-		if dc.d.withExistenceIndex && dc.files[i].src.bloom != nil {
+		if dc.d.withExistenceIndex && dc.files[i].src.existence != nil {
 			hi, _ := dc.hc.ic.hashKey(filekey)
-			if !dc.files[i].src.bloom.ContainsHash(hi) {
+			if !dc.files[i].src.existence.ContainsHash(hi) {
 				return nil, false, nil
 			}
 		}
@@ -1103,7 +1104,7 @@ type StaticFiles struct {
 	valuesDecomp *compress.Decompressor
 	valuesIdx    *recsplit.Index
 	valuesBt     *BtIndex
-	bloom        *bloomFilter
+	bloom        *ExistenceFilter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1192,7 +1193,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	var bloom *bloomFilter
+	var bloom *ExistenceFilter
 	{
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		if dir.FileExist(fPath) {
@@ -1302,7 +1303,7 @@ func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compresse
 	}
 	return recsplit.OpenIndex(idxPath)
 }
-func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*bloomFilter, error) {
+func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
 	if err := buildIdxFilter(ctx, d, compressed, idxPath, salt, ps, logger, noFsync); err != nil {
 		return nil, err
 	}
@@ -1389,7 +1390,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
-	fi.bloom = sf.bloom
+	fi.existence = sf.bloom
 	d.files.Set(fi)
 
 	d.reCalcRoFiles()
@@ -1624,10 +1625,10 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.d.withExistenceIndex {
-			//if dc.files[i].src.bloom == nil {
+			//if dc.files[i].src.existence == nil {
 			//	panic(dc.files[i].src.decompressor.FileName())
 			//}
-			if dc.files[i].src.bloom != nil && !dc.files[i].src.bloom.ContainsHash(hi) {
+			if dc.files[i].src.existence != nil && !dc.files[i].src.existence.ContainsHash(hi) {
 				continue
 			}
 		}

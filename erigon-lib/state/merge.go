@@ -658,9 +658,9 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 	{
 		eiPath := d.kvExistenceIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(eiPath) {
-			valuesIn.bloom, err = OpenBloom(eiPath)
+			valuesIn.existence, err = OpenBloom(eiPath)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
 		}
 	}
@@ -830,9 +830,9 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	{
 		btPath := d.kvExistenceIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(btPath) {
-			valuesIn.bloom, err = OpenBloom(btPath)
+			valuesIn.existence, err = OpenBloom(btPath)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge %s bloom [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
 		}
 	}
@@ -970,7 +970,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	}
 	if ii.withExistenceIndex {
 		idxPath := ii.efExistenceIdxFilePath(startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
-		if outItem.bloom, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.dirs.Tmp, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
+		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ii.compression, idxPath, ii.dirs.Tmp, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 			return nil, err
 		}
 	}
