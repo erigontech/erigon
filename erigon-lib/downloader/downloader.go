@@ -92,7 +92,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		}
 	}
 
-	db, c, m, torrentClient, err := openClient(cfg.SnapDir, cfg.DBDir, cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(cfg.DBDir, cfg.SnapDir, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
