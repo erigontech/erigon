@@ -97,13 +97,12 @@ type IntraBlockState interface {
 		precompiles []common.Address, txAccesses types2.AccessList)
 
 	AddressInAccessList(addr common.Address) bool
-	SlotInAccessList(addr common.Address, slot common.Hash) (addressOk bool, slotOk bool)
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddAddressToAccessList(addr common.Address)
+	AddAddressToAccessList(addr common.Address) (addrMod bool)
 	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddSlotToAccessList(addr common.Address, slot common.Hash)
+	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
 
 	RevertToSnapshot(int)
 	Snapshot() int
