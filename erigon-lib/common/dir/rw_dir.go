@@ -49,6 +49,7 @@ func FileExist(path string) bool {
 	return true
 }
 
+// nolint
 func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
@@ -109,6 +110,7 @@ func deleteFiles(dir string) error {
 	return nil
 }
 
+// nolint
 func DeleteFiles(dirs ...string) error {
 	for _, dir := range dirs {
 		if err := deleteFiles(dir); err != nil {

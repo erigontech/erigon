@@ -64,6 +64,6 @@ func New(datadir string) Dirs {
 	}
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapHistory, dirs.SnapDomain,
-		dirs.TxPool, dirs.Nodes)
+		dirs.Downloader, dirs.TxPool, dirs.Nodes)
 	return dirs
 }
