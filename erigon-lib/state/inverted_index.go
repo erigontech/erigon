@@ -386,7 +386,7 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 	defer ps.Delete(p)
 	defer d.EnableReadAhead().DisableReadAhead()
 
-	idxFilter, err := NewBloom(uint64(count), idxPath)
+	idxFilter, err := NewExistenceFilter(uint64(count), idxPath)
 	if err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func (ii *InvertedIndex) openFiles() error {
 			if item.existence == nil && ii.withExistenceIndex {
 				idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
-					if item.existence, err = OpenBloom(idxPath); err != nil {
+					if item.existence, err = OpenExistenceFilter(idxPath); err != nil {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 						return false
 					}

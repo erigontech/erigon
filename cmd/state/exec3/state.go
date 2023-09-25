@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -46,11 +47,14 @@ type Worker struct {
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
 
-	evm *vm.EVM
-	ibs *state.IntraBlockState
+	evm   *vm.EVM
+	ibs   *state.IntraBlockState
+	vmCfg vm.Config
+
+	dirs datadir.Dirs
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -71,8 +75,11 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
+
+		dirs: dirs,
 	}
 
+	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
 		if err != nil {
@@ -147,7 +154,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if txTask.BlockNum == 0 {
 			// Genesis block
 			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs.Tmp)
 			if err != nil {
 				panic(err)
 			}
@@ -177,15 +184,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			if rw.callTracer != nil {
-				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
-				txTask.TraceTos = rw.callTracer.Tos()
-			}
 			//incorrect unwind to block 2
 			if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 				txTask.Error = err
 			}
-
 			txTask.TraceTos = map[libcommon.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
@@ -193,25 +195,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
-
-		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
+		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
-
-		blockContext := txTask.EvmBlockContext
-		if !rw.background {
-			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-		}
-		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
-		vmenv := rw.evm
-		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -305,7 +298,7 @@ func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp
 	return events
 }
 
-func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
@@ -316,7 +309,7 @@ func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, ba
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
+			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {
@@ -342,7 +335,7 @@ func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, ba
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
+	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }

@@ -171,7 +171,7 @@ func (li *LocalityIndex) openFiles() (err error) {
 	if li.file.existence == nil {
 		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(idxPath) {
-			li.file.existence, err = OpenBloom(idxPath)
+			li.file.existence, err = OpenExistenceFilter(idxPath)
 			if err != nil {
 				return err
 			}
@@ -396,7 +396,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 
 		//if count > 0 {
-		//	existence, err = NewBloom(uint64(count), idxPath+".lb")
+		//	existence, err = NewExistenceFilter(uint64(count), idxPath+".lb")
 		//	if err != nil {
 		//		return nil, err
 		//	}
@@ -468,7 +468,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, err
 	}
 	//if dir.FileExist(idxPath + ".lb") {
-	//	existence, err = OpenBloom(idxPath + ".lb")
+	//	existence, err = OpenExistenceFilter(idxPath + ".lb")
 	//	if err != nil {
 	//		return nil, err
 	//	}

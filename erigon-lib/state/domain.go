@@ -115,9 +115,10 @@ type ExistenceFilter struct {
 	*bloomfilter.Filter
 	FileName, FilePath string
 	f                  *os.File
+	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewBloom(keysCount uint64, filePath string) (*ExistenceFilter, error) {
+func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, error) {
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
@@ -127,22 +128,53 @@ func NewBloom(keysCount uint64, filePath string) (*ExistenceFilter, error) {
 	}
 	return &ExistenceFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
 }
+
 func (b *ExistenceFilter) Build() error {
 	log.Trace("[agg] write file", "file", b.FileName)
-	//TODO: fsync and tmp-file rename
-	if _, err := b.Filter.WriteFile(b.FilePath); err != nil {
+	tmpFilePath := b.FilePath + ".tmp"
+	cf, err := os.Create(tmpFilePath)
+	if err != nil {
+		return err
+	}
+	defer cf.Close()
+	if _, err := b.Filter.WriteTo(cf); err != nil {
+		return err
+	}
+	if err = b.fsync(cf); err != nil {
+		return err
+	}
+	if err = cf.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpFilePath, b.FilePath); err != nil {
 		return err
 	}
 	return nil
 }
 
-func OpenBloom(filePath string) (*ExistenceFilter, error) {
+func (b *ExistenceFilter) DisableFsync() { b.noFsync = true }
+
+// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (b *ExistenceFilter) fsync(f *os.File) error {
+	if b.noFsync {
+		return nil
+	}
+	if err := f.Sync(); err != nil {
+		log.Warn("couldn't fsync", "err", err)
+		return err
+	}
+	return nil
+}
+
+func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 	_, fileName := filepath.Split(filePath)
 	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
 	var err error
 	f.Filter, _, err = bloomfilter.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("OpenBloom: %w, %s", err, fileName)
+		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 	}
 	return f, nil
 }
@@ -510,7 +542,7 @@ func (d *Domain) openFiles() (err error) {
 			if item.existence == nil {
 				idxPath := d.kvExistenceIdxFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
-					if item.existence, err = OpenBloom(idxPath); err != nil {
+					if item.existence, err = OpenExistenceFilter(idxPath); err != nil {
 						return false
 					}
 				}
@@ -1197,7 +1229,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	{
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		if dir.FileExist(fPath) {
-			bloom, err = OpenBloom(fPath)
+			bloom, err = OpenExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1310,7 +1342,7 @@ func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, com
 	if !dir.FileExist(idxPath) {
 		return nil, nil
 	}
-	return OpenBloom(idxPath)
+	return OpenExistenceFilter(idxPath)
 }
 func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	_, fileName := filepath.Split(idxPath)

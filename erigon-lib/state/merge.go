@@ -658,7 +658,7 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 	{
 		eiPath := d.kvExistenceIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(eiPath) {
-			valuesIn.existence, err = OpenBloom(eiPath)
+			valuesIn.existence, err = OpenExistenceFilter(eiPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}
@@ -830,7 +830,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	{
 		btPath := d.kvExistenceIdxFilePath(r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		if dir.FileExist(btPath) {
-			valuesIn.existence, err = OpenBloom(btPath)
+			valuesIn.existence, err = OpenExistenceFilter(btPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 			}

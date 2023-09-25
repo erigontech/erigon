@@ -778,7 +778,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	var bloom *ExistenceFilter
 	var err error
 	if kv.Count() >= 2 {
-		bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
+		bloom, err = NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}
