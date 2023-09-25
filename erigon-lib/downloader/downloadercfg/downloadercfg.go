@@ -54,6 +54,7 @@ type Cfg struct {
 
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
+	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 
 	// enable dht
 	torrentConfig.NoDHT = true
