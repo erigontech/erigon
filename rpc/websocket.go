@@ -256,8 +256,8 @@ func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	return wc
 }
 
-func (wc *websocketCodec) close() {
-	wc.jsonCodec.close()
+func (wc *websocketCodec) Close() {
+	wc.jsonCodec.Close()
 	wc.wg.Wait()
 }
 
