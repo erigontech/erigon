@@ -172,7 +172,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 	t.Helper()
 	dirs, ctx := datadir.New(t.TempDir()), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, nil, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
 	require.NoError(t, err)

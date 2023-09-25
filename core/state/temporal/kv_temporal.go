@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -324,8 +323,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 
 	if historyV3 {
 		var err error
-		dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
-		agg, err = state.NewAggregatorV3(context.Background(), dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+		agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}

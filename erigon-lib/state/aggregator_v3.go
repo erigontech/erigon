@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -66,7 +67,7 @@ type AggregatorV3 struct {
 	logTopics        *InvertedIndex
 	tracesFrom       *InvertedIndex
 	backgroundResult *BackgroundResult
-	dir              string
+	dirs             datadir.Dirs
 	tmpdir           string
 	aggregationStep  uint64
 	keepInDB         uint64
@@ -101,8 +102,9 @@ type AggregatorV3 struct {
 
 type OnFreezeFunc func(frozenFileNames []string)
 
-func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
-	salt, err := getIndicesSalt(dir)
+func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
+	tmpdir := dirs.Tmp
+	salt, err := getIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		ctx:              ctx,
 		ctxCancel:        ctxCancel,
 		onFreeze:         func(frozenFileNames []string) {},
-		dir:              dir,
+		dirs:             dirs,
 		tmpdir:           tmpdir,
 		aggregationStep:  aggregationStep,
 		db:               db,
@@ -124,7 +126,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg := domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: AccDomainLargeValues,
@@ -134,7 +136,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: StorageDomainLargeValues,
@@ -144,7 +146,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 		domainLargeValues: CodeDomainLargeValues,
@@ -154,7 +156,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dir: dir, tmpdir: tmpdir},
+			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
 		},
 		domainLargeValues: CommitmentDomainLargeValues,
@@ -165,19 +167,19 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
-	idxCfg := iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg := iiCfg{salt: salt, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dir: dir, tmpdir: a.tmpdir}
+	idxCfg = iiCfg{salt: salt, dirs: dirs}
 	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}

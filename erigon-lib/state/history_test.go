@@ -21,11 +21,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
@@ -43,15 +43,12 @@ import (
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
-	path := tb.TempDir()
-	dir := filepath.Join(path, "snapshots", "history")
-	require.NoError(tb, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
-	require.NoError(tb, os.MkdirAll(dir, 0740))
+	dirs := datadir.New(tb.TempDir())
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
 	settingsTable := "Settings"
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(dirs.SnapDomain).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:    kv.TableCfgItem{Flags: kv.DupSort},
@@ -62,7 +59,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dir: dir, tmpdir: dir},
+		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
 		withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)

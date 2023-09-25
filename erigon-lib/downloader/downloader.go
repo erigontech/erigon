@@ -534,12 +534,7 @@ func seedableFiles(snapDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(snapDir, "history")
-	if err != nil {
-		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
-	}
-	files = append(files, files2...)
-	files2, err = seedableHistorySnapshots(snapDir, "warm")
+	files2, err := seedableHistorySnapshots(snapDir)
 	if err != nil {
 		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
 	}
