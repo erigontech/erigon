@@ -424,7 +424,10 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 	if /*!d.shortenKeys ||*/ len(val) == 0 {
 		return val, nil
 	}
-	d.logger.Info("commitmentValTransform")
+	var transValBuf []byte
+	defer func(t time.Time) {
+		d.logger.Info("commitmentValTransform", "took", time.Since(t), "in_size", len(val), "out_size", len(transValBuf), "ratio", float64(len(transValBuf))/float64(len(val)))
+	}(time.Now())
 
 	accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
 	if err != nil {
@@ -473,7 +476,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 		transStoragePks = append(transStoragePks, storagePlainKey)
 	}
 
-	transValBuf, err := val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
+	transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 	if err != nil {
 		return nil, err
 	}
