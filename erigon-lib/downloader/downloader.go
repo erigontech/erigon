@@ -97,7 +97,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(cfg.DBDir, cfg.SnapDir, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -586,13 +586,12 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	snapDir := cfg.DataDir
+func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	db, err = mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapDir, "db")).
+		Path(dbDir).
 		Open()
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
