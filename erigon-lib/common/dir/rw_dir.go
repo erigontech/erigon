@@ -21,10 +21,12 @@ import (
 	"path/filepath"
 )
 
-func MustExist(path string) {
+func MustExist(path ...string) {
 	const perm = 0764 // user rwx, group rw, other r
-	if err := os.MkdirAll(path, perm); err != nil {
-		panic(err)
+	for _, p := range path {
+		if err := os.MkdirAll(p, perm); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -45,6 +47,24 @@ func FileExist(path string) bool {
 		return false
 	}
 	return true
+}
+
+// nolint
+func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 func Recreate(dir string) {
@@ -70,30 +90,32 @@ func HasFileOfType(dir, ext string) bool {
 	return false
 }
 
-func DeleteFilesOfType(dir string, exts ...string) {
-	d, err := os.Open(dir)
+func deleteFiles(dir string) error {
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return
+			return nil
 		}
-		panic(err)
+		return err
 	}
-	defer d.Close()
-
-	files, err := d.Readdir(-1)
-	if err != nil {
-		panic(err)
-	}
-
 	for _, file := range files {
-		if !file.Mode().IsRegular() {
+		if file.IsDir() || !file.Type().IsRegular() {
 			continue
 		}
 
-		for _, ext := range exts {
-			if filepath.Ext(file.Name()) == ext {
-				_ = os.Remove(filepath.Join(dir, file.Name()))
-			}
+		if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+// nolint
+func DeleteFiles(dirs ...string) error {
+	for _, dir := range dirs {
+		if err := deleteFiles(dir); err != nil {
+			return err
+		}
+	}
+	return nil
 }
