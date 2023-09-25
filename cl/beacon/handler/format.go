@@ -26,7 +26,7 @@ type BeaconResponse struct {
 // In case of it being a json we need to also expose finalization, version, etc...
 type beaconHandlerFn func(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error)
 
-func beaconHandlerWrapper(fn beaconHandlerFn) func(w http.ResponseWriter, r *http.Request) {
+func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		accept := r.Header.Get("Accept")
 		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
@@ -38,7 +38,7 @@ func beaconHandlerWrapper(fn beaconHandlerFn) func(w http.ResponseWriter, r *htt
 			return
 		}
 
-		if isSSZ {
+		if isSSZ && supportSSZ {
 			// SSZ encoding
 			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
 			if err != nil {
