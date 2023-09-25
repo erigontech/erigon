@@ -85,10 +85,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	// move db from datadir/snapshot/db to datadir/downloader
+	// move db from `datadir/snapshot/db` to `datadir/downloader`
 	if dir.Exist(filepath.Join(cfg.SnapDir, "db", "mdbx.dat")) { // migration from prev versions
-		if err := os.Rename(filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")); err != nil {
-			panic(err)
+		from, to := filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")
+		if err := os.Rename(from, to); err != nil {
+			//fall back to copy-file if folders are on different disks
+			if err := copyFile(from, to); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -131,6 +135,30 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		d.applyWebseeds()
 	}()
 	return d, nil
+}
+
+func copyFile(from, to string) error {
+	r, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	defer r.Close()
+	w, err := os.Create(to)
+	if err != nil {
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	defer w.Close()
+	if _, err = w.ReadFrom(r); err != nil {
+		w.Close()
+		os.Remove(to)
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	if err = w.Sync(); err != nil {
+		w.Close()
+		os.Remove(to)
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
