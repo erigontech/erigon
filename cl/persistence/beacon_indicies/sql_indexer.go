@@ -17,19 +17,19 @@ type SQLObject interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (uint64, error) {
+func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (*uint64, error) {
 	var slot uint64
 
 	// Execute the query.
 	err := tx.QueryRowContext(ctx, "SELECT slot FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
+			return nil, nil
 		}
-		return 0, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
+		return nil, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
 	}
 
-	return slot, nil
+	return &slot, nil
 }
 
 func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (libcommon.Hash, error) {

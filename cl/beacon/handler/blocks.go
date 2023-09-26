@@ -137,7 +137,6 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 
 	blockId, err = blockIdFromRequest(r)
 	if err != nil {
-		fmt.Println("A")
 		httpStatus = http.StatusBadRequest
 		return
 	}
