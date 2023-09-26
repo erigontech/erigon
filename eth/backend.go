@@ -407,7 +407,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		go func() {
-			logEvery := time.NewTicker(120 * time.Second)
+			logEvery := time.NewTicker(180 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
