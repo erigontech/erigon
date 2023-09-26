@@ -228,7 +228,7 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 		segment: C.struct_SilkwormMemoryMappedFile {
 			file_path: cTxsSegmentFilePath,
 			memory_address: (*C.uchar)(snapshot.Txs.Segment.DataHandle),
-			memory_length: C.ulong(snapshot.Bodies.Segment.Size),
+			memory_length: C.ulong(snapshot.Txs.Segment.Size),
 		},
 		tx_hash_index: C.struct_SilkwormMemoryMappedFile {
 			file_path: cTxsIdxTxnHashFilePath,
