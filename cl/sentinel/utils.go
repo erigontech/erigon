@@ -17,13 +17,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"fmt"
+	peers2 "github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"math/big"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -135,7 +135,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 	}
 
 	connectedPeer := false
-	maxTries := peers.DefaultMaxPeers
+	maxTries := peers2.DefaultMaxPeers
 	tries := 0
 	for !connectedPeer {
 		if tries >= maxTries {
@@ -151,7 +151,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 			index = n.Int64()
 		}
 		available := false
-		s.peers.TryPeer(validPeerList[index], func(peer *peers.Peer, ok bool) {
+		s.peers.TryPeer(validPeerList[index], func(peer *peers2.Peer, ok bool) {
 			if !ok {
 				return
 			}

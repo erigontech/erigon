@@ -2,14 +2,11 @@ package peers
 
 import (
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
-
-const USERAGENT_UNKNOWN = "unknown"
 
 type PeeredObject[T any] struct {
 	Peer string
@@ -18,8 +15,9 @@ type PeeredObject[T any] struct {
 
 // Record Peer data.
 type Peer struct {
-	penalties int
-	banned    bool
+	Penalties int
+	Banned    bool
+	InRequest bool
 
 	// request info
 	lastRequest  time.Time
@@ -27,91 +25,63 @@ type Peer struct {
 	useCount     int
 	// gc data
 	lastTouched time.Time
-
-	mu sync.Mutex
-
-	// peer id
-	pid peer.ID
-
-	// acts as the mutex for making requests. channel used to avoid use of TryLock
+	// acts as the mutex. channel used to avoid use of TryLock
 	working chan struct{}
+	// peer id
+	pid  peer.ID
+	busy bool
 	// backref to the manager that owns this peer
 	m *Manager
 }
 
-func (p *Peer) do(fn func(p *Peer)) {
-	if fn == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	fn(p)
+func (p *Peer) ID() peer.ID {
+	return p.pid
 }
-
-func (p *Peer) UserAgent() string {
-	rawVer, err := p.m.host.Peerstore().Get(p.pid, "AgentVersion")
-	if err == nil {
-		if str, ok := rawVer.(string); ok {
-			return str
-		}
-	}
-	return USERAGENT_UNKNOWN
-}
-
 func (p *Peer) Penalize() {
 	log.Trace("[Sentinel Peers] peer penalized", "peer-id", p.pid)
-	p.do(func(p *Peer) {
-		p.penalties++
-	})
+	p.Penalties++
 }
 
 func (p *Peer) Forgive() {
 	log.Trace("[Sentinel Peers] peer forgiven", "peer-id", p.pid)
-	p.do(func(p *Peer) {
-		if p.penalties > 0 {
-			p.penalties--
-		}
-	})
+	if p.Penalties > 0 {
+		p.Penalties--
+	}
 }
 
 func (p *Peer) MarkUsed() {
-	p.do(func(p *Peer) {
-		p.useCount++
-		p.lastRequest = time.Now()
-	})
+	p.useCount++
+	p.busy = true
 	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
+	p.lastRequest = time.Now()
+}
+
+func (p *Peer) MarkUnused() {
+	p.busy = false
 }
 
 func (p *Peer) MarkReplied() {
-	p.do(func(p *Peer) {
-		p.successCount++
-	})
+	p.successCount++
 	log.Trace("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
 }
 
 func (p *Peer) IsAvailable() (available bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.banned {
+	if p.Banned {
 		return false
 	}
-	if p.penalties > MaxBadResponses {
+	if p.Penalties > MaxBadResponses {
 		return false
 	}
-	if time.Now().Sub(p.lastRequest) > 0*time.Second {
-		return true
-	}
-	return false
+
+	return !p.busy
 }
 
 func (p *Peer) IsBad() (bad bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.banned {
+	if p.Banned {
 		bad = true
 		return
 	}
-	bad = p.penalties > MaxBadResponses
+	bad = p.Penalties > MaxBadResponses
 	return
 }
 
@@ -139,16 +109,11 @@ func (p *Peer) Disconnect(reason ...string) {
 	}
 	p.m.host.Peerstore().RemovePeer(p.pid)
 	p.m.host.Network().ClosePeer(p.pid)
-	p.do(func(p *Peer) {
-		p.penalties = 0
-	})
+	p.Penalties = 0
 }
-
 func (p *Peer) Ban(reason ...string) {
-	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", p.pid, "reason", strings.Join(reason, " "))
-	p.do(func(p *Peer) {
-		p.banned = true
-	})
+	log.Trace("[Sentinel Peers] bad peers has been banned", "peer-id", p.pid, "reason", strings.Join(reason, " "))
+	p.Banned = true
 	p.Disconnect(reason...)
 	return
 }

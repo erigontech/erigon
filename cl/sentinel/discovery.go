@@ -16,11 +16,11 @@ package sentinel
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"

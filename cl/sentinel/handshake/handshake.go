@@ -3,13 +3,13 @@ package handshake
 import (
 	"bytes"
 	"context"
+	communication2 "github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -75,7 +75,7 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	response, errResponse, err := communication.SendRequestRawToPeer(h.ctx, h.host, data, communication.StatusProtocolV1, id)
+	response, errResponse, err := communication2.SendRequestRawToPeer(h.ctx, h.host, data, communication2.StatusProtocolV1, id)
 	if err != nil || errResponse > 0 {
 		return false
 	}
