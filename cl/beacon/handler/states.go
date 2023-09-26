@@ -68,7 +68,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (a *ApiHandler) getStatesFork(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
+func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
 		tx        *sql.Tx
 		blockId   *segmentID
@@ -124,7 +124,7 @@ func (a *ApiHandler) getStatesFork(r *http.Request) (data any, finalized *bool, 
 	return
 }
 
-func (a *ApiHandler) getStatesRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
+func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
 		tx        *sql.Tx
 		blockId   *segmentID
