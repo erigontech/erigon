@@ -119,7 +119,7 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBegi
 		}
 		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
 		if txn > firstTxInBlock {
-			txn++
+			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			blockBeginOfft = txn - firstTxInBlock
 		}
 		fmt.Printf("[commitment] block tx range -%d |%d| %d\n", blockBeginOfft, txn, lastTxInBlock-txn)

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -46,13 +47,15 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	//
 	return opts
 }
-func dbAggregatorOnDatadir(t *testing.T, datadir string) (kv.RwDB, *state.AggregatorV3) {
+func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
 	t.Helper()
 	logger := log.New()
-	db := dbCfg(kv.ChainDB, filepath.Join(datadir, "chaindata")).MustOpen()
+	db := dbCfg(kv.ChainDB, filepath.Join(ddir, "chaindata")).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregatorV3(context.Background(), filepath.Join(datadir, "snapshots", "history"), ethconfig.HistoryV3AggregationStep, db, logger)
+	dirs := datadir.New(ddir)
+
+	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -96,7 +99,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 
 	hr := NewHistoryReaderV3()
 	hr.SetTx(tx)
-	for i := txn; i > 0; i-- {
+	for i := txn; i < txn+offt; i++ {
 		hr.SetTxNum(i)
 
 		acc, err := hr.ReadAccountData(common.HexToAddress("0xB5CAEc2ef7B24D644d1517c9286A17E73b5988F8"))
