@@ -47,6 +47,21 @@ func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (lib
 	return blockRoot, nil
 }
 
+func ReadStateRootByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+	var stateRoot libcommon.Hash
+
+	// Execute the query.
+	err := db.QueryRowContext(ctx, "SELECT state_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot).Scan(&stateRoot)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return libcommon.Hash{}, nil
+		}
+		return libcommon.Hash{}, fmt.Errorf("failed to retrieve BeaconBlockRoot for slot: %v", err)
+	}
+
+	return stateRoot, nil
+}
+
 func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
 	// First, reset the Canonical status for all other block roots with the same slot
 	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot = ?", slot); err != nil {
@@ -198,6 +213,34 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, db SQLObject, blockRoot li
 	err := db.QueryRowContext(ctx, `SELECT 
 		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
 		FROM beacon_indicies WHERE beacon_block_root = ?`, blockRoot).Scan(
+		&h.Header.Slot,
+		&h.Header.ProposerIndex,
+		&h.Header.Root,
+		&h.Header.ParentRoot,
+		&canonical,
+		&h.Header.BodyRoot,
+		&signature,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
+	}
+
+	copy(h.Signature[:], signature)
+	return h, canonical, nil
+}
+
+func ReadSignedHeaderByStateRoot(ctx context.Context, db SQLObject, stateRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
+	var canonical bool
+	var signature []byte
+	// Execute the query.
+	err := db.QueryRowContext(ctx, `SELECT 
+		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
+		FROM beacon_indicies WHERE state_root = ?`, stateRoot).Scan(
 		&h.Header.Slot,
 		&h.Header.ProposerIndex,
 		&h.Header.Root,
