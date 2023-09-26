@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -172,6 +173,7 @@ func filesFromDir(dir string) ([]string, error) {
 	}
 	return filtered, nil
 }
+
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	files, err := os.ReadDir(ii.dir)
 	if err != nil {
@@ -345,7 +347,7 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if !dir.FileExist(filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))) {
+			if !dir.FileExist(ii.efAccessorFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -357,7 +359,7 @@ func (ii *InvertedIndex) missedExistenceFilterFiles() (l []*filesItem) {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if !dir.FileExist(filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))) {
+			if !dir.FileExist(ii.efExistenceIdxFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -368,8 +370,7 @@ func (ii *InvertedIndex) missedExistenceFilterFiles() (l []*filesItem) {
 
 func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(ii.dir, fName)
+	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 
 	return buildIndex(ctx, item.decompressor, CompressNone, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync)
 }
@@ -378,8 +379,7 @@ func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesIt
 		return nil
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	fName := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(ii.dir, fName)
+	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
 	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync)
 }
 func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
@@ -462,7 +462,7 @@ func (ii *InvertedIndex) openFiles() error {
 				continue
 			}
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+			datPath := ii.efFilePath(fromStep, toStep)
 			if !dir.FileExist(datPath) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
@@ -474,7 +474,7 @@ func (ii *InvertedIndex) openFiles() error {
 			}
 
 			if item.index == nil {
-				idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+				idxPath := ii.efAccessorFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
@@ -483,7 +483,7 @@ func (ii *InvertedIndex) openFiles() error {
 				}
 			}
 			if item.existence == nil && ii.withExistenceIndex {
-				idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
+				idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.existence, err = OpenExistenceFilter(idxPath); err != nil {
 						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
@@ -1541,15 +1541,16 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 		}
 	}()
-	datFileName := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, step, step+1)
-	datPath := filepath.Join(ii.dir, datFileName)
+
+	datPath := ii.efFilePath(step, step+1)
 	keys := make([]string, 0, len(bitmaps))
 	for key := range bitmaps {
 		keys = append(keys, key)
 	}
+
 	slices.Sort(keys)
 	{
-		p := ps.AddNew(datFileName, 1)
+		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 		comp, err = compress.NewCompressor(ctx, "ef", datPath, ii.tmpdir, compress.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
 		if err != nil {
@@ -1584,15 +1585,13 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
-	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
-	idxPath := filepath.Join(ii.dir, idxFileName)
+	idxPath := ii.efAccessorFilePath(step, step+1)
 	if index, err = buildIndexThenOpen(ctx, decomp, ii.compression, idxPath, ii.tmpdir, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
 	if ii.withExistenceIndex {
-		idxFileName2 := fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, step, step+1)
-		idxPath2 := filepath.Join(ii.dir, idxFileName2)
+		idxPath2 := ii.efExistenceIdxFilePath(step, step+1)
 		if existence, err = buildIndexFilterThenOpen(ctx, decomp, ii.compression, idxPath2, ii.tmpdir, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
 			return InvertedFiles{}, fmt.Errorf("build %s efei: %w", ii.filenameBase, err)
 		}

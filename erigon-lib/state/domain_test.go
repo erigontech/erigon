@@ -118,7 +118,9 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	defer d.Close()
 
 	d.domainLargeValues = domainLargeValues
-	d.compression = CompressKeys | CompressVals
+	if compressDomainVals {
+		d.compression = CompressKeys | CompressVals
+	}
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -145,6 +147,8 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	require.NoError(t, err)
 
 	p1, p2 = v1, v2
+	_ = p2
+
 	v1, v2 = []byte("value1.2"), []byte("value2.2") //nolint
 	expectedStep1 := uint64(0)
 

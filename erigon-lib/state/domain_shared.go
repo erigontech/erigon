@@ -103,6 +103,10 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBeginOfft uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
 	if ok {
 		if err != nil {
@@ -126,7 +130,6 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBegi
 		if txn == lastTxInBlock {
 			blockNum++
 		} else {
-			//txn++
 			txn = firstTxInBlock
 		}
 	} else {

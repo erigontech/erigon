@@ -871,7 +871,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	}
 	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
-	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
+	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
 
 	getter := NewArchiveGetter(idx.decompressor.MakeGetter(), idx.compressed)
 
