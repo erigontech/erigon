@@ -11,7 +11,7 @@ import (
 )
 
 func MilestoneRewindPending() bool {
-	return *generics.BorMilestoneRewind.Load() != 0
+	return generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0
 }
 
 //go:generate mockgen -destination=../../tests/bor/mocks/IHeimdallClient.go -package=mocks . IHeimdallClient
