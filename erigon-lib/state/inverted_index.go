@@ -1535,7 +1535,6 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		}
 	}()
 	datPath := ii.efFilePath(step, step+1)
-	_, datFileName := filepath.Split(datPath)
 	keys := make([]string, 0, len(bitmaps))
 	for key := range bitmaps {
 		keys = append(keys, key)
