@@ -48,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -308,7 +309,9 @@ func Main(ctx *cli.Context) error {
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, getTracer, log.New("t8ntool"))
+	t8logger := log.New("t8ntool")
+	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
