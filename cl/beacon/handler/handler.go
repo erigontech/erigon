@@ -57,6 +57,7 @@ func (a *ApiHandler) init() {
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
 					r.Get("/voluntary_exits", beaconHandlerWrapper(a.poolVoluntaryExits, false))
+					r.Get("/attester_slashings", beaconHandlerWrapper(a.poolAttesterSlashings, false))
 					r.Post("/sync_committees", nil)
 				})
 				r.Get("/node/syncing", nil)

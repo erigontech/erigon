@@ -4,7 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 )
 
-var operationsMultiplier = 10 // Cap the amount of cached element to max_operations_per_block * operations_multiplier
+var operationsMultiplier = 20 // Cap the amount of cached element to max_operations_per_block * operations_multiplier
 
 type OperationPool[K comparable, T any] struct {
 	pool *lru.Cache[K, T] // Map the Signature to the underlying object
