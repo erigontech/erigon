@@ -100,6 +100,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downl
 	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
 	if dir.Exist(filepath.Join(cfg.SnapDir, "warm")) {
 		warmDir := filepath.Join(cfg.SnapDir, "warm")
+		moveFiles(warmDir, dirs.SnapDomain, ".kv")
 		os.Rename(filepath.Join(dirs.SnapHistory, "salt.txt"), filepath.Join(dirs.Snap, "salt.txt"))
 		moveFiles(warmDir, dirs.SnapDomain, ".kv")
 		moveFiles(warmDir, dirs.SnapDomain, ".kvei")
