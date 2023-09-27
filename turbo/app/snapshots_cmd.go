@@ -160,7 +160,7 @@ var (
 )
 
 func doBtSearch(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}

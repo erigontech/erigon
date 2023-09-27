@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -155,21 +154,6 @@ func (ii *InvertedIndex) enableLocalityIndex() error {
 		return fmt.Errorf("NewLocalityIndex: %s, %w", ii.filenameBase, err)
 	}
 	return nil
-}
-
-func filesFromDir(dir string) ([]string, error) {
-	allFiles, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
-	}
-	filtered := make([]string, 0, len(allFiles))
-	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		filtered = append(filtered, f.Name())
-	}
-	return filtered, nil
 }
 
 func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err error) {
