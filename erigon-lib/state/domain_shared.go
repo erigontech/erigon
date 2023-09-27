@@ -563,7 +563,6 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
 
