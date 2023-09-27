@@ -98,8 +98,26 @@ func BorHeimdallForward(
 		return err
 	}
 
+	service := whitelist.GetWhitelistingService()
+
 	if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
+		// TODO set the hash and the headNumber to the milestone fork point
+
 		s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
+
+		if s.BlockNumber > headNumber {
+			for blockNum := headNumber; blockNum > s.BlockNumber; blockNum++ {
+				if header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum); err == nil {
+					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum)
+					cfg.penalize(ctx, []headerdownload.PenaltyItem{
+						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
+					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderEvicted)
+				}
+			}
+		}
+
+		var reset uint64 = 0
+		generics.BorMilestoneRewind.Store(&reset)
 
 		return fmt.Errorf("milestone block mismatch at %d", headNumber)
 
@@ -122,8 +140,6 @@ func BorHeimdallForward(
 			}
 		*/
 	}
-
-	service := whitelist.GetWhitelistingService()
 
 	if mine {
 		header = cfg.miningState.MiningBlock.Header
@@ -187,11 +203,11 @@ func BorHeimdallForward(
 			// on the cannonical chain according to milestones
 			if service != nil {
 				if !service.IsValidChain(headNumber, []*types.Header{header}) {
-					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum, "err", err)
+					logger.Debug("[BorHeimdall] Verification failed for header", "height", blockNum, "hash", header.Hash())
 					cfg.penalize(ctx, []headerdownload.PenaltyItem{
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderEvicted)
-					return err
+					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
 		}
