@@ -1,16 +1,21 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	sentinel2 "github.com/ledgerwatch/erigon/cl/sentinel"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang/snappy"
+	sentinel2 "github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -149,7 +154,7 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	retryReqInterval := time.NewTicker(100 * time.Millisecond)
+	retryReqInterval := time.NewTicker(250 * time.Millisecond)
 	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
@@ -157,18 +162,40 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 	requestPeer := func(peer *peers.Peer) {
 		peer.MarkUsed()
 		defer peer.MarkUnused()
-		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
+		httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
+		if err != nil {
+			return
+		}
+		httpReq.Header.Set("REQRESP-PEER-ID", peer.ID().String())
+		httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
+		resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
 		if err != nil {
 			if strings.Contains(err.Error(), "protocols not supported") {
 				peer.Ban("peer does not support protocol")
 			}
 			return
 		}
+		defer resp.Body.Close()
+		isError, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
+		if err != nil {
+			// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
+			return
+		}
 		if isError > 3 {
 			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
 		}
 		if isError != 0 {
+			data, _ := io.ReadAll(resp.Body)
+			data2, err2 := snappy.Decode(nil, data)
+			if err2 != nil {
+				data = data2
+			}
+			s.logger.Error("peer failed request", "err", string(data))
 			peer.Penalize()
+			return
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
 			return
 		}
 		ans := &sentinelrpc.ResponseData{

@@ -17,12 +17,15 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
+	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"math"
-	"net"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -59,12 +62,15 @@ const (
 )
 
 type Sentinel struct {
-	started    bool
-	listener   *discover.UDPv5 // this is us in the network.
-	ctx        context.Context
-	host       host.Host
-	cfg        *SentinelConfig
-	peers      *peers.Manager
+	started  bool
+	listener *discover.UDPv5 // this is us in the network.
+	ctx      context.Context
+	host     host.Host
+	cfg      *SentinelConfig
+	peers    *peers.Manager
+
+	httpApi http.Handler
+
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
@@ -169,63 +175,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	return net, err
 }
 
-// creates a custom gossipsub parameter set.
-func pubsubGossipParam() pubsub.GossipSubParams {
-	gParams := pubsub.DefaultGossipSubParams()
-	gParams.Dlo = gossipSubDlo
-	gParams.D = gossipSubD
-	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
-	gParams.HistoryLength = gossipSubMcacheLen
-	gParams.HistoryGossip = gossipSubMcacheGossip
-	return gParams
-}
-
-// determines the decay rate from the provided time period till
-// the decayToZero value. Ex: ( 1 -> 0.01)
-func (s *Sentinel) scoreDecay(totalDurationDecay time.Duration) float64 {
-	numOfTimes := totalDurationDecay / s.oneSlotDuration()
-	return math.Pow(decayToZero, 1/float64(numOfTimes))
-}
-
-func (s *Sentinel) pubsubOptions() []pubsub.Option {
-	thresholds := &pubsub.PeerScoreThresholds{
-		GossipThreshold:             -4000,
-		PublishThreshold:            -8000,
-		GraylistThreshold:           -16000,
-		AcceptPXThreshold:           100,
-		OpportunisticGraftThreshold: 5,
-	}
-	scoreParams := &pubsub.PeerScoreParams{
-		Topics:        make(map[string]*pubsub.TopicScoreParams),
-		TopicScoreCap: 32.72,
-		AppSpecificScore: func(p peer.ID) float64 {
-			return 0
-		},
-		AppSpecificWeight:           1,
-		IPColocationFactorWeight:    -35.11,
-		IPColocationFactorThreshold: 10,
-		IPColocationFactorWhitelist: nil,
-		BehaviourPenaltyWeight:      -15.92,
-		BehaviourPenaltyThreshold:   6,
-		BehaviourPenaltyDecay:       s.scoreDecay(10 * s.oneEpochDuration()), // 10 epochs
-		DecayInterval:               s.oneSlotDuration(),
-		DecayToZero:                 decayToZero,
-		RetainScore:                 100 * s.oneEpochDuration(), // Retain for 100 epochs
-	}
-	pubsubQueueSize := 600
-	psOpts := []pubsub.Option{
-		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageIdFn(s.msgId),
-		pubsub.WithNoAuthor(),
-		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
-		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithPeerScore(scoreParams, thresholds),
-		pubsub.WithGossipSubParams(pubsubGossipParam()),
-	}
-	return psOpts
-}
-
 // This is just one of the examples from the libp2p repository.
 func New(
 	ctx context.Context,
@@ -288,11 +237,16 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-
-	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
-
 	s.host = host
-	s.peers = peers.NewManager(ctx, s.host)
+
+	s.peers = peers.NewManager(s.host)
+
+	mux := chi.NewRouter()
+	//	mux := httpreqresp.NewRequestHandler(host)
+	mux.Get("/", httpreqresp.NewRequestHandler(host))
+	s.httpApi = mux
+
+	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, s.httpApi)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
@@ -301,6 +255,10 @@ func New(
 	}
 
 	return s, nil
+}
+
+func (s *Sentinel) ReqRespHandler() http.Handler {
+	return s.httpApi
 }
 
 func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
@@ -383,4 +341,16 @@ func (s *Sentinel) PeersList() []peer.AddrInfo {
 		infos = append(infos, s.host.Network().Peerstore().PeerInfo(pid))
 	}
 	return infos
+}
+
+func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
+	var (
+		pid peer.ID
+		err error
+	)
+	pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
+	if err != nil {
+		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
+	}
+	return pid, nil
 }

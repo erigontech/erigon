@@ -1,23 +1,11 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
-
 package sentinel
 
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -161,8 +149,11 @@ func (s *Sentinel) setupENR(
 func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
-		invalid := !s.handshaker.ValidatePeer(peerId)
-		if invalid {
+		valid, err := s.handshaker.ValidatePeer(peerId)
+		if err != nil {
+			log.Trace("[sentinel] failed to validate peer:", "err", err)
+		}
+		if !valid {
 			log.Trace("Handshake was unsuccessful")
 			s.peers.WithPeer(peerId, func(peer *peers.Peer) {
 				peer.Disconnect("invalid peer", "bad handshake")

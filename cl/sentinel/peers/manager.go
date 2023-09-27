@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -33,8 +32,9 @@ type Manager struct {
 	mu sync.Mutex
 }
 
-func NewManager(ctx context.Context, host host.Host) *Manager {
-	c, err := lru.New[peer.ID, *Peer]("beacon_peer_manager", 500)
+func NewManager(host host.Host) *Manager {
+	c, err := lru.NewWithEvict[peer.ID, *Peer]("beacon_peer_manager", 1024, func(i peer.ID, p *Peer) {
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -43,8 +43,12 @@ func NewManager(ctx context.Context, host host.Host) *Manager {
 		peers:       c,
 		host:        host,
 	}
-	go m.run(ctx)
 	return m
+}
+
+func (m *Manager) ListPeers(ctx context.Context) (peer.IDSlice, error) {
+	peers := m.host.Peerstore().Peers()
+	return peers, nil
 }
 
 func (m *Manager) getPeer(id peer.ID) (peer *Peer) {
@@ -100,40 +104,4 @@ func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
 		<-p.working
 	}()
 	fn(p)
-}
-
-func (m *Manager) run(ctx context.Context) {
-	m1 := time.NewTicker(1 * time.Hour)
-	for {
-		select {
-		case <-m1.C:
-			m.gc()
-		case <-ctx.Done():
-			m1.Stop()
-			return
-		}
-	}
-}
-
-// any extra GC policies that the lru does not suffice.
-// maybe we dont need
-func (m *Manager) gc() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	t := metrics.NewHistTimer("beacon_peer_manager_gc_time")
-	defer t.PutSince()
-	deleted := 0
-	saw := 0
-	n := time.Now()
-	for _, k := range m.peers.Keys() {
-		v, ok := m.peers.Get(k)
-		if !ok {
-			continue
-		}
-		saw = saw + 1
-		if n.Sub(v.lastTouched) > m.peerTimeout {
-			deleted = deleted + 1
-			m.peers.Remove(k)
-		}
-	}
 }

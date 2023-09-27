@@ -3,17 +3,19 @@ package handshake
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"sync"
+
 	communication2 "github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"sync"
+	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"go.uber.org/zap/buffer"
 )
 
 // HandShaker is the data type which will handle handshakes and determine if
@@ -23,17 +25,17 @@ type HandShaker struct {
 	// Status object to send over.
 	status        *cltypes.Status // Contains status object for handshakes
 	set           bool
-	host          host.Host
+	handler       http.Handler
 	genesisConfig *clparams.GenesisConfig
 	beaconConfig  *clparams.BeaconChainConfig
 
 	mu sync.Mutex
 }
 
-func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, host host.Host) *HandShaker {
+func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
 	return &HandShaker{
 		ctx:           ctx,
-		host:          host,
+		handler:       handler,
 		genesisConfig: genesisConfig,
 		beaconConfig:  beaconConfig,
 		status:        &cltypes.Status{},
@@ -62,31 +64,41 @@ func (h *HandShaker) IsSet() bool {
 	return h.set
 }
 
-func (h *HandShaker) ValidatePeer(id peer.ID) bool {
+func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	// Unprotected if it is not set
 	if !h.IsSet() {
-		return true
+		return true, nil
 	}
 	status := h.Status()
 	// Encode our status
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, status); err != nil {
-		return false
+	buf := new(bytes.Buffer)
+	if err := ssz_snappy.EncodeAndWrite(buf, status); err != nil {
+		return false, err
 	}
-
-	data := common.CopyBytes(buffer.Bytes())
-	response, errResponse, err := communication2.SendRequestRawToPeer(h.ctx, h.host, data, communication2.StatusProtocolV1, id)
-	if err != nil || errResponse > 0 {
-		return false
+	req, err := http.NewRequest("GET", "http://service.internal/", buf)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("REQRESP-PEER-ID", id.String())
+	req.Header.Set("REQRESP-TOPIC", communication2.StatusProtocolV1)
+	resp, err := httpreqresp.Do(h.handler, req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
+		a, _ := io.ReadAll(resp.Body)
+		//TODO: proper errors
+		return false, fmt.Errorf("handshake error: %s", string(a))
 	}
 	responseStatus := &cltypes.Status{}
 
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(response), responseStatus, clparams.Phase0Version); err != nil {
-		return false
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
+		return false, nil
 	}
 	forkDigest, err := fork.ComputeForkDigest(h.beaconConfig, h.genesisConfig)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	return responseStatus.ForkDigest == forkDigest
+	return responseStatus.ForkDigest == forkDigest, nil
 }
