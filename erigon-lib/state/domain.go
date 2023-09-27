@@ -1666,16 +1666,16 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			}
 		}
 
-		t := time.Now()
+		//t := time.Now()
 		v, found, err = dc.getFromFile2(i, filekey)
 		if err != nil {
 			return nil, false, err
 		}
 		if !found {
-			LatestStateReadGrindNotFound.UpdateDuration(t)
+			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
-		LatestStateReadGrind.UpdateDuration(t)
+		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
 	return nil, false, nil
