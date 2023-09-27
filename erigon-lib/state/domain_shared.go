@@ -96,37 +96,47 @@ func (sd *SharedDomains) SetInvertedIndices(tracesTo, tracesFrom, logAddrs, logT
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
 	sd.ClearRam(true)
 
-	bn, txn, err := sd.SeekCommitment(0, txUnwindTo)
+	bn, txn, _, err := sd.SeekCommitment(0, txUnwindTo)
 	fmt.Printf("Unwinded domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
 	return err
 }
 
-func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
+func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBeginOfft uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
 	if ok {
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+			return 0, 0, blockBeginOfft, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
 		}
 
 		firstTxInBlock, err := rawdbv3.TxNums.Min(sd.roTx, blockNum)
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+			return 0, 0, blockBeginOfft, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
 		}
 		lastTxInBlock, err := rawdbv3.TxNums.Max(sd.roTx, blockNum)
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
+			return 0, 0, blockBeginOfft, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
 		}
 		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+		if txn > firstTxInBlock {
+			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
+			blockBeginOfft = txn - firstTxInBlock
+		}
+		fmt.Printf("[commitment] block tx range -%d |%d| %d\n", blockBeginOfft, txn, lastTxInBlock-txn)
 		if txn == lastTxInBlock {
 			blockNum++
+		} else {
+			txn = firstTxInBlock
 		}
 	} else {
 		blockNum = bn
-	}
-
-	if blockNum != 0 {
-		txn++
+		if blockNum != 0 {
+			txn++
+		}
 	}
 
 	sd.SetBlockNum(blockNum)
@@ -512,6 +522,8 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 { //
+		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
+		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		_, err := sd.Commit(true, sd.trace)
 		if err != nil {
 			panic(err)

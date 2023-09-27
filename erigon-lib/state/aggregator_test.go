@@ -19,11 +19,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/etl"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 )
@@ -264,7 +263,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	dom2 := anotherAgg.SharedDomains(ac2)
 	dom2.SetTx(rwTx)
 
-	_, sstartTx, err := dom2.SeekCommitment(0, 1<<63-1)
+	_, sstartTx, _, err := dom2.SeekCommitment(0, 1<<63-1)
 
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, sstartTx, startTx)
@@ -381,7 +380,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	defer newDoms.Close()
 	newDoms.SetTx(newTx)
 
-	_, latestTx, err := newDoms.SeekCommitment(0, 1<<63-1)
+	_, latestTx, _, err := newDoms.SeekCommitment(0, 1<<63-1)
 	require.NoError(t, err)
 	t.Logf("seek to latest_tx=%d", latestTx)
 

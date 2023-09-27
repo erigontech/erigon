@@ -40,6 +40,8 @@ type TxTask struct {
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
 
+	HistoryExecution bool // use history reader for that tx instead of state reader
+
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*state.KvList
 	WriteLists         map[string]*state.KvList

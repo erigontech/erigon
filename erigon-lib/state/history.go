@@ -226,7 +226,7 @@ func (h *History) openFiles() error {
 				continue
 			}
 			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-				h.logger.Debug("Hisrory.openFiles: %w, %s", err, datPath)
+				h.logger.Debug("History.openFiles: %w, %s", err, datPath)
 				return false
 			}
 

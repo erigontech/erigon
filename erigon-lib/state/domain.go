@@ -1282,8 +1282,8 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 //	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 //		for _, item := range items {
 //			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-//			fPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
-//			if !dir.FileExist(fPath) {
+//      bloomPath := d.kvExistenceIdxFilePath(fromStep, toStep)
+//      if !dir.FileExist(bloomPath) {
 //				l = append(l, item)
 //			}
 //		}
@@ -2463,21 +2463,6 @@ func (dc *DomainContext) Files() (res []string) {
 		}
 	}
 	return append(res, dc.hc.Files()...)
-}
-
-type Ranges struct {
-	accounts   DomainRanges
-	storage    DomainRanges
-	code       DomainRanges
-	commitment DomainRanges
-}
-
-func (r Ranges) String() string {
-	return fmt.Sprintf("accounts=%s, storage=%s, code=%s, commitment=%s", r.accounts.String(), r.storage.String(), r.code.String(), r.commitment.String())
-}
-
-func (r Ranges) any() bool {
-	return r.accounts.any() || r.storage.any() || r.code.any() || r.commitment.any()
 }
 
 type SelectedStaticFiles struct {

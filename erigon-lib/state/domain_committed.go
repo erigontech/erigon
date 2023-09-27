@@ -231,6 +231,7 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 		Domain:       d,
 		mode:         mode,
 		trace:        false,
+		shortenKeys:  true,
 		updates:      NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
@@ -421,10 +422,13 @@ func (d *DomainCommitted) lookupByShortenedKey(shortKey []byte, list []*filesIte
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, merged *MergedFiles, val commitment.BranchData) ([]byte, error) {
-	if /*!d.shortenKeys ||*/ len(val) == 0 {
+	if !d.shortenKeys || len(val) == 0 {
 		return val, nil
 	}
-	d.logger.Info("commitmentValTransform")
+	var transValBuf []byte
+	defer func(t time.Time) {
+		d.logger.Info("commitmentValTransform", "took", time.Since(t), "in_size", len(val), "out_size", len(transValBuf), "ratio", float64(len(transValBuf))/float64(len(val)))
+	}(time.Now())
 
 	accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
 	if err != nil {
@@ -473,7 +477,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 		transStoragePks = append(transStoragePks, storagePlainKey)
 	}
 
-	transValBuf, err := val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
+	transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 	if err != nil {
 		return nil, err
 	}

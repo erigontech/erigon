@@ -9,8 +9,10 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -20,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) ([]byte, error) {
+func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg, toTxNum uint64) ([]byte, error) {
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
@@ -34,13 +36,17 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) (
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	_, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return nil, err
 	}
 
+	// has to set this value because it will be used during domain.Commit() call.
+	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
+	domains.SetTxNum(toTxNum)
+
 	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
-	logger.Info("Collecting account keys")
+	logger.Info("Collecting account/storage keys")
 	collector := etl.NewCollector("collect_keys", cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
 	defer collector.Close()
 
@@ -71,9 +77,8 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) (
 				return err
 			}
 			logger.Info("Committing batch",
-				"processed", fmt.Sprintf("%d/%d (%.2f%%)",
-					processed.Load(), totalKeys.Load(), 100*(float64(totalKeys.Load())/float64(processed.Load()))),
-				"intermediate root", rh)
+				"processed", fmt.Sprintf("%d/%d (%.2f%%)", processed.Load(), totalKeys.Load(), float64(processed.Load())/float64(totalKeys.Load())*100),
+				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
 		domains.Commitment.TouchPlainKey(k, nil, nil)
@@ -90,7 +95,11 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) (
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("Commitment has been reevaluated", "tx", domains.TxNum(), "root", hex.EncodeToString(rh), "processed", processed.Load(), "total", totalKeys.Load())
+	logger.Info("Commitment has been reevaluated",
+		"tx", domains.TxNum(),
+		"root", hex.EncodeToString(rh),
+		"processed", processed.Load(),
+		"total", totalKeys.Load())
 
 	if err := cfg.agg.Flush(ctx, tx); err != nil {
 		return nil, err
@@ -99,79 +108,107 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg) (
 	return rh, nil
 }
 
-func SpawnPatriciaTrieStage(tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
-	useExternalTx := tx != nil
+func countBlockByTxnum(ctx context.Context, tx kv.Tx, txnum uint64, blockReader services.FullBlockReader) (blockNum uint64, notInTheMiddle bool, err error) {
+	var txCounter uint64 = 0
+	var ft, lt uint64
+
+	for i := uint64(0); i < math.MaxUint64; i++ {
+		if i%1000000 == 0 {
+			fmt.Printf("\r [%s] Counting block for tx %d: cur block %d cur tx %d\n", "restoreCommit", txnum, i, txCounter)
+		}
+
+		h, err := blockReader.HeaderByNumber(ctx, tx, uint64(i))
+		if err != nil {
+			return 0, false, err
+		}
+
+		ft = txCounter
+		txCounter++
+		b, err := blockReader.BodyWithTransactions(ctx, tx, h.Hash(), uint64(i))
+		if err != nil {
+			return 0, false, err
+		}
+		txCounter += uint64(len(b.Transactions))
+		txCounter++
+		blockNum = i
+		lt = txCounter
+
+		if txCounter >= txnum {
+			return blockNum, ft == txnum || lt == txnum, nil
+		}
+	}
+	return 0, false, fmt.Errorf("block not found")
+
+}
+
+func SpawnPatriciaTrieStage(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
+	useExternalTx := rwTx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		rwTx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-		defer tx.Rollback()
+		defer rwTx.Rollback()
 	}
 
-	//to, err := s.ExecutionAt(tx)
-	//if err != nil {
-	//	return trie.EmptyRoot, err
-	//}
-	//if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
-	//	return trie.EmptyRoot, nil
-	//}
-	agg := tx.(*temporal.Tx).Agg()
-	to := agg.EndTxNumNoCommitment()
-
-	//var err error
-	//if s.BlockNumber == to {
-	//	// we already did hash check for this block
-	//	// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-	//	return trie.EmptyRoot, nil
-	//}
+	var foundHash bool
+	agg := rwTx.(*temporal.Tx).Agg()
+	toTxNum := agg.EndTxNumNoCommitment()
+	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, toTxNum)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	if !ok {
+		blockNum, foundHash, err = countBlockByTxnum(ctx, rwTx, toTxNum, cfg.blockReader)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+	} else {
+		firstTxInBlock, err := rawdbv3.TxNums.Min(rwTx, blockNum)
+		if err != nil {
+			return libcommon.Hash{}, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+		}
+		lastTxInBlock, err := rawdbv3.TxNums.Max(rwTx, blockNum)
+		if err != nil {
+			return libcommon.Hash{}, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
+		}
+		if firstTxInBlock == toTxNum || lastTxInBlock == toTxNum {
+			foundHash = true // state is in the beginning or end of block
+		}
+	}
 
 	var expectedRootHash libcommon.Hash
 	var headerHash libcommon.Hash
 	var syncHeadHeader *types.Header
-	var err error
-	if cfg.checkRoot {
-		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, to)
+	if foundHash && cfg.checkRoot {
+		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
 		if syncHeadHeader == nil {
-			return trie.EmptyRoot, fmt.Errorf("no header found with number %d", to)
+			return trie.EmptyRoot, fmt.Errorf("no header found with number %d", blockNum)
 		}
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
 	}
 
-	//logPrefix := s.LogPrefix()
-	var foundHash bool
-	rh, err := collectAndComputeCommitment(ctx, tx, cfg)
+	rh, err := collectAndComputeCommitment(ctx, rwTx, cfg, toTxNum)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	//if !foundHash { // tx could be in the middle of block so no header match will be found
-	//	return trie.EmptyRoot, fmt.Errorf("no header found with root %x", rh)
-	//}
 
-	if (foundHash || cfg.checkRoot) && !bytes.Equal(rh, expectedRootHash[:]) {
-		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", to, rh, expectedRootHash, headerHash))
+	if foundHash && cfg.checkRoot && !bytes.Equal(rh, expectedRootHash[:]) {
+		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", blockNum, rh, expectedRootHash, headerHash))
 		if cfg.badBlockHalt {
 			return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 		}
-		//if cfg.hd != nil {
-		//	cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
-		//}
-		//if to > s.BlockNumber {
-		//	unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-		//	logger.Warn("Unwinding (should to) due to incorrect root hash", "to", unwindTo)
-		//	//u.UnwindTo(unwindTo, headerHash)
-		//}
-		//} else if err = s.Update(tx, to); err != nil {
-		//	return trie.EmptyRoot, err
+	} else {
+		logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, rh, toTxNum))
 	}
 
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err := rwTx.Commit(); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
