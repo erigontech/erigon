@@ -40,16 +40,16 @@ func TestWriteBlockRoot(t *testing.T) {
 
 	retrievedSlot, err := ReadBlockSlotByBlockRoot(context.Background(), tx, blockRoot)
 	require.NoError(t, err)
-	require.Equal(t, block.Block.Slot, retrievedSlot)
+	require.Equal(t, block.Block.Slot, *retrievedSlot)
 
-	canonicalRoot, err := ReadCanonicalBlockRoot(context.Background(), tx, retrievedSlot)
+	canonicalRoot, err := ReadCanonicalBlockRoot(context.Background(), tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash{}, canonicalRoot)
 
-	err = MarkRootCanonical(context.Background(), tx, retrievedSlot, blockRoot)
+	err = MarkRootCanonical(context.Background(), tx, *retrievedSlot, blockRoot)
 	require.NoError(t, err)
 
-	canonicalRoot, err = ReadCanonicalBlockRoot(context.Background(), tx, retrievedSlot)
+	canonicalRoot, err = ReadCanonicalBlockRoot(context.Background(), tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(blockRoot), canonicalRoot)
 }
