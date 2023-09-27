@@ -16,6 +16,7 @@ import (
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.headHash = libcommon.Hash{}
 	data := attestation.AttestantionData()
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err

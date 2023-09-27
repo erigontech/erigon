@@ -198,7 +198,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.
 func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
 	// Sanity checks so that we know it is good.
-	voluntaryExit := signedVoluntaryExit.VolunaryExit
+	voluntaryExit := signedVoluntaryExit.VoluntaryExit
 	currentEpoch := state.Epoch(s)
 	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {

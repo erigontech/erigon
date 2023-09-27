@@ -17,9 +17,12 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 }
 
 func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
+	if f.headHash != (libcommon.Hash{}) {
+		return f.headHash, f.headSlot, nil
+	}
 	// Retrieve att
-	head := f.justifiedCheckpoint.BlockRoot()
-	blocks := f.getFilteredBlockTree(head)
+	f.headHash = f.justifiedCheckpoint.BlockRoot()
+	blocks := f.getFilteredBlockTree(f.headHash)
 	// See which validators can be used for attestation score
 	justificationState, err := f.getCheckpointState(f.justifiedCheckpoint)
 	if err != nil {
@@ -29,7 +32,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.validators, justificationState.epoch)
 	for {
 		// Filter out current head children.
-		unfilteredChildren := f.forkGraph.GetChildren(head)
+		unfilteredChildren := f.forkGraph.GetChildren(f.headHash)
 		children := []libcommon.Hash{}
 		for _, child := range unfilteredChildren {
 			if _, ok := blocks[child]; ok {
@@ -38,15 +41,16 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		}
 		// Stop if we dont have any more children
 		if len(children) == 0 {
-			header, hasHeader := f.forkGraph.GetHeader(head)
+			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
 				return libcommon.Hash{}, 0, fmt.Errorf("no slot for head is stored")
 			}
-			return head, header.Slot, nil
+			f.headSlot = header.Slot
+			return f.headHash, f.headSlot, nil
 		}
 		// Average case scenario.
 		if len(children) == 1 {
-			head = children[0]
+			f.headHash = children[0]
 			continue
 		}
 		// Sort children by lexigographical order
@@ -57,13 +61,13 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		})
 
 		// After sorting is done determine best fit.
-		head = children[0]
+		f.headHash = children[0]
 		maxWeight := f.getWeight(children[0], filteredIndicies, justificationState)
 		for i := 1; i < len(children); i++ {
 			weight := f.getWeight(children[i], filteredIndicies, justificationState)
 			// Lexicographical order is king.
 			if weight >= maxWeight {
-				head = children[i]
+				f.headHash = children[i]
 				maxWeight = weight
 			}
 		}

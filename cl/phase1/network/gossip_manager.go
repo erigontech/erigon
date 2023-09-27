@@ -125,6 +125,14 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decode exit"
 			return err
 		}
+		invalid, err := g.forkChoice.OnVoluntaryExit(object.(*cltypes.SignedVoluntaryExit), false)
+		if invalid {
+			g.sentinel.BanPeer(ctx, data.Peer)
+			l["at"] = "verify exit"
+		}
+		if err != nil {
+			return err
+		}
 	case sentinel.GossipType_ProposerSlashingGossipType:
 		object = &cltypes.ProposerSlashing{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {

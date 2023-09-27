@@ -25,19 +25,26 @@ func ComputeKeyForAttesterSlashing(slashing *cltypes.AttesterSlashing) libcommon
 
 // OperationsPool is the collection of all gossip-collectable operations.
 type OperationsPool struct {
-	AttestationsPool          *OperationPool[*solid.Attestation]
-	AttesterSlashingsPool     *OperationPool[*cltypes.AttesterSlashing]
-	ProposerSlashingsPool     *OperationPool[*cltypes.ProposerSlashing]
-	BLSToExecutionChangesPool *OperationPool[*cltypes.SignedBLSToExecutionChange]
-	VoluntaryExistsPool       *OperationPool[*cltypes.SignedVoluntaryExit]
+	AttestationsPool          *OperationPool[libcommon.Bytes96, *solid.Attestation]
+	AttesterSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing]
+	ProposerSlashingsPool     *OperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing]
+	BLSToExecutionChangesPool *OperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange]
+	VoluntaryExistsPool       *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 }
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
-		AttestationsPool:          NewOperationPool[*solid.Attestation](int(beaconCfg.MaxAttestations), "attestationsPool"),
-		AttesterSlashingsPool:     NewOperationPool[*cltypes.AttesterSlashing](int(beaconCfg.MaxAttestations), "attesterSlashingsPool"),
-		ProposerSlashingsPool:     NewOperationPool[*cltypes.ProposerSlashing](int(beaconCfg.MaxAttestations), "proposerSlashingsPool"),
-		BLSToExecutionChangesPool: NewOperationPool[*cltypes.SignedBLSToExecutionChange](int(beaconCfg.MaxBlsToExecutionChanges), "blsExecutionChangesPool"),
-		VoluntaryExistsPool:       NewOperationPool[*cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
+		AttestationsPool:          NewOperationPool[libcommon.Bytes96, *solid.Attestation](int(beaconCfg.MaxAttestations), "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.AttesterSlashing](int(beaconCfg.MaxAttestations), "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[libcommon.Bytes96, *cltypes.ProposerSlashing](int(beaconCfg.MaxAttestations), "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[libcommon.Bytes96, *cltypes.SignedBLSToExecutionChange](int(beaconCfg.MaxBlsToExecutionChanges), "blsExecutionChangesPool"),
+		VoluntaryExistsPool:       NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](int(beaconCfg.MaxBlsToExecutionChanges), "voluntaryExitsPool"),
 	}
+}
+
+func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
+	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
+		o.VoluntaryExistsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		return true
+	})
 }

@@ -12,7 +12,7 @@ import (
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Check if these attestation is even slashable.
+	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
@@ -45,6 +45,5 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
 		f.equivocatingIndicies[index] = struct{}{}
 	}
-	// add attestation indicies to equivocating indicies.
 	return nil
 }
