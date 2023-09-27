@@ -159,21 +159,6 @@ func (ii *InvertedIndex) enableLocalityIndex() error {
 	return nil
 }
 
-func filesFromDir(dir string) ([]string, error) {
-	allFiles, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
-	}
-	filtered := make([]string, 0, len(allFiles))
-	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		filtered = append(filtered, f.Name())
-	}
-	return filtered, nil
-}
-
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	files, err := os.ReadDir(ii.dir)
 	if err != nil {
