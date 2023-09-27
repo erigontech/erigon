@@ -5,12 +5,12 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/crypto/blake2b"
 )
 
 // DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
 func doubleSignatureKey(one, two libcommon.Bytes96) (out libcommon.Bytes96) {
-	res := utils.Keccak256(one[:], two[:])
+	res := blake2b.Sum256(append(one[:], two[:]...))
 	copy(out[:], res[:])
 	return
 }
@@ -45,6 +45,10 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
 		o.VoluntaryExistsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
+		return true
+	})
+	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {
+		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(att))
 		return true
 	})
 }
