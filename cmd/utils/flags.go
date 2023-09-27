@@ -813,9 +813,26 @@ var (
 		Usage: "Max allowed page size for search methods",
 		Value: 25,
 	}
+
+	DiagnosticsURLFlag = cli.StringFlag{
+		Name:  "diagnostics.url",
+		Usage: "URL of the diagnostics system provided by the support team",
+	}
+
+	DiagnosticsInsecureFlag = cli.BoolFlag{
+		Name:  "diagnostics.insecure",
+		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
+
+	DiagnosticsSessionsFlag = cli.StringSliceFlag{
+		Name:  "diagnostics.ids",
+		Usage: "Comma separated list of support session ids to connect to",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
+
+var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 
 // setNodeKey loads a node key from command line flags if provided,
 // otherwise it tries to load it from datadir,

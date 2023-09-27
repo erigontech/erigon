@@ -407,7 +407,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		go func() {
-			logEvery := time.NewTicker(120 * time.Second)
+			logEvery := time.NewTicker(180 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
@@ -790,7 +790,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		go caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, sqlDb, beaconDB, dirs.Tmp, beacon.RouterConfiguration{Active: false})
+		go caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, sqlDb, rawBeaconBlockChainDb, beaconDB, dirs.Tmp, beacon.RouterConfiguration{Active: false})
 	}
 
 	return backend, nil

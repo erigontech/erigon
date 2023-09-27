@@ -76,7 +76,7 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
