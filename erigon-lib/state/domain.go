@@ -1301,7 +1301,8 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		}
 		item := item
 		g.Go(func() error {
-			idxPath := d.kvBtFilePath(item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
+			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			idxPath := d.kvBtFilePath(fromStep, toStep)
 			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, CompressNone, ps, d.dirs.Tmp, *d.salt, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
@@ -1318,7 +1319,8 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 				return nil
 			}
 
-			idxPath := d.kvAccessorFilePath(item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
+			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			idxPath := d.kvAccessorFilePath(fromStep, toStep)
 			ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
@@ -1665,16 +1667,16 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			}
 		}
 
-		t := time.Now()
+		//t := time.Now()
 		v, found, err = dc.getFromFile2(i, filekey)
 		if err != nil {
 			return nil, false, err
 		}
 		if !found {
-			LatestStateReadGrindNotFound.UpdateDuration(t)
+			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
-		LatestStateReadGrind.UpdateDuration(t)
+		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
 	return nil, false, nil
