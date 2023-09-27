@@ -136,9 +136,9 @@ func blockIdFromRequest(r *http.Request) (*segmentID, error) {
 }
 
 func stateIdFromRequest(r *http.Request) (*segmentID, error) {
-	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|\d+)$`)
+	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|justified|\d+)$`)
 
-	stateId := chi.URLParam(r, "block_id")
+	stateId := chi.URLParam(r, "state_id")
 	if !regex.MatchString(stateId) {
 		return nil, fmt.Errorf("invalid path variable: {block_id}")
 	}
