@@ -33,6 +33,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -80,7 +81,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
 		return nil, err
 	}
@@ -94,6 +95,19 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 				return nil, err
 			}
 		}
+	}
+
+	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
+	if dir.Exist(filepath.Join(cfg.SnapDir, "warm")) {
+		warmDir := filepath.Join(cfg.SnapDir, "warm")
+		os.Rename(filepath.Join(dirs.SnapHistory, "salt.txt"), filepath.Join(dirs.Snap, "salt.txt"))
+		moveFiles(warmDir, dirs.SnapDomain, ".kv")
+		moveFiles(warmDir, dirs.SnapDomain, ".kvei")
+		moveFiles(warmDir, dirs.SnapDomain, ".bt")
+		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".vi")
+		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efi")
+		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efei")
+		moveFiles(dirs.SnapHistory, dirs.SnapIdx, ".ef")
 	}
 
 	db, c, m, torrentClient, err := openClient(cfg.DBDir, cfg.SnapDir, cfg.ClientConfig)
@@ -137,6 +151,22 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	return d, nil
 }
 
+func moveFiles(from, to string, ext string) error {
+	files, err := os.ReadDir(from)
+	if err != nil {
+		return fmt.Errorf("ReadDir: %w, %s", err, from)
+	}
+	for _, f := range files {
+		if f.Type().IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ext {
+			continue
+		}
+		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
+	}
+	return nil
+}
 func copyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
