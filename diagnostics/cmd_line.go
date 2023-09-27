@@ -1,22 +1,29 @@
 package diagnostics
 
 import (
-	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func SetupCmdLineAccess(metricsMux *http.ServeMux) {
-	metricsMux.HandleFunc("/debug/metrics/cmdline", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/cmdline", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		writeCmdLine(w)
-	})
-}
+		w.Header().Set("Content-Type", "application/json")
 
-func writeCmdLine(w io.Writer) {
-	fmt.Fprintf(w, "SUCCESS\n")
-	for _, arg := range os.Args {
-		fmt.Fprintf(w, "%s\n", arg)
-	}
+		var space []byte
+
+		w.Write([]byte{'"'})
+		for _, arg := range os.Args {
+			if len(space) > 0 {
+				w.Write(space)
+			} else {
+				space = []byte(" ")
+			}
+
+			w.Write([]byte(strings.Trim(strconv.Quote(arg), `"`)))
+		}
+		w.Write([]byte{'"'})
+	})
 }
