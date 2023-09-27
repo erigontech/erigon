@@ -149,7 +149,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	if ok {
 		tx.Lock()
 		defer tx.Unlock()
-		tx.Rollback()
+		tx.Rollback() //nolint
 	}
 	newTx, errBegin := s.kv.BeginRo(ctx)
 	if errBegin != nil {
@@ -169,7 +169,7 @@ func (s *KvServer) rollback(id uint64) {
 	if ok {
 		tx.Lock()
 		defer tx.Unlock()
-		tx.Rollback()
+		tx.Rollback() //nolint
 		delete(s.txs, id)
 	}
 }
