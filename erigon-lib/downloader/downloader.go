@@ -235,7 +235,13 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 				}(t)
 			}
-			time.Sleep(10 * time.Second)
+			timer := time.NewTimer(10 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-timer.C:
+			}
 		}
 	}()
 
