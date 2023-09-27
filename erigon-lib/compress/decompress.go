@@ -366,7 +366,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 	}
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
-	defer mmap.MadviseRandom(d.mmapHandle1)
+	defer mmap.MadviseNormal(d.mmapHandle1)
 	return f()
 }
 
