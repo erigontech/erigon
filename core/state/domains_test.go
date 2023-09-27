@@ -46,11 +46,10 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	//
 	return opts
 }
-func dbAggregatorOnDatadir(t *testing.T, datadir string) (kv.RwDB, *state.AggregatorV3) {
+func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
 	t.Helper()
 	logger := log.New()
-	dirs := datadir2.New(datadir)
-
+	dirs := datadir2.New(ddir)
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
@@ -98,7 +97,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 
 	hr := NewHistoryReaderV3()
 	hr.SetTx(tx)
-	for i := txn; i > 0; i-- {
+	for i := txn; i < txn+offt; i++ {
 		hr.SetTxNum(i)
 
 		acc, err := hr.ReadAccountData(common.HexToAddress("0xB5CAEc2ef7B24D644d1517c9286A17E73b5988F8"))

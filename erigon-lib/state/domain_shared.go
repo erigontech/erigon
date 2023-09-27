@@ -103,6 +103,10 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBeginOfft uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
 	if ok {
 		if err != nil {
@@ -119,14 +123,13 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn, blockBegi
 		}
 		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
 		if txn > firstTxInBlock {
-			txn++
+			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			blockBeginOfft = txn - firstTxInBlock
 		}
 		fmt.Printf("[commitment] block tx range -%d |%d| %d\n", blockBeginOfft, txn, lastTxInBlock-txn)
 		if txn == lastTxInBlock {
 			blockNum++
 		} else {
-			//txn++
 			txn = firstTxInBlock
 		}
 	} else {

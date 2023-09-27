@@ -34,6 +34,10 @@ func (eri *ErigonNode) Serve() error {
 	return nil
 }
 
+func (eri *ErigonNode) Backend() *eth.Ethereum {
+	return eri.backend
+}
+
 func (eri *ErigonNode) Close() {
 	eri.stack.Close()
 }

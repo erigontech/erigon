@@ -107,7 +107,7 @@ var (
 	}
 
 	metricsURLsFlag = cli.StringSliceFlag{
-		Name:  "metrics.urls",
+		Name:  "debug.urls",
 		Usage: "internal flag",
 	}
 
@@ -199,7 +199,7 @@ func action(ctx *cli.Context) error {
 	if metrics {
 		// TODO should get this from the network as once we have multiple nodes we'll need to iterate the
 		// nodes and create a series of urls - for the moment only one is supported
-		ctx.Set("metrics.urls", fmt.Sprintf("http://localhost:%d/debug/metrics/", ctx.Int("metrics.port")))
+		ctx.Set("metrics.urls", fmt.Sprintf("http://localhost:%d/debug/", ctx.Int("metrics.port")))
 	}
 
 	// start the network with each node in a go routine

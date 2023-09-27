@@ -674,7 +674,7 @@ Loop:
 				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
-				SkipStateReading: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]

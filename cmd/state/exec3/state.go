@@ -7,9 +7,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -36,7 +37,6 @@ type Worker struct {
 	in          *state.QueueWithRetry
 	rs          *state.StateV3
 	stateWriter *state.StateWriterBufferedV3
-	//stateReader *state.StateReaderV3
 	stateReader state.ResettableStateReader
 	historyMode atomic.Bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -150,9 +150,12 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
-	if txTask.SkipStateReading && !rw.historyMode.Load() {
+	if txTask.HistoryExecution && !rw.historyMode.Load() {
+		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
+		// from the beginning until committed txNum and only then disable history mode.
+		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
-	} else if !txTask.SkipStateReading && rw.historyMode.Load() {
+	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
 		rw.SetReader(state.NewStateReaderV3(rw.rs))
 	}
 

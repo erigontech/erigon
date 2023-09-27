@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -223,18 +224,18 @@ func (h *History) openFiles() error {
 				continue
 			}
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+			datPath := h.vFilePath(fromStep, toStep)
 			if !dir.FileExist(datPath) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
 			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-				h.logger.Debug("Hisrory.openFiles: %w, %s", err, datPath)
+				h.logger.Debug("History.openFiles: %w, %s", err, datPath)
 				return false
 			}
 
 			if item.index == nil {
-				idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+				idxPath := h.vAccessorFilePath(fromStep, toStep)
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 						h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
@@ -304,7 +305,7 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 	h.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			if !dir.FileExist(filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))) {
+			if !dir.FileExist(h.vAccessorFilePath(fromStep, toStep)) {
 				l = append(l, item)
 			}
 		}
@@ -321,8 +322,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	}
 
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-	fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(h.dir, fName)
+	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
 	//h.logger.Info("[snapshots] build idx", "file", fName)
 	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.InvertedIndex.compression, h.compression, h.salt, h.logger)
@@ -643,7 +643,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			}
 		}
 	}()
-	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
+	historyPath := h.vFilePath(step, step+1)
 	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
@@ -823,10 +823,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var historyIdxPath, efHistoryPath string
 
 	{
-		historyIdxFileName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, step, step+1)
-		p := ps.AddNew(historyIdxFileName, 1)
+		historyIdxPath = h.vAccessorFilePath(step, step+1)
+		p := ps.AddNew(path.Base(historyIdxPath), 1)
 		defer ps.Delete(p)
-		historyIdxPath = filepath.Join(h.dir, historyIdxFileName)
 		if err := historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s history: %w", h.filenameBase, err)
 		}
@@ -848,11 +847,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 		// Build history ef
-		efHistoryFileName := fmt.Sprintf("%s.%d-%d.ef", h.filenameBase, step, step+1)
+		efHistoryPath = h.efFilePath(step, step+1)
 
-		p := ps.AddNew(efHistoryFileName, 1)
+		p := ps.AddNew(path.Base(efHistoryPath), 1)
 		defer ps.Delete(p)
-		efHistoryPath = filepath.Join(h.dir, efHistoryFileName)
+
 		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
@@ -891,15 +890,13 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
-		efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
+		efHistoryIdxPath := h.efAccessorFilePath(step, step+1)
 		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 		}
 	}
 	if h.InvertedIndex.withExistenceIndex {
-		existenceIdxFileName := fmt.Sprintf("%s.%d-%d.efei", h.filenameBase, step, step+1)
-		existenceIdxPath := filepath.Join(h.dir, existenceIdxFileName)
+		existenceIdxPath := h.efExistenceIdxFilePath(step, step+1)
 		if efExistence, err = buildIndexFilterThenOpen(ctx, efHistoryDecomp, h.compression, existenceIdxPath, h.tmpdir, h.salt, ps, h.logger, h.noFsync); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 		}
