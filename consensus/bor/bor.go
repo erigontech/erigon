@@ -258,9 +258,10 @@ type Bor struct {
 	fakeDiff  bool // Skip difficulty verifications
 	spanCache *btree.BTree
 
-	closeOnce sync.Once
-	logger    log.Logger
-	closeCh   chan struct{} // Channel to signal the background processes to exit
+	closeOnce           sync.Once
+	logger              log.Logger
+	closeCh             chan struct{} // Channel to signal the background processes to exit
+	frozenSnapshotsInit sync.Once
 }
 
 type signer struct {
@@ -641,6 +642,66 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	return c.verifySeal(chain, header, parents, snap)
 }
 
+func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint64, logEvery *time.Ticker) (snap *Snapshot, err error) {
+	c.logger.Info("Initializing frozen snapshots to", "number", number)
+	defer func() {
+		c.logger.Info("Done initializing frozen snapshots to", "number", number, "err", err)
+	}()
+
+	// Special handling of the headers in the snapshot
+	zeroHeader := chain.GetHeaderByNumber(0)
+
+	if zeroHeader != nil {
+		// get checkpoint data
+		hash := zeroHeader.Hash()
+
+		// get validators and current span
+		var validators []*valset.Validator
+
+		validators, err = c.spanner.GetCurrentValidators(1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+
+		if err != nil {
+			return nil, err
+		}
+
+		// new snap shot
+		snap = newSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
+
+		if err = snap.store(c.DB); err != nil {
+			return nil, err
+		}
+
+		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
+
+		initialHeaders := make([]*types.Header, 0, 128)
+
+		for i := uint64(1); i <= number; i++ {
+			header := chain.GetHeaderByNumber(i)
+			initialHeaders = append(initialHeaders, header)
+			if len(initialHeaders) == cap(initialHeaders) {
+				snap, err = snap.apply(initialHeaders, c.logger)
+
+				if err != nil {
+					return nil, err
+				}
+
+				initialHeaders = initialHeaders[:0]
+			}
+			select {
+			case <-logEvery.C:
+				log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+			default:
+			}
+		}
+
+		if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+			return nil, err
+		}
+	}
+
+	return snap, nil
+}
+
 // snapshot retrieves the authorization snapshot at a given point in time.
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
 	logEvery := time.NewTicker(logInterval)
@@ -710,43 +771,14 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	}
 
 	if snap == nil && chain != nil && number <= chain.FrozenBlocks() {
-		// Special handling of the headers in the snapshot
-		zeroHeader := chain.GetHeaderByNumber(0)
-		if zeroHeader != nil {
-			// get checkpoint data
-			hash := zeroHeader.Hash()
+		var err error
 
-			// get validators and current span
-			validators, err := c.spanner.GetCurrentValidators(1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
-			if err != nil {
-				return nil, err
-			}
+		c.frozenSnapshotsInit.Do(func() {
+			snap, err = c.initFrozenSnapshot(chain, number, logEvery)
+		})
 
-			// new snap shot
-			snap = newSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
-			if err := snap.store(c.DB); err != nil {
-				return nil, err
-			}
-			c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
-			initialHeaders := make([]*types.Header, 0, 128)
-			for i := uint64(1); i <= number; i++ {
-				header := chain.GetHeaderByNumber(i)
-				initialHeaders = append(initialHeaders, header)
-				if len(initialHeaders) == cap(initialHeaders) {
-					if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
-						return nil, err
-					}
-					initialHeaders = initialHeaders[:0]
-				}
-				select {
-				case <-logEvery.C:
-					log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
-				default:
-				}
-			}
-			if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
-				return nil, err
-			}
+		if err != nil {
+			return nil, err
 		}
 	}
 

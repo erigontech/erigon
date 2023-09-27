@@ -88,7 +88,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 			return s.Path == snapshotPath
 		})
 		if !found {
-			return fmt.Errorf("Segment %s not found\n", snapshotPath)
+			return fmt.Errorf("segment %s not found", snapshotPath)
 		}
 
 		switch segment.T {
