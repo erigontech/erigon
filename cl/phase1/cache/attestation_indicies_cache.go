@@ -9,7 +9,7 @@ import (
 
 var attestationIndiciesCache *lru.Cache[common.Hash, []uint64]
 
-const attestationIndiciesCacheSize = 256
+const attestationIndiciesCacheSize = 1024
 
 func LoadAttestatingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, bool) {
 	bitsHash := utils.Keccak256(aggregationBits)
