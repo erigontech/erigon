@@ -74,7 +74,6 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 		blockId   *segmentID
 		root      libcommon.Hash
 		blkHeader *cltypes.SignedBeaconBlockHeader
-		canonical bool
 	)
 
 	ctx := r.Context()
@@ -96,7 +95,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 		return
 	}
 
-	blkHeader, canonical, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
+	blkHeader, _, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -118,8 +117,6 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           epoch,
 	}
-	finalized = new(bool)
-	*finalized = canonical && slot <= a.forkchoiceStore.FinalizedSlot()
 	httpStatus = http.StatusAccepted
 	return
 }
