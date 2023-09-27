@@ -680,11 +680,12 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		defer agg.CloseSharedDomains()
 		domains.SetTx(tx)
 
-		blockNum, txnUm, _, err := domains.SeekCommitment(0, math.MaxUint64)
+		_, err := domains.SeekCommitment(0, math.MaxUint64)
 		if err != nil {
 			return fmt.Errorf("seek commitment: %w", err)
 		}
-		_ = txnUm
+		//txnUm := domains.TxNum()
+		blockNum := domains.BlockNum()
 
 		// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
 		progress, err := stages.GetStageProgress(tx, stages.Snapshots)
@@ -948,7 +949,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				defer ct.Close()
 
 				doms.SetTx(tx)
-				blockNum, _, _, err = doms.SeekCommitment(0, math.MaxUint64)
+				_, err = doms.SeekCommitment(0, math.MaxUint64)
+				blockNum = doms.BlockNum()
 				return err
 			})
 			if err != nil {
@@ -1125,7 +1127,7 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
 
-	if _, err := stagedsync.SpawnPatriciaTrieStage(tx, cfg, ctx, logger); err != nil {
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(tx, cfg, ctx, logger); err != nil {
 		return err
 	}
 	return tx.Commit()
