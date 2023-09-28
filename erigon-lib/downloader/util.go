@@ -33,6 +33,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -65,26 +66,23 @@ var Trackers = [][]string{
 	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
 }
 
-func AllTorrentPaths(dir string) ([]string, error) {
+func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
+	dir := dirs.Snap
 	files, err := AllTorrentFiles(dir)
 	if err != nil {
 		return nil, err
 	}
-	histDir := filepath.Join(dir, "history")
-	files2, err := AllTorrentFiles(histDir)
+	files2, err := AllTorrentFiles(dirs.SnapHistory)
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, 0, len(files)+len(files2))
-	for _, f := range files {
-		torrentFilePath := filepath.Join(dir, f)
-		res = append(res, torrentFilePath)
+	files = append(files, files2...)
+	files2, err = AllTorrentFiles(dirs.SnapDomain)
+	if err != nil {
+		return nil, err
 	}
-	for _, f := range files2 {
-		torrentFilePath := filepath.Join(histDir, f)
-		res = append(res, torrentFilePath)
-	}
-	return res, nil
+	files = append(files, files2...)
+	return files, nil
 }
 
 func AllTorrentFiles(dir string) ([]string, error) {
@@ -94,6 +92,9 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
+		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
 		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
 			continue
 		}
@@ -104,7 +105,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 		if fileInfo.Size() == 0 {
 			continue
 		}
-		res = append(res, f.Name())
+		res = append(res, filepath.Join(dir, f.Name()))
 	}
 	return res, nil
 }
@@ -116,10 +117,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-		if !f.Type().IsRegular() {
+		if f.IsDir() && !f.Type().IsRegular() {
 			continue
 		}
 		if !snaptype.IsCorrectFileName(f.Name()) {
@@ -163,10 +161,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-		if !f.Type().IsRegular() {
+		if f.IsDir() && !f.Type().IsRegular() {
 			continue
 		}
 		ext := filepath.Ext(f.Name())
