@@ -236,15 +236,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}(t)
 			}
 
-			func() { // scop of sleep timer
-				timer := time.NewTimer(10 * time.Second)
-				defer timer.Stop()
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-timer.C:
-				}
-			}()
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 	}()
 
