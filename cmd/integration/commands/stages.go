@@ -708,6 +708,11 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	sn, borSn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer borSn.Close()
@@ -716,13 +721,13 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if !(unwind > 0 || reset) {
-			logger.Info("This command only works with --unwind or --reset options")
-		}
+	if !(unwind > 0 || reset) {
+		logger.Error("This command only works with --unwind or --reset options")
+		return nil
+	}
 
+	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			dirs := datadir.New(datadirCli)
 			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
@@ -926,6 +931,10 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	sn, borSn, agg := allSnapshots(ctx, db, logger)
