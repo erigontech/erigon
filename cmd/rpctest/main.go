@@ -64,6 +64,16 @@ func main() {
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
+	var benchEthGetBlockByHash = &cobra.Command{
+		Use:   "benchEthGetBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
 		Short: "",
@@ -294,6 +304,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
+		benchEthGetBlockByHash,
 		benchEthCallCmd,
 		bench1Cmd,
 		bench2Cmd,
