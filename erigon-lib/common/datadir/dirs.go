@@ -136,6 +136,7 @@ func downloaderV2Migration(dirs Dirs) error {
 	return nil
 }
 
+// nolint
 func erigonV3foldersV31Migration(dirs Dirs) error {
 	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
 	if dir.Exist(filepath.Join(dirs.Snap, "warm")) {
