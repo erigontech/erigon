@@ -1,6 +1,7 @@
 package forkchoice
 
 import (
+	"context"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -21,6 +22,7 @@ const (
 )
 
 type ForkChoiceStore struct {
+	ctx                           context.Context
 	time                          uint64
 	highestSeen                   uint64
 	justifiedCheckpoint           solid.Checkpoint
@@ -49,7 +51,7 @@ type LatestMessage struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -68,6 +70,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	}
 
 	return &ForkChoiceStore{
+		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
 		justifiedCheckpoint:           anchorCheckpoint.Copy(),

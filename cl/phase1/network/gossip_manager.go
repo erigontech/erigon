@@ -150,6 +150,12 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
+		if err := g.forkChoice.OnAttestation(object.(*cltypes.SignedAggregateAndProof).Message.Aggregate, false); err != nil {
+			l["at"] = "on attestation"
+			log.Trace("Could not process attestation", "reason", err)
+			return err
+		}
+
 	}
 	return nil
 }

@@ -2,21 +2,28 @@ package forkchoice
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-// OnAttestation processes incoming attestations. TODO(Giulio2002): finish it with forward changesets.
+// OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	data := attestation.AttestantionData()
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err
+	}
+	// Schedule for later processing.
+	if f.Slot() < attestation.AttestantionData().Slot()+1 {
+		f.scheduleAttestationForLaterProcessing(attestation, fromBlock)
+		return nil
 	}
 	target := data.Target()
 	if cachedIndicies, ok := cache.LoadAttestatingIndicies(&data, attestation.AggregationBits()); ok {
@@ -50,9 +57,31 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 			return fmt.Errorf("invalid attestation")
 		}
 	}
+	cache.StoreAttestation(&data, attestation.AggregationBits(), attestationIndicies)
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
 	return nil
+}
+
+// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
+func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, fromBlock bool) {
+	go func() {
+		logInterval := time.NewTicker(50 * time.Millisecond)
+		for {
+			select {
+			case <-f.ctx.Done():
+				return
+			case <-logInterval.C:
+				if f.Slot() < attestation.AttestantionData().Slot()+1 {
+					continue
+				}
+				if err := f.OnAttestation(attestation, false); err != nil {
+					log.Trace("could not process scheduled attestation", "reason", err)
+				}
+				return
+			}
+		}
+	}()
 }
 
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
@@ -99,9 +128,7 @@ func (f *ForkChoiceStore) validateOnAttestation(attestation *solid.Attestation, 
 	if ancestorRoot != target.BlockRoot() {
 		return fmt.Errorf("ancestor root mismatches with target")
 	}
-	if f.Slot() < attestation.AttestantionData().Slot()+1 {
-		return fmt.Errorf("future attestation")
-	}
+
 	return nil
 }
 
