@@ -368,11 +368,6 @@ func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesIt
 	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
 	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
 }
-func (ii *InvertedIndex) openExistenceIdx(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
-	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
-	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
-}
 
 func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
