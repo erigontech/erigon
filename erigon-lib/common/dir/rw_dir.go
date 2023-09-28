@@ -90,32 +90,42 @@ func HasFileOfType(dir, ext string) bool {
 	return false
 }
 
-func deleteFiles(dir string) error {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	for _, file := range files {
-		if file.IsDir() || !file.Type().IsRegular() {
-			continue
-		}
-
-		if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
+// nolint
+func DeleteFiles(dirs ...string) error {
+	for _, dir := range dirs {
+		files, err := ListFiles(dir)
+		if err != nil {
 			return err
+		}
+		for _, fPath := range files {
+			if err := os.Remove(filepath.Join(dir, fPath)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// nolint
-func DeleteFiles(dirs ...string) error {
-	for _, dir := range dirs {
-		if err := deleteFiles(dir); err != nil {
-			return err
-		}
+func ListFiles(dir string, extensions ...string) ([]string, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	res := make([]string, 0, len(files))
+	for _, f := range files {
+		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
+		match := false
+		for _, ext := range extensions {
+			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
+				match = true
+			}
+		}
+		if !match {
+			continue
+		}
+		res = append(res, filepath.Join(dir, f.Name()))
+	}
+	return res, nil
 }

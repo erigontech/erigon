@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -816,11 +815,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 	}()
 
-	var historyIdxPath, efHistoryPath string
-
+	historyIdxPath := h.vAccessorFilePath(step, step+1)
 	{
-		historyIdxPath = h.vAccessorFilePath(step, step+1)
-		p := ps.AddNew(path.Base(historyIdxPath), 1)
+		_, historyIdxFileName := filepath.Split(historyIdxPath)
+		p := ps.AddNew(historyIdxFileName, 1)
 		defer ps.Delete(p)
 		if err := historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s history: %w", h.filenameBase, err)
@@ -836,6 +834,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	slices.Sort(keys)
 
+	efHistoryPath := h.efFilePath(step, step+1)
 	{
 		var err error
 		if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
@@ -843,11 +842,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 
 		// Build history ef
-		efHistoryPath = h.efFilePath(step, step+1)
-
-		p := ps.AddNew(path.Base(efHistoryPath), 1)
+		_, efHistoryFileName := filepath.Split(efHistoryPath)
+		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
-
 		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)

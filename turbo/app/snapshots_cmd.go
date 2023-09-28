@@ -280,8 +280,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory, dirs.SnapDomain)
-
 	if rebuild {
 		panic("not implemented")
 	}

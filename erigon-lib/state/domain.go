@@ -311,8 +311,6 @@ type Domain struct {
 
 	domainLargeValues bool
 	compression       FileCompression
-
-	dir string
 }
 
 type domainCfg struct {
@@ -326,7 +324,6 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		panic("empty `dirs` varialbe")
 	}
 	d := &Domain{
-		dir:         cfg.hist.iiCfg.dirs.SnapDomain,
 		keysTable:   keysTable,
 		valsTable:   valsTable,
 		compression: cfg.compress,
@@ -1229,9 +1226,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	var bloom *ExistenceFilter
 	{
-		bloomIdxPath := d.kvExistenceIdxFilePath(step, step+1)
-		if dir.FileExist(bloomIdxPath) {
-			bloom, err = OpenExistenceFilter(bloomIdxPath)
+		fPath := d.kvExistenceIdxFilePath(step, step+1)
+		if dir.FileExist(fPath) {
+			bloom, err = OpenExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1271,8 +1268,8 @@ func (d *Domain) missedKviIdxFiles() (l []*filesItem) {
 	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			indexPath := d.kvAccessorFilePath(fromStep, toStep)
-			if !dir.FileExist(indexPath) {
+			fPath := d.kvAccessorFilePath(fromStep, toStep)
+			if !dir.FileExist(fPath) {
 				l = append(l, item)
 			}
 		}
@@ -1318,6 +1315,10 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		}
 		item := item
 		g.Go(func() error {
+			if UseBpsTree {
+				return nil
+			}
+
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvAccessorFilePath(fromStep, toStep)
 			ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync)
