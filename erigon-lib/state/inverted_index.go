@@ -187,12 +187,15 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 }
 
 func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
-	if err := ii.warmLocalityIdx.OpenList(warmFNames); err != nil {
-		return err
+	if ii.withLocalityIndex {
+		if err := ii.warmLocalityIdx.OpenList(warmFNames); err != nil {
+			return err
+		}
+		if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
+			return err
+		}
 	}
-	if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
-		return err
-	}
+
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
