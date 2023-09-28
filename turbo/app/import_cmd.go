@@ -54,7 +54,7 @@ func importChain(cliCtx *cli.Context) error {
 		utils.Fatalf("This command requires an argument.")
 	}
 
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}

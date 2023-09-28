@@ -802,7 +802,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.Spammer
 	}
-	if p.all.blobCount(txn.SenderID) > p.cfg.BlobSlots {
+	if !isLocal && p.all.blobCount(txn.SenderID) > p.cfg.BlobSlots {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}

@@ -114,7 +114,7 @@ func addSszTests() {
 		With("PendingAttestation", getSSZStaticConsensusTest(&solid.PendingAttestation{})).
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
-		//		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
+		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
 		With("SignedBeaconBlock", getSSZStaticConsensusTest(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig))).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
 		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).

@@ -1,6 +1,7 @@
 package regression
 
 import (
+	"context"
 	"runtime"
 	"time"
 
@@ -38,7 +39,7 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(state, nil, nil, true)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, true)
 	if err != nil {
 		return err
 	}

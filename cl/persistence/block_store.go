@@ -110,12 +110,20 @@ func (b *GossipSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, cou
 func (b *GossipSource) PurgeRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.blocks.AscendMut(from, func(key uint64, value chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
+	initSize := count
+	if initSize > 256 {
+		initSize = 256
+	}
+	xs := make([]uint64, 0, initSize)
+	b.blocks.Ascend(from, func(key uint64, value chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
 		if key >= from+count {
 			return false
 		}
-		b.blocks.Delete(key)
+		xs = append(xs, key)
 		return true
 	})
+	for _, v := range xs {
+		b.blocks.Delete(v)
+	}
 	return nil
 }
