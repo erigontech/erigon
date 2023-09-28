@@ -474,11 +474,6 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
 	// if we don't have the torrent file we build it if we have the .seg file
 	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
 	if err != nil {
