@@ -325,7 +325,7 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 		}
 
 		switch label {
-		case kv.ChainDB, kv.ConsensusDB:
+		case kv.ChainDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())
 			}
@@ -333,6 +333,18 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
 			}
 			if config.MdbxGrowthStep > 0 {
+				opts = opts.GrowthStep(config.MdbxGrowthStep)
+			}
+		case kv.ConsensusDB:
+			if config.MdbxPageSize.Bytes() > 0 {
+				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			}
+			// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
+			if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {
+				opts = opts.MapSize(config.MdbxDBSizeLimit)
+			}
+			// Don't adjust up the consensus DB - to align with db size limit above
+			if config.MdbxGrowthStep > 0 && config.MdbxGrowthStep < mdbx.DefaultGrowthStep {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 		default:
