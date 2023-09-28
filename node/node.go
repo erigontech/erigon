@@ -20,13 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -65,7 +66,7 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *nodecfg.Config, logger log.Logger) (*Node, error) {
+func New(ctx context.Context, conf *nodecfg.Config, logger log.Logger) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
@@ -88,7 +89,7 @@ func New(conf *nodecfg.Config, logger log.Logger) (*Node, error) {
 	}
 
 	// Acquire the instance directory lock.
-	if err := node.openDataDir(); err != nil {
+	if err := node.openDataDir(ctx); err != nil {
 		return nil, err
 	}
 
@@ -223,27 +224,35 @@ func (n *Node) stopServices(running []Lifecycle) error {
 	return nil
 }
 
-func (n *Node) openDataDir() error {
+func (n *Node) openDataDir(ctx context.Context) error {
 	if n.config.Dirs.DataDir == "" {
 		return nil // ephemeral
 	}
 
 	instdir := n.config.Dirs.DataDir
-	if err := os.MkdirAll(instdir, 0700); err != nil {
+	if err := datadir.ApplyMigrations(n.config.Dirs); err != nil {
 		return err
 	}
-	// Lock the instance directory to prevent concurrent use by another instance as well as
-	// accidental use of the instance directory as a database.
-	l := flock.New(filepath.Join(instdir, "LOCK"))
-
-	locked, err := l.TryLock()
-	if err != nil {
-		return convertFileLockError(err)
+	for retry := 0; ; retry++ {
+		l, locked, err := datadir.Flock(n.config.Dirs)
+		if err != nil {
+			return err
+		}
+		if !locked {
+			if retry >= 10 {
+				return fmt.Errorf("%w: %s", datadir.ErrDataDirLocked, instdir)
+			}
+			log.Error(datadir.ErrDataDirLocked.Error() + ", retry in 2 sec")
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+		n.dirLock = l
+		break
 	}
-	if !locked {
-		return fmt.Errorf("%w: %s", ErrDataDirUsed, instdir)
-	}
-	n.dirLock = l
 	return nil
 }
 

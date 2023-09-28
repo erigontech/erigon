@@ -34,7 +34,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -82,33 +81,12 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downloader, error) {
-	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
+	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return nil, err
 	}
 
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	if dir.Exist(filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
-		from, to := filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat"), filepath.Join(cfg.Dirs.Downloader, "mdbx.dat")
-		if err := os.Rename(from, to); err != nil {
-			//fall back to copy-file if folders are on different disks
-			if err := copyFile(from, to); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
-	if dir.Exist(filepath.Join(cfg.Dirs.Snap, "warm")) {
-		warmDir := filepath.Join(cfg.Dirs.Snap, "warm")
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		os.Rename(filepath.Join(dirs.SnapHistory, "salt.txt"), filepath.Join(dirs.Snap, "salt.txt"))
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		moveFiles(warmDir, dirs.SnapDomain, ".kvei")
-		moveFiles(warmDir, dirs.SnapDomain, ".bt")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".vi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efei")
-		moveFiles(dirs.SnapHistory, dirs.SnapIdx, ".ef")
+	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
+		return nil, err
 	}
 
 	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
@@ -150,46 +128,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downl
 		d.applyWebseeds()
 	}()
 	return d, nil
-}
-
-func moveFiles(from, to string, ext string) error {
-	files, err := os.ReadDir(from)
-	if err != nil {
-		return fmt.Errorf("ReadDir: %w, %s", err, from)
-	}
-	for _, f := range files {
-		if f.Type().IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ext {
-			continue
-		}
-		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
-	}
-	return nil
-}
-func copyFile(from, to string) error {
-	r, err := os.Open(from)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer r.Close()
-	w, err := os.Create(to)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer w.Close()
-	if _, err = w.ReadFrom(r); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	if err = w.Sync(); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -300,15 +238,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}(t)
 			}
 
-			func() { // scop of sleep timer
-				timer := time.NewTimer(10 * time.Second)
-				defer timer.Stop()
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-timer.C:
-				}
-			}()
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 	}()
 
