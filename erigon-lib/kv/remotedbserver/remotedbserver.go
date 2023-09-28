@@ -169,7 +169,7 @@ func (s *KvServer) rollback(id uint64) {
 	if ok {
 		tx.Lock()
 		defer tx.Unlock()
-		tx.Rollback()
+		tx.Rollback() //nolint
 		delete(s.txs, id)
 	}
 }
