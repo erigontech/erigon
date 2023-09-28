@@ -92,6 +92,9 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
+		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
 		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
 			continue
 		}
@@ -102,7 +105,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 		if fileInfo.Size() == 0 {
 			continue
 		}
-		res = append(res, f.Name())
+		res = append(res, filepath.Join(dir, f.Name()))
 	}
 	return res, nil
 }
@@ -180,7 +183,6 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
 		if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
-			log.Warn("[snapshots] skip non-frozen file", "name", f.Name(), "subs", fmt.Sprint(subs))
 			continue
 		}
 		res = append(res, filepath.Join(subDir, f.Name()))
