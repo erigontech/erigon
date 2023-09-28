@@ -30,6 +30,7 @@ import (
 	"time"
 
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -1305,7 +1306,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		d.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, _, err := mc.GetLatest(keys[j], nil, tx)
 			require.NoError(t, err)
 

@@ -26,7 +26,8 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
+	defer domains.Close()
+	defer domains.StartWrites().FinishWrites()
 
 	acc := domains.Account.MakeContext()
 	ccc := domains.Code.MakeContext()

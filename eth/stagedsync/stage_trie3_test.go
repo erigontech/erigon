@@ -10,21 +10,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
-
-func newAggWithTemporalDB(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
-	t.Helper()
-	dirs, ctx := datadir.New(t.TempDir()), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)
-	require.NoError(t, err)
-	err = agg.OpenFolder()
-	require.NoError(t, err)
-	return agg
-}
 
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	dirs := datadir.New(t.TempDir())

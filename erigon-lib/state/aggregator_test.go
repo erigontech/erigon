@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -69,7 +70,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 
-		buf := EncodeAccountBytes(1, uint256.NewInt(0), nil, 0)
+		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
 		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
@@ -205,7 +206,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.EqualValues(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
 
-		buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
+		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(rnd.Uint64()), nil, 0)
 		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
@@ -224,16 +225,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
-
-	//tx, err = db.BeginRw(context.Background())
-	//require.NoError(t, err)
-	//
-	//ac := agg.MakeContext()
-	//ac.IterateAccounts(tx, []byte{}, func(addr, val []byte) {
-	//	fmt.Printf("addr=%x val=%x\n", addr, val)
-	//})
-	//ac.Close()
-	//tx.Rollback()
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -327,7 +318,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 
-		buf := EncodeAccountBytes(txNum, uint256.NewInt(1000000000000), nil, 0)
+		buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(1000000000000), nil, 0)
 		err = domains.UpdateAccountData(addr, buf[:], nil)
 		require.NoError(t, err)
 
@@ -398,7 +389,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
-		nonce, _, _ := DecodeAccountBytes(stored)
+		nonce, _, _ := types.DecodeAccountBytesV3(stored)
 
 		require.EqualValues(t, i+1, int(nonce))
 
@@ -427,12 +418,12 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	defer agg.StartUnbufferedWrites().FinishWrites()
 
 	ct := agg.MakeContext()
 	defer ct.Close()
 	domains := agg.SharedDomains(ct)
-	defer agg.CloseSharedDomains()
+	defer domains.Close()
+	defer domains.StartUnbufferedWrites().FinishWrites()
 	domains.SetTx(tx)
 
 	var latestCommitTxNum uint64
@@ -470,7 +461,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 		keys[txNum-1] = append(addr, loc...)
 
-		buf := EncodeAccountBytes(1, uint256.NewInt(0), nil, 0)
+		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
 
 		prev, _, err := ct.accounts.GetLatest(addr, nil, tx)
 		require.NoError(t, err)
@@ -721,7 +712,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, err := domains.LatestAccount(keys[j])
 			require.NoError(t, err)
 
@@ -747,7 +738,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
 			require.NoError(t, err)
 
@@ -779,7 +770,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
 			require.NoError(t, err)
 
@@ -800,6 +791,6 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 
-	n, b, ch := DecodeAccountBytes(input)
+	n, b, ch := types.DecodeAccountBytesV3(input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
 }

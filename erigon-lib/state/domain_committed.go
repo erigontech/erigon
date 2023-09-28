@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 // Defines how to evaluate commitments
@@ -124,7 +125,7 @@ func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if c.update.Flags&commitment.DeleteUpdate != 0 {
 		c.update.Flags ^= commitment.DeleteUpdate
 	}
-	nonce, balance, chash := DecodeAccountBytes(val)
+	nonce, balance, chash := types.DecodeAccountBytesV3(val)
 	if c.update.Nonce != nonce {
 		c.update.Nonce = nonce
 		c.update.Flags |= commitment.NonceUpdate
