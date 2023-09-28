@@ -70,6 +70,9 @@ type MdbxOpts struct {
 	inMem           bool
 }
 
+const DefaultMapSize = 2 * datasize.TB
+const DefaultGrowthStep = 2 * datasize.GB
+
 func NewMDBX(log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
@@ -81,8 +84,8 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		// but for reproducibility of benchmarks - please don't rely on Available RAM
 		dirtySpace: 2 * (memory.TotalMemory() / 42),
 
-		mapSize:         2 * datasize.TB,
-		growthStep:      2 * datasize.GB,
+		mapSize:         DefaultMapSize,
+		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
