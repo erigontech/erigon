@@ -62,7 +62,7 @@ func importChain(cliCtx *cli.Context) error {
 	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
 	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	stack := makeConfigNode(nodeCfg, logger)
+	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
 	ethereum, err := eth.New(stack, ethCfg, logger)

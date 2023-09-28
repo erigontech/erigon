@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -132,12 +133,12 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	return &nodeConfig
 }
 
-func MakeConfigNodeDefault(ctx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(NewNodeConfig(ctx), logger)
+func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
+	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx), logger)
 }
 
-func makeConfigNode(config *nodecfg.Config, logger log.Logger) *node.Node {
-	stack, err := node.New(config, logger)
+func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
+	stack, err := node.New(ctx, config, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
