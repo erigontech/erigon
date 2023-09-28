@@ -366,7 +366,7 @@ func checkChainName(dirs datadir.Dirs, chainName string) error {
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().Label(kv.ChainDB).MustOpen()
+	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Label(kv.ChainDB).MustOpen()
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)
