@@ -51,4 +51,8 @@ func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(att))
 		return true
 	})
+	blk.Body.ProposerSlashings.Range(func(_ int, ps *cltypes.ProposerSlashing, _ int) bool {
+		o.ProposerSlashingsPool.DeleteIfExist(ComputeKeyForProposerSlashing(ps))
+		return true
+	})
 }

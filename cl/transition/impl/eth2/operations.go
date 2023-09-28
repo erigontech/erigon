@@ -39,16 +39,8 @@ func (I *impl) ProcessProposerSlashing(s abstract.BeaconState, propSlashing *clt
 		return fmt.Errorf("non-matching proposer indices proposer slashing: %d != %d", h1.ProposerIndex, h2.ProposerIndex)
 	}
 
-	h1Root, err := h1.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("unable to hash header1: %v", err)
-	}
-	h2Root, err := h2.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("unable to hash header2: %v", err)
-	}
-	if h1Root == h2Root {
-		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
+	if h1.Equal(h2) {
+		return fmt.Errorf("proposee slashing headers are the same")
 	}
 
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))

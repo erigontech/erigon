@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -62,7 +63,13 @@ func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan 
 
 }
 
-func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) error {
+func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
+	defer func() {
+		r := recover()
+		if r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
@@ -140,6 +147,11 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			g.sentinel.BanPeer(ctx, data.Peer)
 			return err
 		}
+		if err := g.forkChoice.OnProposerSlashing(object.(*cltypes.ProposerSlashing), false); err != nil {
+			g.sentinel.BanPeer(ctx, data.Peer)
+			l["at"] = "on proposer slash"
+			return err
+		}
 	case sentinel.GossipType_AttesterSlashingGossipType:
 		object = &cltypes.AttesterSlashing{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -148,6 +160,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 		if err := g.forkChoice.OnAttesterSlashing(object.(*cltypes.AttesterSlashing)); err != nil {
+			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "on attester slash"
 			return err
 		}
