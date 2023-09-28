@@ -116,9 +116,9 @@ func ApplyMigrations(dirs Dirs) error {
 	if err := downloaderV2Migration(dirs); err != nil {
 		return err
 	}
-	if err := erigonV3foldersV31Migration(dirs); err != nil {
-		return err
-	}
+	//if err := erigonV3foldersV31Migration(dirs); err != nil {
+	//	return err
+	//}
 	return nil
 }
 
