@@ -110,6 +110,7 @@ func (c *segmentID) getRoot() *libcommon.Hash {
 
 func blockIdFromRequest(r *http.Request) (*segmentID, error) {
 	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|\d+)$`)
+
 	blockId := chi.URLParam(r, "block_id")
 	if !regex.MatchString(blockId) {
 		return nil, fmt.Errorf("invalid path variable: {block_id}")
@@ -129,6 +130,36 @@ func blockIdFromRequest(r *http.Request) (*segmentID, error) {
 		return &segmentID{slot: &slotMaybe}, nil
 	}
 	root := libcommon.HexToHash(blockId)
+	return &segmentID{
+		root: &root,
+	}, nil
+}
+
+func stateIdFromRequest(r *http.Request) (*segmentID, error) {
+	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|justified|\d+)$`)
+
+	stateId := chi.URLParam(r, "state_id")
+	if !regex.MatchString(stateId) {
+		return nil, fmt.Errorf("invalid path variable: {block_id}")
+	}
+
+	if stateId == "head" {
+		return &segmentID{tag: Head}, nil
+	}
+	if stateId == "finalized" {
+		return &segmentID{tag: Finalized}, nil
+	}
+	if stateId == "genesis" {
+		return &segmentID{tag: Genesis}, nil
+	}
+	if stateId == "justified" {
+		return &segmentID{tag: Justified}, nil
+	}
+	slotMaybe, err := strconv.ParseUint(stateId, 10, 64)
+	if err == nil {
+		return &segmentID{slot: &slotMaybe}, nil
+	}
+	root := libcommon.HexToHash(stateId)
 	return &segmentID{
 		root: &root,
 	}, nil

@@ -83,7 +83,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 			return err
 		}
 	}
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, caplinFreezer, true)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, true)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -100,7 +100,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 
 	{ // start ticking forkChoice
 		go func() {
-			tickInterval := time.NewTicker(50 * time.Millisecond)
+			tickInterval := time.NewTicker(2 * time.Millisecond)
 			for {
 				select {
 				case <-tickInterval.C:
