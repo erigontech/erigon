@@ -432,18 +432,20 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					for currentRoot != currentCanonical {
+						var newFoundSlot *uint64
 						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
 							return err
 						}
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
-						if currentSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(ctx, tx, currentRoot); err != nil {
+						if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
-						if currentSlot == 0 {
+						if newFoundSlot == nil {
 							break
 						}
+						currentSlot = *newFoundSlot
 						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
 						if err != nil {
 							return err

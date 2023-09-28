@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg, toTxNum uint64) ([]byte, error) {
+func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
@@ -36,7 +36,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg, t
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	_, err := domains.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg, t
 
 	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger.Info("Collecting account/storage keys")
-	collector := etl.NewCollector("collect_keys", cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
+	collector := etl.NewCollector("collect_keys", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
 	defer collector.Close()
 
 	var totalKeys atomic.Uint64
@@ -101,14 +101,14 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, cfg TrieCfg, t
 		"processed", processed.Load(),
 		"total", totalKeys.Load())
 
-	if err := cfg.agg.Flush(ctx, tx); err != nil {
+	if err := agg.Flush(ctx, tx); err != nil {
 		return nil, err
 	}
 
 	return rh, nil
 }
 
-func countBlockByTxnum(ctx context.Context, tx kv.Tx, txnum uint64, blockReader services.FullBlockReader) (blockNum uint64, notInTheMiddle bool, err error) {
+func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, txnum uint64) (blockNum uint64, notInTheMiddle bool, err error) {
 	var txCounter uint64 = 0
 	var ft, lt uint64
 
@@ -138,10 +138,9 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, txnum uint64, blockReader 
 		}
 	}
 	return 0, false, fmt.Errorf("block not found")
-
 }
 
-func SpawnPatriciaTrieStage(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
+func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := rwTx != nil
 	if !useExternalTx {
 		var err error
@@ -160,7 +159,7 @@ func SpawnPatriciaTrieStage(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logg
 		return libcommon.Hash{}, err
 	}
 	if !ok {
-		blockNum, foundHash, err = countBlockByTxnum(ctx, rwTx, toTxNum, cfg.blockReader)
+		blockNum, foundHash, err = countBlockByTxnum(ctx, rwTx, cfg.blockReader, toTxNum)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -181,7 +180,7 @@ func SpawnPatriciaTrieStage(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logg
 	var expectedRootHash libcommon.Hash
 	var headerHash libcommon.Hash
 	var syncHeadHeader *types.Header
-	if foundHash && cfg.checkRoot {
+	if foundHash {
 		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
 			return trie.EmptyRoot, err
@@ -193,19 +192,18 @@ func SpawnPatriciaTrieStage(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logg
 		headerHash = syncHeadHeader.Hash()
 	}
 
-	rh, err := collectAndComputeCommitment(ctx, rwTx, cfg, toTxNum)
+	rh, err := collectAndComputeCommitment(ctx, rwTx, cfg.tmpDir, toTxNum)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
 
-	if foundHash && cfg.checkRoot && !bytes.Equal(rh, expectedRootHash[:]) {
+	if foundHash && !bytes.Equal(rh, expectedRootHash[:]) {
 		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", blockNum, rh, expectedRootHash, headerHash))
-		if cfg.badBlockHalt {
-			return trie.EmptyRoot, fmt.Errorf("wrong trie root")
-		}
-	} else {
-		logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, rh, toTxNum))
+		rwTx.Rollback()
+
+		return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 	}
+	logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, rh, toTxNum))
 
 	if !useExternalTx {
 		if err := rwTx.Commit(); err != nil {

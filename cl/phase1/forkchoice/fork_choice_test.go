@@ -1,6 +1,7 @@
 package forkchoice_test
 
 import (
+	"context"
 	_ "embed"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	// Initialize forkchoice store
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
-	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, nil, false)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, false)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)

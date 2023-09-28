@@ -14,9 +14,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -225,14 +226,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	bn, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(0, math.MaxUint64)
 	tx.Rollback()
 	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, "", "", bn)
+	err = reset2.ResetExec(ctx, db, "", "", domains.BlockNum())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -247,9 +248,10 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains.SetTx(tx)
 	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 
-	bn, txToStart, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	txToStart++ // block and tx from seek commitment is already committed, have to start from next one
+	_, err = domains.SeekCommitment(0, math.MaxUint64)
 	require.NoError(t, err)
+
+	txToStart := domains.TxNum()
 
 	rh, err = writer.Commitment(false, false)
 	require.NoError(t, err)
@@ -329,7 +331,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 	)
 
-	for txNum := uint64(1); txNum <= txs; txNum++ {
+	testStartedFromTxNum := uint64(1)
+	for txNum := testStartedFromTxNum; txNum <= txs; txNum++ {
 		domains.SetTxNum(txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
@@ -394,14 +397,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 
-	bn, _, _, err := domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(0, math.MaxUint64)
 	tx.Rollback()
 	require.NoError(t, err)
 
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, "", "", bn)
+	err = reset2.ResetExec(ctx, db, "", "", domains.BlockNum())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -416,9 +419,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domains.SetTx(tx)
 	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
 
-	bn, txToStart, _, err := domains.SeekCommitment(0, math.MaxUint64)
-	txToStart++ // block and tx from seek commitment is already committed, have to start from next one
+	_, err = domains.SeekCommitment(0, math.MaxUint64)
 	require.NoError(t, err)
+
+	txToStart := domains.TxNum()
+	require.EqualValues(t, txToStart, 0)
+	txToStart = testStartedFromTxNum
 
 	rh, err := writer.Commitment(false, false)
 	require.NoError(t, err)
