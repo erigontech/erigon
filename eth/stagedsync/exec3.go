@@ -15,6 +15,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -888,13 +889,17 @@ Loop:
 		}
 	}
 
-	if parallel && blocksFreezeCfg.Produce {
-		agg.BuildFilesInBackground(outputTxNum.Load())
+	_, err = rawdb.IncrementStateVersion(applyTx)
+	if err != nil {
+		return fmt.Errorf("writing plain state version: %w", err)
 	}
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
+	}
+	if parallel && blocksFreezeCfg.Produce {
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 	return nil
 }
