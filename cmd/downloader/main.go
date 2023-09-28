@@ -260,12 +260,13 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
-		if strings.HasPrefix("history/commitment", t.DisplayName) {
+		if strings.HasPrefix(t.DisplayName, "history/commitment") {
 			continue
 		}
-		if strings.HasPrefix("idx/commitment", t.DisplayName) {
+		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
 			continue
 		}
+		fmt.Printf("a: %s\n", t.DisplayName)
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
