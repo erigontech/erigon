@@ -33,6 +33,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -86,8 +87,8 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	}
 
 	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	if dir.Exist(filepath.Join(cfg.SnapDir, "db", "mdbx.dat")) { // migration from prev versions
-		from, to := filepath.Join(cfg.SnapDir, "db", "mdbx.dat"), filepath.Join(cfg.DBDir, "mdbx.dat")
+	if dir.Exist(filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
+		from, to := filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat"), filepath.Join(cfg.Dirs.Downloader, "mdbx.dat")
 		if err := os.Rename(from, to); err != nil {
 			//fall back to copy-file if folders are on different disks
 			if err := copyFile(from, to); err != nil {
@@ -96,7 +97,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		}
 	}
 
-	db, c, m, torrentClient, err := openClient(cfg.DBDir, cfg.SnapDir, cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -336,7 +337,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	}
 }
 
-func (d *Downloader) SnapDir() string { return d.cfg.SnapDir }
+func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
 	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
@@ -540,12 +541,12 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 	return nil
 }
 
-func seedableFiles(snapDir string) ([]string, error) {
-	files, err := seedableSegmentFiles(snapDir)
+func seedableFiles(dirs datadir.Dirs) ([]string, error) {
+	files, err := seedableSegmentFiles(dirs.Snap)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(snapDir)
+	files2, err := seedableHistorySnapshots(dirs.Snap)
 	if err != nil {
 		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
 	}
@@ -553,11 +554,11 @@ func seedableFiles(snapDir string) ([]string, error) {
 	return files, nil
 }
 func (d *Downloader) addSegments(ctx context.Context) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.SnapDir())
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
 	if err != nil {
 		return err
 	}
-	return AddTorrentFiles(d.SnapDir(), d.torrentClient)
+	return AddTorrentFiles(d.cfg.Dirs, d.torrentClient)
 }
 
 func (d *Downloader) Stats() AggStats {

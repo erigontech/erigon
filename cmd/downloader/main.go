@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -215,7 +214,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		_, err := downloader.BuildTorrentFilesIfNeed(context.Background(), dirs.Snap)
+		_, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
 		if err != nil {
 			return err
 		}
@@ -248,27 +247,18 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if _, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
+		if _, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}
 
 	res := map[string]string{}
-	files, err := downloader.AllTorrentPaths(dirs)
+	torrents, err := downloader.AllTorrentSpecs(dirs)
 	if err != nil {
 		return err
 	}
-	for _, torrentFilePath := range files {
-		fmt.Printf("a: %s\n", torrentFilePath)
-		mi, err := metainfo.LoadFromFile(torrentFilePath)
-		if err != nil {
-			return fmt.Errorf("LoadFromFile: %w", err)
-		}
-		info, err := mi.UnmarshalInfo()
-		if err != nil {
-			return err
-		}
-		res[info.Name] = mi.HashInfoBytes().String()
+	for _, t := range torrents {
+		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
 	if err != nil {

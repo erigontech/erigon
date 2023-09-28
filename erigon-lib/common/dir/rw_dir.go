@@ -119,3 +119,24 @@ func DeleteFiles(dirs ...string) error {
 	}
 	return nil
 }
+
+func ListFiles(dir string, extensions ...string) ([]string, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, 0, len(files))
+Loop:
+	for _, f := range files {
+		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
+		for _, ext := range extensions {
+			if filepath.Ext(f.Name()) != ext { // filter out only compressed files
+				continue Loop
+			}
+		}
+		res = append(res, filepath.Join(dir, f.Name()))
+	}
+	return res, nil
+}
