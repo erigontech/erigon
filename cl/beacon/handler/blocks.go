@@ -34,6 +34,8 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *s
 		}
 	case blockId.finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+	case blockId.justified():
+		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
 	case blockId.genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, 0)
 		if err != nil {
@@ -137,7 +139,6 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 
 	blockId, err = blockIdFromRequest(r)
 	if err != nil {
-		fmt.Println("A")
 		httpStatus = http.StatusBadRequest
 		return
 	}
