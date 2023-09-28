@@ -266,7 +266,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
 			continue
 		}
-		fmt.Printf("a: %s\n", t.DisplayName)
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
