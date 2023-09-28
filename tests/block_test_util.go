@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -79,33 +80,39 @@ type btBlock struct {
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
 
 type btHeader struct {
-	Bloom            types.Bloom
-	Coinbase         libcommon.Address
-	MixHash          libcommon.Hash
-	Nonce            types.BlockNonce
-	Number           *big.Int
-	Hash             libcommon.Hash
-	ParentHash       libcommon.Hash
-	ReceiptTrie      libcommon.Hash
-	StateRoot        libcommon.Hash
-	TransactionsTrie libcommon.Hash
-	UncleHash        libcommon.Hash
-	ExtraData        []byte
-	Difficulty       *big.Int
-	GasLimit         uint64
-	GasUsed          uint64
-	Timestamp        uint64
-	BaseFee          *big.Int
+	Bloom                 types.Bloom
+	Coinbase              libcommon.Address
+	MixHash               libcommon.Hash
+	Nonce                 types.BlockNonce
+	Number                *big.Int
+	Hash                  libcommon.Hash
+	ParentHash            libcommon.Hash
+	ReceiptTrie           libcommon.Hash
+	StateRoot             libcommon.Hash
+	TransactionsTrie      libcommon.Hash
+	UncleHash             libcommon.Hash
+	ExtraData             []byte
+	Difficulty            *big.Int
+	GasLimit              uint64
+	GasUsed               uint64
+	Timestamp             uint64
+	BaseFeePerGas         *big.Int
+	WithdrawalsRoot       *libcommon.Hash
+	BlobGasUsed           *uint64
+	ExcessBlobGas         *uint64
+	ParentBeaconBlockRoot *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
-	ExtraData  hexutility.Bytes
-	Number     *math.HexOrDecimal256
-	Difficulty *math.HexOrDecimal256
-	GasLimit   math.HexOrDecimal64
-	GasUsed    math.HexOrDecimal64
-	Timestamp  math.HexOrDecimal64
-	BaseFee    *math.HexOrDecimal256
+	ExtraData     hexutility.Bytes
+	Number        *math.HexOrDecimal256
+	Difficulty    *math.HexOrDecimal256
+	GasLimit      math.HexOrDecimal64
+	GasUsed       math.HexOrDecimal64
+	Timestamp     math.HexOrDecimal64
+	BaseFeePerGas *math.HexOrDecimal256
+	BlobGasUsed   *math.HexOrDecimal64
+	ExcessBlobGas *math.HexOrDecimal64
 }
 
 func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
@@ -149,18 +156,21 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 	return &types.Genesis{
-		Config:     config,
-		Nonce:      bt.json.Genesis.Nonce.Uint64(),
-		Timestamp:  bt.json.Genesis.Timestamp,
-		ParentHash: bt.json.Genesis.ParentHash,
-		ExtraData:  bt.json.Genesis.ExtraData,
-		GasLimit:   bt.json.Genesis.GasLimit,
-		GasUsed:    bt.json.Genesis.GasUsed,
-		Difficulty: bt.json.Genesis.Difficulty,
-		Mixhash:    bt.json.Genesis.MixHash,
-		Coinbase:   bt.json.Genesis.Coinbase,
-		Alloc:      bt.json.Pre,
-		BaseFee:    bt.json.Genesis.BaseFee,
+		Config:                config,
+		Nonce:                 bt.json.Genesis.Nonce.Uint64(),
+		Timestamp:             bt.json.Genesis.Timestamp,
+		ParentHash:            bt.json.Genesis.ParentHash,
+		ExtraData:             bt.json.Genesis.ExtraData,
+		GasLimit:              bt.json.Genesis.GasLimit,
+		GasUsed:               bt.json.Genesis.GasUsed,
+		Difficulty:            bt.json.Genesis.Difficulty,
+		Mixhash:               bt.json.Genesis.MixHash,
+		Coinbase:              bt.json.Genesis.Coinbase,
+		Alloc:                 bt.json.Pre,
+		BaseFee:               bt.json.Genesis.BaseFeePerGas,
+		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
+		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
+		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
 	}
 }
 
@@ -271,6 +281,21 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	}
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
+	}
+	if !reflect.DeepEqual(h.BaseFeePerGas, h2.BaseFee) {
+		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
+	}
+	if !reflect.DeepEqual(h.WithdrawalsRoot, h2.WithdrawalsHash) {
+		return fmt.Errorf("withdrawalsRoot: want: %v have: %v", h.WithdrawalsRoot, h2.WithdrawalsHash)
+	}
+	if !reflect.DeepEqual(h.BlobGasUsed, h2.BlobGasUsed) {
+		return fmt.Errorf("blobGasUsed: want: %v have: %v", h.BlobGasUsed, h2.BlobGasUsed)
+	}
+	if !reflect.DeepEqual(h.ExcessBlobGas, h2.ExcessBlobGas) {
+		return fmt.Errorf("excessBlobGas: want: %v have: %v", h.ExcessBlobGas, h2.ExcessBlobGas)
+	}
+	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
+		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
 	return nil
 }

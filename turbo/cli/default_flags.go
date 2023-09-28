@@ -19,6 +19,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolPriceBumpFlag,
 	&utils.TxPoolBlobPriceBumpFlag,
 	&utils.TxPoolAccountSlotsFlag,
+	&utils.TxPoolBlobSlotsFlag,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
 	&utils.TxPoolAccountQueueFlag,
@@ -147,6 +148,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallgRPCAddressFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
+	&utils.WithHeimdallMilestones,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideCancunFlag,
 

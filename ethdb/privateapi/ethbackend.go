@@ -96,10 +96,19 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.Ver
 	return EthBackendAPIVersion, nil
 }
 
-func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
 	pendingBlock := s.latestBlockBuiltStore.BlockBuilt()
 	if pendingBlock == nil {
-		return nil, nil
+		tx, err := s.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		// use latest
+		pendingBlock, err = s.blockReader.CurrentBlock(tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	blockRlp, err := rlp.EncodeToBytes(pendingBlock)

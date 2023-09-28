@@ -120,7 +120,7 @@ func writeDbList(w http.ResponseWriter, dataDir string) {
 	m := mdbx.PathDbMap()
 	dbs := make([]string, 0, len(m))
 	for path := range m {
-		dbs = append(dbs, strings.Replace(strings.TrimPrefix(path, dataDir)[1:], "\\", "/", -1))
+		dbs = append(dbs, strings.ReplaceAll(strings.TrimPrefix(path, dataDir)[1:], "\\", "/"))
 	}
 
 	json.NewEncoder(w).Encode(dbs)

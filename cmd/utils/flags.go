@@ -173,6 +173,11 @@ var (
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
 		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
 	}
+	TxPoolBlobSlotsFlag = cli.Uint64Flag{
+		Name:  "txpool.blobslots",
+		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
+		Value: txpoolcfg.DefaultConfig.BlobSlots,
+	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
@@ -200,7 +205,7 @@ var (
 	}
 	TxPoolTraceSendersFlag = cli.StringFlag{
 		Name:  "txpool.trace.senders",
-		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
+		Usage: "Comma separated list of addresses, whose transactions will traced in transaction pool with debug printing",
 		Value: "",
 	}
 	TxPoolCommitEveryFlag = cli.DurationFlag{
@@ -363,7 +368,7 @@ var (
 	}
 	RpcStreamingDisableFlag = cli.BoolFlag{
 		Name:  "rpc.streaming.disable",
-		Usage: "Erigon has enalbed json streaming for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+		Usage: "Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
 	}
 	RpcBatchLimit = cli.IntFlag{
 		Name:  "rpc.batch.limit",
@@ -545,14 +550,14 @@ var (
 	NATFlag = cli.StringFlag{
 		Name: "nat",
 		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
-	     "" or "none"         default - do not nat
-	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-	     "any"                uses the first auto-detected mechanism
-	     "upnp"               uses the Universal Plug and Play protocol
-	     "pmp"                uses NAT-PMP with an auto-detected gateway address
-	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
-	     "stun"               uses STUN to detect an external IP using a default server
-	     "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
+			 "" or "none"         default - do not nat
+			 "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+			 "any"                uses the first auto-detected mechanism
+			 "upnp"               uses the Universal Plug and Play protocol
+			 "pmp"                uses NAT-PMP with an auto-detected gateway address
+			 "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+			 "stun"               uses STUN to detect an external IP using a default server
+			 "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 `,
 		Value: "",
 	}
@@ -654,7 +659,7 @@ var (
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 2,
-		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has defeault: 3)",
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
@@ -736,6 +741,7 @@ var (
 		Usage: "URL of Heimdall service",
 		Value: "http://localhost:1317",
 	}
+
 	WebSeedsFlag = cli.StringFlag{
 		Name:  "webseeds",
 		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
@@ -756,6 +762,12 @@ var (
 	BorBlockSizeFlag = cli.BoolFlag{
 		Name:  "bor.minblocksize",
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
+	}
+
+	WithHeimdallMilestones = cli.BoolFlag{
+		Name:  "bor.milestone",
+		Usage: "Enabling bor milestone processing",
+		Value: false,
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
@@ -1260,8 +1272,14 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)
 	}
+	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
+		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
 	if ctx.IsSet(TxPoolAccountSlotsFlag.Name) {
 		cfg.AccountSlots = ctx.Uint64(TxPoolAccountSlotsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
+		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
@@ -1379,6 +1397,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.HeimdallgRPCAddress = ctx.String(HeimdallgRPCAddressFlag.Name)
+	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

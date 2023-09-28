@@ -65,7 +65,8 @@ func writeLogsList(w http.ResponseWriter, dirPath string) {
 		Size int64  `json:"size"`
 	}
 
-	var files []file
+	files := make([]file, len(infos))
+
 	for _, fileInfo := range infos {
 		files = append(files, file{Name: fileInfo.Name(), Size: fileInfo.Size()})
 	}
@@ -141,9 +142,9 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(int64(readTotal), 10))
-	w.Header().Set("X-Offset", strconv.FormatInt(int64(offset), 10))
-	w.Header().Set("X-Limit", strconv.FormatInt(int64(limit), 10))
-	w.Header().Set("X-Size", strconv.FormatInt(int64(fileInfo.Size()), 10))
+	w.Header().Set("X-Offset", strconv.FormatInt(offset, 10))
+	w.Header().Set("X-Limit", strconv.FormatInt(limit, 10))
+	w.Header().Set("X-Size", strconv.FormatInt(fileInfo.Size(), 10))
 	w.Write(buf[:readTotal])
 }
 

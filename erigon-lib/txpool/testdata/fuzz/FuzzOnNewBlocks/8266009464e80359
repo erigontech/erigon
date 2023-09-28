@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("21")
+[]byte("7")
+[]byte("Z")
+[]byte("(02")
+[]byte(".c&a")
+byte('\x02')

@@ -19,16 +19,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -308,8 +310,19 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
+		var pendingBlobFee uint64 = params.MinBlobGasPrice
+		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
+		if currentHeder.ExcessBlobGas != nil {
+			f, err := misc.GetBlobGasPrice(excessBlobGas)
+			if err != nil {
+				return err
+			}
+			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {
+				pendingBlobFee = f.Uint64()
+			}
+		}
 
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit, finalizedBlock)
+		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeder.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END
 	return nil
@@ -365,7 +378,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if chainReader != nil {
 			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				return err
+				return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 			}
 		}
 
@@ -398,7 +411,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	}
 	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
 		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-		return err
+		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
 
 	// Setup
@@ -438,7 +451,7 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	agg *state.AggregatorV3,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient bor.IHeimdallClient,
+	heimdallClient heimdall.IHeimdallClient,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
@@ -448,10 +461,16 @@ func NewDefaultStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
+	var loopBreakCheck func() bool
+
+	if heimdallClient != nil && flags.Milestone {
+		loopBreakCheck = heimdall.MilestoneRewindPending
+	}
+
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
-		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator),
-		stagedsync.StageBorHeimdallCfg(db, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, blockReader),
+		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
+		stagedsync.StageBorHeimdallCfg(db, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, blockReader, controlServer.Hd, controlServer.Penalize),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
@@ -539,10 +558,10 @@ func NewPipelineStages(ctx context.Context,
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
-	logger log.Logger) (*stagedsync.Sync, error) {
+	logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
-			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
+			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil, nil),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
@@ -570,5 +589,5 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
-	), nil
+	)
 }

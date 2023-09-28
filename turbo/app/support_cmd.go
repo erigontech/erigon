@@ -175,7 +175,11 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 		var reply remote.NodesInfoReply
 
-		if err = json.NewDecoder(debugResponse.Body).Decode(&reply); err != nil {
+		err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+		debugResponse.Body.Close()
+
+		if err != nil {
 			return err
 		}
 
@@ -192,7 +196,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					Id:        ni.Id,
 					Name:      ni.Name,
 					Protocols: ni.Protocols,
-					Enodes: []enode{enode{
+					Enodes: []enode{{
 						Enode:        ni.Enode,
 						Enr:          ni.Enr,
 						Ports:        ni.Ports,

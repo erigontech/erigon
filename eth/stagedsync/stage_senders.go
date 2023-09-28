@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -258,7 +259,7 @@ Loop:
 			return minBlockErr
 		}
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil {
+		if cfg.hd != nil && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 
@@ -328,7 +329,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
-				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
+				job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %v",
+					consensus.ErrInvalidBlock, tx.Hash(), err)
 				break
 			}
 			copy(job.senders[i*length.Addr:], from[:])
