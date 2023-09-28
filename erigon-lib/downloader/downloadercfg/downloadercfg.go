@@ -45,11 +45,11 @@ const DefaultPieceSize = 2 * 1024 * 1024
 const DefaultNetworkChunkSize = 512 * 1024
 
 type Cfg struct {
-	ClientConfig   *torrent.ClientConfig
-	SnapDir, DBDir string // mdbx require flock support and SnapDir doesn't (for example can be mounted to NFS)
-	DownloadSlots  int
-	WebSeedUrls    []*url.URL
-	WebSeedFiles   []string
+	ClientConfig  *torrent.ClientConfig
+	DownloadSlots int
+	WebSeedUrls   []*url.URL
+	WebSeedFiles  []string
+	Dirs          datadir.Dirs
 }
 
 func Default() *torrent.ClientConfig {
@@ -160,7 +160,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		webseedFiles = append(webseedFiles, localCfgFile)
 	}
 
-	return &Cfg{SnapDir: dirs.Snap, DBDir: dirs.Downloader,
+	return &Cfg{Dirs: dirs,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedUrls, WebSeedFiles: webseedFiles,
 	}, nil

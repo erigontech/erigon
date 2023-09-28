@@ -201,6 +201,7 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 			}
 		}
 	}
+
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {

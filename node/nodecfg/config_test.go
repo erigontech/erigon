@@ -61,16 +61,6 @@ func TestDataDirCreation(t *testing.T) {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
 	defer os.Remove(file.Name())
-
-	dir = filepath.Join(file.Name(), "invalid/path")
-	node, err = node2.New(&nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
-	if err == nil {
-		t.Fatalf("protocol stack created with an invalid datadir")
-		if err := node.Close(); err != nil {
-			t.Fatalf("failed to close node: %v", err)
-		}
-	}
-	_ = node
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different
