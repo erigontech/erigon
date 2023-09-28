@@ -140,17 +140,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	}
 
 	if hook != nil {
-		if externalTx {
-			if err = hook.BeforeRun(tx, isSynced); err != nil {
-				return err
-			}
-		} else {
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				return hook.AfterRun(tx, finishProgressBefore)
-			}); err != nil {
-				return err
-			}
+		if err = hook.BeforeRun(tx, isSynced); err != nil {
+			return err
 		}
+
 	}
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
