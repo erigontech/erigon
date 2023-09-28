@@ -546,11 +546,15 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(dirs.Snap)
+	l, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
 	if err != nil {
-		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
+		return nil, err
 	}
-	files = append(files, files2...)
+	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "warm")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(files, l...), l2...)
 	return files, nil
 }
 func (d *Downloader) addSegments(ctx context.Context) error {

@@ -126,15 +126,18 @@ func ListFiles(dir string, extensions ...string) ([]string, error) {
 		return nil, err
 	}
 	res := make([]string, 0, len(files))
-Loop:
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
 			continue
 		}
+		match := false
 		for _, ext := range extensions {
-			if filepath.Ext(f.Name()) != ext { // filter out only compressed files
-				continue Loop
+			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
+				match = true
 			}
+		}
+		if !match {
+			continue
 		}
 		res = append(res, filepath.Join(dir, f.Name()))
 	}

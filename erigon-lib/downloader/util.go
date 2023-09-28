@@ -91,18 +91,6 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir string) ([]string, error) {
-	l, err := seedableSnapshotsBySubDir(dir, "history")
-	if err != nil {
-		return nil, err
-	}
-	l2, err := seedableSnapshotsBySubDir(dir, "warm")
-	if err != nil {
-		return nil, err
-	}
-	return append(l, l2...), nil
-}
-
 func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
