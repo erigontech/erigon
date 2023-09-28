@@ -175,6 +175,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 		}
 
 		subs := historyFileRegex.FindStringSubmatch(f.Name())
+		log.Warn("[snapshots] skip non-frozen file", "name", f.Name(), "subs", fmt.Sprint(subs))
 		if len(subs) != 5 {
 			continue
 		}
@@ -188,7 +189,6 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
 		if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
-			log.Warn("[snapshots] skip non-frozen file", "name", f.Name())
 			continue
 		}
 		res = append(res, filepath.Join(subDir, f.Name()))
