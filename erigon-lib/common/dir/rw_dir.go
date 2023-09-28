@@ -90,31 +90,17 @@ func HasFileOfType(dir, ext string) bool {
 	return false
 }
 
-func deleteFiles(dir string) error {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	for _, file := range files {
-		if file.IsDir() || !file.Type().IsRegular() {
-			continue
-		}
-
-		if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // nolint
 func DeleteFiles(dirs ...string) error {
 	for _, dir := range dirs {
-		if err := deleteFiles(dir); err != nil {
+		files, err := ListFiles(dir)
+		if err != nil {
 			return err
+		}
+		for _, fPath := range files {
+			if err := os.Remove(filepath.Join(dir, fPath)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
