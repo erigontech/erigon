@@ -44,7 +44,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (strin
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
-	settingsTable := "Settings"
+	settingsTable := "Settings" //nolint
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
