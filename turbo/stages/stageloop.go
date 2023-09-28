@@ -249,13 +249,13 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	return nil
 }
 func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
-	if tx != nil {
+	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.beforeRun(tx, inSync) })
 	}
 	return h.beforeRun(tx, inSync)
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
-	if tx != nil {
+	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
 	}
 	return h.afterRun(tx, finishProgressBefore)
