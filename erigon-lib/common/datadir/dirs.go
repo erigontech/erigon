@@ -154,6 +154,7 @@ func erigonV3foldersV31Migration(dirs Dirs) error {
 	return nil
 }
 
+// nolint
 func moveFiles(from, to string, ext string) error {
 	files, err := os.ReadDir(from)
 	if err != nil {
