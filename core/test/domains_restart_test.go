@@ -62,6 +62,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		return kvcfg.HistoryV3.ForceWrite(tx, true)
 	})
+	require.NoError(t, err)
 
 	chain := "unknown_testing"
 	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
@@ -414,6 +415,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer domains.Close()
 
 	tx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	domains.SetTx(tx)
