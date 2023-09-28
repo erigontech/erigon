@@ -528,6 +528,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	default:
 		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
+
 	return rootHash, branchNodeUpdates, err
 }
 

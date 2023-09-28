@@ -215,7 +215,6 @@ Loop:
 }
 
 func (h *History) openFiles() error {
-	var totalKeys uint64
 	var err error
 	invalidFileItems := make([]*filesItem, 0)
 	h.files.Walk(func(items []*filesItem) bool {
@@ -241,7 +240,6 @@ func (h *History) openFiles() error {
 						h.logger.Debug(fmt.Errorf("Hisrory.openFiles: %w, %s", err, idxPath).Error())
 						return false
 					}
-					totalKeys += item.index.KeyCount()
 				}
 			}
 
@@ -323,9 +321,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
-
-	//h.logger.Info("[snapshots] build idx", "file", fName)
-	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.InvertedIndex.compression, h.compression, h.salt, h.logger)
+	return buildVi(ctx, item, iiItem, idxPath, h.dirs.Tmp, ps, h.InvertedIndex.compression, h.compression, h.salt, h.logger)
 }
 
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -437,15 +433,15 @@ func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
 
 func (h *History) DiscardHistory() {
 	h.InvertedIndex.StartWrites()
-	h.wal = h.newWriter(h.tmpdir, false, true)
+	h.wal = h.newWriter(h.dirs.Tmp, false, true)
 }
 func (h *History) StartUnbufferedWrites() {
 	h.InvertedIndex.StartUnbufferedWrites()
-	h.wal = h.newWriter(h.tmpdir, false, false)
+	h.wal = h.newWriter(h.dirs.Tmp, false, false)
 }
 func (h *History) StartWrites() {
 	h.InvertedIndex.StartWrites()
-	h.wal = h.newWriter(h.tmpdir, true, false)
+	h.wal = h.newWriter(h.dirs.Tmp, true, false)
 }
 func (h *History) FinishWrites() {
 	h.InvertedIndex.FinishWrites()
@@ -644,7 +640,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := h.vFilePath(step, step+1)
-	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -852,7 +848,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		p := ps.AddNew(path.Base(efHistoryPath), 1)
 		defer ps.Delete(p)
 
-		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 		}
@@ -891,13 +887,13 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	{
 		efHistoryIdxPath := h.efAccessorFilePath(step, step+1)
-		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.tmpdir, false, h.salt, ps, h.logger, h.noFsync); err != nil {
+		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.dirs.Tmp, false, h.salt, ps, h.logger, h.noFsync); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 		}
 	}
 	if h.InvertedIndex.withExistenceIndex {
 		existenceIdxPath := h.efExistenceIdxFilePath(step, step+1)
-		if efExistence, err = buildIndexFilterThenOpen(ctx, efHistoryDecomp, h.compression, existenceIdxPath, h.tmpdir, h.salt, ps, h.logger, h.noFsync); err != nil {
+		if efExistence, err = buildIndexFilterThenOpen(ctx, efHistoryDecomp, h.compression, existenceIdxPath, h.dirs.Tmp, h.salt, ps, h.logger, h.noFsync); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 		}
 
@@ -907,7 +903,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		Enums:       false,
 		BucketSize:  2000,
 		LeafSize:    8,
-		TmpDir:      h.tmpdir,
+		TmpDir:      h.dirs.Tmp,
 		IndexFile:   historyIdxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 		Salt:        h.salt,

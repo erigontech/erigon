@@ -91,9 +91,10 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	defer domains.Close()
 	domains.SetTx(tx)
 
-	bn, txn, offt, err := domains.SeekCommitment(0, 1<<63-1)
+	offt, err := domains.SeekCommitment(0, 1<<63-1)
 	require.NoError(t, err)
-	fmt.Printf("seek to block %d txn %d block beginning offset %d\n", bn, txn, offt)
+	txn := domains.TxNum()
+	fmt.Printf("seek to block %d txn %d block beginning offset %d\n", domains.BlockNum(), txn, offt)
 
 	hr := NewHistoryReaderV3()
 	hr.SetTx(tx)

@@ -17,19 +17,19 @@ type SQLObject interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (uint64, error) {
+func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (*uint64, error) {
 	var slot uint64
 
 	// Execute the query.
 	err := tx.QueryRowContext(ctx, "SELECT slot FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
+			return nil, nil
 		}
-		return 0, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
+		return nil, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
 	}
 
-	return slot, nil
+	return &slot, nil
 }
 
 func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (libcommon.Hash, error) {
@@ -45,6 +45,21 @@ func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (lib
 	}
 
 	return blockRoot, nil
+}
+
+func ReadStateRootByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+	var stateRoot libcommon.Hash
+
+	// Execute the query.
+	err := db.QueryRowContext(ctx, "SELECT state_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot).Scan(&stateRoot)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return libcommon.Hash{}, nil
+		}
+		return libcommon.Hash{}, fmt.Errorf("failed to retrieve BeaconBlockRoot for slot: %v", err)
+	}
+
+	return stateRoot, nil
 }
 
 func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
@@ -198,6 +213,34 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, db SQLObject, blockRoot li
 	err := db.QueryRowContext(ctx, `SELECT 
 		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
 		FROM beacon_indicies WHERE beacon_block_root = ?`, blockRoot).Scan(
+		&h.Header.Slot,
+		&h.Header.ProposerIndex,
+		&h.Header.Root,
+		&h.Header.ParentRoot,
+		&canonical,
+		&h.Header.BodyRoot,
+		&signature,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
+	}
+
+	copy(h.Signature[:], signature)
+	return h, canonical, nil
+}
+
+func ReadSignedHeaderByStateRoot(ctx context.Context, db SQLObject, stateRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
+	var canonical bool
+	var signature []byte
+	// Execute the query.
+	err := db.QueryRowContext(ctx, `SELECT 
+		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
+		FROM beacon_indicies WHERE state_root = ?`, stateRoot).Scan(
 		&h.Header.Slot,
 		&h.Header.ProposerIndex,
 		&h.Header.Root,

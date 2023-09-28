@@ -48,6 +48,8 @@ type HeadersCfg struct {
 	blockWriter   *blockio.BlockWriter
 	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
+
+	loopBreakCheck func() bool
 }
 
 func StageHeadersCfg(
@@ -64,7 +66,8 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	forkValidator *engine_helpers.ForkValidator) HeadersCfg {
+	forkValidator *engine_helpers.ForkValidator,
+	loopBreakCheck func() bool) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -80,6 +83,7 @@ func StageHeadersCfg(
 		blockWriter:       blockWriter,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
+		loopBreakCheck:    loopBreakCheck,
 	}
 }
 
@@ -90,7 +94,7 @@ func SpawnStageHeaders(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	test bool, // Returns true to allow the stage to stop rather than wait indefinitely
 	logger log.Logger,
 ) error {
 	useExternalTx := tx != nil
@@ -120,7 +124,7 @@ func HeadersPOW(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	test bool, // Returns true to allow the stage to stop rather than wait indefinitely
 	useExternalTx bool,
 	logger log.Logger,
 ) error {
@@ -240,13 +244,6 @@ Loop:
 			return err
 		}
 
-		if test {
-			announces := cfg.hd.GrabAnnounces()
-			if len(announces) > 0 {
-				cfg.announceNewHashes(ctx, announces)
-			}
-		}
-
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
@@ -255,9 +252,20 @@ Loop:
 				break
 			}
 		}
-		if test {
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck() {
 			break
 		}
+
+		if test {
+			announces := cfg.hd.GrabAnnounces()
+			if len(announces) > 0 {
+				cfg.announceNewHashes(ctx, announces)
+			}
+
+			break
+		}
+
 		timer := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
