@@ -107,6 +107,7 @@ type filesItem struct {
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
 }
+
 type ExistenceFilter struct {
 	*bloomfilter.Filter
 	FileName, FilePath string
@@ -332,7 +333,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
 	}
 
@@ -395,11 +396,11 @@ func (d *Domain) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(coldNames, warmNames []string) error {
-	if err := d.History.OpenList(coldNames, warmNames); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
+	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	return d.openList(warmNames)
+	return d.openList(domainFiles)
 }
 
 func (d *Domain) openList(names []string) error {
@@ -412,11 +413,11 @@ func (d *Domain) openList(names []string) error {
 }
 
 func (d *Domain) OpenFolder() error {
-	files, warmNames, err := d.fileNamesOnDisk()
+	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return d.OpenList(files, warmNames)
+	return d.OpenList(idx, histFiles, domainFiles)
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -1245,14 +1246,13 @@ func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
 	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-
-			btPath := d.kvBtFilePath(fromStep, toStep)
-			if !dir.FileExist(btPath) {
+			fPath := d.kvBtFilePath(fromStep, toStep)
+			if !dir.FileExist(fPath) {
 				l = append(l, item)
 				continue
 			}
-			bloomPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-			if !dir.FileExist(bloomPath) {
+			fPath = d.kvExistenceIdxFilePath(fromStep, toStep)
+			if !dir.FileExist(fPath) {
 				l = append(l, item)
 				continue
 			}
@@ -1335,7 +1335,7 @@ func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compresse
 	return recsplit.OpenIndex(idxPath)
 }
 func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
-	if err := buildIdxFilter(ctx, d, compressed, idxPath, tmpdir, salt, ps, logger, noFsync); err != nil {
+	if err := buildIdxFilter(ctx, d, compressed, idxPath, salt, ps, logger, noFsync); err != nil {
 		return nil, err
 	}
 	if !dir.FileExist(idxPath) {

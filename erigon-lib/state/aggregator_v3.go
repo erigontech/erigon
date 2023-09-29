@@ -261,33 +261,33 @@ func (a *AggregatorV3) OpenFolder() error {
 
 	return nil
 }
-func (a *AggregatorV3) OpenList(fNames, warmNames []string) error {
+func (a *AggregatorV3) OpenList(idxFiles, histFiles, domainFiles []string) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 
 	var err error
-	if err = a.accounts.OpenList(fNames, warmNames); err != nil {
+	if err = a.accounts.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.storage.OpenList(fNames, warmNames); err != nil {
+	if err = a.storage.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.code.OpenList(fNames, warmNames); err != nil {
+	if err = a.code.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.commitment.OpenList(fNames, warmNames); err != nil {
+	if err = a.commitment.OpenList(idxFiles, histFiles, domainFiles); err != nil {
 		return err
 	}
-	if err = a.logAddrs.OpenList(fNames, warmNames); err != nil {
+	if err = a.logAddrs.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.logTopics.OpenList(fNames, warmNames); err != nil {
+	if err = a.logTopics.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.tracesFrom.OpenList(fNames, warmNames); err != nil {
+	if err = a.tracesFrom.OpenList(idxFiles); err != nil {
 		return err
 	}
-	if err = a.tracesTo.OpenList(fNames, warmNames); err != nil {
+	if err = a.tracesTo.OpenList(idxFiles); err != nil {
 		return err
 	}
 	a.recalcMaxTxNum()

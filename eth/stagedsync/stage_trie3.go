@@ -131,7 +131,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 			fmt.Printf("\r [%s] Counting block for tx %d: cur block %d cur tx %d\n", "restoreCommit", txnum, i, txCounter)
 		}
 
-		h, err := blockReader.HeaderByNumber(ctx, tx, uint64(i))
+		h, err := blockReader.HeaderByNumber(ctx, tx, i)
 		if err != nil {
 			return blockBorders{}, err
 		}
@@ -139,7 +139,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 		bb.Number = i
 		bb.FirstTx = txCounter
 		txCounter++
-		b, err := blockReader.BodyWithTransactions(ctx, tx, h.Hash(), uint64(i))
+		b, err := blockReader.BodyWithTransactions(ctx, tx, h.Hash(), i)
 		if err != nil {
 			return blockBorders{}, err
 		}

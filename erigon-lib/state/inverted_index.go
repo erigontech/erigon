@@ -63,13 +63,14 @@ type InvertedIndex struct {
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
-	warmDir         string // Directory where static files are created
 	filenameBase    string
 	aggregationStep uint64
 
-	integrityFileExtensions []string
-	withLocalityIndex       bool
-	withExistenceIndex      bool
+	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
+	integrityCheck func(fromStep, toStep uint64) bool
+
+	withLocalityIndex  bool
+	withExistenceIndex bool
 
 	// localityIdx of warm files - storing `steps` where `key` was updated
 	//  - need re-calc when new file created
@@ -94,7 +95,6 @@ type InvertedIndex struct {
 
 type iiCfg struct {
 	salt *uint32
-	dir  string
 	dirs datadir.Dirs
 }
 
@@ -105,25 +105,24 @@ func NewInvertedIndex(
 	indexKeysTable string,
 	indexTable string,
 	withLocalityIndex, withExistenceIndex bool,
-	integrityFileExtensions []string,
+	integrityCheck func(fromStep, toStep uint64) bool,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	if cfg.dir == "" {
-		cfg.dir = cfg.dirs.SnapHistory
+	if cfg.dirs.SnapDomain == "" {
+		panic("empty `dirs` varialbe")
 	}
 	ii := InvertedIndex{
-		iiCfg:                   cfg,
-		warmDir:                 cfg.dirs.SnapDomain,
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		aggregationStep:         aggregationStep,
-		filenameBase:            filenameBase,
-		indexKeysTable:          indexKeysTable,
-		indexTable:              indexTable,
-		compressWorkers:         1,
-		integrityFileExtensions: integrityFileExtensions,
-		withLocalityIndex:       withLocalityIndex,
-		withExistenceIndex:      withExistenceIndex,
-		logger:                  logger,
+		iiCfg:              cfg,
+		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		aggregationStep:    aggregationStep,
+		filenameBase:       filenameBase,
+		indexKeysTable:     indexKeysTable,
+		indexTable:         indexTable,
+		compressWorkers:    1,
+		integrityCheck:     integrityCheck,
+		withLocalityIndex:  withLocalityIndex,
+		withExistenceIndex: withExistenceIndex,
+		logger:             logger,
 	}
 	ii.roFiles.Store(&[]ctxItem{})
 
@@ -136,63 +135,70 @@ func NewInvertedIndex(
 }
 
 func (ii *InvertedIndex) efExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 }
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
-	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
+	ii.warmLocalityIdx = NewLocalityIndex(true, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewLocalityIndex: %s, %w", ii.filenameBase, err)
 	}
-	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
+	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewLocalityIndex: %s, %w", ii.filenameBase, err)
 	}
 	return nil
 }
-
-func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
-	files, err := os.ReadDir(ii.dir)
+func filesFromDir(dir string) ([]string, error) {
+	allFiles, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
+		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
 	}
-	filteredFiles := make([]string, 0, len(files))
-	for _, f := range files {
-		if !f.Type().IsRegular() {
+	filtered := make([]string, 0, len(allFiles))
+	for _, f := range allFiles {
+		if f.IsDir() || !f.Type().IsRegular() {
 			continue
 		}
-		filteredFiles = append(filteredFiles, f.Name())
+		filtered = append(filtered, f.Name())
 	}
-
-	warmFiles := make([]string, 0, len(files))
-	files, err = os.ReadDir(ii.warmDir)
+	return filtered, nil
+}
+func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err error) {
+	idx, err = filesFromDir(ii.dirs.SnapIdx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ReadDir: %w, %s", err, ii.dir)
+		return
 	}
-	for _, f := range files {
-		if !f.Type().IsRegular() {
-			continue
-		}
-		warmFiles = append(warmFiles, f.Name())
+	hist, err = filesFromDir(ii.dirs.SnapHistory)
+	if err != nil {
+		return
 	}
-
-	return filteredFiles, warmFiles, nil
+	domain, err = filesFromDir(ii.dirs.SnapDomain)
+	if err != nil {
+		return
+	}
+	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
-	if ii.withLocalityIndex {
-		if err := ii.warmLocalityIdx.OpenList(warmFNames); err != nil {
-			return err
-		}
-		if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
-			return err
+func (ii *InvertedIndex) OpenList(fNames []string) error {
+	{
+		if ii.withLocalityIndex {
+			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
+			if err != nil {
+				return err
+			}
+			if err := ii.warmLocalityIdx.OpenList(accFiles); err != nil {
+				return err
+			}
+			if err := ii.coldLocalityIdx.OpenList(accFiles); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -205,17 +211,16 @@ func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
 }
 
 func (ii *InvertedIndex) OpenFolder() error {
-	files, warm, err := ii.fileNamesOnDisk()
+	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(files, warm)
+	return ii.OpenList(idxFiles)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
-Loop:
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -241,13 +246,8 @@ Loop:
 		startTxNum, endTxNum := startStep*ii.aggregationStep, endStep*ii.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
-		for _, ext := range ii.integrityFileExtensions {
-			requiredFile := fmt.Sprintf("%s.%d-%d.%s", ii.filenameBase, startStep, endStep, ext)
-			if !dir.FileExist(filepath.Join(ii.dir, requiredFile)) {
-				ii.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-				garbageFiles = append(garbageFiles, newFile)
-				continue Loop
-			}
+		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
+			continue
 		}
 
 		if _, has := ii.files.Get(newFile); has {
@@ -366,9 +366,10 @@ func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesIt
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
-	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.dirs.Tmp, ii.salt, ps, ii.logger, ii.noFsync)
+	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
 }
-func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+
+func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count() / 2
@@ -1527,7 +1528,6 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 		}
 	}()
-
 	datPath := ii.efFilePath(step, step+1)
 	keys := make([]string, 0, len(bitmaps))
 	for key := range bitmaps {
