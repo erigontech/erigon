@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -125,15 +126,15 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
+		if !histV3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				continue
+			}
+		}
+
 		_, exists := existingFilesMap[p.Name]
 		_, borExists := borExistingFilesMap[p.Name]
 		if !exists && !borExists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
-		}
-	}
-	if histV3 {
-		preverifiedHistorySnapshots := snapcfg.KnownCfg(cc.ChainName, snInDB, snHistInDB).PreverifiedHistory
-		for _, p := range preverifiedHistorySnapshots {
 			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
