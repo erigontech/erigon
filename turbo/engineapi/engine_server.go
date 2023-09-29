@@ -464,7 +464,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			}
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 		}
-	
+
 		if s.config.IsCancun(timestamp) && version >= clparams.DenebVersion {
 			if payloadAttributes.ParentBeaconBlockRoot == nil {
 				return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
@@ -566,7 +566,6 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 
 	return resp, nil
 }
-
 
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
