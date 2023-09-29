@@ -45,20 +45,12 @@ func (*BeaconBlockHeader) Static() bool {
 	return true
 }
 
-func (b *BeaconBlockHeader) Equal(other *BeaconBlockHeader) bool {
-	return b.Slot == other.Slot && b.ProposerIndex == other.ProposerIndex && b.ParentRoot == other.ParentRoot && b.Root == other.Root && b.BodyRoot == other.BodyRoot
-}
-
 /*
  * SignedBeaconBlockHeader is a beacon block header + validator signature.
  */
 type SignedBeaconBlockHeader struct {
 	Header    *BeaconBlockHeader `json:"message"`
 	Signature libcommon.Bytes96  `json:"signature"`
-}
-
-func (b *SignedBeaconBlockHeader) Equal(other *SignedBeaconBlockHeader) bool {
-	return b.Signature == other.Signature && b.Header.Equal(other.Header)
 }
 
 func (b *SignedBeaconBlockHeader) Static() bool {

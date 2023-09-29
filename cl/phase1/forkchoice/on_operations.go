@@ -84,7 +84,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("non-matching proposer indices proposer slashing: %d != %d", h1.ProposerIndex, h2.ProposerIndex)
 	}
 
-	if h1.Equal(h2) {
+	if *h1 == *h2 {
 		return fmt.Errorf("proposee slashing headers are the same")
 	}
 
