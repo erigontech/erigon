@@ -158,3 +158,40 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
+
+## E3
+
+### E3 datadir structure
+
+```
+datadir        
+    chaindata   # "Recently-updated Latest State" and "Recent History"
+    snapshots   
+        domain    # Latest State: link to fast disk
+        history   # Historical values 
+        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
+        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly
+   
+# There is 4 domains: account, storage, code, commitment 
+```
+
+### E3 can store state on fast disk and history on slow disk
+
+```
+# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast disk.
+# Example: what need link to fast disk to speedup execution
+datadir        
+    chaindata   # link to fast disk
+    snapshots   
+        domain    # link to fast disk
+        history   
+        idx       
+        accessors 
+    temp   
+
+# Example: how to speedup history access: 
+#   - go step-by-step - first try store `accessors` on fast disk
+#   - if speed is not good enough: `idx`
+#   - if still not enough: `history` 
+```
