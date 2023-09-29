@@ -159,6 +159,13 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
 
+webseed.toml format:
+
+```
+"v1-003000-003500-headers.seg" = "https://your-url.com/v1-003000-003500-headers.seg?signature=123"
+"v1-003000-003500-bodies.seg" = "https://your-url.com/v1-003000-003500-bodies.seg?signature=123"
+```
+
 ## E3
 
 ### E3 datadir structure
