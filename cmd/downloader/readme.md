@@ -176,15 +176,15 @@ E3 changes from E2:
 
 - ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
   stage_trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices are now have
+- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
 - Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
   above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
   here. Likely later we will add optional flag "to persist receipts".
-- More cold-start-friendly. E2 DB had MADVISE_RANDOM (because b+tree gravitating towards random-pages-distribution and
-  confusing OS's pre-fetch logic), now snapshots have MADVISE_NORMAL - and it showing better performance on our
-  benchmarks.
-- Chaindata folder is very small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
+- More cold-start-friendly and os-pre-fetch-friendly. E2 DB had MADVISE_RANDOM (because b+tree gravitating towards
+  random-pages-distribution and confusing OS's pre-fetch logic), now snapshots storing data sequentially and have
+  MADVISE_NORMAL - and it showing better performance on our benchmarks.
+- datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
   enough.
 -
 
