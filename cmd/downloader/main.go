@@ -354,11 +354,6 @@ func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error
 			return err
 		}
 	}
-	for _, it := range snapcfg.KnownCfg(chain, nil, nil).PreverifiedHistory {
-		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
