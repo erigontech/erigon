@@ -347,7 +347,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
+		slices.SortFunc(deletedAccounts, bytes.Compare)
 		for _, k := range deletedAccounts {
 			if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 				if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
@@ -445,7 +445,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo 
 	}
 
 	// delete Intermediate hashes of deleted accounts
-	slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
+	slices.SortFunc(deletedAccounts, bytes.Compare)
 	for _, k := range deletedAccounts {
 		if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 			if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
@@ -533,7 +533,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
+		slices.SortFunc(deletedAccounts, bytes.Compare)
 		for _, k := range deletedAccounts {
 			if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 				if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
