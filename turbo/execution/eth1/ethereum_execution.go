@@ -52,14 +52,15 @@ type EthereumExecutionModule struct {
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
-	config    *chain.Config
-	historyV3 bool
+	config             *chain.Config
+	historyV3          bool
+	forcePartialCommit bool
 
 	execution.UnimplementedExecutionServer
 }
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool, forcePartialCommit bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -73,6 +74,8 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		hook:                hook,
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
+		historyV3:           historyV3,
+		forcePartialCommit:  forcePartialCommit,
 	}
 }
 
