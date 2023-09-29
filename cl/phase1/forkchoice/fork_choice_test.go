@@ -89,13 +89,12 @@ func TestForkChoiceBasic(t *testing.T) {
 	// lastly do attestation
 	require.NoError(t, store.OnAttestation(testAttestation, false))
 	// Try processing a voluntary exit
-	invalid, err := store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
+	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
 			Epoch:          0,
 			ValidatorIndex: 0,
 		},
 	}, true)
 	require.NoError(t, err)
-	require.False(t, invalid)
 	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }

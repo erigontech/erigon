@@ -15,33 +15,33 @@ import (
 // and verify external operations and eventually push them in the operations pool.
 
 // OnVoluntaryExit is a non-official handler for voluntary exit operations. it pushes the voluntary exit in the pool.
-func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) (invalid bool, err error) {
+func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
 	voluntaryExit := signedVoluntaryExit.VoluntaryExit
 	if f.operationsPool.VoluntaryExistsPool.Has(voluntaryExit.ValidatorIndex) {
-		return false, nil
+		return nil
 	}
 	f.mu.Lock()
 
 	headHash, _, err := f.getHead()
 	if err != nil {
 		f.mu.Unlock()
-		return false, err
+		return err
 	}
 	s, _, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
-		return false, err
+		return err
 	}
 
 	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		f.mu.Unlock()
-		return true, err
+		return err
 	}
 
 	if val.ExitEpoch() != f.forkGraph.Config().FarFutureEpoch {
 		f.mu.Unlock()
-		return false, nil
+		return nil
 	}
 
 	pk := val.PublicKey()
@@ -49,23 +49,23 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 
 	domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 	if err != nil {
-		return false, err
+		return err
 	}
 	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
 	if err != nil {
-		return true, err
+		return err
 	}
 	if !test {
 		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], pk[:])
 		if err != nil {
-			return true, err
+			return err
 		}
 		if !valid {
-			return true, errors.New("ProcessVoluntaryExit: BLS verification failed")
+			return errors.New("ProcessVoluntaryExit: BLS verification failed")
 		}
 	}
 	f.operationsPool.VoluntaryExistsPool.Insert(voluntaryExit.ValidatorIndex, signedVoluntaryExit)
-	return false, nil
+	return nil
 }
 
 // OnProposerSlashing is a non-official handler for proposer slashing operations. it pushes the proposer slashing in the pool.

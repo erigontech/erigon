@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing) error {
+func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
 	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
 		return nil
 	}
@@ -54,31 +54,33 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	}
 	f.mu.Unlock()
 
-	// Verify validity of slashings (1)
-	signingRoot, err := fork.ComputeSigningRoot(attestation1.Data, domain1)
-	if err != nil {
-		return fmt.Errorf("unable to get signing root: %v", err)
-	}
+	if !test {
+		// Verify validity of slashings (1)
+		signingRoot, err := fork.ComputeSigningRoot(attestation1.Data, domain1)
+		if err != nil {
+			return fmt.Errorf("unable to get signing root: %v", err)
+		}
 
-	valid, err := bls.VerifyAggregate(attestation1.Signature[:], signingRoot[:], attestation1PublicKeys)
-	if err != nil {
-		return fmt.Errorf("error while validating signature: %v", err)
-	}
-	if !valid {
-		return fmt.Errorf("invalid aggregate signature")
-	}
-	// Verify validity of slashings (2)
-	signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
-	if err != nil {
-		return fmt.Errorf("unable to get signing root: %v", err)
-	}
+		valid, err := bls.VerifyAggregate(attestation1.Signature[:], signingRoot[:], attestation1PublicKeys)
+		if err != nil {
+			return fmt.Errorf("error while validating signature: %v", err)
+		}
+		if !valid {
+			return fmt.Errorf("invalid aggregate signature")
+		}
+		// Verify validity of slashings (2)
+		signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
+		if err != nil {
+			return fmt.Errorf("unable to get signing root: %v", err)
+		}
 
-	valid, err = bls.VerifyAggregate(attestation2.Signature[:], signingRoot[:], attestation2PublicKeys)
-	if err != nil {
-		return fmt.Errorf("error while validating signature: %v", err)
-	}
-	if !valid {
-		return fmt.Errorf("invalid aggregate signature")
+		valid, err = bls.VerifyAggregate(attestation2.Signature[:], signingRoot[:], attestation2PublicKeys)
+		if err != nil {
+			return fmt.Errorf("error while validating signature: %v", err)
+		}
+		if !valid {
+			return fmt.Errorf("invalid aggregate signature")
+		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

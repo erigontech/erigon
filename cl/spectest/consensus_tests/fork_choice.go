@@ -170,7 +170,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			data := &cltypes.AttesterSlashing{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttesterSlashing(data)
+			err = forkStore.OnAttesterSlashing(data, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
