@@ -132,3 +132,4 @@ jobs:
 #
 #      - name: run automated testing
 #        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh
+ 
