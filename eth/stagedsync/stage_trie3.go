@@ -82,7 +82,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
-		domains.Commitment.TouchPlainKey(k, nil, nil)
+		domains.Commitment.TouchPlainKey(string(k), nil, nil)
 
 		return nil
 	}
