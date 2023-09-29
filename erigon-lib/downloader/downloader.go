@@ -34,7 +34,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -81,20 +80,13 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
-	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downloader, error) {
+	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return nil, err
 	}
 
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	if dir.Exist(filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
-		from, to := filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat"), filepath.Join(cfg.Dirs.Downloader, "mdbx.dat")
-		if err := os.Rename(from, to); err != nil {
-			//fall back to copy-file if folders are on different disks
-			if err := copyFile(from, to); err != nil {
-				return nil, err
-			}
-		}
+	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
+		return nil, err
 	}
 
 	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
@@ -136,30 +128,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		d.applyWebseeds()
 	}()
 	return d, nil
-}
-
-func copyFile(from, to string) error {
-	r, err := os.Open(from)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer r.Close()
-	w, err := os.Create(to)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer w.Close()
-	if _, err = w.ReadFrom(r); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	if err = w.Sync(); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -537,15 +505,19 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	l, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
+	l1, err := seedableSnapshotsBySubDir(dirs.Snap, "idx")
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "warm")
+	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(files, l...), l2...)
+	l3, err := seedableSnapshotsBySubDir(dirs.Snap, "domain")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
 func (d *Downloader) addSegments(ctx context.Context) error {

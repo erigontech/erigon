@@ -225,9 +225,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	}
 
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if e.forcePartialCommit {
-		isSynced = false
-	}
 	if e.hook != nil {
 		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)

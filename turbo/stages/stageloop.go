@@ -143,6 +143,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 		if err = hook.BeforeRun(tx, isSynced); err != nil {
 			return err
 		}
+
 	}
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {

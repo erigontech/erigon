@@ -63,10 +63,12 @@ type History struct {
 	// MakeContext() using this field in zero-copy way
 	roFiles atomic.Pointer[[]ctxItem]
 
-	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
-	compressWorkers         int
-	compression             FileCompression
-	integrityFileExtensions []string
+	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
+	compressWorkers  int
+	compression      FileCompression
+
+	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
+	integrityCheck func(fromStep, toStep uint64) bool
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -89,18 +91,20 @@ type histCfg struct {
 	withExistenceIndex bool // move to iiCfg
 }
 
-func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
 	h := History{
-		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable:        historyValsTable,
-		compression:             cfg.compression,
-		compressWorkers:         1,
-		integrityFileExtensions: integrityFileExtensions,
-		historyLargeValues:      cfg.historyLargeValues,
+		files:              btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		historyValsTable:   historyValsTable,
+		compression:        cfg.compression,
+		compressWorkers:    1,
+		integrityCheck:     integrityCheck,
+		historyLargeValues: cfg.historyLargeValues,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, cfg.withExistenceIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, cfg.withExistenceIndex,
+		func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) },
+		logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -112,18 +116,18 @@ func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(coldNames, warmNames []string) error {
-	if err := h.InvertedIndex.OpenList(coldNames, warmNames); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string) error {
+	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
 		return err
 	}
-	return h.openList(coldNames)
+	return h.openList(histNames)
 
 }
 func (h *History) openList(fNames []string) error {
@@ -136,11 +140,11 @@ func (h *History) openList(fNames []string) error {
 }
 
 func (h *History) OpenFolder() error {
-	coldNames, warmNames, err := h.fileNamesOnDisk()
+	idxFiles, histFiles, _, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(coldNames, warmNames)
+	return h.OpenList(idxFiles, histFiles)
 }
 
 // scanStateFiles
@@ -148,7 +152,6 @@ func (h *History) OpenFolder() error {
 func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
-Loop:
 	for _, name := range fNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -174,13 +177,8 @@ Loop:
 		startTxNum, endTxNum := startStep*h.aggregationStep, endStep*h.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, h.aggregationStep)
 
-		for _, ext := range h.integrityFileExtensions {
-			requiredFile := fmt.Sprintf("%s.%d-%d.%s", h.filenameBase, startStep, endStep, ext)
-			if !dir.FileExist(filepath.Join(h.dir, requiredFile)) {
-				h.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-				garbageFiles = append(garbageFiles, newFile)
-				continue Loop
-			}
+		if h.integrityCheck != nil && !h.integrityCheck(startStep, endStep) {
+			continue
 		}
 
 		if _, has := h.files.Get(newFile); has {
