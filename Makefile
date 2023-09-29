@@ -178,23 +178,6 @@ clean:
 	go clean -cache
 	rm -fr build/*
 
-# The devtools target installs tools required for 'go generate'.
-# You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
-
-## devtools:                          installs dev tools (and checks for npm installation etc.)
-devtools:
-	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
-	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
-	PATH=$(GOBIN):$(PATH) go generate ./common
-#	PATH=$(GOBIN):$(PATH) go generate ./core/types
-	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
-	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
-	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
-	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
-	@type "solc" 2> /dev/null || echo 'Please install solc'
-	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
