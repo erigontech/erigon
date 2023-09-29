@@ -23,17 +23,15 @@ import (
 	"hash"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/types"
+	"golang.org/x/crypto/sha3"
+	"golang.org/x/exp/slices"
 )
 
 // Defines how to evaluate commitments
@@ -76,7 +74,7 @@ type ValueMerger func(prev, current []byte) (merged []byte, err error)
 type UpdateTree struct {
 	tree   *btree.BTreeG[*commitmentItem]
 	keccak cryptozerocopy.KeccakState
-	keys   etl.Buffer
+	keys   map[string]struct{}
 	mode   CommitmentMode
 }
 
@@ -84,7 +82,7 @@ func NewUpdateTree(m CommitmentMode) *UpdateTree {
 	return &UpdateTree{
 		tree:   btree.NewG[*commitmentItem](64, commitmentItemLessPlain),
 		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
-		keys:   etl.NewOldestEntryBuffer(datasize.MB * 32),
+		keys:   map[string]struct{}{},
 		mode:   m,
 	}
 }
@@ -101,20 +99,20 @@ func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
+func (t *UpdateTree) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
 	switch t.mode {
 	case CommitmentModeUpdate:
-		item, _ := t.get(key)
+		item, _ := t.get([]byte(key))
 		fn(item, val)
 		t.tree.ReplaceOrInsert(item)
 	case CommitmentModeDirect:
-		t.keys.Put(key, nil)
+		t.keys[key] = struct{}{}
 	default:
 	}
 }
 
 func (t *UpdateTree) Size() uint64 {
-	return uint64(t.keys.Len())
+	return uint64(len(t.keys))
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
@@ -185,17 +183,17 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 	switch t.mode {
 	case CommitmentModeDirect:
-		plainKeys := make([][]byte, t.keys.Len())
-		t.keys.Sort()
-
-		keyBuf := make([]byte, 0)
-		for i := 0; i < len(plainKeys); i++ {
-			key, _ := t.keys.Get(i, keyBuf, nil)
-			plainKeys[i] = common.Copy(key)
+		plainKeys := make([][]byte, len(t.keys))
+		i := 0
+		for key := range t.keys {
+			plainKeys[i] = []byte(key)
+			i++
 		}
+		slices.SortFunc(plainKeys, func(i, j []byte) bool { return bytes.Compare(i, j) < 0 })
 		if clear {
-			t.keys.Reset()
+			t.keys = make(map[string]struct{}, len(t.keys)/8)
 		}
+
 		return plainKeys, nil
 	case CommitmentModeUpdate:
 		plainKeys := make([][]byte, t.tree.Len())
@@ -276,7 +274,7 @@ func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
+func (d *DomainCommitted) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
 	if d.discard {
 		return
 	}
@@ -487,7 +485,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 
 func (d *DomainCommitted) Close() {
 	d.Domain.Close()
-	d.updates.keys.Reset()
+	d.updates.keys = nil
 	d.updates.tree.Clear(true)
 }
 
