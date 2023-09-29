@@ -8,9 +8,11 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -39,7 +41,7 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, true)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), true)
 	if err != nil {
 		return err
 	}
