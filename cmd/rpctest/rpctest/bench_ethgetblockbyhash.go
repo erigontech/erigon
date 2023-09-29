@@ -14,9 +14,9 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
 //			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-//	                 recordFile stores all eth_call returned with success
-//	                 errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFile string, errorFile string) {
+//	                 recordFileName stores all eth_call returned wite success
+//	                 errorFileName stores information when erigon and geth doesn't return same data
+func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -27,22 +27,20 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 	var resultsCh chan CallResult = nil
 	var nBlocks = 0
 
-	if errorFile != "" {
-		f, err := os.Create(errorFile)
+	if errorFileName != "" {
+		f, err := os.Create(errorFileName)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for errorFile: %v\n", errorFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for errorFileName: %v\n", errorFileName, err)
 		}
 		defer f.Close()
 		errs = bufio.NewWriter(f)
 		defer errs.Flush()
 	}
 
-	if recordFile != "" {
-		frec, errRec := os.Create(recordFile)
-		if errRec != nil {
-			fmt.Printf("Cannot create file %s for errorFile: %v\n", recordFile, errRec)
-			return
+	if recordFileName != "" {
+		frec, err := os.Create(recordFileName)
+		if err != nil {
+			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, err)
 		}
 		defer frec.Close()
 		rec = bufio.NewWriter(frec)
@@ -67,34 +65,29 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-			return
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-			return
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-				return
+				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 			}
 			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-				return
+				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
-				fmt.Printf("Block difference for %d\n", bn)
 				if rec != nil {
 					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
 					rec.Flush()
 					continue
 				} else {
-					return
+					return fmt.Errorf("block %d has different fields\n", bn)
 				}
 			}
 		}
@@ -106,10 +99,10 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 		errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, b.Result.Hash)
 
 		if err := requestAndCompare(request, "eth_getBlockByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
-			fmt.Println(err)
-			return
+			return err
 		}
 
 		fmt.Println("\nProcessed Blocks: ", nBlocks)
 	}
+	return nil
 }
