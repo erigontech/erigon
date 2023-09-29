@@ -164,16 +164,8 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 
 	// -- send notifications START
 	if hook != nil {
-		if externalTx {
-			if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
-				return err
-			}
-		} else {
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				return hook.AfterRun(tx, finishProgressBefore)
-			}); err != nil {
-				return err
-			}
+		if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
+			return err
 		}
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
@@ -239,12 +231,13 @@ type Hook struct {
 	logger        log.Logger
 	blockReader   services.FullBlockReader
 	updateHead    func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)
+	db            kv.RoDB
 }
 
-func NewHook(ctx context.Context, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
-	return &Hook{ctx: ctx, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
+func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
+	return &Hook{ctx: ctx, db: db, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
-func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
 	if notifications != nil && notifications.Accumulator != nil && inSync {
 		stateVersion, err := rawdb.GetStateVersion(tx)
@@ -255,7 +248,19 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return nil
 }
+func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+	if tx == nil {
+		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.beforeRun(tx, inSync) })
+	}
+	return h.beforeRun(tx, inSync)
+}
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+	if tx == nil {
+		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
+	}
+	return h.afterRun(tx, finishProgressBefore)
+}
+func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	notifications := h.notifications
 	blockReader := h.blockReader
 	// -- send notifications START
