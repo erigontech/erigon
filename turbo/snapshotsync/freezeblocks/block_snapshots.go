@@ -1440,7 +1440,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 		snapDir, fileName := filepath.Split(f.Path)
 		ext := filepath.Ext(fileName)
-		logger.Log(lvl, "[snapshots] Compression", "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
+		logger.Log(lvl, "[snapshots] Compression", "file", fileName[:len(fileName)-len(ext)])
 
 		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(snapDir, blockFrom, blockTo)
 		if err != nil {
@@ -1452,6 +1452,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		if err := sn.Compress(); err != nil {
 			return fmt.Errorf("compress: %w", err)
 		}
+		logger.Log(lvl, "[snapshots] Compression", "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
 
 		p := &background.Progress{}
 		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
