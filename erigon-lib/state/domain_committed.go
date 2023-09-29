@@ -99,14 +99,14 @@ func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
+func (t *UpdateTree) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
 	switch t.mode {
 	case CommitmentModeUpdate:
-		item, _ := t.get(key)
+		item, _ := t.get([]byte(key))
 		fn(item, val)
 		t.tree.ReplaceOrInsert(item)
 	case CommitmentModeDirect:
-		t.keys[string(key)] = struct{}{}
+		t.keys[key] = struct{}{}
 	default:
 	}
 }
@@ -274,7 +274,7 @@ func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
+func (d *DomainCommitted) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
 	if d.discard {
 		return
 	}
