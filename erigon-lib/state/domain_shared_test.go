@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 func TestSharedDomain_Unwind(t *testing.T) {
@@ -20,14 +21,14 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	agg.StartWrites()
-	defer agg.FinishWrites()
-
 	ac := agg.MakeContext()
 	defer ac.Close()
-	d := agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
-	d.SetTx(rwTx)
+
+	domains := agg.SharedDomains(ac)
+	defer domains.Close()
+	defer domains.StartWrites().FinishWrites()
+
+	domains.SetTx(rwTx)
 
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
@@ -43,29 +44,28 @@ Loop:
 	defer rwTx.Rollback()
 
 	ac = agg.MakeContext()
-	defer ac.Close()
-	d = agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
-	d.SetTx(rwTx)
+	domains = agg.SharedDomains(ac)
+	domains.StartWrites()
+	domains.SetTx(rwTx)
 
 	i := 0
 	k0 := make([]byte, length.Addr)
 	commitStep := 3
 
 	for ; i < int(maxTx); i++ {
-		d.SetTxNum(uint64(i))
+		domains.SetTxNum(uint64(i))
 		for accs := 0; accs < 256; accs++ {
-			v := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
+			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
-			pv, err := d.LatestAccount(k0)
+			pv, err := domains.LatestAccount(k0)
 			require.NoError(t, err)
 
-			err = d.UpdateAccountData(k0, v, pv)
+			err = domains.UpdateAccountData(k0, v, pv)
 			require.NoError(t, err)
 		}
 
 		if i%commitStep == 0 {
-			rh, err := d.Commit(true, false)
+			rh, err := domains.Commit(true, false)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -75,7 +75,7 @@ Loop:
 		}
 	}
 
-	err = agg.Flush(ctx, rwTx)
+	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
@@ -90,6 +90,9 @@ Loop:
 	if count > 0 {
 		count--
 	}
+	domains.FinishWrites()
+	domains.Close()
+	ac.Close()
 	if count == 0 {
 		return
 	}

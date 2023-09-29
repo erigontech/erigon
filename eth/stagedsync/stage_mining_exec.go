@@ -3,11 +3,12 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"io"
 	"math/big"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
@@ -95,7 +96,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
 		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
+		defer domains.Close()
+		defer domains.StartWrites().FinishWrites()
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 	} else {

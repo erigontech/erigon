@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -258,6 +259,13 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	for _, t := range torrents {
+		// we don't release commitment history in this time. let's skip it here.
+		if strings.HasPrefix(t.DisplayName, "history/commitment") {
+			continue
+		}
+		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
+			continue
+		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)

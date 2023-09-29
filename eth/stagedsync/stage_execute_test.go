@@ -145,6 +145,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 
 	rs := state.NewStateV3(domains, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
+	stateWriter.SetTx(tx)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
