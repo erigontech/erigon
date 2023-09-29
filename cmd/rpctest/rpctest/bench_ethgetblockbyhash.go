@@ -32,6 +32,7 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 		if err != nil {
 			return fmt.Errorf("Cannot create file %s for errorFileName: %v\n", errorFileName, err)
 		}
+		defer f.Sync()
 		defer f.Close()
 		errs = bufio.NewWriter(f)
 		defer errs.Flush()
