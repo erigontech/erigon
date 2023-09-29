@@ -154,8 +154,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		if err := operationsContract[*cltypes.AttesterSlashing](ctx, g, l, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing); err != nil {
 			return err
 		}
-		//case sentinel.GossipType_AggregateAndProofGossipType:
-		// TODO: implement
+	case sentinel.GossipType_BlsToExecutionChangeType:
+		if err := operationsContract[*cltypes.SignedBLSToExecutionChange](ctx, g, l, data, int(version), "bls to execution change", g.forkChoice.OnBlsToExecutionChange); err != nil {
+			return err
+		}
 	}
 	return nil
 }
