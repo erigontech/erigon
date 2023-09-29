@@ -165,7 +165,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, rh, datadir)
 
-	err = agg.Flush(ctx, tx)
+	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	//COMS := make(map[string][]byte)
@@ -369,7 +369,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, latestHash, datadir)
 
-	err = agg.Flush(ctx, tx)
+	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	err = tx.Commit()

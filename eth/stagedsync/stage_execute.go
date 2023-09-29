@@ -324,8 +324,8 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 
 	domains := agg.SharedDomains(ac)
 	rs := state.NewStateV3(domains, logger)
-	defer agg.CloseSharedDomains()
-	domains.StartWrites()
+	defer domains.Close()
+	defer domains.StartWrites().FinishWrites()
 	domains.SetTx(tx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -333,9 +333,6 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err != nil {
 		return err
 	}
-	//if err := agg.Flush(ctx, tx); err != nil {
-	//	return fmt.Errorf("AggregatorV3.Flush: %w", err)
-	//}
 	if tx == nil {
 		panic(1)
 	}

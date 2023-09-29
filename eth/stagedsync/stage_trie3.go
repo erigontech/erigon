@@ -26,7 +26,8 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
+	defer domains.Close()
+	defer domains.StartWrites().FinishWrites()
 
 	acc := domains.Account.MakeContext()
 	ccc := domains.Code.MakeContext()
@@ -108,9 +109,22 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	return rh, nil
 }
 
-func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, txnum uint64) (blockNum uint64, notInTheMiddle bool, err error) {
+type blockBorders struct {
+	Number    uint64
+	FirstTx   uint64
+	CurrentTx uint64
+	LastTx    uint64
+}
+
+func (b blockBorders) Offset() uint64 {
+	if b.CurrentTx > b.FirstTx && b.CurrentTx < b.LastTx {
+		return b.CurrentTx - b.FirstTx
+	}
+	return 0
+}
+
+func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, txnum uint64) (bb blockBorders, err error) {
 	var txCounter uint64 = 0
-	var ft, lt uint64
 
 	for i := uint64(0); i < math.MaxUint64; i++ {
 		if i%1000000 == 0 {
@@ -119,25 +133,26 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 
 		h, err := blockReader.HeaderByNumber(ctx, tx, i)
 		if err != nil {
-			return 0, false, err
+			return blockBorders{}, err
 		}
 
-		ft = txCounter
+		bb.Number = i
+		bb.FirstTx = txCounter
 		txCounter++
 		b, err := blockReader.BodyWithTransactions(ctx, tx, h.Hash(), i)
 		if err != nil {
-			return 0, false, err
+			return blockBorders{}, err
 		}
 		txCounter += uint64(len(b.Transactions))
 		txCounter++
-		blockNum = i
-		lt = txCounter
+		bb.LastTx = txCounter
 
 		if txCounter >= txnum {
-			return blockNum, ft == txnum || lt == txnum, nil
+			bb.CurrentTx = txnum
+			return bb, nil
 		}
 	}
-	return 0, false, fmt.Errorf("block not found")
+	return blockBorders{}, fmt.Errorf("block with tx %x not found", txnum)
 }
 
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
@@ -159,10 +174,12 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		return libcommon.Hash{}, err
 	}
 	if !ok {
-		blockNum, foundHash, err = countBlockByTxnum(ctx, rwTx, cfg.blockReader, toTxNum)
+		bb, err := countBlockByTxnum(ctx, rwTx, cfg.blockReader, toTxNum)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
+		blockNum = bb.Number
+		foundHash = bb.Offset() != 0
 	} else {
 		firstTxInBlock, err := rawdbv3.TxNums.Min(rwTx, blockNum)
 		if err != nil {
@@ -180,7 +197,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 	var expectedRootHash libcommon.Hash
 	var headerHash libcommon.Hash
 	var syncHeadHeader *types.Header
-	if foundHash {
+	if foundHash && cfg.checkRoot {
 		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
 			return trie.EmptyRoot, err
@@ -197,7 +214,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		return trie.EmptyRoot, err
 	}
 
-	if foundHash && !bytes.Equal(rh, expectedRootHash[:]) {
+	if foundHash && cfg.checkRoot && !bytes.Equal(rh, expectedRootHash[:]) {
 		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", blockNum, rh, expectedRootHash, headerHash))
 		rwTx.Rollback()
 

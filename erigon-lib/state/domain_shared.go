@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -365,7 +366,7 @@ func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error
 	cell.Nonce = 0
 	cell.Balance.Clear()
 	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
 		if len(chash) > 0 {
@@ -606,7 +607,6 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()
 
-	// return sc.IteratePrefix(roTx, prefix, it)
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -817,6 +817,16 @@ func (sd *SharedDomains) BatchHistoryWriteEnd() {
 	sd.walLock.RUnlock()
 }
 
+func (sd *SharedDomains) DiscardHistory(tmpDir string) {
+	sd.Account.DiscardHistory()
+	sd.Storage.DiscardHistory()
+	sd.Code.DiscardHistory()
+	sd.Commitment.DiscardHistory()
+	sd.LogAddrs.DiscardHistory(tmpDir)
+	sd.LogTopics.DiscardHistory(tmpDir)
+	sd.TracesFrom.DiscardHistory(tmpDir)
+	sd.TracesTo.DiscardHistory(tmpDir)
+}
 func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()

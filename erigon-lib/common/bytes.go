@@ -54,13 +54,6 @@ func Copy(b []byte) []byte {
 	return c
 }
 
-func AppendInto(dst []byte, src ...[]byte) {
-	d := bytes.NewBuffer(dst)
-	for _, s := range src {
-		d.Write(s)
-	}
-}
-
 func Append(data ...[]byte) []byte {
 	s := new(bytes.Buffer)
 	for _, d := range data {
