@@ -229,6 +229,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
+		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash.Close()
 		sn.IdxTxnHash = nil
@@ -240,6 +241,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
+		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash2BlockNum.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash2BlockNum.Close()
 		sn.IdxTxnHash2BlockNum = nil

@@ -40,11 +40,11 @@ func NewAttestionDataFromParameters(
 
 func (a AttestationData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Slot            uint64
-		Index           uint64
-		BeaconBlockRoot libcommon.Hash
-		Source          Checkpoint
-		Target          Checkpoint
+		Slot            uint64         `json:"slot"`
+		Index           uint64         `json:"index"`
+		BeaconBlockRoot libcommon.Hash `json:"beacon_block_root"`
+		Source          Checkpoint     `json:"source"`
+		Target          Checkpoint     `json:"target"`
 	}{
 		Slot:            a.Slot(),
 		BeaconBlockRoot: a.BeaconBlockRoot(),
@@ -56,11 +56,11 @@ func (a AttestationData) MarshalJSON() ([]byte, error) {
 
 func (a AttestationData) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		Slot            uint64
-		Index           uint64
-		BeaconBlockRoot libcommon.Hash
-		Source          Checkpoint
-		Target          Checkpoint
+		Slot            uint64         `json:"slot"`
+		Index           uint64         `json:"index"`
+		BeaconBlockRoot libcommon.Hash `json:"beacon_block_root"`
+		Source          Checkpoint     `json:"source"`
+		Target          Checkpoint     `json:"target"`
 	}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
