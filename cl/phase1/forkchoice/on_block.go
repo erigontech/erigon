@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -15,6 +16,7 @@ import (
 func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.headHash = libcommon.Hash{}
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -86,6 +88,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
+	f.operationsPool.NotifyBlock(block.Block)
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)

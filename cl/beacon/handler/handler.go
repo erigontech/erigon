@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 )
 
 type ApiHandler struct {
@@ -20,10 +21,11 @@ type ApiHandler struct {
 	genesisCfg      *clparams.GenesisConfig
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
+	operationsPool  pool.OperationsPool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore}
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool}
 }
 
 func (a *ApiHandler) init() {
@@ -54,6 +56,9 @@ func (a *ApiHandler) init() {
 				r.Post("/binded_blocks", nil)
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
+					r.Get("/voluntary_exits", beaconHandlerWrapper(a.poolVoluntaryExits, false))
+					r.Get("/attester_slashings", beaconHandlerWrapper(a.poolAttesterSlashings, false))
+					r.Get("/proposer_slashings", beaconHandlerWrapper(a.poolProposerSlashings, false))
 					r.Post("/sync_committees", nil)
 				})
 				r.Get("/node/syncing", nil)

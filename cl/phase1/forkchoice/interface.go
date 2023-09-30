@@ -29,7 +29,7 @@ type ForkChoiceStorageReader interface {
 
 type ForkChoiceStorageWriter interface {
 	OnAttestation(attestation *solid.Attestation, fromBlock bool) error
-	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing) error
+	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
 	OnTick(time uint64)
 }
