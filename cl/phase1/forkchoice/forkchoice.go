@@ -9,6 +9,7 @@ import (
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/pool"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,6 +31,8 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint solid.Checkpoint
 	unrealizedFinalizedCheckpoint solid.Checkpoint
 	proposerBoostRoot             libcommon.Hash
+	headHash                      libcommon.Hash
+	headSlot                      uint64
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies map[uint64]struct{}
 	forkGraph            *fork_graph.ForkGraph
@@ -43,6 +46,8 @@ type ForkChoiceStore struct {
 	engine execution_client.ExecutionEngine
 	// freezer
 	recorder freezer.Freezer
+	// operations pool
+	operationsPool pool.OperationsPool
 }
 
 type LatestMessage struct {
@@ -51,7 +56,7 @@ type LatestMessage struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, enabledPruning bool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -84,6 +89,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		eth2Roots:                     eth2Roots,
 		engine:                        engine,
 		recorder:                      recorder,
+		operationsPool:                operationsPool,
 	}, nil
 }
 

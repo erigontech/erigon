@@ -33,6 +33,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/log/v3"
@@ -300,17 +301,17 @@ func (db *DictionaryBuilder) Less(i, j int) bool {
 	return db.items[i].score < db.items[j].score
 }
 
-func dictionaryBuilderLess(i, j *Pattern) bool {
+func dictionaryBuilderCmp(i, j *Pattern) int {
 	if i.score == j.score {
-		return bytes.Compare(i.word, j.word) < 0
+		return bytes.Compare(i.word, j.word)
 	}
-	return i.score < j.score
+	return cmp.Compare(i.score, j.score)
 }
 
 func (db *DictionaryBuilder) Swap(i, j int) {
 	db.items[i], db.items[j] = db.items[j], db.items[i]
 }
-func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderLess) }
+func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderCmp) }
 
 func (db *DictionaryBuilder) Push(x interface{}) {
 	db.items = append(db.items, x.(*Pattern))
@@ -383,11 +384,11 @@ type Pattern struct {
 type PatternList []*Pattern
 
 func (pl PatternList) Len() int { return len(pl) }
-func patternListLess(i, j *Pattern) bool {
+func patternListCmp(i, j *Pattern) int {
 	if i.uses == j.uses {
-		return bits.Reverse64(i.code) < bits.Reverse64(j.code)
+		return cmp.Compare(bits.Reverse64(i.code), bits.Reverse64(j.code))
 	}
-	return i.uses < j.uses
+	return cmp.Compare(i.uses, j.uses)
 }
 
 // PatternHuff is an intermediate node in a huffman tree of patterns
@@ -555,11 +556,11 @@ type PositionList []*Position
 
 func (pl PositionList) Len() int { return len(pl) }
 
-func positionListLess(i, j *Position) bool {
+func positionListCmp(i, j *Position) int {
 	if i.uses == j.uses {
-		return bits.Reverse64(i.code) < bits.Reverse64(j.code)
+		return cmp.Compare(bits.Reverse64(i.code), bits.Reverse64(j.code))
 	}
-	return i.uses < j.uses
+	return cmp.Compare(i.uses, j.uses)
 }
 
 type PositionHeap []*PositionHuff
@@ -569,10 +570,14 @@ func (ph PositionHeap) Len() int {
 }
 
 func (ph PositionHeap) Less(i, j int) bool {
+	return ph.Compare(i, j) < 0
+}
+
+func (ph PositionHeap) Compare(i, j int) int {
 	if ph[i].uses == ph[j].uses {
-		return ph[i].tieBreaker < ph[j].tieBreaker
+		return cmp.Compare(ph[i].tieBreaker, ph[j].tieBreaker)
 	}
-	return ph[i].uses < ph[j].uses
+	return cmp.Compare(ph[i].uses, ph[j].uses)
 }
 
 func (ph *PositionHeap) Swap(i, j int) {

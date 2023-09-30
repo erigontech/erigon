@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -47,7 +48,8 @@ func TestForkChoiceBasic(t *testing.T) {
 	// Initialize forkchoice store
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, false)
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, false)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -86,4 +88,13 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// lastly do attestation
 	require.NoError(t, store.OnAttestation(testAttestation, false))
+	// Try processing a voluntary exit
+	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{
+			Epoch:          0,
+			ValidatorIndex: 0,
+		},
+	}, true)
+	require.NoError(t, err)
+	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }
