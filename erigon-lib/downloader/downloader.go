@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -199,7 +198,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
 		d.addSegments(d.ctx)
-		maps.Clear(torrentMap)
+		clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
 			select {
