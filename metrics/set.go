@@ -22,11 +22,12 @@ type namedMetric struct {
 //
 // Set.WritePrometheus must be called for exporting metrics from the set.
 type Set struct {
-	mu        sync.Mutex
-	a         []*namedMetric
-	m         map[string]*namedMetric
-	summaries []prometheus.Summary
+	mu sync.Mutex
+	a  []*namedMetric
+	m  map[string]*namedMetric
 }
+
+var defaultSet = NewSet()
 
 // NewSet creates new set of metrics.
 //
@@ -536,9 +537,9 @@ func (s *Set) registerMetric(name string, m prometheus.Metric) {
 //
 // Panics if the given name was already registered before.
 func (s *Set) mustRegisterLocked(name string, m prometheus.Metric) {
-	nm, ok := s.m[name]
+	_, ok := s.m[name]
 	if !ok {
-		nm = &namedMetric{
+		nm := &namedMetric{
 			name:   name,
 			metric: m,
 		}

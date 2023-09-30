@@ -69,6 +69,7 @@ require (
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.0
 	github.com/prometheus/client_golang v1.16.0
+	github.com/prometheus/client_model v0.4.0
 	github.com/prometheus/common v0.44.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
@@ -82,8 +83,8 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
-	github.com/ugorji/go/codec v1.1.13
-	github.com/ugorji/go/codec/codecgen v1.1.13
+	github.com/ugorji/go/codec v1.2.7
+	github.com/ugorji/go/codec/codecgen v1.2.7
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.6
@@ -226,7 +227,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/procfs v0.10.1 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.3 // indirect
