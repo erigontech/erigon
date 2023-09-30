@@ -32,6 +32,8 @@ type EngineAPI interface {
 	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV1, error)
 }
 
+// Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
@@ -45,26 +47,38 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 	return response.ExecutionPayload, nil
 }
 
+// Same as [GetPayloadV1] with addition of blockValue
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.CapellaVersion)
 }
 
+// Same as [GetPayloadV2], with addition of blobsBundle containing valid blobs, commitments, proofs
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
+// Updates the forkchoice state after validating the headBlockHash
+// Additionally, builds and returns a unique identifier for an initial version of a payload
+// (asynchronously updated with transactions), if payloadAttributes is not nil and passes validation
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_forkchoiceupdatedv1
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.BellatrixVersion)
 }
 
+// Same as, and a replacement for, [ForkchoiceUpdatedV1], post Shanghai
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_forkchoiceupdatedv2
 func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
+// Successor of [ForkchoiceUpdatedV2] post Cancun, with stricter check on params
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
@@ -109,6 +123,8 @@ func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, be
 	}, nil
 }
 
+// Returns an array of execution payload bodies referenced by their block hashes
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
 func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*engine_types.ExecutionPayloadBodyV1, error) {
 	if len(hashes) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
@@ -117,6 +133,8 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []li
 	return e.getPayloadBodiesByHash(ctx, hashes, clparams.DenebVersion)
 }
 
+// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
 func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV1, error) {
 	if start == 0 || count == 0 {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
