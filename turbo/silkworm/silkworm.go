@@ -44,6 +44,9 @@ typedef struct MDBX_txn MDBX_txn;
 #define SILKWORM_MDBX_ERROR          10
 #define SILKWORM_INVALID_BLOCK       11
 #define SILKWORM_DECODING_ERROR      12
+#define SILKWORM_TOO_MANY_INSTANCES  13
+#define SILKWORM_INSTANCE_NOT_FOUND  14
+#define SILKWORM_TERMINATION_SIGNAL  15
 
 typedef struct SilkwormHandle SilkwormHandle;
 
@@ -128,12 +131,36 @@ int call_silkworm_fini_func(void* func_ptr, SilkwormHandle* handle) {
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus"
 )
+
+const (
+	SILKWORM_OK                  = iota
+	SILKWORM_INTERNAL_ERROR
+	SILKWORM_UNKNOWN_ERROR
+	SILKWORM_INVALID_HANDLE
+	SILKWORM_INVALID_PATH
+	SILKWORM_INVALID_SNAPSHOT
+	SILKWORM_INVALID_MDBX_TXN
+	SILKWORM_INVALID_BLOCK_RANGE
+	SILKWORM_BLOCK_NOT_FOUND
+	SILKWORM_UNKNOWN_CHAIN_ID
+	SILKWORM_MDBX_ERROR
+	SILKWORM_INVALID_BLOCK
+	SILKWORM_DECODING_ERROR
+	SILKWORM_TOO_MANY_INSTANCES
+	SILKWORM_INSTANCE_NOT_FOUND
+	SILKWORM_TERMINATION_SIGNAL
+)
+
+// ErrInterrupted is the error returned by Silkworm APIs when stopped by any termination signal.
+var ErrInterrupted = errors.New("interrupted")
 
 type Silkworm struct {
 	dllHandle		unsafe.Pointer
@@ -269,8 +296,16 @@ func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64,
 	status := C.call_silkworm_execute_blocks_func(s.executeBlocks, s.instance, cTxn, cChainId, cStartBlock,
 		cMaxBlock, cBatchSize, cWriteChangeSets, cWriteReceipts, cWriteCallTraces, &cLastExecutedBlock, &cMdbxErrorCode)
 	lastExecutedBlock = uint64(cLastExecutedBlock)
-	if status == 0 || status == 8 {
+	// Handle successful execution
+	if status == SILKWORM_OK || status == SILKWORM_BLOCK_NOT_FOUND {
 		return lastExecutedBlock, nil
+	}
+	// Handle special erros
+	if status == SILKWORM_INVALID_BLOCK {
+		return lastExecutedBlock, consensus.ErrInvalidBlock
+	}
+	if status == SILKWORM_TERMINATION_SIGNAL {
+		return lastExecutedBlock, ErrInterrupted
 	}
 	return lastExecutedBlock, fmt.Errorf("silkworm_execute_blocks error %d, MDBX error %d", status, cMdbxErrorCode)
 }

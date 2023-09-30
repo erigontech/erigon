@@ -472,8 +472,22 @@ Loop:
 		}
 
 		if err != nil {
+			if errors.Is(err, silkworm.ErrInterrupted) {
+				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "block", blockNum, "err", err)
+				// Remount the termination signal
+				p, err := os.FindProcess(os.Getpid())
+				if err != nil {
+					return err
+				}
+				p.Signal(os.Interrupt)
+				return nil
+			}
 			if !errors.Is(err, context.Canceled) {
-				logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", blockHash.String(), "err", err)
+				if cfg.silkworm != nil {
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "err", err)
+				} else {
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", blockHash.String(), "err", err)
+				}
 				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash() /* lastValidAncestor */)
 				}
