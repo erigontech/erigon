@@ -169,7 +169,7 @@ webseed.toml format:
 ## E3
 
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
-Golang 1.20
+Golang 1.21
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
 E3 changes from E2:
