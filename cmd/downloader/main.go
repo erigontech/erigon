@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -166,6 +167,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
+	cfg.ClientConfig.PieceHashersPerTorrent = runtime.NumCPU() * 2
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
