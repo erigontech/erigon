@@ -189,7 +189,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			plainKeys[i] = []byte(key)
 			i++
 		}
-		slices.SortFunc(plainKeys, func(i, j []byte) bool { return bytes.Compare(i, j) < 0 })
+		slices.SortFunc(plainKeys, func(i, j []byte) int { return bytes.Compare(i, j) })
 		if clear {
 			t.keys = make(map[string]struct{}, len(t.keys)/8)
 		}
