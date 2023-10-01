@@ -282,9 +282,10 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_ProposerSlashingGossipType, data, string(textPid))
 	} else if strings.Contains(*pkt.Topic, string(sentinel.AttesterSlashingTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AttesterSlashingGossipType, data, string(textPid))
+	} else if strings.Contains(*pkt.Topic, string(sentinel.BlsToExecutionChangeTopic)) {
+		s.gossipNotifier.notify(sentinelrpc.GossipType_BlsToExecutionChangeType, data, string(textPid))
 	} else if strings.Contains(*pkt.Topic, string(sentinel.BlobSidecarTopic)) {
 		// extract the index
-
 		s.gossipNotifier.notifyBlob(sentinelrpc.GossipType_BlobSidecarType, data, string(textPid), extractBlobSideCarIndex(*pkt.Topic))
 	}
 	return nil
