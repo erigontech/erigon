@@ -32,7 +32,7 @@ var (
 	keyValueTpl                      = "%s %v\n"
 	keyCounterTpl                    = "%s %v\n"
 	keyQuantileTagValueTpl           = "%s {quantile=\"%s\"} %v\n"
-	keyQuantileTagValueWithLabelsTpl = "%s, quantile=\"%s\"} %v\n"
+	keyQuantileTagValueWithLabelsTpl = "%s,quantile=\"%s\"} %v\n"
 )
 
 // collector is a collection of byte buffers that aggregate Prometheus reports
