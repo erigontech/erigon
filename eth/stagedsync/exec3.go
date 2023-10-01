@@ -581,10 +581,15 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
+	blocksInSnapshots := cfg.blockReader.FrozenBlocks()
 	var b *types.Block
 	//var err error
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		if blockNum >= blocksInSnapshots {
+			agg.KeepStepsInDB(1)
+		}
+
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
