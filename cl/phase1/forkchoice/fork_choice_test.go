@@ -96,5 +96,12 @@ func TestForkChoiceBasic(t *testing.T) {
 		},
 	}, true)
 	require.NoError(t, err)
+	// Try processing a bls execution change exit
+	err = store.OnBlsToExecutionChange(&cltypes.SignedBLSToExecutionChange{
+		Message: &cltypes.BLSToExecutionChange{
+			ValidatorIndex: 0,
+		},
+	}, true)
+	require.NoError(t, err)
 	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
 }

@@ -129,9 +129,9 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
-// if the payload extend the canonical chain, then we stack it in extendingFork without any unwind.
-// if the payload is a fork then we unwind to the point where the fork meet the canonical chain and we check if it is valid or not from there.
-// if for any reasons none of the action above can be performed due to lack of information, we accept the payload and avoid validation.
+// if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
+// if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
+// if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
 func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *types.RawBody, extendCanonical bool) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
