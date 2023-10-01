@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"io"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"

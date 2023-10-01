@@ -15,9 +15,10 @@ package handlers
 
 import (
 	"context"
+	"strings"
+
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -31,7 +32,6 @@ import (
 type ConsensusHandlers struct {
 	handlers      map[protocol.ID]network.StreamHandler
 	host          host.Host
-	peers         *peers.Manager
 	metadata      *cltypes.Metadata
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
@@ -46,9 +46,8 @@ const (
 )
 
 func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
-	peers *peers.Manager, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
+	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		peers:         peers,
 		host:          host,
 		metadata:      metadata,
 		beaconDB:      db,

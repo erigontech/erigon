@@ -14,14 +14,9 @@ package sentinel
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"net"
-	"strings"
 	"time"
-
-	peers2 "github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -106,65 +101,6 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 }
 
 var shuffleSource = randutil.NewMathRandomGenerator()
-
-// will iterate onto randoms nodes until our sentinel connects to one
-func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error) {
-	var sub *GossipSubscription
-	for t, currSub := range s.subManager.subscriptions {
-		if strings.Contains(t, topic) {
-			sub = currSub
-		}
-	}
-
-	if sub == nil {
-		return peer.ID(""), fmt.Errorf("no peers")
-	}
-	validPeerList := s.Host().Network().Peers()
-	// blocksSub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
-	// if blocksSub != nil {
-	// 	validPeerList = blocksSub.topic.ListPeers()
-	// }
-
-	//validPeerList := sub.topic.ListPeers()
-	if len(validPeerList) == 0 {
-		return peer.ID(""), fmt.Errorf("no peers")
-	}
-	for i := range validPeerList {
-		j := shuffleSource.Intn(i + 1)
-		validPeerList[i], validPeerList[j] = validPeerList[j], validPeerList[i]
-	}
-
-	connectedPeer := false
-	maxTries := peers2.DefaultMaxPeers
-	tries := 0
-	for !connectedPeer {
-		if tries >= maxTries {
-			break
-		}
-		tries++
-		index := int64(0)
-		if len(validPeerList) > 1 {
-			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(validPeerList)-1)))
-			if err != nil {
-				panic(err)
-			}
-			index = n.Int64()
-		}
-		available := false
-		s.peers.TryPeer(validPeerList[index], func(peer *peers2.Peer, ok bool) {
-			if !ok {
-				return
-			}
-			available = peer.IsAvailable()
-		})
-		if !available {
-			continue
-		}
-		return validPeerList[index], nil
-	}
-
-	return peer.ID(""), fmt.Errorf("failed to connect to peer")
-}
 
 func (s *Sentinel) oneSlotDuration() time.Duration {
 	return time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second

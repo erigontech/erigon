@@ -61,21 +61,17 @@ func extractBlobSideCarIndex(topic string) int {
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
 	}
-	s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
-		peer.Ban()
-	})
+	s.sentinel.Peers().SetBanStatus(pid, true)
+	s.sentinel.Host().Peerstore().RemovePeer(pid)
+	s.sentinel.Host().Network().ClosePeer(pid)
 	return &sentinelrpc.EmptyMessage{}, nil
 }
 
 func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
@@ -151,83 +147,99 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 	return ctx, cn
 }
 
+func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
+	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
+	// for now this can't actually error. in the future, it can due to a network error
+	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
+	if err != nil {
+		// we remove, but dont ban the peer if we fail. this is because ma
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		errBody, _ := io.ReadAll(resp.Body)
+		errorMessage := fmt.Errorf("SentinelHttpError: %s", string(errBody))
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
+		return nil, errorMessage
+	}
+	isError, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
+	if err != nil {
+		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
+		return nil, err
+	}
+	if isError > 3 {
+		s.logger.Debug("peer returned error response", "id", pid.String())
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+		return nil, fmt.Errorf("peer returned error response")
+	}
+	// error codes of 1,2,3 means we should not disconnect, but we should return an error
+	if isError != 0 {
+		data, _ := io.ReadAll(resp.Body)
+		data2, err2 := snappy.Decode(nil, data)
+		if err2 != nil {
+			data = data2
+		}
+		errorMessage := fmt.Errorf("SentinelHttpError: %s", string(data))
+		return nil, errorMessage
+	}
+	// wow, success? crazy
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ans := &sentinelrpc.ResponseData{
+		Data:  data,
+		Error: isError != 0,
+		Peer: &sentinelrpc.Peer{
+			Pid: pid.String(),
+		},
+	}
+	return ans, nil
+
+}
+
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	retryReqInterval := time.NewTicker(250 * time.Millisecond)
-	defer retryReqInterval.Stop()
-	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
 	uniquePeers := map[peer.ID]struct{}{}
-	requestPeer := func(peer *peers.Peer) {
-		peer.MarkUsed()
-		defer peer.MarkUnused()
-		httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
-		if err != nil {
-			return
-		}
-		httpReq.Header.Set("REQRESP-PEER-ID", peer.ID().String())
-		httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
-		resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
-		if err != nil {
-			if strings.Contains(err.Error(), "protocols not supported") {
-				peer.Ban("peer does not support protocol")
-			}
-			return
-		}
-		defer resp.Body.Close()
-		isError, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
-		if err != nil {
-			// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
-			return
-		}
-		if isError > 3 {
-			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
-		}
-		if isError != 0 {
-			data, _ := io.ReadAll(resp.Body)
-			data2, err2 := snappy.Decode(nil, data)
-			if err2 != nil {
-				data = data2
-			}
-			s.logger.Error("peer failed request", "err", string(data))
-			peer.Penalize()
-			return
-		}
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return
-		}
-		ans := &sentinelrpc.ResponseData{
-			Data:  data,
-			Error: isError != 0,
-			Peer: &sentinelrpc.Peer{
-				Pid: peer.ID().String(),
-			},
-		}
-		select {
-		case doneCh <- ans:
-			peer.MarkReplied()
-			retryReqInterval.Stop()
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
+	doneCh := make(chan *sentinelrpc.ResponseData)
 	go func() {
-		for {
-			pid, err := s.sentinel.RandomPeer(req.Topic)
-			if err != nil {
-				continue
-			}
-			if _, ok := uniquePeers[pid]; !ok {
-				go s.sentinel.Peers().WithPeer(pid, requestPeer)
+		for i := 0; i < peers.MaxBadResponses; i++ {
+			if func() bool {
+				peer, done, err := s.sentinel.Peers().Request()
+				if err != nil {
+					return false
+				}
+				defer done()
+				pid := peer.Id()
+				_, ok := uniquePeers[pid]
+				if ok {
+					return false
+				}
+				resp, err := s.requestPeer(ctx, pid, req)
+				if err != nil {
+					s.logger.Debug("[sentinel] peer gave us bad data", "peer", pid, "err", err)
+					// we simply retry
+					return false
+				}
 				uniquePeers[pid] = struct{}{}
-			}
-			select {
-			case <-retryReqInterval.C:
-			case <-ctx.Done():
-				return
+				doneCh <- resp
+				return true
+			}() {
+				break
 			}
 		}
 	}()
@@ -244,8 +256,6 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 }
 
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	// Send the request and get the data if we get an answer.
 	s.sentinel.SetStatus(&cltypes.Status{
 		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
@@ -258,8 +268,6 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
 		Amount: uint64(s.sentinel.GetPeersCount()),

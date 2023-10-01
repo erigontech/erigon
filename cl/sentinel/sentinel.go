@@ -67,7 +67,7 @@ type Sentinel struct {
 	ctx      context.Context
 	host     host.Host
 	cfg      *SentinelConfig
-	peers    *peers.Manager
+	peers    *peers.Pool
 
 	httpApi http.Handler
 
@@ -239,7 +239,7 @@ func New(
 	}
 	s.host = host
 
-	s.peers = peers.NewManager(s.host)
+	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
 	//	mux := httpreqresp.NewRequestHandler(host)
@@ -281,6 +281,10 @@ func (s *Sentinel) Start() error {
 	// Configuring handshake
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: s.onConnection,
+		DisconnectedF: func(n network.Network, c network.Conn) {
+			peerId := c.RemotePeer()
+			s.peers.RemovePeer(peerId)
+		},
 	})
 	s.subManager = NewGossipManager(s.ctx)
 
@@ -318,7 +322,7 @@ func (s *Sentinel) Host() host.Host {
 	return s.host
 }
 
-func (s *Sentinel) Peers() *peers.Manager {
+func (s *Sentinel) Peers() *peers.Pool {
 	return s.peers
 }
 
@@ -341,16 +345,4 @@ func (s *Sentinel) PeersList() []peer.AddrInfo {
 		infos = append(infos, s.host.Network().Peerstore().PeerInfo(pid))
 	}
 	return infos
-}
-
-func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
-	var (
-		pid peer.ID
-		err error
-	)
-	pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
-	if err != nil {
-		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
-	}
-	return pid, nil
 }

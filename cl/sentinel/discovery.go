@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -19,29 +17,28 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) (err error) {
+// ConnectWithPeer is used to attempt to connect and add the peer to our pool
+// it errors when if fail to connect with the peer, for instance, if it fails the handshake
+// if it does not return an error, the peer is attempted to be added to the pool
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo) (err error) {
 	if info.ID == s.host.ID() {
 		return nil
 	}
-	s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
-		if peer.IsBad() {
-			err = fmt.Errorf("refused to connect to bad peer")
-		}
-	})
-	if err != nil {
-		return err
+	if s.peers.BanStatus(info.ID) {
+		return fmt.Errorf("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
-	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
-		s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
-			peer.Disconnect(err.Error())
-		})
+	err = s.host.Connect(ctxWithTimeout, info)
+	if err != nil {
 		return err
 	}
 	return nil
 }
 
+// connectWithAllPeers is a helper function used to connect with a list of addrs.
+// it only returns an error on fail to parse multiaddrs
+// will print connect with peer errors to trace debug level
 func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	addrInfos, err := peer.AddrInfosFromP2pAddrs(multiAddrs...)
 	if err != nil {
@@ -49,7 +46,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, peerInfo, true); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -75,7 +72,6 @@ func (s *Sentinel) listenForPeers() {
 	multiAddresses := convertToMultiAddr(enodes)
 	if err := s.connectWithAllPeers(multiAddresses); err != nil {
 		log.Warn("Could not connect to static peers", "reason", err)
-
 	}
 
 	iterator := s.listener.RandomNodes()
@@ -112,7 +108,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, *peerInfo, false); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -155,9 +151,13 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		}
 		if !valid {
 			log.Trace("Handshake was unsuccessful")
-			s.peers.WithPeer(peerId, func(peer *peers.Peer) {
-				peer.Disconnect("invalid peer", "bad handshake")
-			})
+			// on handshake fail, we disconnect with said peer, and remove them from our pool
+			s.host.Peerstore().RemovePeer(peerId)
+			s.host.Network().ClosePeer(peerId)
+			s.peers.RemovePeer(peerId)
+		} else {
+			// we were able to succesfully connect, so add this peer to our pool
+			s.peers.AddPeer(peerId)
 		}
 	}()
 }
