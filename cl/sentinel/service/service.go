@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/snappy"
 	sentinel2 "github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
@@ -161,9 +160,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
-		errorMessage := fmt.Errorf("SentinelHttpError: %s", string(errBody))
+		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
@@ -180,23 +179,18 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
-	if isError > 3 {
-		s.logger.Debug("peer returned error response", "id", pid.String())
+	// unknown error codes
+	if isError == 2 {
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
-		return nil, fmt.Errorf("peer returned error response")
+		return nil, fmt.Errorf("peer server error")
 	}
-	// error codes of 1,2,3 means we should not disconnect, but we should return an error
-	if isError != 0 {
-		data, _ := io.ReadAll(resp.Body)
-		data2, err2 := snappy.Decode(nil, data)
-		if err2 != nil {
-			data = data2
-		}
-		errorMessage := fmt.Errorf("SentinelHttpError: %s", string(data))
-		return nil, errorMessage
+	if isError > 3 {
+		s.logger.Debug("peer returned unknown erro", "id", pid.String())
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+		return nil, fmt.Errorf("peer returned unknown error")
 	}
-	// wow, success? crazy
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
