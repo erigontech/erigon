@@ -716,7 +716,7 @@ Loop:
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if txTask.Error != nil {
-						return txTask.Error
+						return fmt.Errorf("%w, blockNum=%d", txTask.Error, txTask.BlockNum)
 					}
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
