@@ -558,7 +558,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				errString = res.Err.Error()
 			}
 			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
-			if optimizeGas != nil && *optimizeGas {
+			if optimizeGas == nil || *optimizeGas { // optimize gas unless explicitly told not to
 				optimizeWarmAddrInAccessList(accessList, *args.From)
 				optimizeWarmAddrInAccessList(accessList, to)
 				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
