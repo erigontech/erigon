@@ -1,6 +1,7 @@
 package forkchoice
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // NOTE: This file implements non-official handlers for other types of iterations. what it does is,using the forkchoices
@@ -148,5 +150,68 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 	f.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
 
+	return nil
+}
+
+func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
+	if f.operationsPool.BLSToExecutionChangesPool.Has(signedChange.Signature) {
+		return nil
+	}
+	change := signedChange.Message
+
+	beaconConfig := f.forkGraph.Config()
+	// Take lock as we interact with state.
+	f.mu.Lock()
+
+	headHash, _, err := f.getHead()
+	if err != nil {
+		f.mu.Unlock()
+		return err
+	}
+	s, _, err := f.forkGraph.GetState(headHash, false)
+	if err != nil {
+		f.mu.Unlock()
+		return err
+	}
+	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
+	if err != nil {
+		f.mu.Unlock()
+		return fmt.Errorf("unable to retrieve state: %v", err)
+	}
+	wc := validator.WithdrawalCredentials()
+
+	if wc[0] != beaconConfig.BLSWithdrawalPrefixByte {
+		f.mu.Unlock()
+		return fmt.Errorf("invalid withdrawal credentials prefix")
+	}
+	genesisValidatorRoot := s.GenesisValidatorsRoot()
+	f.mu.Unlock()
+	// Perform full validation if requested.
+	if !test {
+		// Check the validator's withdrawal credentials against the provided message.
+		hashedFrom := utils.Keccak256(change.From[:])
+		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
+			return fmt.Errorf("invalid withdrawal credentials")
+		}
+
+		// Compute the signing domain and verify the message signature.
+		domain, err := fork.ComputeDomain(beaconConfig.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion), genesisValidatorRoot)
+		if err != nil {
+			return err
+		}
+		signedRoot, err := fork.ComputeSigningRoot(change, domain)
+		if err != nil {
+			return err
+		}
+		valid, err := bls.Verify(signedChange.Signature[:], signedRoot[:], change.From[:])
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return fmt.Errorf("invalid signature")
+		}
+	}
+
+	f.operationsPool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
 	return nil
 }

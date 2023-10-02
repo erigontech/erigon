@@ -55,4 +55,8 @@ func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
 		o.ProposerSlashingsPool.DeleteIfExist(ComputeKeyForProposerSlashing(ps))
 		return true
 	})
+	blk.Body.ExecutionChanges.Range(func(_ int, c *cltypes.SignedBLSToExecutionChange, _ int) bool {
+		o.BLSToExecutionChangesPool.DeleteIfExist(c.Signature)
+		return true
+	})
 }

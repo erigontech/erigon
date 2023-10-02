@@ -1218,7 +1218,13 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
+func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
+	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
+}
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	if !hc.CanPrune(rwTx) {
+		return nil
+	}
 	defer func(t time.Time) { mxPruneTookHistory.UpdateDuration(t) }(time.Now())
 
 	historyKeysCursorForDeletes, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)

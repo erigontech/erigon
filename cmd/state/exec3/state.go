@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -144,9 +143,8 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 		rw.historyMode.Store(false)
 	default:
 		rw.historyMode.Store(false)
-		fmt.Printf("[worker] unknown reader %T: historyMode is set to disabled\n", reader)
+		//fmt.Printf("[worker] unknown reader %T: historyMode is set to disabled\n", reader)
 	}
-	fmt.Printf("[worker] set reader %T\n", reader)
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {

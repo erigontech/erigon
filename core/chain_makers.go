@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -136,6 +137,9 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 }
 
 func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+	if b.beforeAddTx != nil {
+		b.beforeAddTx()
+	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
@@ -329,7 +333,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 		domains = agg.SharedDomains(ac)
 		defer domains.Close()
-		defer domains.StartWrites().FinishWrites()
+		_, err := domains.SeekCommitment(0, math.MaxUint64)
+		if err != nil {
+			return nil, err
+		}
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	}
 	txNum := -1
@@ -511,6 +518,14 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 
 		root, err := trie.CalcRoot("GenerateChain", tx)
 		return root, err
+
+		//var root libcommon.Hash
+		//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
+		//if err != nil {
+		//	return root, err
+		//}
+		//root = libcommon.BytesToHash(rootB)
+		//return root, err
 	}
 
 	c, err := tx.Cursor(kv.PlainState)

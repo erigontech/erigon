@@ -555,8 +555,8 @@ func (ii *InvertedIndex) add(key, indexKey []byte) error { //nolint
 	return ii.wal.add(key, indexKey)
 }
 
-func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
-	ii.wal = ii.newWriter(tmpdir, false, true)
+func (ii *InvertedIndex) DiscardHistory() {
+	ii.wal = ii.newWriter(ii.dirs.Tmp, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
 	ii.wal = ii.newWriter(ii.dirs.Tmp, true, false)
@@ -586,12 +586,13 @@ func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 }
 
 type invertedIndexWAL struct {
-	ii        *InvertedIndex
-	index     *etl.Collector
-	indexKeys *etl.Collector
-	tmpdir    string
-	buffered  bool
-	discard   bool
+	ii           *InvertedIndex
+	index        *etl.Collector
+	indexKeys    *etl.Collector
+	tmpdir       string
+	buffered     bool
+	discard      bool
+	filenameBase string
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -632,9 +633,10 @@ var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
 	w := &invertedIndexWAL{ii: ii,
-		buffered: buffered,
-		discard:  discard,
-		tmpdir:   tmpdir,
+		buffered:     buffered,
+		discard:      discard,
+		tmpdir:       tmpdir,
+		filenameBase: ii.filenameBase,
 	}
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
@@ -650,7 +652,6 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-
 	if ii.buffered {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err
@@ -845,7 +846,6 @@ func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTx
 		to = make([]byte, 8)
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
-
 	it, err := roTx.RangeDupSort(ic.ii.indexTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
@@ -909,8 +909,25 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 	return it, nil
 }
 
+func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ic.ii.indexKeysTable)
+	if len(fst) > 0 {
+		fstInDb := binary.BigEndian.Uint64(fst)
+		return cmp.Min(fstInDb, math.MaxUint64)
+	}
+	return math.MaxUint64
+}
+
+func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
+	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
+}
+
 // [txFrom; txTo)
 func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	if !ic.CanPrune(rwTx) {
+		return nil
+	}
+
 	ii := ic.ii
 	defer func(t time.Time) { mxPruneTookIndex.UpdateDuration(t) }(time.Now())
 
