@@ -44,3 +44,14 @@ func Max[T constraints.Ordered](a, b T) T {
 	}
 	return b
 }
+
+func Compare[T constraints.Ordered](a, b T) int {
+	switch {
+	case a < b:
+		return -1
+	case a == b:
+		return 0
+	default:
+		return 1
+	}
+}

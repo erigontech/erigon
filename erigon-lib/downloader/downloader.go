@@ -82,10 +82,6 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
-	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
-		return nil, err
-	}
-
 	// move db from `datadir/snapshot/db` to `datadir/downloader`
 	if dir.Exist(filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
 		from, to := filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat"), filepath.Join(cfg.Dirs.Downloader, "mdbx.dat")
@@ -270,15 +266,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}(t)
 			}
 
-			func() { // scop of sleep timer
-				timer := time.NewTimer(10 * time.Second)
-				defer timer.Stop()
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-timer.C:
-				}
-			}()
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 	}()
 

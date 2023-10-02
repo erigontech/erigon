@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
+	"github.com/ledgerwatch/erigon/cl/pool"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -83,7 +84,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 			return err
 		}
 	}
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, true)
+	pool := pool.NewOperationsPool(beaconConfig)
+
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, true)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -114,7 +117,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice)
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool)
 		go beacon.ListenAndServe(apiHandler, &cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}

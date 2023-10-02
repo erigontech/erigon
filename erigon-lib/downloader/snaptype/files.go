@@ -20,12 +20,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/anacrolix/torrent/metainfo"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/anacrolix/torrent/metainfo"
+
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"golang.org/x/exp/slices"
 )
@@ -209,20 +211,20 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 		res = append(res, meta)
 	}
-	slices.SortFunc(res, func(i, j FileInfo) bool {
+	slices.SortFunc(res, func(i, j FileInfo) int {
 		if i.Version != j.Version {
-			return i.Version < j.Version
+			return cmp.Compare(i.Version, j.Version)
 		}
 		if i.From != j.From {
-			return i.From < j.From
+			return cmp.Compare(i.From, j.From)
 		}
 		if i.To != j.To {
-			return i.To < j.To
+			return cmp.Compare(i.To, j.To)
 		}
 		if i.T != j.T {
-			return i.T < j.T
+			return cmp.Compare(i.T, j.T)
 		}
-		return i.Ext < j.Ext
+		return cmp.Compare(i.Ext, j.Ext)
 	})
 
 	return res, nil
