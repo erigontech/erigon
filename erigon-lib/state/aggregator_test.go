@@ -38,6 +38,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
@@ -99,6 +100,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
+	agg.FinishWrites()
 
 	require.NoError(t, err)
 	err = rwTx.Commit()
@@ -172,6 +174,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 			tx.Rollback()
 		}
 	}()
+	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
@@ -227,6 +230,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
+	agg.FinishWrites()
 	agg.Close()
 
 	// Start another aggregator on same datadir
@@ -290,6 +294,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		}
 	}()
 	//agg.SetTx(tx)
+	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
@@ -333,6 +338,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	err = tx.Commit()
 	require.NoError(t, err)
+	agg.FinishWrites()
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -359,6 +365,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	defer newTx.Rollback()
 
 	//newAgg.SetTx(newTx)
+	defer newAgg.StartWrites().FinishWrites()
 
 	ac := newAgg.MakeContext()
 	defer ac.Close()
@@ -686,8 +693,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer rwTx.Rollback()
 
 	domains.SetTx(rwTx)
+	agg.StartWrites()
 
 	//agg.StartUnbufferedWrites()
+	defer agg.FinishWrites()
 	defer domains.Close()
 
 	keys, vals := generateInputData(t, 20, 16, 10)
