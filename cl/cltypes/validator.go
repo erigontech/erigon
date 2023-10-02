@@ -101,23 +101,23 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 }
 
 type SignedVoluntaryExit struct {
-	VolunaryExit *VoluntaryExit    `json:"message"`
-	Signature    libcommon.Bytes96 `json:"signature"`
+	VoluntaryExit *VoluntaryExit    `json:"message"`
+	Signature     libcommon.Bytes96 `json:"signature"`
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, e.VolunaryExit, e.Signature[:])
+	return ssz2.MarshalSSZ(dst, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, version int) error {
-	e.VolunaryExit = new(VoluntaryExit)
-	return ssz2.UnmarshalSSZ(buf, version, e.VolunaryExit, e.Signature[:])
+	e.VoluntaryExit = new(VoluntaryExit)
+	return ssz2.UnmarshalSSZ(buf, version, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(e.VolunaryExit, e.Signature[:])
+	return merkle_tree.HashTreeRoot(e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
-	return 96 + e.VolunaryExit.EncodingSizeSSZ()
+	return 96 + e.VoluntaryExit.EncodingSizeSSZ()
 }

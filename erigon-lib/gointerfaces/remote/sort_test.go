@@ -49,7 +49,7 @@ func TestSort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			slices.SortFunc(tt.got.NodesInfo, remote.NodeInfoReplyLess)
+			slices.SortFunc(tt.got.NodesInfo, remote.NodeInfoReplyCmp)
 			assert.Equal(t, tt.want, tt.got)
 		})
 	}

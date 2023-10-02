@@ -8,12 +8,14 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	logger := logging.SetupLogger("rpctest")
 
 	var (
 		needCompare bool
@@ -63,6 +65,19 @@ func main() {
 		},
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
+	var benchEthGetBlockByHash = &cobra.Command{
+		Use:   "benchEthGetBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
@@ -294,6 +309,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
+		benchEthGetBlockByHash,
 		benchEthCallCmd,
 		bench1Cmd,
 		bench2Cmd,
