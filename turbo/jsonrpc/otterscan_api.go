@@ -277,6 +277,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("drain: %s, %d, %d\n", addr, fromTxNum, iter.ToArrU64Must(itTo))
 	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err

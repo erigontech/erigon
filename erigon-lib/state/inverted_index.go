@@ -586,12 +586,13 @@ func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 }
 
 type invertedIndexWAL struct {
-	ii        *InvertedIndex
-	index     *etl.Collector
-	indexKeys *etl.Collector
-	tmpdir    string
-	buffered  bool
-	discard   bool
+	ii           *InvertedIndex
+	index        *etl.Collector
+	indexKeys    *etl.Collector
+	tmpdir       string
+	buffered     bool
+	discard      bool
+	filenameBase string
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -632,9 +633,10 @@ var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
 	w := &invertedIndexWAL{ii: ii,
-		buffered: buffered,
-		discard:  discard,
-		tmpdir:   tmpdir,
+		buffered:     buffered,
+		discard:      discard,
+		tmpdir:       tmpdir,
+		filenameBase: ii.filenameBase,
 	}
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
@@ -651,6 +653,9 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 		return nil
 	}
 
+	//if ii.filenameBase == "tracesto" && bytes.Equal(key, hexutility.FromHex("537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")) {
+	//	fmt.Printf("ii: %s, %x, %d\n", ii.filenameBase, key, ii.ii.txNum)
+	//}
 	if ii.buffered {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err
@@ -813,10 +818,12 @@ func (ic *InvertedIndexContext) IdxRange(key []byte, startTxNum, endTxNum int, a
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("IdxRange: %x, %d, %d\n", key, startTxNum, iter.ToArrU64Must(frozenIt))
 	recentIt, err := ic.recentIterateRange(key, startTxNum, endTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("IdxRange: %x, %d, %d\n", key, startTxNum, iter.ToArrU64Must(frozenIt))
 	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 

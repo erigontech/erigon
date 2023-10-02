@@ -154,12 +154,16 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (txsFromBlockBeginn
 		if err != nil {
 			return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
 		}
-		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+		if sd.trace {
+			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+		}
 		if txn > firstTxInBlock {
 			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			txsFromBlockBeginning = txn - firstTxInBlock
 		}
-		fmt.Printf("[commitment] block tx range -%d |%d| %d\n", txsFromBlockBeginning, txn, lastTxInBlock-txn)
+		if sd.trace {
+			fmt.Printf("[commitment] block tx range -%d |%d| %d\n", txsFromBlockBeginning, txn, lastTxInBlock-txn)
+		}
 		if txn == lastTxInBlock {
 			blockNum++
 		} else {
@@ -170,7 +174,9 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (txsFromBlockBeginn
 		if blockNum != 0 {
 			txn++
 		}
-		fmt.Printf("[commitment] found block %d tx %d. No DB info about block first/last txnum has been found\n", blockNum, txn)
+		if sd.trace {
+			fmt.Printf("[commitment] found block %d tx %d. No DB info about block first/last txnum has been found\n", blockNum, txn)
+		}
 	}
 
 	sd.SetBlockNum(blockNum)

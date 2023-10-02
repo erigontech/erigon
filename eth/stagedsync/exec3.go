@@ -278,7 +278,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	rs := state.NewStateV3(doms, logger)
-	fmt.Printf("[dbg] input tx %d\n", inputTxNum)
 	offsetFromBlockBeginning, err := doms.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return err
