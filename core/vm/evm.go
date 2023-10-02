@@ -437,7 +437,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrLegacyCode
 	}
 
-	if err == nil && hasEOFByte(ret) {
+	if err == nil && HasEOFByte(ret) {
 		if evm.chainRules.IsPrague {
 			var c Container
 			if err = c.UnmarshalBinary(ret); err == nil {

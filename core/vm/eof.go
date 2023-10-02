@@ -61,8 +61,8 @@ var (
 
 var eofMagic = []byte{0xef, 0x00}
 
-// hasEOFByte returns true if code starts with 0xEF byte
-func hasEOFByte(code []byte) bool {
+// HasEOFByte returns true if code starts with 0xEF byte
+func HasEOFByte(code []byte) bool {
 	return len(code) != 0 && code[0] == eofFormatByte
 }
 
@@ -100,14 +100,14 @@ func (c *Container) MarshalBinary() []byte {
 
 	// Write section headers.
 	b = append(b, kindTypes)
-	b = appendUint16(b, uint16(len(c.Types)*4))
+	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Types)*4))
 	b = append(b, kindCode)
-	b = appendUint16(b, uint16(len(c.Code)))
+	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Code)))
 	for _, code := range c.Code {
-		b = appendUint16(b, uint16(len(code)))
+		b = binary.BigEndian.AppendUint16(b, uint16(len(code)))
 	}
 	b = append(b, kindData)
-	b = appendUint16(b, uint16(len(c.Data)))
+	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Data)))
 	b = append(b, 0) // terminator
 
 	// Write section contents.
@@ -299,17 +299,18 @@ func parseInt16(b []byte) int {
 	return int(int16(b[1]) | int16(b[0])<<8)
 }
 
+// max returns the maximum of a and b.
+func max(a, b int) int {
+	if a < b {
+		return b
+	}
+	return a
+}
+
 // sum computes the sum of a slice.
 func sum(list []int) (s int) {
 	for _, n := range list {
 		s += n
 	}
 	return
-}
-
-func appendUint16(b []byte, v uint16) []byte {
-	return append(b,
-		byte(v>>8),
-		byte(v),
-	)
 }
