@@ -7,10 +7,9 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

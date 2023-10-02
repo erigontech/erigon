@@ -554,7 +554,9 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
 		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
-		fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		if d.trace {
+			fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		}
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}

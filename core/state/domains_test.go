@@ -83,7 +83,6 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 		}
 	}()
 
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 

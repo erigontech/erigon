@@ -22,6 +22,8 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -108,19 +110,22 @@ func (al accessList) accessList() types2.AccessList {
 // AccessListTracer is a tracer that accumulates touched accounts and storage
 // slots into an internal set.
 type AccessListTracer struct {
-	excl map[libcommon.Address]struct{} // Set of account to exclude from the list
-	list accessList                     // Set of accounts and storage slots touched
+	excl               map[libcommon.Address]struct{} // Set of account to exclude from the list
+	list               accessList                     // Set of accounts and storage slots touched
+	state              evmtypes.IntraBlockState       // State for nonce calculation of created contracts
+	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during tx execution
+	usedBeforeCreation map[libcommon.Address]struct{} // Set of all contract addresses first used before creation
 }
 
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
 // the resulting accesslist.
-func NewAccessListTracer(acl types2.AccessList, from, to libcommon.Address, precompiles []libcommon.Address) *AccessListTracer {
-	excl := map[libcommon.Address]struct{}{
-		from: {}, to: {},
-	}
-	for _, addr := range precompiles {
-		excl[addr] = struct{}{}
+// An optional set of addresses to be excluded from the resulting accesslist can
+// also be specified.
+func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
+	excl := make(map[libcommon.Address]struct{})
+	if exclude != nil {
+		excl = exclude
 	}
 	list := newAccessList()
 	for _, al := range acl {
@@ -132,8 +137,11 @@ func NewAccessListTracer(acl types2.AccessList, from, to libcommon.Address, prec
 		}
 	}
 	return &AccessListTracer{
-		excl: excl,
-		list: list,
+		excl:               excl,
+		list:               list,
+		state:              state,
+		createdContracts:   make(map[libcommon.Address]struct{}),
+		usedBeforeCreation: make(map[libcommon.Address]struct{}),
 	}
 }
 
@@ -151,25 +159,60 @@ func (a *AccessListTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, t
 func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	stack := scope.Stack
 	contract := scope.Contract
+	caller := contract.Address()
 
 	stackData := stack.Data
 	stackLen := len(stackData)
 	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
+		addr := contract.Address()
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
-		a.list.addSlot(contract.Address(), slot)
+		if _, ok := a.excl[addr]; !ok {
+			a.list.addSlot(addr, slot)
+			if _, ok := a.createdContracts[addr]; !ok {
+				a.usedBeforeCreation[addr] = struct{}{}
+			}
+		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
 		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
+			if _, ok := a.createdContracts[addr]; !ok {
+				a.usedBeforeCreation[addr] = struct{}{}
+			}
 		}
 	}
 	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
 		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
+			if _, ok := a.createdContracts[addr]; !ok {
+				a.usedBeforeCreation[addr] = struct{}{}
+			}
 		}
 	}
+	if op == vm.CREATE {
+		// contract address for CREATE can only be generated with state
+		if a.state != nil {
+			nonce := a.state.GetNonce(caller)
+			addr := crypto.CreateAddress(caller, nonce)
+			if _, ok := a.excl[addr]; !ok {
+				a.createdContracts[addr] = struct{}{}
+			}
+		}
+	}
+	if op == vm.CREATE2 && stackLen >= 4 {
+		offset := stackData[stackLen-2]
+		size := stackData[stackLen-3]
+		init := scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
+		inithash := crypto.Keccak256(init)
+		salt := stackData[stackLen-4]
+		addr := crypto.CreateAddress2(caller, salt.Bytes32(), inithash)
+		if _, ok := a.excl[addr]; !ok {
+			a.createdContracts[addr] = struct{}{}
+		}
+	}
+
 }
 
 func (*AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
@@ -182,6 +225,17 @@ func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 // AccessList returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()
+}
+
+// CreatedContracts returns the set of all addresses of contracts created during tx execution.
+func (a *AccessListTracer) CreatedContracts() map[libcommon.Address]struct{} {
+	return a.createdContracts
+}
+
+// UsedBeforeCreation returns for a given address whether it was first used before creation.
+func (a *AccessListTracer) UsedBeforeCreation(addr libcommon.Address) bool {
+	_, contained := a.usedBeforeCreation[addr]
+	return contained
 }
 
 // Equal returns if the content of two access list traces are equal.

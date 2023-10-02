@@ -27,7 +27,7 @@ const (
 	PersistedQueueID
 )
 
-// Link is a chain link that can be connect to other chain links
+// Link is a chain link that can be connected to other links in the chain
 // For a given link, parent link can be found by hd.links[link.header.ParentHash], and child links by link.next (there may be more than one child in case of forks)
 // Links encapsule block headers
 // Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still

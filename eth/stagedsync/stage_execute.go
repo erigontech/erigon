@@ -194,11 +194,9 @@ func executeBlock(
 			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 		}
 	}
-
 	if writeCallTraces {
 		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
-
 	return nil
 }
 
@@ -687,8 +685,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
-
-	fmt.Printf("unwindExecutionStage: u.UnwindPoint=%d, s.BlockNumber=%d\n", u.UnwindPoint, s.BlockNumber)
 
 	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle, logger); err != nil {
 		return err

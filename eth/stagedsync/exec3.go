@@ -218,12 +218,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			agg.DiscardHistory()
-		} else {
-			agg.StartWrites()
-		}
-
 		var err error
 		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
@@ -277,9 +271,13 @@ func ExecV3(ctx context.Context,
 	defer doms.Close()
 	defer doms.StartWrites().FinishWrites()
 	doms.SetTx(applyTx)
+	if applyTx != nil {
+		if dbg.DiscardHistory() {
+			doms.DiscardHistory()
+		}
+	}
 
 	rs := state.NewStateV3(doms, logger)
-	fmt.Printf("[dbg] input tx %d\n", inputTxNum)
 	offsetFromBlockBeginning, err := doms.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return err
@@ -382,9 +380,9 @@ func ExecV3(ctx context.Context,
 
 			doms.SetTx(tx)
 			if dbg.DiscardHistory() {
-				agg.DiscardHistory()
+				doms.DiscardHistory()
 			} else {
-				agg.StartWrites()
+				doms.StartWrites()
 			}
 
 			defer applyLoopWg.Wait()
@@ -414,7 +412,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if err = agg.Flush(ctx, tx); err != nil {
+						if err = doms.Flush(ctx, tx); err != nil {
 							return err
 						}
 						break
@@ -471,7 +469,7 @@ func ExecV3(ctx context.Context,
 						t2 = time.Since(tt)
 						tt = time.Now()
 
-						if err := agg.Flush(ctx, tx); err != nil {
+						if err := doms.Flush(ctx, tx); err != nil {
 							return err
 						}
 						doms.ClearRam(true)
@@ -479,6 +477,9 @@ func ExecV3(ctx context.Context,
 
 						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 							return err
+						}
+						if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
+							return fmt.Errorf("writing plain state version: %w", err)
 						}
 
 						tx.CollectMetrics()
@@ -509,7 +510,7 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			if err = agg.Flush(ctx, tx); err != nil {
+			if err = doms.Flush(ctx, tx); err != nil {
 				return err
 			}
 			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
@@ -581,10 +582,15 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
+	blocksInSnapshots := cfg.blockReader.FrozenBlocks()
 	var b *types.Block
 	//var err error
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		if blockNum >= blocksInSnapshots {
+			agg.KeepStepsInDB(1)
+		}
+
 		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
@@ -716,7 +722,7 @@ Loop:
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if txTask.Error != nil {
-						return txTask.Error
+						return fmt.Errorf("%w, blockNum=%d", txTask.Error, txTask.BlockNum)
 					}
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
@@ -795,7 +801,7 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
-					if err := agg.Flush(ctx, applyTx); err != nil {
+					if err := doms.Flush(ctx, applyTx); err != nil {
 						return err
 					}
 					doms.ClearRam(false)
@@ -841,7 +847,7 @@ Loop:
 							return err
 						}
 					}
-					agg.StartWrites()
+					doms.StartWrites()
 					applyWorker.ResetTx(applyTx)
 					nc := applyTx.(*temporal.Tx).AggCtx()
 					doms.SetTx(applyTx)
@@ -882,17 +888,15 @@ Loop:
 		}
 		waitWorkers()
 	} else {
-		if err = agg.Flush(ctx, applyTx); err != nil {
+		if err = doms.Flush(ctx, applyTx); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
-	}
-
-	_, err = rawdb.IncrementStateVersion(applyTx)
-	if err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
+		if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
+			return fmt.Errorf("writing plain state version: %w", err)
+		}
 	}
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {

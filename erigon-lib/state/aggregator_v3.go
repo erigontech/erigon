@@ -780,21 +780,6 @@ func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
 	return e.Wait()
 }
 
-// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
-	a.domains.DiscardHistory(a.tmpdir)
-	return a
-}
-
-// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *AggregatorV3) StartWrites() *AggregatorV3 {
-	if a.domains == nil {
-		a.SharedDomains(a.MakeContext())
-	}
-	a.domains.StartWrites()
-	return a
-}
-
 func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
 	if a.domains == nil {
 		a.SharedDomains(a.MakeContext())
@@ -810,10 +795,6 @@ func (a *AggregatorV3) FinishWrites() {
 
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
-}
-
-func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	return a.domains.Flush(ctx, tx)
 }
 
 func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
@@ -921,44 +902,6 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 		return err
 	}
 	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ac *AggregatorV3Context) Unwind(ctx context.Context, txUnwindTo uint64, rwTx kv.RwTx) error {
-	step := txUnwindTo / ac.a.aggregationStep
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	ac.a.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(rwTx))
-
-	if err := ac.accounts.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := ac.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := ac.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := ac.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := ac.logAddrs.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := ac.logTopics.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := ac.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := ac.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := ac.a.domains.Unwind(ctx, rwTx, txUnwindTo); err != nil {
 		return err
 	}
 	return nil

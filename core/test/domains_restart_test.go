@@ -92,13 +92,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}()
 
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
 	domains := agg.SharedDomains(domCtx)
 	defer domains.Close()
-
 	domains.SetTx(tx)
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -157,7 +155,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
 			hashes = append(hashes, rh)
-			hashedTxs = append(hashedTxs, txNum)
+			hashedTxs = append(hashedTxs, txNum) //nolint
 		}
 	}
 
@@ -186,7 +184,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 
 	domains.Close()
-	agg.FinishWrites()
 	agg.Close()
 	db.Close()
 	db = nil
@@ -206,7 +203,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	agg.StartWrites()
 	domCtx = agg.MakeContext()
 	domains = agg.SharedDomains(domCtx)
 
@@ -228,8 +224,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//}
 
 	_, err = domains.SeekCommitment(0, math.MaxUint64)
-	tx.Rollback()
 	require.NoError(t, err)
+	tx.Rollback()
 
 	domCtx.Close()
 	domains.Close()
@@ -304,7 +300,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		}
 	}()
 
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
@@ -359,7 +354,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			require.NoError(t, err)
 
 			hashes = append(hashes, rh)
-			hashedTxs = append(hashedTxs, txNum)
+			hashedTxs = append(hashedTxs, txNum) //nolint
 			err = rawdbv3.TxNums.Append(tx, domains.BlockNum(), domains.TxNum())
 			require.NoError(t, err)
 		}
@@ -380,7 +375,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 
 	domains.Close()
-	agg.FinishWrites()
 	agg.Close()
 	db.Close()
 	db = nil
@@ -392,7 +386,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	agg.StartWrites()
 	domCtx = agg.MakeContext()
 	domains = agg.SharedDomains(domCtx)
 

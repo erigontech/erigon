@@ -8,8 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -27,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -97,7 +96,6 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		ac := tx.(*temporal.Tx).AggCtx()
 		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
 		defer domains.Close()
-		defer domains.StartWrites().FinishWrites()
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 	} else {

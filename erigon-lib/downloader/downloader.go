@@ -85,10 +85,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs) (*Downl
 		return nil, err
 	}
 
-	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
-		return nil, err
-	}
-
 	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
