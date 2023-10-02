@@ -845,11 +845,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		return err
 	}
 
-	var borDb kv.RoDB
-	if casted, ok := s.engine.(*bor.Bor); ok {
-		borDb = casted.DB
-	}
-	s.apiList = jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
