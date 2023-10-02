@@ -780,21 +780,6 @@ func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
 	return e.Wait()
 }
 
-// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
-	a.domains.DiscardHistory()
-	return a
-}
-
-// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *AggregatorV3) StartWrites() *AggregatorV3 {
-	if a.domains == nil {
-		a.SharedDomains(a.MakeContext())
-	}
-	a.domains.StartWrites()
-	return a
-}
-
 func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
 	if a.domains == nil {
 		a.SharedDomains(a.MakeContext())
@@ -810,10 +795,6 @@ func (a *AggregatorV3) FinishWrites() {
 
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
-}
-
-func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	return a.domains.Flush(ctx, tx)
 }
 
 func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {

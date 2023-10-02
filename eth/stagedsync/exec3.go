@@ -381,7 +381,7 @@ func ExecV3(ctx context.Context,
 
 			doms.SetTx(tx)
 			if dbg.DiscardHistory() {
-				agg.DiscardHistory()
+				doms.DiscardHistory()
 			} else {
 				doms.StartWrites()
 			}
@@ -413,7 +413,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if err = agg.Flush(ctx, tx); err != nil {
+						if err = doms.Flush(ctx, tx); err != nil {
 							return err
 						}
 						break
@@ -470,7 +470,7 @@ func ExecV3(ctx context.Context,
 						t2 = time.Since(tt)
 						tt = time.Now()
 
-						if err := agg.Flush(ctx, tx); err != nil {
+						if err := doms.Flush(ctx, tx); err != nil {
 							return err
 						}
 						doms.ClearRam(true)
@@ -508,7 +508,7 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			if err = agg.Flush(ctx, tx); err != nil {
+			if err = doms.Flush(ctx, tx); err != nil {
 				return err
 			}
 			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
@@ -799,7 +799,7 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
-					if err := agg.Flush(ctx, applyTx); err != nil {
+					if err := doms.Flush(ctx, applyTx); err != nil {
 						return err
 					}
 					doms.ClearRam(false)
@@ -886,7 +886,7 @@ Loop:
 		}
 		waitWorkers()
 	} else {
-		if err = agg.Flush(ctx, applyTx); err != nil {
+		if err = doms.Flush(ctx, applyTx); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
