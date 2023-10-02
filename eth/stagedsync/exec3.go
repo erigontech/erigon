@@ -218,12 +218,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			agg.DiscardHistory()
-		} else {
-			agg.StartWrites()
-		}
-
 		var err error
 		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
@@ -277,6 +271,11 @@ func ExecV3(ctx context.Context,
 	defer doms.Close()
 	defer doms.StartWrites().FinishWrites()
 	doms.SetTx(applyTx)
+	if applyTx != nil {
+		if dbg.DiscardHistory() {
+			doms.DiscardHistory()
+		}
+	}
 
 	rs := state.NewStateV3(doms, logger)
 	fmt.Printf("[dbg] input tx %d\n", inputTxNum)
@@ -384,7 +383,7 @@ func ExecV3(ctx context.Context,
 			if dbg.DiscardHistory() {
 				agg.DiscardHistory()
 			} else {
-				agg.StartWrites()
+				doms.StartWrites()
 			}
 
 			defer applyLoopWg.Wait()
@@ -846,7 +845,7 @@ Loop:
 							return err
 						}
 					}
-					agg.StartWrites()
+					doms.StartWrites()
 					applyWorker.ResetTx(applyTx)
 					nc := applyTx.(*temporal.Tx).AggCtx()
 					doms.SetTx(applyTx)
