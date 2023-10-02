@@ -367,7 +367,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Validate initcode per EOF rules. If caller is EOF and initcode is legacy, fail.
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
-	if evm.chainRules.IsCancun {
+	if evm.chainRules.IsPrague {
 		if isInitcodeEOF {
 			// If the initcode is EOF, verify it is well-formed.
 			var c Container
@@ -438,7 +438,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if err == nil && hasEOFByte(ret) {
-		if evm.chainRules.IsCancun {
+		if evm.chainRules.IsPrague {
 			var c Container
 			if err = c.UnmarshalBinary(ret); err == nil {
 				err = c.ValidateCode(evm.config.JumpTableEOF)
@@ -539,7 +539,7 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 
 // parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
 func (evm *EVM) parseContainer(b []byte) *Container {
-	if evm.chainRules.IsCancun && hasEOFMagic(b) {
+	if evm.chainRules.IsPrague && hasEOFMagic(b) {
 		var c Container
 		if err := c.UnmarshalBinary(b); err != nil {
 			// Code was already validated, so no other errors should be possible.
