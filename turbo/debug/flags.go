@@ -31,7 +31,6 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
@@ -176,7 +175,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -188,13 +187,13 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return logger, err
+			return logger, nil, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return logger, err
+			return logger, nil, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -208,13 +207,6 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
-		diagnostics.SetupLogsAccess(ctx, metricsMux)
-		diagnostics.SetupDbAccess(ctx, metricsMux)
-		diagnostics.SetupCmdLineAccess(metricsMux)
-		diagnostics.SetupFlagsAccess(ctx, metricsMux)
-		diagnostics.SetupVersionAccess(metricsMux)
-		diagnostics.SetupBlockBodyDownload(metricsMux)
-		diagnostics.SetupHeaderDownloadStats(metricsMux)
 	}
 
 	// pprof server
@@ -228,7 +220,8 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 			StartPProf(address, nil)
 		}
 	}
-	return logger, nil
+
+	return logger, metricsMux, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) {

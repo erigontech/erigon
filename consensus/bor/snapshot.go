@@ -146,25 +146,29 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 		if number >= sprintLen {
 			delete(snap.Recents, number-sprintLen)
 		}
-
 		// Resolve the authorization key and check against signers
 		signer, err := ecrecover(header, s.sigcache, s.config)
+
 		if err != nil {
 			return nil, err
 		}
+
+		var validSigner bool
 
 		// check if signer is in validator set
 		if !snap.ValidatorSet.HasAddress(signer) {
 			log.Error("Hey", "number", number, "hash", header.Hash())
 			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
-		}
+		} else {
+			if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
+				return nil, err
+			}
 
-		if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-			return nil, err
-		}
+			// add recents
+			snap.Recents[number] = signer
 
-		// add recents
-		snap.Recents[number] = signer
+			validSigner = true
+		}
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
@@ -178,6 +182,10 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
 			v.IncrementProposerPriority(1, logger)
 			snap.ValidatorSet = v
+		}
+
+		if number > 64 && !validSigner {
+			return nil, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 		}
 	}
 

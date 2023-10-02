@@ -9,21 +9,23 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
 )
 
 type ApiHandler struct {
 	o   sync.Once
 	mux chi.Router
 
-	blockSource     persistence.BlockSource
+	blockSource     persistence.RawBeaconBlockChain
 	indiciesDB      *sql.DB
 	genesisCfg      *clparams.GenesisConfig
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
+	operationsPool  pool.OperationsPool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.BlockSource, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore}
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool}
 }
 
 func (a *ApiHandler) init() {
@@ -35,25 +37,30 @@ func (a *ApiHandler) init() {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/events", nil)
 			r.Route("/config", func(r chi.Router) {
-				r.Get("/spec", beaconHandlerWrapper(a.getSpec))
-				r.Get("/deposit_contract", beaconHandlerWrapper(a.getDepositContract))
-				r.Get("/fork_schedule", beaconHandlerWrapper(a.getForkSchedule))
+				r.Get("/spec", beaconHandlerWrapper(a.getSpec, false))
+				r.Get("/deposit_contract", beaconHandlerWrapper(a.getDepositContract, false))
+				r.Get("/fork_schedule", beaconHandlerWrapper(a.getForkSchedule, false))
 			})
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/headers", func(r chi.Router) {
-					r.Get("/", beaconHandlerWrapper(a.getHeaders))
-					r.Get("/{block_id}", beaconHandlerWrapper(a.getHeader))
+					r.Get("/", beaconHandlerWrapper(a.getHeaders, false))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getHeader, false))
 				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
-					r.Get("/{block_id}", a.getBlock)
-					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockRoot))
-					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot))
+					r.Get("/{block_id}", beaconHandlerWrapper(a.getBlock, true))
+					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockAttestations, true))
+					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot, false))
 				})
-				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis))
+				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis, false))
 				r.Post("/binded_blocks", nil)
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
+					r.Get("/voluntary_exits", beaconHandlerWrapper(a.poolVoluntaryExits, false))
+					r.Get("/attester_slashings", beaconHandlerWrapper(a.poolAttesterSlashings, false))
+					r.Get("/proposer_slashings", beaconHandlerWrapper(a.poolProposerSlashings, false))
+					r.Get("/bls_to_execution_changes", beaconHandlerWrapper(a.poolBlsToExecutionChanges, false))
+					r.Get("/attestations", beaconHandlerWrapper(a.poolAttestations, false))
 					r.Post("/sync_committees", nil)
 				})
 				r.Get("/node/syncing", nil)
@@ -63,7 +70,8 @@ func (a *ApiHandler) init() {
 					r.Get("/head/committees", nil)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
 						r.Get("/validators", nil)
-						r.Get("/fork", nil)
+						r.Get("/root", beaconHandlerWrapper(a.getStateRoot, false))
+						r.Get("/fork", beaconHandlerWrapper(a.getStateFork, false))
 						r.Get("/validators/{id}", nil)
 					})
 				})

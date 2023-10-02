@@ -19,7 +19,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -417,28 +416,6 @@ func addTorrentFile(ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*to
 }
 
 var ErrSkip = fmt.Errorf("skip")
-
-func portMustBeTCPAndUDPOpen(port int) error {
-	tcpAddr := &net.TCPAddr{
-		Port: port,
-		IP:   net.ParseIP("127.0.0.1"),
-	}
-	ln, err := net.ListenTCP("tcp", tcpAddr)
-	if err != nil {
-		return fmt.Errorf("please open port %d for TCP and UDP. %w", port, err)
-	}
-	_ = ln.Close()
-	udpAddr := &net.UDPAddr{
-		Port: port,
-		IP:   net.ParseIP("127.0.0.1"),
-	}
-	ser, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		return fmt.Errorf("please open port %d for UDP. %w", port, err)
-	}
-	_ = ser.Close()
-	return nil
-}
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 	return db.Update(context.Background(), func(tx kv.RwTx) error {

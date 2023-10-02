@@ -50,9 +50,9 @@ func NewAttestionFromParameters(
 
 func (a Attestation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		AggregationBits hexutility.Bytes
-		Signature       libcommon.Bytes96
-		Data            AttestationData
+		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
+		Signature       libcommon.Bytes96 `json:"signature"`
+		Data            AttestationData   `json:"data"`
 	}{
 		AggregationBits: a.aggregationBitsBuffer,
 		Signature:       a.Signature(),
@@ -62,9 +62,9 @@ func (a Attestation) MarshalJSON() ([]byte, error) {
 
 func (a *Attestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AggregationBits hexutility.Bytes
-		Signature       libcommon.Bytes96
-		Data            AttestationData
+		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
+		Signature       libcommon.Bytes96 `json:"signature"`
+		Data            AttestationData   `json:"data"`
 	}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err

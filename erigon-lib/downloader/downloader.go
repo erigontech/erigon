@@ -82,10 +82,6 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
-	if err := portMustBeTCPAndUDPOpen(cfg.ClientConfig.ListenPort); err != nil {
-		return nil, err
-	}
-
 	// Application must never see partially-downloaded files
 	// To provide such consistent view - downloader does:
 	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
@@ -235,7 +231,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 				}(t)
 			}
-			time.Sleep(10 * time.Second)
+
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 	}()
 
