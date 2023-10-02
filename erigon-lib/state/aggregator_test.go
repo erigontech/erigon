@@ -174,12 +174,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 			tx.Rollback()
 		}
 	}()
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
 	domains := agg.SharedDomains(domCtx)
 	defer domains.Close()
+	domains.StartWrites()
 
 	domains.SetTx(tx)
 
@@ -364,14 +364,12 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	//newAgg.SetTx(newTx)
-	defer newAgg.StartWrites().FinishWrites()
-
 	ac := newAgg.MakeContext()
 	defer ac.Close()
 	newDoms := newAgg.SharedDomains(ac)
 	defer newDoms.Close()
 	newDoms.SetTx(newTx)
+	defer newDoms.StartWrites().FinishWrites()
 
 	_, err = newDoms.SeekCommitment(0, 1<<63-1)
 	require.NoError(t, err)

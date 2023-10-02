@@ -383,7 +383,7 @@ func ExecV3(ctx context.Context,
 			if dbg.DiscardHistory() {
 				agg.DiscardHistory()
 			} else {
-				agg.StartWrites()
+				doms.StartWrites()
 			}
 
 			defer applyLoopWg.Wait()
@@ -845,7 +845,7 @@ Loop:
 							return err
 						}
 					}
-					agg.StartWrites()
+					doms.StartWrites()
 					applyWorker.ResetTx(applyTx)
 					nc := applyTx.(*temporal.Tx).AggCtx()
 					doms.SetTx(applyTx)
