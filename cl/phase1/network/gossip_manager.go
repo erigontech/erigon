@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Gossip manager is sending all messages to fork choice or others
