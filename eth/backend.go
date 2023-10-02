@@ -1219,7 +1219,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	if s.chainConfig.Bor != nil {
-		s.engine.(*bor.Bor).Start(s.chainDB, s.blockReader)
+		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
 	return nil

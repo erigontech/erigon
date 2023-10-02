@@ -1309,10 +1309,10 @@ func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
 	return f(start, end)
 }
 
-func (c *Bor) Start(chainDB kv.RwDB, blockReader services.FullBlockReader) {
+func (c *Bor) Start(chainDB kv.RwDB) {
 	if flags.Milestone {
 		whitelist.RegisterService(c.DB)
-		borfinality.Whitelist(c.HeimdallClient, c.DB, chainDB, blockReader, c.logger,
+		borfinality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
 			FinalityAPIFunc(func(start uint64, end uint64) (string, error) {
 				ctx := context.Background()
 				tx, err := chainDB.BeginRo(ctx)
