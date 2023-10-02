@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -59,6 +58,8 @@ func (a *ApiHandler) init() {
 					r.Get("/voluntary_exits", beaconHandlerWrapper(a.poolVoluntaryExits, false))
 					r.Get("/attester_slashings", beaconHandlerWrapper(a.poolAttesterSlashings, false))
 					r.Get("/proposer_slashings", beaconHandlerWrapper(a.poolProposerSlashings, false))
+					r.Get("/bls_to_execution_changes", beaconHandlerWrapper(a.poolBlsToExecutionChanges, false))
+					r.Get("/attestations", beaconHandlerWrapper(a.poolAttestations, false))
 					r.Post("/sync_committees", nil)
 				})
 				r.Get("/node/syncing", nil)
