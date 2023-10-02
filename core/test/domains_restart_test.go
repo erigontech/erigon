@@ -424,7 +424,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	rh, err := writer.Commitment(false, false)
 	require.NoError(t, err)
-	require.EqualValues(t, rh, types.EmptyRootHash)
+	require.EqualValues(t, libcommon.BytesToHash(rh), types.EmptyRootHash)
 
 	var i, j int
 	for txNum := txToStart; txNum <= txs; txNum++ {
