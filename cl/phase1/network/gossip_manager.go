@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
