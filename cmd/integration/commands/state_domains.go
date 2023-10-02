@@ -394,7 +394,7 @@ func (b *blockProcessor) commit(ctx context.Context) error {
 	}
 
 	s := time.Now()
-	defer mxCommitTook.UpdateDuration(s)
+	defer mxCommitTook.Observe(float64(time.Since(s)))
 
 	var spaceDirty uint64
 	var err error
@@ -496,7 +496,8 @@ func (b *blockProcessor) applyBlock(
 	ctx context.Context,
 	block *types.Block,
 ) (types.Receipts, error) {
-	defer mxBlockExecutionTimer.UpdateDuration(time.Now())
+	s := time.Now()
+	defer mxBlockExecutionTimer.UpdateDuration(s)
 
 	header := block.Header()
 	b.vmConfig.Debug = true
