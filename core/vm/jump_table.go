@@ -69,6 +69,7 @@ var (
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
+	pragueEOFInstructionSet        = newPragueEOFInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -96,6 +97,12 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
+	instructionSet := newCancunInstructionSet()
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newPragueEOFInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
