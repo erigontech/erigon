@@ -61,8 +61,7 @@ type summary struct {
 }
 
 func (sm summary) UpdateDuration(startTime time.Time) {
-	d := time.Since(startTime).Seconds()
-	sm.Observe(float64(d))
+	sm.Observe(time.Since(startTime).Seconds())
 }
 
 func GetOrCreateSummary(s string) Summary {
