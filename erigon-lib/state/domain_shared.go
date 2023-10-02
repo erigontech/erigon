@@ -130,7 +130,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 
 	// TODO what if unwinded to the middle of block? It should cause one more unwind until block beginning or end is not found.
 	_, err := sd.SeekCommitment(0, txUnwindTo)
-	fmt.Printf("Unwinded domains to block %d, txn %d wanted to %d\n", sd.BlockNum(), sd.TxNum(), txUnwindTo)
 	return err
 }
 

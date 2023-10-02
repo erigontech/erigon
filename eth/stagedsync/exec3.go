@@ -478,6 +478,9 @@ func ExecV3(ctx context.Context,
 						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 							return err
 						}
+						if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
+							return fmt.Errorf("writing plain state version: %w", err)
+						}
 
 						tx.CollectMetrics()
 						tt = time.Now()
@@ -888,14 +891,17 @@ Loop:
 		if err = doms.Flush(ctx, applyTx); err != nil {
 			return err
 		}
+
+		applyTx.ForEach(kv.TblTracesToIdx, nil, func(k, v []byte) error {
+			fmt.Printf("see after flush1: %t, %x, %x\n", useExternalTx, k, v)
+			return nil
+		})
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
-	}
-
-	_, err = rawdb.IncrementStateVersion(applyTx)
-	if err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
+		if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
+			return fmt.Errorf("writing plain state version: %w", err)
+		}
 	}
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {

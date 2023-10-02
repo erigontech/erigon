@@ -652,10 +652,6 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-
-	//if ii.filenameBase == "tracesto" && bytes.Equal(key, hexutility.FromHex("537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")) {
-	//	fmt.Printf("ii: %s, %x, %d\n", ii.filenameBase, key, ii.ii.txNum)
-	//}
 	if ii.buffered {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err
@@ -818,12 +814,10 @@ func (ic *InvertedIndexContext) IdxRange(key []byte, startTxNum, endTxNum int, a
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("IdxRange: %x, %d, %d\n", key, startTxNum, iter.ToArrU64Must(frozenIt))
 	recentIt, err := ic.recentIterateRange(key, startTxNum, endTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("IdxRange: %x, %d, %d\n", key, startTxNum, iter.ToArrU64Must(frozenIt))
 	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
@@ -852,7 +846,6 @@ func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTx
 		to = make([]byte, 8)
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
-
 	it, err := roTx.RangeDupSort(ic.ii.indexTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
@@ -916,8 +909,25 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 	return it, nil
 }
 
+func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ic.ii.indexKeysTable)
+	if len(fst) > 0 {
+		fstInDb := binary.BigEndian.Uint64(fst)
+		return cmp.Min(fstInDb, math.MaxUint64)
+	}
+	return math.MaxUint64
+}
+
+func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
+	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
+}
+
 // [txFrom; txTo)
 func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	if !ic.CanPrune(rwTx) {
+		return nil
+	}
+
 	ii := ic.ii
 	defer func(t time.Time) { mxPruneTookIndex.UpdateDuration(t) }(time.Now())
 

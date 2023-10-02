@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 
@@ -2152,23 +2151,8 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 	return fit, nil
 }
 
-func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, dc.d.indexKeysTable)
-	//fst2, _ := kv.FirstKey(tx, dc.d.keysTable)
-	//if len(fst) > 0 && len(fst2) > 0 {
-	//	fstInDb := binary.BigEndian.Uint64(fst)
-	//	fstInDb2 := binary.BigEndian.Uint64(fst2)
-	//	return cmp.Min(fstInDb, fstInDb2)
-	//}
-	if len(fst) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		return cmp.Min(fstInDb, math.MaxUint64)
-	}
-	return math.MaxUint64
-}
-
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	return dc.CanPruneFrom(tx) < dc.maxTxNumInFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInFiles(false)
 }
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
