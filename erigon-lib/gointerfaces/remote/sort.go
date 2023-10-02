@@ -6,9 +6,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
-func NodeInfoReplyLess(i, j *types.NodeInfoReply) bool {
+func NodeInfoReplyCmp(i, j *types.NodeInfoReply) int {
 	if cmp := strings.Compare(i.Name, j.Name); cmp != 0 {
-		return cmp == -1
+		return cmp
 	}
-	return strings.Compare(i.Enode, j.Enode) == -1
+	return strings.Compare(i.Enode, j.Enode)
 }
