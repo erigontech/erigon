@@ -891,11 +891,6 @@ Loop:
 		if err = doms.Flush(ctx, applyTx); err != nil {
 			return err
 		}
-
-		applyTx.ForEach(kv.TblTracesToIdx, nil, func(k, v []byte) error {
-			fmt.Printf("see after flush1: %t, %x, %x\n", useExternalTx, k, v)
-			return nil
-		})
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
