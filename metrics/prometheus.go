@@ -31,6 +31,8 @@ import (
 // Handler returns an HTTP handler which dump metrics in Prometheus format.
 // Output format can be cheched here: https://o11y.tools/metricslint/
 func Handler(reg Registry) http.Handler {
+	prometheus.DefaultRegisterer.MustRegister(defaultSet)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Gather and pre-sort the metrics to avoid random listings
 		var names []string
