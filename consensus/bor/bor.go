@@ -159,6 +159,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 	var signer libcommon.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
+	//log.Info(fmt.Sprintf("put to cache %d %x=>%x\n", header.Number.Uint64(), hash, signer))
 	sigcache.Add(hash, signer)
 
 	return signer, nil
@@ -398,7 +399,7 @@ func New(
 		libcommon.Address{},
 		func(_ libcommon.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &UnauthorizedSignerError{0, libcommon.Address{}.Bytes()}
+			return nil, &UnauthorizedSignerError{libcommon.Hash{}, 0, libcommon.Address{}.Bytes()}
 		},
 	})
 
@@ -820,7 +821,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 
 	if !snap.ValidatorSet.HasAddress(signer) {
 		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
+		return &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 	}
 
 	succession, err := snap.GetSignerSuccessionNumber(signer)
@@ -1101,7 +1102,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	// Bail out if we're unauthorized to sign a block
 	if !snap.ValidatorSet.HasAddress(signer) {
 		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
+		return &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 	}
 
 	successionNumber, err := snap.GetSignerSuccessionNumber(signer)

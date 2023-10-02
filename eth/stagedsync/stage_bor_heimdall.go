@@ -228,8 +228,8 @@ func BorHeimdallForward(
 				return err
 			}
 		}
-		if err = persistValidatorSets(ctx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
-			return err
+		if err = persistValidatorSets(u, ctx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+			return fmt.Errorf("persistValidatorSets: %w", err)
 		}
 	}
 
@@ -384,6 +384,7 @@ func fetchAndWriteSpans(
 }
 
 func persistValidatorSets(
+	u Unwinder,
 	ctx context.Context,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
@@ -427,6 +428,7 @@ func persistValidatorSets(
 		// No explicit parents (or no more left), reach out to the database
 		if chain != nil {
 			header = chain.GetHeader(hash, blockNum)
+			//logger.Info(fmt.Sprintf("header %d %x => %+v\n", header.Number.Uint64(), header.Hash(), header))
 		}
 
 		if header == nil {
@@ -446,7 +448,7 @@ func persistValidatorSets(
 
 		select {
 		case <-logEvery.C:
-			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", blockNum)
+			logger.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", blockNum)
 		default:
 		}
 	}
@@ -475,7 +477,7 @@ func persistValidatorSets(
 			// new snap shot
 			snap = bor.NewSnapshot(config, signatures, 0, hash, validators, logger)
 			if err := snap.Store(snapDb); err != nil {
-				return err
+				return fmt.Errorf("snap.Store (0): %w", err)
 			}
 			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 			initialHeaders := make([]*types.Header, 0, 128)
@@ -484,7 +486,11 @@ func persistValidatorSets(
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(initialHeaders, logger); err != nil {
-						return err
+						if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
+							u.UnwindTo(signErr.Number-1, signErr.Hash)
+						} else {
+							return fmt.Errorf("snap.Apply (inside loop): %w", err)
+						}
 					}
 					initialHeaders = initialHeaders[:0]
 				}
@@ -495,14 +501,14 @@ func persistValidatorSets(
 				}
 			}
 			if snap, err = snap.Apply(initialHeaders, logger); err != nil {
-				return err
+				return fmt.Errorf("snap.Apply (outside loop): %w", err)
 			}
 		}
 	}
 
 	// check if snapshot is nil
 	if snap == nil {
-		fmt.Errorf("unknown error while retrieving snapshot at block number %v", blockNum)
+		return fmt.Errorf("unknown error while retrieving snapshot at block number %v", blockNum)
 	}
 
 	// Previous snapshot found, apply any pending headers on top of it
@@ -510,23 +516,34 @@ func persistValidatorSets(
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	var err error
-	if snap, err = snap.Apply(headers, logger); err != nil {
-		return err
+	prevSnap := snap.Number
+	if len(headers) > 0 {
+		var err error
+		if snap, err = snap.Apply(headers, logger); err != nil {
+			if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
+				u.UnwindTo(signErr.Number-1, signErr.Hash)
+			} else {
+				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
+			}
+		}
+	}
+
+	if prevSnap == snap.Number {
+		return nil
 	}
 
 	recents.Add(snap.Hash, snap)
 
 	// If we've generated a new persistent snapshot, save to disk
 	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
-		if err = snap.Store(snapDb); err != nil {
-			return err
+		if err := snap.Store(snapDb); err != nil {
+			return fmt.Errorf("snap.Store: %w", err)
 		}
 
 		logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
-	return err
+	return nil
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
