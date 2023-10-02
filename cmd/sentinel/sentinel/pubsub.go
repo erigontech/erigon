@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
