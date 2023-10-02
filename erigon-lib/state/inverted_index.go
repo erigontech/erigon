@@ -555,8 +555,8 @@ func (ii *InvertedIndex) add(key, indexKey []byte) error { //nolint
 	return ii.wal.add(key, indexKey)
 }
 
-func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
-	ii.wal = ii.newWriter(tmpdir, false, true)
+func (ii *InvertedIndex) DiscardHistory() {
+	ii.wal = ii.newWriter(ii.dirs.Tmp, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
 	ii.wal = ii.newWriter(ii.dirs.Tmp, true, false)
