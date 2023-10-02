@@ -38,11 +38,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
 	defer domains.Close()
+	domains.StartWrites()
 
 	domains.SetTx(rwTx)
 
@@ -294,12 +294,12 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		}
 	}()
 	//agg.SetTx(tx)
-	agg.StartWrites()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
 	defer domains.Close()
 	domains.SetTx(tx)
+	domains.StartWrites()
 
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
@@ -693,10 +693,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer rwTx.Rollback()
 
 	domains.SetTx(rwTx)
-	agg.StartWrites()
-
-	//agg.StartUnbufferedWrites()
-	defer agg.FinishWrites()
+	defer domains.StartWrites().FinishWrites()
 	defer domains.Close()
 
 	keys, vals := generateInputData(t, 20, 16, 10)

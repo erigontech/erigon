@@ -161,7 +161,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
-				if err := agg.Flush(context.Background(), tx); err != nil {
+				if err := domains.Flush(context.Background(), tx); err != nil {
 					panic(err)
 				}
 			}
