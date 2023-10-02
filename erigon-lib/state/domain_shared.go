@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	math2 "math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +96,36 @@ func (sd *SharedDomains) SetInvertedIndices(tracesTo, tracesFrom, logAddrs, logT
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
+	step := txUnwindTo / sd.aggCtx.a.aggregationStep
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
+		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
+
+	if err := sd.aggCtx.accounts.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.logTopics.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
 	sd.ClearRam(true)
 
 	// TODO what if unwinded to the middle of block? It should cause one more unwind until block beginning or end is not found.
@@ -820,15 +851,15 @@ func (sd *SharedDomains) BatchHistoryWriteEnd() {
 	sd.walLock.RUnlock()
 }
 
-func (sd *SharedDomains) DiscardHistory(tmpDir string) {
+func (sd *SharedDomains) DiscardHistory() {
 	sd.Account.DiscardHistory()
 	sd.Storage.DiscardHistory()
 	sd.Code.DiscardHistory()
 	sd.Commitment.DiscardHistory()
-	sd.LogAddrs.DiscardHistory(tmpDir)
-	sd.LogTopics.DiscardHistory(tmpDir)
-	sd.TracesFrom.DiscardHistory(tmpDir)
-	sd.TracesTo.DiscardHistory(tmpDir)
+	sd.LogAddrs.DiscardHistory()
+	sd.LogTopics.DiscardHistory()
+	sd.TracesFrom.DiscardHistory()
+	sd.TracesTo.DiscardHistory()
 }
 func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
