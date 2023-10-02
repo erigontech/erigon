@@ -157,7 +157,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
 			hashes = append(hashes, rh)
-			hashedTxs = append(hashedTxs, txNum)
+			hashedTxs = append(hashedTxs, txNum) //nolint
 		}
 	}
 
@@ -359,7 +359,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			require.NoError(t, err)
 
 			hashes = append(hashes, rh)
-			hashedTxs = append(hashedTxs, txNum)
+			hashedTxs = append(hashedTxs, txNum) //nolint
 			err = rawdbv3.TxNums.Append(tx, domains.BlockNum(), domains.TxNum())
 			require.NoError(t, err)
 		}
