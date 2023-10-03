@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -159,7 +161,16 @@ func (d *WebSeeds) callTorrentUrlProvider(ctx context.Context, url *url.URL) ([]
 	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
 		return nil, nil
 	}
-	return io.ReadAll(resp.Body)
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	//validate
+	var mi metainfo.MetaInfo
+	if err = bencode.NewDecoder(bytes.NewBuffer(res)).Decode(&mi); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
 	data, err := os.ReadFile(webSeedProviderPath)

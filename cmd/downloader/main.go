@@ -215,7 +215,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		_, err := downloader.BuildTorrentFilesIfNeed(context.Background(), dirs.Snap)
+		err := downloader.BuildTorrentFilesIfNeed(context.Background(), dirs.Snap)
 		if err != nil {
 			return err
 		}
@@ -242,7 +242,7 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if _, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
 				return err
 			}
 		}

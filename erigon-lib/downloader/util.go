@@ -240,13 +240,13 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	files, err := seedableFiles(snapDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -276,9 +276,9 @@ Loop:
 		}
 	}
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return err
 	}
-	return files, nil
+	return nil
 }
 
 func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
