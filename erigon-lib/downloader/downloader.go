@@ -60,8 +60,9 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
-	webseeds *WebSeeds
-	logger   log.Logger
+	webseeds  *WebSeeds
+	logger    log.Logger
+	verbosity log.Lvl
 }
 
 type AggStats struct {
@@ -79,7 +80,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
 	// Application must never see partially-downloaded files
 	// To provide such consistent view - downloader does:
 	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
@@ -116,6 +117,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		statsLock:         &sync.RWMutex{},
 		webseeds:          &WebSeeds{logger: logger},
 		logger:            logger,
+		verbosity:         verbosity,
 	}
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
@@ -132,7 +134,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.SnapDir)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(); err != nil {
+		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
 		d.applyWebseeds()
@@ -346,7 +348,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Debug("[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
 				}
 			}
 		default:
@@ -356,16 +358,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 	if len(noMetadata) > 0 {
-		if len(noMetadata) > 6 {
-			noMetadata = append(noMetadata[:6], "...")
+		if len(noMetadata) > 5 {
+			noMetadata = append(noMetadata[:5], "...")
 		}
-		d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
+		d.logger.Log(d.verbosity, "[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
-		if len(zeroProgress) > 6 {
-			zeroProgress = append(zeroProgress[:6], "...")
+		if len(zeroProgress) > 5 {
+			zeroProgress = append(zeroProgress[:5], "...")
 		}
-		d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
+		d.logger.Log(d.verbosity, "[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
 	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
