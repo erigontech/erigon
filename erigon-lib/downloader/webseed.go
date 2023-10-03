@@ -48,7 +48,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 		}
 		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Warn("[downloader] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
 		list = append(list, response)
@@ -58,11 +58,11 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 		response, err := d.readWebSeedsFile(webSeedFile)
 		if err != nil { // don't fail on error
 			_, fileName := filepath.Split(webSeedFile)
-			d.logger.Warn("[downloader] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
+			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
 			continue
 		}
 		if len(diskProviders) > 0 {
-			d.logger.Log(d.verbosity, "[downloader] see webseed.toml file", "files", webSeedFile)
+			d.logger.Log(d.verbosity, "[snapshots] see webseed.toml file", "files", webSeedFile)
 		}
 		list = append(list, response)
 	}
@@ -73,7 +73,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 			if strings.HasSuffix(name, ".torrent") {
 				uri, err := url.ParseRequestURI(wUrl)
 				if err != nil {
-					d.logger.Debug("[downloader] url is invalid", "url", wUrl, "err", err)
+					d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
 					continue
 				}
 				torrentUrls[name] = append(torrentUrls[name], uri)
