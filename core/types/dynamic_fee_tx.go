@@ -473,11 +473,11 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 	return addr, nil
 }
 
-func (tx *DynamicFeeTransaction) PutOptions(options *TransactionConditions) {
+func (tx *DynamicFeeTransaction) PutOptions(options *types2.TransactionConditions) {
 	tx.TransactionConditions = options
 }
 
-func (tx *DynamicFeeTransaction) GetOptions() *TransactionConditions {
+func (tx *DynamicFeeTransaction) GetOptions() *types2.TransactionConditions {
 	return tx.TransactionConditions
 }
 
