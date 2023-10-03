@@ -26,5 +26,6 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	SetupHeaderDownloadStats(debugMux)
 	SetupNodeInfoAccess(debugMux, node)
 	SetupPeersAccess(ctx, debugMux, node)
+	SetupBootnodesAccess(debugMux, node)
 
 }

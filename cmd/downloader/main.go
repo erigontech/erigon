@@ -174,7 +174,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	d, err := downloader.New(ctx, cfg)
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		_, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
 		if err != nil {
 			return err
 		}
@@ -247,7 +247,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if _, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}
