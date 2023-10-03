@@ -130,14 +130,10 @@ func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
 	return d.torrentUrls
 }
 
-func (d *WebSeeds) Names() []string {
+func (d *WebSeeds) Len() int {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	res := make([]string, 0, len(d.byFileName))
-	for name := range d.byFileName {
-		res = append(res, name)
-	}
-	return nil
+	return len(d.byFileName)
 }
 
 func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {

@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(); err != nil {
+		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
 		d.applyWebseeds()
@@ -632,7 +632,9 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 }
 
 func (d *Downloader) applyWebseeds() {
-	d.logger.Debug("[downloader] add webseed urls", "files", strings.Join(d.webseeds.Names(), ","))
+	if d.webseeds.Len() > 0 {
+		d.logger.Debug("[downloader] add webseed urls", "amount", d.webseeds.Len())
+	}
 	for _, t := range d.TorrentClient().Torrents() {
 		select {
 		case <-d.ctx.Done():
