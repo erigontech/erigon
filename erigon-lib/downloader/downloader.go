@@ -634,12 +634,15 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 }
 
 func (d *Downloader) applyWebseeds() {
-	if d.webseeds.Len() > 0 {
-		d.logger.Log(d.verbosity, "[snapshots] add webseed urls", "amount", d.webseeds.Len())
-	}
-	for _, t := range d.TorrentClient().Torrents() {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	torrents := d.TorrentClient().Torrents()
+	var added int
+	for _, t := range torrents {
 		select {
 		case <-d.ctx.Done():
+		case <-logEvery.C:
+			d.logger.Log(d.verbosity, "[snapshots] added webseed urls", "progress", fmt.Sprintf("%d/%d", added, len(torrents)))
 		default:
 		}
 
@@ -648,5 +651,7 @@ func (d *Downloader) applyWebseeds() {
 			continue
 		}
 		t.AddWebSeeds(urls)
+		added++
 	}
+	d.logger.Log(d.verbosity, "[snapshots] added webseed urls for", "files", added)
 }
