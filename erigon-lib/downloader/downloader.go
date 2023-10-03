@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
 		return nil, err
 	}
-	if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
+	if err := d.addTorrentFilesFromDisk(); err != nil {
 		return nil, err
 	}
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -132,7 +132,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.SnapDir)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
+		if err := d.addTorrentFilesFromDisk(); err != nil {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
 		d.applyWebseeds()
@@ -164,6 +164,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 		// First loop drops torrents that were downloaded or are already complete
 		// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
@@ -203,10 +208,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 		}
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addTorrentFilesFromDisk(d.ctx)
+		d.addTorrentFilesFromDisk()
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
+			select {
+			case <-d.ctx.Done():
+				return
+			default:
+			}
 			for _, t := range torrents {
 				if _, already := torrentMap[t.InfoHash()]; already {
 					continue
@@ -336,7 +346,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Debug("[downloader] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					d.logger.Debug("[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
 				}
 			}
 		default:
@@ -348,7 +358,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	if len(noMetadata) > 0 {
 		d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
-	if len(noMetadata) > 0 {
+	if len(zeroProgress) > 0 {
 		d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
@@ -482,11 +492,6 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
 	// if we don't have the torrent file we build it if we have the .seg file
 	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
 	if err != nil {
@@ -496,7 +501,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
-	_, err = addTorrentFile(ts, d.torrentClient)
+	_, err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -561,15 +566,22 @@ func seedableFiles(snapDir string) ([]string, error) {
 	files = append(files, files2...)
 	return files, nil
 }
-func (d *Downloader) addTorrentFilesFromDisk(ctx context.Context) error {
+func (d *Downloader) addTorrentFilesFromDisk() error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	files, err := allTorrentFiles(d.SnapDir())
 	if err != nil {
 		return err
 	}
-	for _, ts := range files {
-		_, err := addTorrentFile(ts, d.torrentClient)
+	for i, ts := range files {
+		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("[snapshots] Adding .torrent files from disk", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+		default:
 		}
 	}
 	return nil
@@ -650,6 +662,11 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 func (d *Downloader) applyWebseeds() {
 	d.logger.Debug("[downloader] add webseed urls", "files", strings.Join(d.webseeds.Names(), ","))
 	for _, t := range d.TorrentClient().Torrents() {
+		select {
+		case <-d.ctx.Done():
+		default:
+		}
+
 		urls, ok := d.webseeds.ByFileName(t.Name())
 		if !ok {
 			continue
