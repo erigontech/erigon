@@ -33,7 +33,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -191,15 +190,13 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 		})
 	}
 
-	var m runtime.MemStats
 Loop:
 	for int(i.Load()) < len(files) {
 		select {
 		case <-ctx.Done():
 			break Loop // g.Wait() will return right error
 		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 		}
 	}
 	if err := g.Wait(); err != nil {

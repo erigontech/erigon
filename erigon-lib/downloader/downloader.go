@@ -534,14 +534,22 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	return files, nil
 }
 func (d *Downloader) addTorrentFilesFromDisk() error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	files, err := AllTorrentSpecs(d.cfg.Dirs)
 	if err != nil {
 		return err
 	}
-	for _, ts := range files {
+	for i, ts := range files {
 		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("[snapshots] Adding .torrent files from disk", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+		default:
 		}
 	}
 	return nil
