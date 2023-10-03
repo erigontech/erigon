@@ -56,8 +56,6 @@ func (v *KnownAccountStorageCondition) IsStorage() bool {
 	return v != nil && v.StorageSlotHashes != nil
 }
 
-const EmptyValue = "{}"
-
 func (v *KnownAccountStorageCondition) MarshalJSON() ([]byte, error) {
 	if v.IsSingle() {
 		return json.Marshal(v.StorageRootHash)
@@ -67,10 +65,8 @@ func (v *KnownAccountStorageCondition) MarshalJSON() ([]byte, error) {
 		return json.Marshal(v.StorageSlotHashes)
 	}
 
-	return []byte(EmptyValue), nil
+	return []byte("{}"), nil
 }
-
-const hashTypeName = "Hash"
 
 func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 {
@@ -98,7 +94,7 @@ func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 		// check k if it is a Hex value
 		var kHash libcommon.Hash
 
-		err = hexutility.UnmarshalFixedText(hashTypeName, []byte(k), kHash[:])
+		err = hexutility.UnmarshalFixedText("Hash", []byte(k), kHash[:])
 		if err != nil {
 			return fmt.Errorf("%w by key: %s with key %q and value %q", ErrKnownAccounts, err, k, string(v))
 		}
