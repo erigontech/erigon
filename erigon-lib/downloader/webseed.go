@@ -29,7 +29,8 @@ type WebSeeds struct {
 	byFileName  snaptype.WebSeedUrls // HTTP urls of data files
 	torrentUrls snaptype.TorrentUrls // HTTP urls of .torrent files
 
-	logger log.Logger
+	logger    log.Logger
+	verbosity log.Lvl
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
@@ -59,6 +60,9 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 			_, fileName := filepath.Split(webSeedFile)
 			d.logger.Warn("[downloader] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
 			continue
+		}
+		if len(diskProviders) > 0 {
+			d.logger.Log(d.verbosity, "[downloader] see webseed.toml file", "files", webSeedFile)
 		}
 		list = append(list, response)
 	}
