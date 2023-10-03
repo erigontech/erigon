@@ -550,6 +550,8 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		return err
 	}
 	for i, ts := range files {
+		ws, _ := d.webseeds.ByFileName(ts.DisplayName)
+		ts.Webseeds = append(ts.Webseeds, ws...)
 		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
