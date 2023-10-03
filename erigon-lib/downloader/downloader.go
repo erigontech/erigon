@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -317,6 +318,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 
 	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
+
+	var zeroProgress []string
+	var noMetadata []string
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
@@ -329,10 +333,20 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			stats.BytesTotal += uint64(t.Length())
 			if !t.Complete.Bool() {
 				progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
-				d.logger.Debug("[downloader] file not downloaded yet", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+				if progress == 0 {
+					zeroProgress = append(zeroProgress, t.Name())
+				} else {
+					d.logger.Debug("[downloader] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+				}
 			}
 		default:
-			d.logger.Debug("[downloader] file has no metadata yet", "name", t.Name())
+			noMetadata = append(noMetadata, t.Name())
+		}
+		if len(noMetadata) > 0 {
+			d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
+		}
+		if len(noMetadata) > 0 {
+			d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 		}
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
@@ -634,12 +648,12 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 }
 
 func (d *Downloader) applyWebseeds() {
+	d.logger.Debug("[downloader] add webseed urls", "files", strings.Join(d.webseeds.Names(), ","))
 	for _, t := range d.TorrentClient().Torrents() {
 		urls, ok := d.webseeds.ByFileName(t.Name())
 		if !ok {
 			continue
 		}
-		d.logger.Debug("[downloader] addd webseeds", "file", t.Name())
 		t.AddWebSeeds(urls)
 	}
 }
