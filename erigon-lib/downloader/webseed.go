@@ -93,6 +93,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	e, ctx := errgroup.WithContext(ctx)
 	for name, tUrls := range d.TorrentUrls() {
 		tPath := filepath.Join(rootDir, name)
+		fmt.Printf("check existance: %s, %t\n", name, dir.FileExist(tPath))
 		if dir.FileExist(tPath) {
 			continue
 		}
