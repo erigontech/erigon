@@ -196,6 +196,9 @@ Loop:
 		case <-ctx.Done():
 			break Loop // g.Wait() will return right error
 		case <-logEvery.C:
+			if int(i.Load()) == len(files) {
+				break Loop
+			}
 			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 		}
 	}
