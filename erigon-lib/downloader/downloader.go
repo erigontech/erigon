@@ -112,7 +112,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
 		return nil, err
 	}
-	if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
+	if err := d.addTorrentFilesFromDisk(); err != nil {
 		return nil, err
 	}
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
+		if err := d.addTorrentFilesFromDisk(); err != nil {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
 		d.applyWebseeds()
@@ -198,7 +198,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		}
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addTorrentFilesFromDisk(d.ctx)
+		d.addTorrentFilesFromDisk()
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -460,7 +460,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
-	_, err = addTorrentFile(ts, d.torrentClient)
+	_, err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -533,13 +533,13 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
-func (d *Downloader) addTorrentFilesFromDisk(ctx context.Context) error {
+func (d *Downloader) addTorrentFilesFromDisk() error {
 	files, err := AllTorrentSpecs(d.cfg.Dirs)
 	if err != nil {
 		return err
 	}
 	for _, ts := range files {
-		_, err := addTorrentFile(ts, d.torrentClient)
+		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
 		}
