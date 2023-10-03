@@ -377,13 +377,13 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
-func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
+func saveTorrent(torrentFilePath string, res []byte) error {
 	f, err := os.Create(torrentFilePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err = info.Write(f); err != nil {
+	if _, err = f.Write(res); err != nil {
 		return err
 	}
 	if err = f.Sync(); err != nil {
