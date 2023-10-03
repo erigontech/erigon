@@ -378,6 +378,9 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
 func saveTorrent(torrentFilePath string, res []byte) error {
+	if len(res) == 0 {
+		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+	}
 	f, err := os.Create(torrentFilePath)
 	if err != nil {
 		return err
