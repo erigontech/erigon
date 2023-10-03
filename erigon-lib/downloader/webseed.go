@@ -3,6 +3,7 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -165,12 +166,17 @@ func (d *WebSeeds) callTorrentUrlProvider(ctx context.Context, url *url.URL) ([]
 	if err != nil {
 		return nil, err
 	}
-	//validate
-	var mi metainfo.MetaInfo
-	if err = bencode.NewDecoder(bytes.NewBuffer(res)).Decode(&mi); err != nil {
+	if err = validateTorrentBytes(res, url.Path); err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+func validateTorrentBytes(b []byte, url string) error {
+	var mi metainfo.MetaInfo
+	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
+		return fmt.Errorf("invalid bytes received from url %s, err=%w", url, err)
+	}
+	return nil
 }
 func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
 	data, err := os.ReadFile(webSeedProviderPath)
