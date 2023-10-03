@@ -27,38 +27,38 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
-type KnownAccounts map[libcommon.Address]*Value
+type KnownAccountStorageConditions map[libcommon.Address]*KnownAccountStorageCondition
 
-type Value struct {
+type KnownAccountStorageCondition struct {
 	Single  *libcommon.Hash
 	Storage map[libcommon.Hash]libcommon.Hash
 }
 
-func SingleFromHex(hex string) *Value {
-	return &Value{Single: libcommon.HexToRefHash(hex)}
+func SingleFromHex(hex string) *KnownAccountStorageCondition {
+	return &KnownAccountStorageCondition{Single: libcommon.HexToRefHash(hex)}
 }
 
-func FromMap(m map[string]string) *Value {
+func FromMap(m map[string]string) *KnownAccountStorageCondition {
 	res := map[libcommon.Hash]libcommon.Hash{}
 
 	for k, v := range m {
 		res[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 	}
 
-	return &Value{Storage: res}
+	return &KnownAccountStorageCondition{Storage: res}
 }
 
-func (v *Value) IsSingle() bool {
+func (v *KnownAccountStorageCondition) IsSingle() bool {
 	return v != nil && v.Single != nil && !v.IsStorage()
 }
 
-func (v *Value) IsStorage() bool {
+func (v *KnownAccountStorageCondition) IsStorage() bool {
 	return v != nil && v.Storage != nil
 }
 
 const EmptyValue = "{}"
 
-func (v *Value) MarshalJSON() ([]byte, error) {
+func (v *KnownAccountStorageCondition) MarshalJSON() ([]byte, error) {
 	if v.IsSingle() {
 		return json.Marshal(v.Single)
 	}
@@ -72,7 +72,7 @@ func (v *Value) MarshalJSON() ([]byte, error) {
 
 const hashTypeName = "Hash"
 
-func (v *Value) UnmarshalJSON(data []byte) error {
+func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -119,26 +119,26 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func InsertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](accounts KnownAccounts, k libcommon.Address, v T) {
+func InsertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](accounts KnownAccountStorageConditions, k libcommon.Address, v T) {
 	switch typedV := any(v).(type) {
 	case libcommon.Hash:
-		accounts[k] = &Value{Single: &typedV}
+		accounts[k] = &KnownAccountStorageCondition{Single: &typedV}
 	case map[libcommon.Hash]libcommon.Hash:
-		accounts[k] = &Value{Storage: typedV}
+		accounts[k] = &KnownAccountStorageCondition{Storage: typedV}
 	}
 }
 
 type TransactionConditions struct {
-	KnownAccounts  KnownAccounts `json:"knownAccounts"`
-	BlockNumberMin *big.Int      `json:"blockNumberMin"`
-	BlockNumberMax *big.Int      `json:"blockNumberMax"`
-	TimestampMin   *uint64       `json:"timestampMin"`
-	TimestampMax   *uint64       `json:"timestampMax"`
+	KnownAccountStorageConditions KnownAccountStorageConditions `json:"knownAccounts"`
+	BlockNumberMin                *big.Int                      `json:"blockNumberMin"`
+	BlockNumberMax                *big.Int                      `json:"blockNumberMax"`
+	TimestampMin                  *uint64                       `json:"timestampMin"`
+	TimestampMax                  *uint64                       `json:"timestampMax"`
 }
 
 var ErrKnownAccounts = errors.New("an incorrect list of knownAccounts")
 
-func (ka KnownAccounts) ValidateLength() error {
+func (ka KnownAccountStorageConditions) ValidateLength() error {
 	if ka == nil {
 		return nil
 	}
@@ -155,7 +155,7 @@ func (ka KnownAccounts) ValidateLength() error {
 	}
 
 	if length >= 1000 {
-		return fmt.Errorf("number of slots/accounts in KnownAccounts %v exceeds the limit of 1000", length)
+		return fmt.Errorf("number of slots/accounts in KnownAccountStorageConditions %v exceeds the limit of 1000", length)
 	}
 
 	return nil

@@ -353,7 +353,7 @@ func TestTransientStorage(t *testing.T) {
 func TestValidateKnownAccounts(t *testing.T) {
 	t.Parallel()
 
-	knownAccounts := make(types.KnownAccounts)
+	knownAccounts := make(types.KnownAccountStorageConditions)
 
 	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
 	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"), map[libcommon.Hash]libcommon.Hash{

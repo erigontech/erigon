@@ -453,7 +453,7 @@ LOOP:
 				continue
 			}
 
-			if err := ibs.ValidateKnownAccounts(options.KnownAccounts); err != nil {
+			if err := ibs.ValidateKnownAccounts(options.KnownAccountStorageConditions); err != nil {
 				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
 				txs.Pop()
 

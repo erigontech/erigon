@@ -830,7 +830,7 @@ func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcom
 }
 
 // ValidateKnownAccounts validates the knownAccounts passed in the options parameter in the conditional transaction (EIP-4337)
-func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccounts) error {
+func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccountStorageConditions) error {
 	if knownAccounts == nil {
 		return nil
 	}
