@@ -30,41 +30,41 @@ import (
 type KnownAccountStorageConditions map[libcommon.Address]*KnownAccountStorageCondition
 
 type KnownAccountStorageCondition struct {
-	Single  *libcommon.Hash
-	Storage map[libcommon.Hash]libcommon.Hash
+	StorageRootHash   *libcommon.Hash
+	StorageSlotHashes map[libcommon.Hash]libcommon.Hash
 }
 
-func SingleFromHex(hex string) *KnownAccountStorageCondition {
-	return &KnownAccountStorageCondition{Single: libcommon.HexToRefHash(hex)}
+func NewKnownAccountStorageConditionWithRootHash(hex string) *KnownAccountStorageCondition {
+	return &KnownAccountStorageCondition{StorageRootHash: libcommon.HexToRefHash(hex)}
 }
 
-func FromMap(m map[string]string) *KnownAccountStorageCondition {
+func NewKnownAccountStorageConditionWithSlotHashes(m map[string]string) *KnownAccountStorageCondition {
 	res := map[libcommon.Hash]libcommon.Hash{}
 
 	for k, v := range m {
 		res[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 	}
 
-	return &KnownAccountStorageCondition{Storage: res}
+	return &KnownAccountStorageCondition{StorageSlotHashes: res}
 }
 
 func (v *KnownAccountStorageCondition) IsSingle() bool {
-	return v != nil && v.Single != nil && !v.IsStorage()
+	return v != nil && v.StorageRootHash != nil && !v.IsStorage()
 }
 
 func (v *KnownAccountStorageCondition) IsStorage() bool {
-	return v != nil && v.Storage != nil
+	return v != nil && v.StorageSlotHashes != nil
 }
 
 const EmptyValue = "{}"
 
 func (v *KnownAccountStorageCondition) MarshalJSON() ([]byte, error) {
 	if v.IsSingle() {
-		return json.Marshal(v.Single)
+		return json.Marshal(v.StorageRootHash)
 	}
 
 	if v.IsStorage() {
-		return json.Marshal(v.Storage)
+		return json.Marshal(v.StorageSlotHashes)
 	}
 
 	return []byte(EmptyValue), nil
@@ -82,9 +82,9 @@ func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &m)
 	if err != nil {
 		// single Hash value case
-		v.Single = new(libcommon.Hash)
+		v.StorageRootHash = new(libcommon.Hash)
 
-		innerErr := json.Unmarshal(data, v.Single)
+		innerErr := json.Unmarshal(data, v.StorageRootHash)
 		if innerErr != nil {
 			return fmt.Errorf("can't unmarshal to single value with error: %v value %q", innerErr, string(data))
 		}
@@ -114,7 +114,7 @@ func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 		res[kHash] = vHash
 	}
 
-	v.Storage = res
+	v.StorageSlotHashes = res
 
 	return nil
 }
@@ -122,9 +122,9 @@ func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 func InsertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](accounts KnownAccountStorageConditions, k libcommon.Address, v T) {
 	switch typedV := any(v).(type) {
 	case libcommon.Hash:
-		accounts[k] = &KnownAccountStorageCondition{Single: &typedV}
+		accounts[k] = &KnownAccountStorageCondition{StorageRootHash: &typedV}
 	case map[libcommon.Hash]libcommon.Hash:
-		accounts[k] = &KnownAccountStorageCondition{Storage: typedV}
+		accounts[k] = &KnownAccountStorageCondition{StorageSlotHashes: typedV}
 	}
 }
 
@@ -150,7 +150,7 @@ func (ka KnownAccountStorageConditions) ValidateLength() error {
 		if v.IsSingle() {
 			length += 1
 		} else {
-			length += len(v.Storage)
+			length += len(v.StorageSlotHashes)
 		}
 	}
 

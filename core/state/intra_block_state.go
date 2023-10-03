@@ -845,15 +845,15 @@ func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccou
 		switch {
 		case v.IsSingle():
 			if tempAccount != nil {
-				if *v.Single != tempAccount.Root {
-					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", k, v.Single, tempAccount.Root)
+				if *v.StorageRootHash != tempAccount.Root {
+					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", k, v.StorageRootHash, tempAccount.Root)
 				}
 			} else {
 				return fmt.Errorf("Storage Trie is nil for: %v", k)
 			}
 		case v.IsStorage():
 			if tempAccount != nil {
-				for slot, value := range v.Storage {
+				for slot, value := range v.StorageSlotHashes {
 					slot := slot
 					tempByte, err := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
 					if err != nil {

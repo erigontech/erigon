@@ -19,8 +19,8 @@ func TestKnownAccounts(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := &KnownAccountStorageConditions{
-		common.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"): SingleFromHex("0x000000000000000000000000313aadca1750caadc7bcb26ff08175c95dcf8e38"),
-		common.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"): FromMap(map[string]string{
+		common.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"): NewKnownAccountStorageConditionWithRootHash("0x000000000000000000000000313aadca1750caadc7bcb26ff08175c95dcf8e38"),
+		common.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"): NewKnownAccountStorageConditionWithSlotHashes(map[string]string{
 			"0x0000000000000000000000000000000000000000000000000000000000000aaa": "0x0000000000000000000000000000000000000000000000000000000000000bbb",
 			"0x0000000000000000000000000000000000000000000000000000000000000ccc": "0x0000000000000000000000000000000000000000000000000000000000000ddd",
 		}),
