@@ -356,9 +356,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 	if len(noMetadata) > 0 {
+		if len(noMetadata) > 6 {
+			noMetadata = append(noMetadata[:6], "...")
+		}
 		d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
+		if len(zeroProgress) > 6 {
+			zeroProgress = append(zeroProgress[:6], "...")
+		}
 		d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
