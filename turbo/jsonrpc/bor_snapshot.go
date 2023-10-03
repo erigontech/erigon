@@ -289,22 +289,22 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 
 	// check block number range
 	if err := currentHeader.ValidateBlockNumberOptions4337(options.BlockNumberMin, options.BlockNumberMax); err != nil {
-		return common.Hash{}, &rpc.OptionsValidateError{Message: "out of block range. err: " + err.Error()}
+		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of block range. err: " + err.Error()}
 	}
 
 	// check timestamp range
 	if err := currentHeader.ValidateTimestampOptions4337(options.TimestampMin, options.TimestampMax); err != nil {
-		return common.Hash{}, &rpc.OptionsValidateError{Message: "out of time range. err: " + err.Error()}
+		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of time range. err: " + err.Error()}
 	}
 
 	// check knownAccounts length (number of slots/accounts) should be less than 1000
 	if options.KnownAccountStorageConditions.CountStorageEntries() >= 1000 {
-		return common.Hash{}, &rpc.KnownAccountsLimitExceededError{Message: "limit exceeded. err: " + err.Error()}
+		return common.Hash{}, &KnownAccountsLimitExceededError{Message: "limit exceeded. err: " + err.Error()}
 	}
 
 	// check knownAccounts
 	if err := currentState.ValidateKnownAccounts(options.KnownAccountStorageConditions); err != nil {
-		return common.Hash{}, &rpc.OptionsValidateError{Message: "storage error. err: " + err.Error()}
+		return common.Hash{}, &TransactionConditionsValidationError{Message: "storage error. err: " + err.Error()}
 	}
 
 	// put options data in Tx, to use it later while block building
@@ -632,3 +632,15 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 
 	return snap, nil
 }
+
+type TransactionConditionsValidationError struct{ Message string }
+
+func (e *TransactionConditionsValidationError) ErrorCode() int { return -32003 }
+
+func (e *TransactionConditionsValidationError) Error() string { return e.Message }
+
+type KnownAccountsLimitExceededError struct{ Message string }
+
+func (e *KnownAccountsLimitExceededError) ErrorCode() int { return -32005 }
+
+func (e *KnownAccountsLimitExceededError) Error() string { return e.Message }
