@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -135,30 +134,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		d.applyWebseeds()
 	}()
 	return d, nil
-}
-
-func copyFile(from, to string) error {
-	r, err := os.Open(from)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer r.Close()
-	w, err := os.Create(to)
-	if err != nil {
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	defer w.Close()
-	if _, err = w.ReadFrom(r); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	if err = w.Sync(); err != nil {
-		w.Close()
-		os.Remove(to)
-		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
-	}
-	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
