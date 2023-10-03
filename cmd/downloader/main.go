@@ -158,7 +158,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	logger.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	logger.Info("Run snapshot downloader", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
