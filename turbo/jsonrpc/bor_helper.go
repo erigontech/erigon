@@ -107,18 +107,6 @@ func ecrecover(header *types.Header, c *chain.BorConfig) (common.Address, error)
 	return signer, nil
 }
 
-// validateHeaderExtraField validates that the extra-data contains both the vanity and signature.
-// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
-func validateHeaderExtraField(extraBytes []byte) error {
-	if len(extraBytes) < extraVanity {
-		return errMissingVanity
-	}
-	if len(extraBytes) < extraVanity+extraSeal {
-		return errMissingSignature
-	}
-	return nil
-}
-
 // validatorContains checks for a validator in given validator set
 func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
 	for _, n := range a {
