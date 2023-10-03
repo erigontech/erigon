@@ -114,6 +114,31 @@ func (a AttestationData) SetBeaconBlockRoot(beaconBlockRoot libcommon.Hash) {
 	copy(a[16:], beaconBlockRoot[:])
 }
 
+func (a AttestationData) SetSlotWithRawBytes(b []byte) {
+	copy(a[:8], b)
+}
+
+func (a AttestationData) SetValidatorIndexWithRawBytes(b []byte) {
+	copy(a[8:16], b)
+
+}
+
+func (a AttestationData) RawSlot() []byte {
+	return a[:8]
+}
+
+func (a AttestationData) RawValidatorIndex() []byte {
+	return a[8:16]
+}
+
+func (a AttestationData) RawBeaconBlockRoot() []byte {
+	return a[16:48]
+}
+
+func (a AttestationData) SetBeaconBlockRootWithRawBytes(b []byte) {
+	copy(a[16:48], b)
+}
+
 func (a AttestationData) SetSource(c Checkpoint) {
 	copy(a[48:88], c)
 }
