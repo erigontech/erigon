@@ -69,6 +69,8 @@ func (v *KnownAccountStorageCondition) MarshalJSON() ([]byte, error) {
 }
 
 func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
+	var ErrKnownAccounts = errors.New("an incorrect list of knownAccounts")
+
 	if len(data) == 0 {
 		return nil
 	}
@@ -131,8 +133,6 @@ type TransactionConditions struct {
 	TimestampMin                  *uint64                       `json:"timestampMin"`
 	TimestampMax                  *uint64                       `json:"timestampMax"`
 }
-
-var ErrKnownAccounts = errors.New("an incorrect list of knownAccounts")
 
 func (ka KnownAccountStorageConditions) ValidateLength() error {
 	if ka == nil {
