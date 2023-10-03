@@ -3,14 +3,13 @@ package stagedsync
 import (
 	"fmt"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/huandu/xstrings"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/metrics"
 )
 
-var syncMetrics = map[stages.SyncStage]*metrics2.Counter{}
+var syncMetrics = map[stages.SyncStage]metrics.Counter{}
 
 func init() {
 	for _, v := range stages.AllStages {
