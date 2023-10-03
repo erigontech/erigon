@@ -17,7 +17,7 @@ import (
 // beaconBlockHash: 32 bytes
 // source: 40 bytes
 // target: 40 bytes
-const attestationDataBufferSize = 8 + 8 + 32 + 40*2
+const AttestationDataBufferSize = 8 + 8 + 32 + 40*2
 
 // AttestantionData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData []byte
@@ -74,7 +74,7 @@ func (a AttestationData) UnmarshalJSON(buf []byte) error {
 }
 
 func NewAttestationData() AttestationData {
-	return make([]byte, attestationDataBufferSize)
+	return make([]byte, AttestationDataBufferSize)
 }
 
 func (a AttestationData) Static() bool {
