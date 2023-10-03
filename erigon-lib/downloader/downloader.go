@@ -336,7 +336,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Debug("[downloader] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					d.logger.Debug("[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
 				}
 			}
 		default:
@@ -348,7 +348,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	if len(noMetadata) > 0 {
 		d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
-	if len(noMetadata) > 0 {
+	if len(zeroProgress) > 0 {
 		d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
