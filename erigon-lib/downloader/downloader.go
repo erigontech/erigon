@@ -135,7 +135,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.SnapDir)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
-			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
+			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 		}
 	}()
 	return d, nil
@@ -557,7 +557,7 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 
 		mi := t.Metainfo()
 		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
-			d.logger.Warn("[downloader] create torrent file", "err", err)
+			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
 		urls, ok := d.webseeds.ByFileName(t.Name())
