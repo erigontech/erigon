@@ -474,11 +474,11 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 }
 
 func (tx *DynamicFeeTransaction) PutOptions(options *OptionsAA4337) {
-	tx.CommonTx.TransactionMisc.optionsAA4337 = options
+	tx.OptionsAA4337 = options
 }
 
 func (tx *DynamicFeeTransaction) GetOptions() *OptionsAA4337 {
-	return tx.CommonTx.TransactionMisc.optionsAA4337
+	return tx.OptionsAA4337
 }
 
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.

@@ -465,9 +465,9 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 }
 
 func (tx *LegacyTx) PutOptions(options *OptionsAA4337) {
-	tx.CommonTx.TransactionMisc.optionsAA4337 = options
+	tx.OptionsAA4337 = options
 }
 
 func (tx *LegacyTx) GetOptions() *OptionsAA4337 {
-	return tx.CommonTx.TransactionMisc.optionsAA4337
+	return tx.OptionsAA4337
 }

@@ -383,9 +383,9 @@ func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
 }
 
 func (txw BlobTxWrapper) PutOptions(options *OptionsAA4337) {
-	txw.Tx.DynamicFeeTransaction.CommonTx.TransactionMisc.optionsAA4337 = options
+	txw.Tx.OptionsAA4337 = options
 }
 
 func (txw BlobTxWrapper) GetOptions() *OptionsAA4337 {
-	return txw.Tx.DynamicFeeTransaction.CommonTx.TransactionMisc.optionsAA4337
+	return txw.Tx.OptionsAA4337
 }
