@@ -1184,7 +1184,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 	if branchData != nil {
 		if bph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
+			fmt.Printf("fold: update key: '%x', branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
 		}
 	}
 	return branchData, updateKey, nil

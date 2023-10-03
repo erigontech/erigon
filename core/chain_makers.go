@@ -466,9 +466,9 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 	}
 
 	if histV4 {
-		if GenerateTrace {
-			panic("implement me")
-		}
+		//if GenerateTrace {
+		//	panic("implement me")
+		//}
 		h := common.NewHasher()
 		defer common.ReturnHasherToPool(h)
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"math/big"
 	"math/rand"
 	"os"
 	"path"
@@ -18,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -460,4 +463,59 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 	acc.Balance = *uint256.NewInt(uint64(rand.Int63()))
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	return &acc, addr
+}
+
+func TestCommit(t *testing.T) {
+	aggStep := uint64(100)
+
+	ctx := context.Background()
+	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	domCtx := agg.MakeContext()
+	defer domCtx.Close()
+	domains := agg.SharedDomains(domCtx)
+	defer domains.Close()
+	domains.SetTx(tx)
+	defer domains.StartWrites().FinishWrites()
+
+	//buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
+
+	//addr1 := common.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
+	addr2 := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	loc1 := common.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	//err = domains.UpdateAccountData(addr2, buf, nil)
+	//require.NoError(t, err)
+
+	for i := 1; i < 3; i++ {
+		ad := common.CopyBytes(addr2)
+		ad[0] = byte(i)
+
+		//err = domains.UpdateAccountData(ad, buf, nil)
+		//require.NoError(t, err)
+		//
+		err = domains.WriteAccountStorage(ad, loc1, []byte("0401"), nil)
+		require.NoError(t, err)
+	}
+
+	//err = domains.WriteAccountStorage(addr2, loc1, []byte("0401"), nil)
+	//require.NoError(t, err)
+
+	domainsHash, err := domains.Commit(true, true)
+	require.NoError(t, err)
+	err = domains.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	core.GenerateTrace = true
+	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true)
+	require.NoError(t, err)
+
+	t.Logf("old hash %x\n", oldHash)
+	require.EqualValues(t, oldHash, domainsHash)
 }
