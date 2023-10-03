@@ -134,9 +134,9 @@ type TransactionConditions struct {
 	TimestampMax                  *uint64                       `json:"timestampMax"`
 }
 
-func (ka KnownAccountStorageConditions) ValidateLength() error {
+func (ka KnownAccountStorageConditions) CountStorageEntries() int {
 	if ka == nil {
-		return nil
+		return 0
 	}
 
 	length := 0
@@ -150,9 +150,5 @@ func (ka KnownAccountStorageConditions) ValidateLength() error {
 		}
 	}
 
-	if length >= 1000 {
-		return fmt.Errorf("number of slots/accounts in KnownAccountStorageConditions %v exceeds the limit of 1000", length)
-	}
-
-	return nil
+	return length
 }

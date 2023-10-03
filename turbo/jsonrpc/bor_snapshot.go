@@ -298,7 +298,7 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 	}
 
 	// check knownAccounts length (number of slots/accounts) should be less than 1000
-	if err := options.KnownAccountStorageConditions.ValidateLength(); err != nil {
+	if options.KnownAccountStorageConditions.CountStorageEntries() >= 1000 {
 		return common.Hash{}, &rpc.KnownAccountsLimitExceededError{Message: "limit exceeded. err: " + err.Error()}
 	}
 
