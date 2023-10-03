@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -31,9 +32,9 @@ func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string
 	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
-func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, urls []*url.URL, files []string) {
-	list := make([]snaptype.WebSeedsFromProvider, 0, len(urls)+len(files))
-	for _, webSeedProviderURL := range urls {
+func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, providers []*url.URL, diskProviders []string) {
+	list := make([]snaptype.WebSeedsFromProvider, 0, len(providers)+len(diskProviders))
+	for _, webSeedProviderURL := range providers {
 		select {
 		case <-ctx.Done():
 			break
@@ -41,22 +42,38 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, urls []
 		}
 		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Warn("[downloader] callWebSeedsProvider", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Warn("[downloader] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
 		list = append(list, response)
 	}
-	for _, webSeedFile := range files {
+	// add to list files from disk
+	for _, webSeedFile := range diskProviders {
 		response, err := d.readWebSeedsFile(webSeedFile)
 		if err != nil { // don't fail on error
 			_, fileName := filepath.Split(webSeedFile)
-			d.logger.Warn("[downloader] readWebSeedsFile", "err", err, "file", fileName)
+			d.logger.Warn("[downloader] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
 			continue
 		}
 		list = append(list, response)
 	}
 
-	webSeedUrls, torrentUrls := snaptype.NewWebSeedUrls(list)
+	webSeedUrls, torrentUrls := snaptype.WebSeedUrls{}, snaptype.TorrentUrls{}
+	for _, urls := range list {
+		for name, wUrl := range urls {
+			if strings.HasSuffix(name, ".torrent") {
+				uri, err := url.ParseRequestURI(wUrl)
+				if err != nil {
+					d.logger.Debug("[downloader] url is invalid", "url", wUrl, "err", err)
+					continue
+				}
+				torrentUrls[name] = append(torrentUrls[name], uri)
+				continue
+			}
+			webSeedUrls[name] = append(webSeedUrls[name], wUrl)
+		}
+	}
+
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.byFileName = webSeedUrls
