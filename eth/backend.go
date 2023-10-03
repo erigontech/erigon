@@ -1106,7 +1106,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		// start embedded Downloader
-		s.downloader, err = downloader3.New(ctx, downloaderCfg)
+		s.downloader, err = downloader3.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}

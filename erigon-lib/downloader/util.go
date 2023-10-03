@@ -141,7 +141,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 
 var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
+func seedableHistorySnapshots(dir string) ([]string, error) {
 	l, err := seedableSnapshotsBySubDir(dir, "history")
 	if err != nil {
 		return nil, err
@@ -330,21 +330,6 @@ func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	return CreateTorrentFromMetaInfo(root, info, mi)
 }
 
-func AddTorrentFiles(snapDir string, torrentClient *torrent.Client) error {
-	files, err := allTorrentFiles(snapDir)
-	if err != nil {
-		return err
-	}
-	for _, ts := range files {
-		_, err := addTorrentFile(ts, torrentClient)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func allTorrentFiles(snapDir string) (res []*torrent.TorrentSpec, err error) {
 	res, err = torrentInDir(snapDir)
 	if err != nil {
@@ -392,6 +377,20 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
+func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
+	f, err := os.Create(torrentFilePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err = info.Write(f); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
@@ -414,8 +413,6 @@ func addTorrentFile(ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*to
 	t.AllowDataUpload()
 	return t, nil
 }
-
-var ErrSkip = fmt.Errorf("skip")
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
