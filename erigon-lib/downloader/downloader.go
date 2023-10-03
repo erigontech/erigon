@@ -137,7 +137,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
-		d.applyWebseeds()
 	}()
 	return d, nil
 }
@@ -509,6 +508,10 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
+	wsUrls, ok := d.webseeds.ByFileName(ts.DisplayName)
+	if ok {
+		ts.Webseeds = append(ts.Webseeds, wsUrls...)
+	}
 	_, err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
@@ -557,6 +560,10 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 			d.logger.Warn("[downloader] create torrent file", "err", err)
 			return
 		}
+		urls, ok := d.webseeds.ByFileName(t.Name())
+		if ok {
+			t.AddWebSeeds(urls)
+		}
 	}(t)
 	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return nil
@@ -582,8 +589,10 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		return err
 	}
 	for i, ts := range files {
-		ws, _ := d.webseeds.ByFileName(ts.DisplayName)
-		ts.Webseeds = append(ts.Webseeds, ws...)
+		ws, ok := d.webseeds.ByFileName(ts.DisplayName)
+		if ok {
+			ts.Webseeds = append(ts.Webseeds, ws...)
+		}
 		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
@@ -667,22 +676,4 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	}
 
 	return db, c, m, torrentClient, nil
-}
-
-func (d *Downloader) applyWebseeds() {
-	if d.webseeds.Len() > 0 {
-		d.logger.Debug("[snapshots] add webseed urls", "amount", d.webseeds.Len())
-	}
-	for _, t := range d.TorrentClient().Torrents() {
-		select {
-		case <-d.ctx.Done():
-		default:
-		}
-
-		urls, ok := d.webseeds.ByFileName(t.Name())
-		if !ok {
-			continue
-		}
-		t.AddWebSeeds(urls)
-	}
 }
