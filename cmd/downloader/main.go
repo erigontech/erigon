@@ -177,7 +177,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	d, err := downloader.New(ctx, cfg, dirs)
+	d, err := downloader.New(ctx, cfg, dirs, logger)
 	if err != nil {
 		return err
 	}
