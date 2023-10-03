@@ -61,6 +61,12 @@ func BigToHash(b *big.Int) Hash { return BytesToHash(b.Bytes()) }
 // If b is larger than len(h), b will be cropped from the left.
 func HexToHash(s string) Hash { return BytesToHash(hexutility.FromHex(s)) }
 
+func HexToRefHash(s string) *Hash {
+	v := BytesToHash(FromHex(s))
+
+	return &v
+}
+
 // Bytes gets the byte representation of the underlying hash.
 func (h Hash) Bytes() []byte { return h[:] }
 
