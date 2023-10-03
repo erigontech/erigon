@@ -533,8 +533,7 @@ func (d *Downloader) addTorrentFilesFromDisk(ctx context.Context) error {
 	return nil
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
-	return err
+	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
 }
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()

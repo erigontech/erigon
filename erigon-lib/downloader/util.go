@@ -167,13 +167,13 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) ([]string, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	files, err := seedableFiles(dirs)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -203,9 +203,9 @@ Loop:
 		}
 	}
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return err
 	}
-	return files, nil
+	return nil
 }
 
 func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
@@ -301,13 +301,16 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
-func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
+func saveTorrent(torrentFilePath string, res []byte) error {
+	if len(res) == 0 {
+		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+	}
 	f, err := os.Create(torrentFilePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err = info.Write(f); err != nil {
+	if _, err = f.Write(res); err != nil {
 		return err
 	}
 	if err = f.Sync(); err != nil {
