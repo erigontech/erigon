@@ -157,7 +157,6 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 
 		// check if signer is in validator set
 		if !snap.ValidatorSet.HasAddress(signer) {
-			log.Error("Hey", "number", number, "hash", header.Hash())
 			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 		} else {
 			if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
