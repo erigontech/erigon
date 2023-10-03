@@ -257,20 +257,6 @@ func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	return CreateTorrentFromMetaInfo(root, info, mi)
 }
 
-func AddTorrentFiles(dirs datadir.Dirs, torrentClient *torrent.Client) error {
-	files, err := AllTorrentSpecs(dirs)
-	if err != nil {
-		return err
-	}
-	for _, ts := range files {
-		_, err := addTorrentFile(ts, torrentClient)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	files, err := dir2.ListFiles(dirs.Snap, ".torrent")
 	if err != nil {
@@ -314,6 +300,20 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	}
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
+}
+func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
+	f, err := os.Create(torrentFilePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err = info.Write(f); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
