@@ -473,12 +473,12 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 	return addr, nil
 }
 
-func (tx *DynamicFeeTransaction) PutOptions(options *OptionsAA4337) {
-	tx.OptionsAA4337 = options
+func (tx *DynamicFeeTransaction) PutOptions(options *TransactionConditions) {
+	tx.TransactionConditions = options
 }
 
-func (tx *DynamicFeeTransaction) GetOptions() *OptionsAA4337 {
-	return tx.OptionsAA4337
+func (tx *DynamicFeeTransaction) GetOptions() *TransactionConditions {
+	return tx.TransactionConditions
 }
 
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.

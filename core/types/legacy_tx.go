@@ -464,10 +464,10 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	return addr, nil
 }
 
-func (tx *LegacyTx) PutOptions(options *OptionsAA4337) {
-	tx.OptionsAA4337 = options
+func (tx *LegacyTx) PutOptions(options *TransactionConditions) {
+	tx.TransactionConditions = options
 }
 
-func (tx *LegacyTx) GetOptions() *OptionsAA4337 {
-	return tx.OptionsAA4337
+func (tx *LegacyTx) GetOptions() *TransactionConditions {
+	return tx.TransactionConditions
 }

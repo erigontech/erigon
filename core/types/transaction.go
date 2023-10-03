@@ -96,8 +96,8 @@ type Transaction interface {
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwise returns itself.
-	PutOptions(options *OptionsAA4337)
-	GetOptions() *OptionsAA4337
+	PutOptions(options *TransactionConditions)
+	GetOptions() *TransactionConditions
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -106,7 +106,7 @@ type TransactionMisc struct {
 	time time.Time // Time first seen locally (spam avoidance)
 
 	// knownAccounts (EIP-4337)
-	OptionsAA4337 *OptionsAA4337
+	TransactionConditions *TransactionConditions
 
 	// caches
 	hash atomic.Value //nolint:structcheck

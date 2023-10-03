@@ -555,10 +555,10 @@ func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
 	return addr, nil
 }
 
-func (tx *AccessListTx) PutOptions(options *OptionsAA4337) {
-	tx.OptionsAA4337 = options
+func (tx *AccessListTx) PutOptions(options *TransactionConditions) {
+	tx.TransactionConditions = options
 }
 
-func (tx *AccessListTx) GetOptions() *OptionsAA4337 {
-	return tx.OptionsAA4337
+func (tx *AccessListTx) GetOptions() *TransactionConditions {
+	return tx.TransactionConditions
 }

@@ -382,10 +382,10 @@ func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }
 
-func (txw BlobTxWrapper) PutOptions(options *OptionsAA4337) {
-	txw.Tx.OptionsAA4337 = options
+func (txw BlobTxWrapper) PutOptions(options *TransactionConditions) {
+	txw.Tx.TransactionConditions = options
 }
 
-func (txw BlobTxWrapper) GetOptions() *OptionsAA4337 {
-	return txw.Tx.OptionsAA4337
+func (txw BlobTxWrapper) GetOptions() *TransactionConditions {
+	return txw.Tx.TransactionConditions
 }

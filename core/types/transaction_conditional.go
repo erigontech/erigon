@@ -128,7 +128,7 @@ func InsertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](a
 	}
 }
 
-type OptionsAA4337 struct {
+type TransactionConditions struct {
 	KnownAccounts  KnownAccounts `json:"knownAccounts"`
 	BlockNumberMin *big.Int      `json:"blockNumberMin"`
 	BlockNumberMax *big.Int      `json:"blockNumberMax"`

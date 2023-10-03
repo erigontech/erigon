@@ -257,7 +257,7 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 
 // SendRawTransactionConditional will add the signed transaction to the transaction pool.
 // The sender/bundler is responsible for signing the transaction
-func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx hexutility.Bytes, options types.OptionsAA4337) (common.Hash, error) {
+func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx hexutility.Bytes, options types.TransactionConditions) (common.Hash, error) {
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return common.Hash{}, err
