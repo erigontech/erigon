@@ -633,7 +633,7 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 
 func (d *Downloader) applyWebseeds() {
 	if d.webseeds.Len() > 0 {
-		d.logger.Debug("[downloader] add webseed urls", "amount", d.webseeds.Len())
+		d.logger.Debug("[snapshots] add webseed urls", "amount", d.webseeds.Len())
 	}
 	for _, t := range d.TorrentClient().Torrents() {
 		select {
