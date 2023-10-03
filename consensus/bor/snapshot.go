@@ -172,7 +172,7 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
-			if err := validateHeaderExtraField(header.Extra); err != nil {
+			if err := ValidateHeaderExtraField(header.Extra); err != nil {
 				return nil, err
 			}
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]

@@ -849,11 +849,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		return err
 	}
 
-	var borDb kv.RoDB
-	if casted, ok := s.engine.(*bor.Bor); ok {
-		borDb = casted.DB
-	}
-	s.apiList = jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
@@ -1114,7 +1110,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		// start embedded Downloader
-		s.downloader, err = downloader3.New(ctx, downloaderCfg)
+		s.downloader, err = downloader3.New(ctx, downloaderCfg, s.logger)
 		if err != nil {
 			return err
 		}
@@ -1227,7 +1223,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	if s.chainConfig.Bor != nil {
-		s.engine.(*bor.Bor).Start(s.apiList, s.chainDB, s.blockReader)
+		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
 	return nil
