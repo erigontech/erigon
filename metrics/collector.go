@@ -26,12 +26,13 @@ import (
 )
 
 var (
-	typeGaugeTpl           = "\n# TYPE %s gauge\n"
-	typeCounterTpl         = "\n# TYPE %s counter\n"
-	typeSummaryTpl         = "\n# TYPE %s summary\n"
-	keyValueTpl            = "%s %v\n"
-	keyCounterTpl          = "%s %v\n"
-	keyQuantileTagValueTpl = "%s {quantile=\"%s\"} %v\n"
+	typeGaugeTpl                     = "\n# TYPE %s gauge\n"
+	typeCounterTpl                   = "\n# TYPE %s counter\n"
+	typeSummaryTpl                   = "\n# TYPE %s summary\n"
+	keyValueTpl                      = "%s %v\n"
+	keyCounterTpl                    = "%s %v\n"
+	keyQuantileTagValueTpl           = "%s {quantile=\"%s\"} %v\n"
+	keyQuantileTagValueWithLabelsTpl = "%s,quantile=\"%s\"} %v\n"
 )
 
 // collector is a collection of byte buffers that aggregate Prometheus reports
@@ -101,21 +102,38 @@ func stripLabels(name string) string {
 	return name
 }
 
+func splitLabels(name string) (string, string) {
+	if labelsIndex := strings.IndexByte(name, '{'); labelsIndex >= 0 {
+		return name[0:labelsIndex], name[labelsIndex:]
+	}
+
+	return name, ""
+}
+
 func (c *collector) writeSummaryCounter(name string, value interface{}) {
+	name, labels := splitLabels(name)
 	name = name + "_count"
-	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
+	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name+labels, value))
 }
 
 func (c *collector) writeSummaryPercentile(name, p string, value interface{}) {
-	c.buff.WriteString(fmt.Sprintf(keyQuantileTagValueTpl, name, p, value))
+	name, labels := splitLabels(name)
+
+	if len(labels) > 0 {
+		c.buff.WriteString(fmt.Sprintf(keyQuantileTagValueWithLabelsTpl, name+strings.TrimSuffix(labels, "}"), p, value))
+	} else {
+		c.buff.WriteString(fmt.Sprintf(keyQuantileTagValueTpl, name, p, value))
+	}
 }
 
 func (c *collector) writeSummarySum(name string, value string) {
+	name, labels := splitLabels(name)
 	name = name + "_sum"
-	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
+	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name+labels, value))
 }
 
 func (c *collector) writeSummaryTime(name string, value string) {
+	name, labels := splitLabels(name)
 	name = name + "_time"
-	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
+	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name+labels, value))
 }
