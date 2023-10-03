@@ -201,8 +201,11 @@ func New(dllPath string) (*Silkworm, error) {
 		addSnapshot: addSnapshot,
 		executeBlocks: executeBlocks,
 	}
-	C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance)
-	return silkworm, nil
+	status := C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance) //nolint:gocritic
+	if status == SILKWORM_OK {
+		return silkworm, nil
+	}
+	return nil, fmt.Errorf("silkworm_init error %d", status)
 }
 
 func (s *Silkworm) Close() {
@@ -275,8 +278,8 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 		transactions: cTxsSnapshot,
 	}
 
-	status := C.call_silkworm_add_snapshot_func(s.addSnapshot, s.instance, &cChainSnapshot)
-	if status == 0 {
+	status := C.call_silkworm_add_snapshot_func(s.addSnapshot, s.instance, &cChainSnapshot) //nolint:gocritic
+	if status == SILKWORM_OK {
 		return nil
 	}
 	return fmt.Errorf("silkworm_add_snapshot error %d", status)
