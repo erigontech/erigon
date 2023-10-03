@@ -542,8 +542,6 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 func (d *Downloader) addTorrentFilesFromDisk() error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 
 	files, err := AllTorrentSpecs(d.cfg.Dirs)
 	if err != nil {
