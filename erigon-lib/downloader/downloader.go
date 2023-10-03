@@ -558,7 +558,7 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		}
 		select {
 		case <-logEvery.C:
-			log.Info("[snapshots] Adding .torrent files from disk", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
 		default:
 		}
 	}
