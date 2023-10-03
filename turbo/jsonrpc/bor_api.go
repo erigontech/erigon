@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -27,16 +28,16 @@ type BorAPI interface {
 type BorImpl struct {
 	*BaseAPI
 	db     kv.RoDB // the chain db
-	borDb  kv.RoDB // the consensus db
+	bor    *bor.Bor
 	txPool txpool.TxpoolClient
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB, borDb kv.RoDB, txpool txpool.TxpoolClient) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB, bor *bor.Bor, txpool txpool.TxpoolClient) *BorImpl {
 	return &BorImpl{
 		BaseAPI: base,
 		db:      db,
-		borDb:   borDb,
+		bor:     bor,
 		txPool:  txpool,
 	}
 }
