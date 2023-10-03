@@ -852,17 +852,21 @@ func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types.KnownAccou
 				return fmt.Errorf("Storage Trie is nil for: %v", k)
 			}
 		case v.IsStorage():
-			for slot, value := range v.Storage {
-				slot := slot
-				tempByte, err := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
-				if err != nil {
-					return fmt.Errorf("error reading account storage at: %v slot: %v", k, slot)
-				}
+			if tempAccount != nil {
+				for slot, value := range v.Storage {
+					slot := slot
+					tempByte, err := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
+					if err != nil {
+						return fmt.Errorf("error reading account storage at: %v slot: %v", k, slot)
+					}
 
-				actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
-				if value != actualValue {
-					return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", k, slot, value, actualValue)
+					actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
+					if value != actualValue {
+						return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", k, slot, value, actualValue)
+					}
 				}
+			} else {
+				return fmt.Errorf("Storage Trie is nil for: %v", k)
 			}
 		default:
 			return fmt.Errorf("impossible to validate known accounts: %v", k)
