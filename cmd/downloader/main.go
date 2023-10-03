@@ -141,6 +141,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context, logger log.Logger) error {
+	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	dirs := datadir.New(datadirCli)
 	if err := checkChainName(dirs, chain); err != nil {
 		return err
