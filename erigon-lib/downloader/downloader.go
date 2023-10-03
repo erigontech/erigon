@@ -57,8 +57,9 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
-	webseeds *WebSeeds
-	logger   log.Logger
+	webseeds  *WebSeeds
+	logger    log.Logger
+	verbosity log.Lvl
 }
 
 type AggStats struct {
@@ -76,7 +77,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return nil, err
 	}
@@ -106,6 +107,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		statsLock:         &sync.RWMutex{},
 		webseeds:          &WebSeeds{logger: logger},
 		logger:            logger,
+		verbosity:         verbosity,
 	}
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
@@ -336,7 +338,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Debug("[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
 				}
 			}
 		default:
@@ -349,13 +351,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		if len(noMetadata) > 5 {
 			noMetadata = append(noMetadata[:5], "...")
 		}
-		d.logger.Debug("[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
+		d.logger.Log(d.verbosity, "[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
 		if len(zeroProgress) > 5 {
 			zeroProgress = append(zeroProgress[:5], "...")
 		}
-		d.logger.Debug("[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
+		d.logger.Log(d.verbosity, "[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
 	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
@@ -633,7 +635,7 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 
 func (d *Downloader) applyWebseeds() {
 	if d.webseeds.Len() > 0 {
-		d.logger.Debug("[snapshots] add webseed urls", "amount", d.webseeds.Len())
+		d.logger.Log(d.verbosity, "[snapshots] add webseed urls", "amount", d.webseeds.Len())
 	}
 	for _, t := range d.TorrentClient().Torrents() {
 		select {
