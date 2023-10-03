@@ -297,7 +297,7 @@ func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64,
 		cMaxBlock, cBatchSize, cWriteChangeSets, cWriteReceipts, cWriteCallTraces, &cLastExecutedBlock, &cMdbxErrorCode)
 	lastExecutedBlock = uint64(cLastExecutedBlock)
 	// Handle successful execution
-	if status == SILKWORM_OK || status == SILKWORM_BLOCK_NOT_FOUND {
+	if status == SILKWORM_OK {
 		return lastExecutedBlock, nil
 	}
 	// Handle special erros

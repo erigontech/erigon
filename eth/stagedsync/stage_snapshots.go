@@ -24,7 +24,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type SnapshotsCfg struct {
@@ -39,14 +41,19 @@ type SnapshotsCfg struct {
 
 	historyV3 bool
 	agg       *state.AggregatorV3
+	silkworm  *silkworm.Silkworm
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
-	chainConfig chain.Config, dirs datadir.Dirs,
+	chainConfig chain.Config,
+	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader, dbEventNotifier services.DBEventNotifier,
-	historyV3 bool, agg *state.AggregatorV3,
+	blockReader services.FullBlockReader,
+	dbEventNotifier services.DBEventNotifier,
+	historyV3 bool,
+	agg *state.AggregatorV3,
+	silkworm *silkworm.Silkworm,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
 		db:                 db,
@@ -58,6 +65,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		dbEventNotifier:    dbEventNotifier,
 		historyV3:          historyV3,
 		agg:                agg,
+		silkworm:           silkworm,
 	}
 }
 
@@ -123,6 +131,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.dbEventNotifier, &cfg.chainConfig); err != nil {
 		return err
+	}
+
+	if cfg.silkworm != nil {
+		if err := cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
+			return err
+		}
 	}
 
 	if cfg.historyV3 {

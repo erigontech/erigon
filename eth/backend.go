@@ -482,10 +482,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		err = addSnapshotsToSilkworm(backend.silkworm, allSnapshots)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
@@ -1373,57 +1369,4 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 		return err
 	})
 	return currentTD, err
-}
-
-func addSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm, allSnapshots *freezeblocks.RoSnapshots) error {
-	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
-	err := allSnapshots.Headers.View(func(segments []*freezeblocks.HeaderSegment) error {
-		for _, headerSegment := range segments {
-			mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.MappedSnapshot())
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
-	err = allSnapshots.Bodies.View(func(segments []*freezeblocks.BodySegment) error {
-		for _, bodySegment := range segments {
-			mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.MappedSnapshot())
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
-	err = allSnapshots.Txs.View(func(segments []*freezeblocks.TxnSegment) error {
-		for _, txnSegment := range segments {
-			mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.MappedSnapshot())
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
-	}
-
-	for i :=0; i < len(mappedHeaderSnapshots); i++ {
-		mappedSnapshot := &silkworm.MappedChainSnapshot{
-			Headers: mappedHeaderSnapshots[i],
-			Bodies: mappedBodySnapshots[i],
-			Txs: mappedTxnSnapshots[i],
-		}
-		err := silkwormInstance.AddSnapshot(mappedSnapshot)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
