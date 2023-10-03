@@ -90,12 +90,15 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
+	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
-	for name, tUrls := range d.TorrentUrls() {
+	urlsByName := d.TorrentUrls()
+	for name, tUrls := range urlsByName {
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
 		}
+		addedNew++
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
@@ -116,6 +119,9 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if err := e.Wait(); err != nil {
 		d.logger.Warn("[downloader] webseed discover", "err", err)
 	}
+	if addedNew > 0 {
+		d.logger.Debug("[snapshots] downloaded .torrent from webseed", "amount", addedNew)
+	}
 }
 
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
@@ -124,14 +130,10 @@ func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
 	return d.torrentUrls
 }
 
-func (d *WebSeeds) Names() []string {
+func (d *WebSeeds) Len() int {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	res := make([]string, 0, len(d.byFileName))
-	for name := range d.byFileName {
-		res = append(res, name)
-	}
-	return nil
+	return len(d.byFileName)
 }
 
 func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
