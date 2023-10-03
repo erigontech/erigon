@@ -180,7 +180,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 	// unknown error codes
-	if isError == 2 {
+	if isError == 3 || isError == 2 {
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
 		return nil, fmt.Errorf("peer server error")
