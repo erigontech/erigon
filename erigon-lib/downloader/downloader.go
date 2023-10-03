@@ -666,7 +666,9 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 }
 
 func (d *Downloader) applyWebseeds() {
-	d.logger.Debug("[downloader] add webseed urls", "files", strings.Join(d.webseeds.Names(), ","))
+	if d.webseeds.Len() > 0 {
+		d.logger.Debug("[snapshots] add webseed urls", "amount", d.webseeds.Len())
+	}
 	for _, t := range d.TorrentClient().Torrents() {
 		select {
 		case <-d.ctx.Done():
