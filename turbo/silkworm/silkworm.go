@@ -141,7 +141,7 @@ import (
 )
 
 const (
-	SILKWORM_OK                  = iota
+	SILKWORM_OK = iota
 	SILKWORM_INTERNAL_ERROR
 	SILKWORM_UNKNOWN_ERROR
 	SILKWORM_INVALID_HANDLE
@@ -163,12 +163,12 @@ const (
 var ErrInterrupted = errors.New("interrupted")
 
 type Silkworm struct {
-	dllHandle		unsafe.Pointer
-	instance		*C.SilkwormHandle
-	initFunc		unsafe.Pointer
-	finiFunc		unsafe.Pointer
-	addSnapshot		unsafe.Pointer
-	executeBlocks	unsafe.Pointer
+	dllHandle     unsafe.Pointer
+	instance      *C.SilkwormHandle
+	initFunc      unsafe.Pointer
+	finiFunc      unsafe.Pointer
+	addSnapshot   unsafe.Pointer
+	executeBlocks unsafe.Pointer
 }
 
 func New(dllPath string) (*Silkworm, error) {
@@ -195,10 +195,10 @@ func New(dllPath string) (*Silkworm, error) {
 	}
 
 	silkworm := &Silkworm{
-		dllHandle: dllHandle,
-		initFunc: initFunc,
-		finiFunc: finiFunc,
-		addSnapshot: addSnapshot,
+		dllHandle:     dllHandle,
+		initFunc:      initFunc,
+		finiFunc:      finiFunc,
+		addSnapshot:   addSnapshot,
 		executeBlocks: executeBlocks,
 	}
 	status := C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance) //nolint:gocritic
@@ -218,16 +218,16 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 	defer C.free(unsafe.Pointer(cHeadersSegmentFilePath))
 	cHeadersIdxHeaderHashFilePath := C.CString(snapshot.Headers.IdxHeaderHash.FilePath)
 	defer C.free(unsafe.Pointer(cHeadersIdxHeaderHashFilePath))
-	cHeadersSnapshot := C.struct_SilkwormHeadersSnapshot {
-		segment: C.struct_SilkwormMemoryMappedFile {
-			file_path: cHeadersSegmentFilePath,
+	cHeadersSnapshot := C.struct_SilkwormHeadersSnapshot{
+		segment: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cHeadersSegmentFilePath,
 			memory_address: (*C.uchar)(snapshot.Headers.Segment.DataHandle),
-			memory_length: C.ulong(snapshot.Headers.Segment.Size),
+			memory_length:  C.uint64_t(snapshot.Headers.Segment.Size),
 		},
-		header_hash_index: C.struct_SilkwormMemoryMappedFile {
-			file_path: cHeadersIdxHeaderHashFilePath,
+		header_hash_index: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cHeadersIdxHeaderHashFilePath,
 			memory_address: (*C.uchar)(snapshot.Headers.IdxHeaderHash.DataHandle),
-			memory_length: C.ulong(snapshot.Headers.IdxHeaderHash.Size),
+			memory_length:  C.uint64_t(snapshot.Headers.IdxHeaderHash.Size),
 		},
 	}
 
@@ -235,16 +235,16 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 	defer C.free(unsafe.Pointer(cBodiesSegmentFilePath))
 	cBodiesIdxBodyNumberFilePath := C.CString(snapshot.Bodies.IdxBodyNumber.FilePath)
 	defer C.free(unsafe.Pointer(cBodiesIdxBodyNumberFilePath))
-	cBodiesSnapshot := C.struct_SilkwormBodiesSnapshot {
-		segment: C.struct_SilkwormMemoryMappedFile {
-			file_path: cBodiesSegmentFilePath,
+	cBodiesSnapshot := C.struct_SilkwormBodiesSnapshot{
+		segment: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cBodiesSegmentFilePath,
 			memory_address: (*C.uchar)(snapshot.Bodies.Segment.DataHandle),
-			memory_length: C.ulong(snapshot.Bodies.Segment.Size),
+			memory_length:  C.uint64_t(snapshot.Bodies.Segment.Size),
 		},
-		block_num_index: C.struct_SilkwormMemoryMappedFile {
-			file_path: cBodiesIdxBodyNumberFilePath,
+		block_num_index: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cBodiesIdxBodyNumberFilePath,
 			memory_address: (*C.uchar)(snapshot.Bodies.IdxBodyNumber.DataHandle),
-			memory_length: C.ulong(snapshot.Bodies.IdxBodyNumber.Size),
+			memory_length:  C.uint64_t(snapshot.Bodies.IdxBodyNumber.Size),
 		},
 	}
 
@@ -254,27 +254,27 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 	defer C.free(unsafe.Pointer(cTxsIdxTxnHashFilePath))
 	cTxsIdxTxnHash2BlockFilePath := C.CString(snapshot.Txs.IdxTxnHash2BlockNum.FilePath)
 	defer C.free(unsafe.Pointer(cTxsIdxTxnHash2BlockFilePath))
-	cTxsSnapshot := C.struct_SilkwormTransactionsSnapshot {
-		segment: C.struct_SilkwormMemoryMappedFile {
-			file_path: cTxsSegmentFilePath,
+	cTxsSnapshot := C.struct_SilkwormTransactionsSnapshot{
+		segment: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cTxsSegmentFilePath,
 			memory_address: (*C.uchar)(snapshot.Txs.Segment.DataHandle),
-			memory_length: C.ulong(snapshot.Txs.Segment.Size),
+			memory_length:  C.uint64_t(snapshot.Txs.Segment.Size),
 		},
-		tx_hash_index: C.struct_SilkwormMemoryMappedFile {
-			file_path: cTxsIdxTxnHashFilePath,
+		tx_hash_index: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cTxsIdxTxnHashFilePath,
 			memory_address: (*C.uchar)(snapshot.Txs.IdxTxnHash.DataHandle),
-			memory_length: C.ulong(snapshot.Txs.IdxTxnHash.Size),
+			memory_length:  C.uint64_t(snapshot.Txs.IdxTxnHash.Size),
 		},
-		tx_hash_2_block_index: C.struct_SilkwormMemoryMappedFile {
-			file_path: cTxsIdxTxnHash2BlockFilePath,
+		tx_hash_2_block_index: C.struct_SilkwormMemoryMappedFile{
+			file_path:      cTxsIdxTxnHash2BlockFilePath,
 			memory_address: (*C.uchar)(snapshot.Txs.IdxTxnHash2BlockNum.DataHandle),
-			memory_length: C.ulong(snapshot.Txs.IdxTxnHash2BlockNum.Size),
+			memory_length:  C.uint64_t(snapshot.Txs.IdxTxnHash2BlockNum.Size),
 		},
 	}
 
 	cChainSnapshot := C.struct_SilkwormChainSnapshot{
-		headers: cHeadersSnapshot,
-		bodies: cBodiesSnapshot,
+		headers:      cHeadersSnapshot,
+		bodies:       cBodiesSnapshot,
 		transactions: cTxsSnapshot,
 	}
 

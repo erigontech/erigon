@@ -879,11 +879,11 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
 	}
 
-	for i :=0; i < len(mappedHeaderSnapshots); i++ {
+	for i := 0; i < len(mappedHeaderSnapshots); i++ {
 		mappedSnapshot := &silkworm.MappedChainSnapshot{
 			Headers: mappedHeaderSnapshots[i],
-			Bodies: mappedBodySnapshots[i],
-			Txs: mappedTxnSnapshots[i],
+			Bodies:  mappedBodySnapshots[i],
+			Txs:     mappedTxnSnapshots[i],
 		}
 		err := silkwormInstance.AddSnapshot(mappedSnapshot)
 		if err != nil {
@@ -2414,6 +2414,6 @@ func (sn *BodySegment) mappedSnapshot() *silkworm.MappedBodySnapshot {
 func (sn *TxnSegment) mappedSnapshot() *silkworm.MappedTxnSnapshot {
 	segmentRegion := silkworm.NewMemoryMappedRegion(sn.Seg.FilePath(), sn.Seg.DataHandle(), sn.Seg.Size())
 	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash.FilePath(), sn.IdxTxnHash.DataHandle(), sn.IdxTxnHash.Size())
-	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash2BlockNum.FilePath(), sn.IdxTxnHash2BlockNum.DataHandle(), sn.IdxTxnHash2BlockNum.Size()) 
+	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash2BlockNum.FilePath(), sn.IdxTxnHash2BlockNum.DataHandle(), sn.IdxTxnHash2BlockNum.Size())
 	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
 }

@@ -198,7 +198,7 @@ type Ethereum struct {
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
 
-	silkworm       *silkworm.Silkworm
+	silkworm *silkworm.Silkworm
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {

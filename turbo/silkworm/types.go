@@ -32,16 +32,16 @@ type MappedChainSnapshot struct {
 
 func NewMemoryMappedRegion(filePath string, dataHandle unsafe.Pointer, size int64) *MemoryMappedRegion {
 	region := &MemoryMappedRegion{
-		FilePath: filePath,
+		FilePath:   filePath,
 		DataHandle: dataHandle,
-		Size: size,
+		Size:       size,
 	}
 	return region
 }
 
 func NewMappedHeaderSnapshot(segment, idxHeaderHash *MemoryMappedRegion) *MappedHeaderSnapshot {
 	snapshot := &MappedHeaderSnapshot{
-		Segment: segment,
+		Segment:       segment,
 		IdxHeaderHash: idxHeaderHash,
 	}
 	return snapshot
@@ -49,7 +49,7 @@ func NewMappedHeaderSnapshot(segment, idxHeaderHash *MemoryMappedRegion) *Mapped
 
 func NewMappedBodySnapshot(segment, idxBodyNumber *MemoryMappedRegion) *MappedBodySnapshot {
 	snapshot := &MappedBodySnapshot{
-		Segment: segment,
+		Segment:       segment,
 		IdxBodyNumber: idxBodyNumber,
 	}
 	return snapshot
@@ -57,8 +57,8 @@ func NewMappedBodySnapshot(segment, idxBodyNumber *MemoryMappedRegion) *MappedBo
 
 func NewMappedTxnSnapshot(segment, idxTxnHash, idxTxnHash2BlockNum *MemoryMappedRegion) *MappedTxnSnapshot {
 	snapshot := &MappedTxnSnapshot{
-		Segment: segment,
-		IdxTxnHash: idxTxnHash,
+		Segment:             segment,
+		IdxTxnHash:          idxTxnHash,
 		IdxTxnHash2BlockNum: idxTxnHash2BlockNum,
 	}
 	return snapshot
