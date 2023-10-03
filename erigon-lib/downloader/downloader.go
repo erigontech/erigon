@@ -125,7 +125,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
-			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
+			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 		}
 	}()
 	return d, nil
@@ -350,13 +350,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		if len(noMetadata) > 5 {
 			noMetadata = append(noMetadata[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[downloader] no metadata yet", "files", strings.Join(noMetadata, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
 		if len(zeroProgress) > 5 {
 			zeroProgress = append(zeroProgress[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[downloader] no progress yet", "files", strings.Join(zeroProgress, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", strings.Join(zeroProgress, ","))
 	}
 
 	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
@@ -516,7 +516,7 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 
 		mi := t.Metainfo()
 		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
-			d.logger.Warn("[downloader] create torrent file", "err", err)
+			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
 		urls, ok := d.webseeds.ByFileName(t.Name())
