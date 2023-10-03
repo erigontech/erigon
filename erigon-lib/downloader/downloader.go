@@ -127,7 +127,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
 		}
-		d.applyWebseeds()
 	}()
 	return d, nil
 }
@@ -468,6 +467,10 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
+	wsUrls, ok := d.webseeds.ByFileName(ts.DisplayName)
+	if ok {
+		ts.Webseeds = append(ts.Webseeds, wsUrls...)
+	}
 	_, err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
@@ -516,6 +519,10 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 			d.logger.Warn("[downloader] create torrent file", "err", err)
 			return
 		}
+		urls, ok := d.webseeds.ByFileName(t.Name())
+		if ok {
+			t.AddWebSeeds(urls)
+		}
 	}(t)
 	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return nil
@@ -550,8 +557,10 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		return err
 	}
 	for i, ts := range files {
-		ws, _ := d.webseeds.ByFileName(ts.DisplayName)
-		ts.Webseeds = append(ts.Webseeds, ws...)
+		ws, ok := d.webseeds.ByFileName(ts.DisplayName)
+		if ok {
+			ts.Webseeds = append(ts.Webseeds, ws...)
+		}
 		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
@@ -633,27 +642,4 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 	}
 
 	return db, c, m, torrentClient, nil
-}
-
-func (d *Downloader) applyWebseeds() {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	torrents := d.TorrentClient().Torrents()
-	var added int
-	for _, t := range torrents {
-		select {
-		case <-d.ctx.Done():
-		case <-logEvery.C:
-			d.logger.Log(d.verbosity, "[snapshots] added webseed urls", "progress", fmt.Sprintf("%d/%d", added, len(torrents)))
-		default:
-		}
-
-		urls, ok := d.webseeds.ByFileName(t.Name())
-		if !ok {
-			continue
-		}
-		t.AddWebSeeds(urls)
-		added++
-	}
-	d.logger.Log(d.verbosity, "[snapshots] added webseed urls for", "files", added)
 }
