@@ -561,8 +561,7 @@ func (d *Downloader) addTorrentFilesFromDisk(ctx context.Context) error {
 	return nil
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.SnapDir())
-	return err
+	return BuildTorrentFilesIfNeed(ctx, d.SnapDir())
 }
 
 func (d *Downloader) Stats() AggStats {
