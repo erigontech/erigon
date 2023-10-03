@@ -28,6 +28,9 @@ type BlockSource interface {
 
 	// Returns initial balances
 	GetInitialBalances() ([]BalanceEntry, error)
+
+	// Returns chain id
+	GetChainID() (int64, error)
 }
 
 type HttpBlockSource struct {
@@ -176,11 +179,31 @@ func (blockSource *HttpBlockSource) GetInitialBalances() ([]BalanceEntry, error)
 
 			return parsedEntries, nil
 		} else {
-			return nil, fmt.Errorf("invalif response type")
+			return nil, fmt.Errorf("invalid response type")
 		}
 	} else {
 		return nil, err
 	}
+}
+
+func (blockSource *HttpBlockSource) GetChainID() (int64, error) {
+	requestData := makeJsonRpcRequest("eth_chainId", []string{})
+	chainIDResponse, err := blockSource.makeRpcRequest(requestData)
+	if err != nil {
+		return 0, err
+	}
+
+	response, ok := chainIDResponse.(string)
+	if !ok {
+		return 0, fmt.Errorf("invalid response structure")
+	}
+
+	var chainID big.Int
+	if _, ok = chainID.SetString(strings.TrimPrefix(strings.ToLower(response), "0x"), 16); !ok {
+		return 0, fmt.Errorf("failed to parse chain id `%s`", response)
+	}
+
+	return chainID.Int64(), nil
 }
 
 type intervalBlockSourceDecorator struct {
@@ -223,6 +246,10 @@ func (decorator *intervalBlockSourceDecorator) PollBlocks(fromBlock uint64) ([]t
 
 func (decorator *intervalBlockSourceDecorator) GetInitialBalances() ([]BalanceEntry, error) {
 	return decorator.decoree.GetInitialBalances()
+}
+
+func (decorator *intervalBlockSourceDecorator) GetChainID() (int64, error) {
+	return decorator.decoree.GetChainID()
 }
 
 type retryBlockSourceDecorator struct {
@@ -289,4 +316,28 @@ func (decorator *retryBlockSourceDecorator) GetInitialBalances() ([]BalanceEntry
 	}
 
 	return nil, err
+}
+
+func (decorator *retryBlockSourceDecorator) GetChainID() (int64, error) {
+	var err error
+	var chainID int64
+	for i := 0; i < int(decorator.retryCount); i += 1 {
+		select {
+		case <-decorator.terminated:
+			{
+				return 0, nil
+			}
+		default:
+			{
+				chainID, err = decorator.decoree.GetChainID()
+				if err == nil {
+					return chainID, nil
+				}
+
+				time.Sleep(decorator.retryInterval)
+			}
+		}
+	}
+
+	return 0, err
 }

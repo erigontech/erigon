@@ -27,10 +27,7 @@ type State struct {
 	chainConfig     *chain.Config
 }
 
-// Account that is used to perform withdraws/deposits
-const chainID int64 = 355113
-
-func NewState(db *DB, initialBalances []BalanceEntry) (*State, error) {
+func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, error) {
 	tx, err := db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return nil, err

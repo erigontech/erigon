@@ -19,16 +19,21 @@ type Settings struct {
 func RunImport(settings *Settings, blockSource BlockSource) error {
 	db, err := NewDB(settings.DBPath, settings.Logger)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer db.Close()
 
 	initBalances, err := blockSource.GetInitialBalances()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	state, err := NewState(db, initBalances)
+	chainID, err := blockSource.GetChainID()
+	if err != nil {
+		return err
+	}
+
+	state, err := NewState(db, initBalances, chainID)
 	if err != nil {
 		panic(err)
 	}

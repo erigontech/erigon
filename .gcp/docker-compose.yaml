@@ -14,7 +14,7 @@ services:
   blockimporter:
     <<: *default-erigon-service
     entrypoint: /bin/sh
-    command: ["-c", "blockimporter --db=/chain-db --evm=https://4fe7g-7iaaa-aaaak-aegcq-cai.raw.ic0.app"]
+    command: ["-c", "blockimporter --db=/chain-db --evm=https://emz6j-kiaaa-aaaak-ae35a-cai.raw.icp0.io"]
     restart: unless-stopped
 
   # Reads data from db-volume
