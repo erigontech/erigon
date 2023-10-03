@@ -38,6 +38,10 @@ func (eri *ErigonNode) Backend() *eth.Ethereum {
 	return eri.backend
 }
 
+func (eri *ErigonNode) Node() *node.Node {
+	return eri.stack
+}
+
 func (eri *ErigonNode) Close() {
 	eri.stack.Close()
 }

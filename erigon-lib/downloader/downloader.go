@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,11 +34,9 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -64,6 +60,7 @@ type Downloader struct {
 	wg           sync.WaitGroup
 
 	webseeds *WebSeeds
+	logger   log.Logger
 }
 
 type AggStats struct {
@@ -81,7 +78,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
 	// Application must never see partially-downloaded files
 	// To provide such consistent view - downloader does:
 	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
@@ -116,11 +113,15 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{},
+		webseeds:          &WebSeeds{logger: logger},
+		logger:            logger,
 	}
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
-	if err := d.addSegments(d.ctx); err != nil {
+	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
+		return nil, err
+	}
+	if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
 		return nil, err
 	}
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -128,7 +129,11 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.SnapDir)
+		// webseeds.Discover may create new .torrent files on disk
+		if err := d.addTorrentFilesFromDisk(d.ctx); err != nil {
+			d.logger.Warn("[downloader] addTorrentFilesFromDisk", "err", err)
+		}
 		d.applyWebseeds()
 	}()
 	return d, nil
@@ -140,7 +145,7 @@ func (d *Downloader) MainLoopInBackground(silent bool) {
 		defer d.wg.Done()
 		if err := d.mainLoop(silent); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Warn("[snapshots]", "err", err)
+				d.logger.Warn("[snapshots]", "err", err)
 			}
 		}
 	}()
@@ -197,7 +202,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		}
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addSegments(d.ctx)
+		d.addTorrentFilesFromDisk(d.ctx)
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -269,7 +274,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					_ = d.db.Update(d.ctx, func(tx kv.RwTx) error { return nil })
 				}
 
-				log.Info("[snapshots] Seeding",
+				d.logger.Info("[snapshots] Seeding",
 					"up", common2.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
 					"conns", stats.ConnectionsTotal,
@@ -277,7 +282,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				continue
 			}
 
-			log.Info("[snapshots] Downloading",
+			d.logger.Info("[snapshots] Downloading",
 				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common2.ByteCount(stats.BytesCompleted), common2.ByteCount(stats.BytesTotal)),
 				"download", common2.ByteCount(stats.DownloadRate)+"/s",
 				"upload", common2.ByteCount(stats.UploadRate)+"/s",
@@ -288,7 +293,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			if stats.PeersUnique == 0 {
 				ips := d.TorrentClient().BadPeerIPs()
 				if len(ips) > 0 {
-					log.Info("[snapshots] Stats", "banned", ips)
+					d.logger.Info("[snapshots] Stats", "banned", ips)
 				}
 			}
 		}
@@ -324,10 +329,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			stats.BytesTotal += uint64(t.Length())
 			if !t.Complete.Bool() {
 				progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
-				log.Debug("[downloader] file not downloaded yet", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+				d.logger.Debug("[downloader] file not downloaded yet", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
 			}
 		default:
-			log.Debug("[downloader] file has no metadata yet", "name", t.Name())
+			d.logger.Debug("[downloader] file has no metadata yet", "name", t.Name())
 		}
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
@@ -421,8 +426,8 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	completedPieces := &atomic.Uint64{}
 
 	{
-		log.Info("[snapshots] Verify start")
-		defer log.Info("[snapshots] Verify done")
+		d.logger.Info("[snapshots] Verify start")
+		defer d.logger.Info("[snapshots] Verify done")
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		logInterval := 20 * time.Second
@@ -436,7 +441,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					log.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
+					d.logger.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
 				}
 			}
 		}()
@@ -522,7 +527,7 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 
 		mi := t.Metainfo()
 		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
-			log.Warn("[downloader] create torrent file", "err", err)
+			d.logger.Warn("[downloader] create torrent file", "err", err)
 			return
 		}
 	}(t)
@@ -535,24 +540,28 @@ func seedableFiles(snapDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	files2, err := seedableHistorySnapshots(snapDir, "history")
-	if err != nil {
-		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
-	}
-	files = append(files, files2...)
-	files2, err = seedableHistorySnapshots(snapDir, "warm")
+	files2, err := seedableHistorySnapshots(snapDir)
 	if err != nil {
 		return nil, fmt.Errorf("seedableHistorySnapshots: %w", err)
 	}
 	files = append(files, files2...)
 	return files, nil
 }
-func (d *Downloader) addSegments(ctx context.Context) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.SnapDir())
+func (d *Downloader) addTorrentFilesFromDisk(ctx context.Context) error {
+	files, err := allTorrentFiles(d.SnapDir())
 	if err != nil {
 		return err
 	}
-	return AddTorrentFiles(d.SnapDir(), d.torrentClient)
+	for _, ts := range files {
+		_, err := addTorrentFile(ts, d.torrentClient)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
+	return BuildTorrentFilesIfNeed(ctx, d.SnapDir())
 }
 
 func (d *Downloader) Stats() AggStats {
@@ -566,10 +575,10 @@ func (d *Downloader) Close() {
 	d.wg.Wait()
 	d.torrentClient.Close()
 	if err := d.folder.Close(); err != nil {
-		log.Warn("[snapshots] folder.close", "err", err)
+		d.logger.Warn("[snapshots] folder.close", "err", err)
 	}
 	if err := d.pieceCompletionDB.Close(); err != nil {
-		log.Warn("[snapshots] pieceCompletionDB.close", "err", err)
+		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
 	d.db.Close()
 }
@@ -626,83 +635,11 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 
 func (d *Downloader) applyWebseeds() {
 	for _, t := range d.TorrentClient().Torrents() {
-		urls, ok := d.webseeds.GetByFileNames()[t.Name()]
+		urls, ok := d.webseeds.ByFileName(t.Name())
 		if !ok {
 			continue
 		}
-		log.Debug("[downloader] addd webseeds", "file", t.Name())
+		d.logger.Debug("[downloader] addd webseeds", "file", t.Name())
 		t.AddWebSeeds(urls)
 	}
-}
-
-type WebSeeds struct {
-	lock              sync.Mutex
-	webSeedsByFilName snaptype.WebSeeds
-}
-
-func (d *WebSeeds) GetByFileNames() snaptype.WebSeeds {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	return d.webSeedsByFilName
-}
-func (d *WebSeeds) SetByFileNames(l snaptype.WebSeeds) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	d.webSeedsByFilName = l
-}
-
-func (d *WebSeeds) callWebSeedsProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
-	request, err := http.NewRequest(http.MethodGet, webSeedProviderUrl.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	request = request.WithContext(ctx)
-	resp, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	response := snaptype.WebSeedsFromProvider{}
-	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, err
-	}
-	return response, nil
-}
-func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
-	data, err := os.ReadFile(webSeedProviderPath)
-	if err != nil {
-		return nil, err
-	}
-	response := snaptype.WebSeedsFromProvider{}
-	if err := toml.Unmarshal(data, &response); err != nil {
-		return nil, err
-	}
-	return response, nil
-}
-
-func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string) {
-	list := make([]snaptype.WebSeedsFromProvider, len(urls)+len(files))
-	for _, webSeedProviderURL := range urls {
-		select {
-		case <-ctx.Done():
-			break
-		default:
-		}
-		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
-		if err != nil { // don't fail on error
-			log.Warn("[downloader] callWebSeedsProvider", "err", err, "url", webSeedProviderURL.EscapedPath())
-			continue
-		}
-		list = append(list, response)
-	}
-	for _, webSeedFile := range files {
-		response, err := d.readWebSeedsFile(webSeedFile)
-		if err != nil { // don't fail on error
-			_, fileName := filepath.Split(webSeedFile)
-			log.Warn("[downloader] readWebSeedsFile", "err", err, "file", fileName)
-			continue
-		}
-		list = append(list, response)
-	}
-	d.SetByFileNames(snaptype.NewWebSeeds(list))
 }
