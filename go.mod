@@ -275,5 +275,3 @@ require (
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
 replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
-
-replace github.com/ledgerwatch/erigon-lib => github.com/pratikspatil024/erigon-lib v0.0.0-20230914110124-2768437ea2d4
