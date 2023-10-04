@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -201,7 +200,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
 		//d.addTorrentFilesFromDisk(false)
-		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
 			select {
@@ -210,16 +208,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
 				select {
 				case <-d.ctx.Done():
 					return
 				case <-t.GotInfo():
 				}
 				if t.Complete.Bool() {
-					torrentMap[t.InfoHash()] = struct{}{}
 					continue
 				}
 				if err := sem.Acquire(d.ctx, 1); err != nil {
@@ -227,7 +221,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 				t.AllowDataDownload()
 				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
 					defer d.wg.Done()
