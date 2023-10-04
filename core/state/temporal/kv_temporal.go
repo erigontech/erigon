@@ -16,10 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -67,38 +65,20 @@ type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
 
-	convertV3toV2        tConvertAccount
-	convertV2toV3        tConvertAccount
-	restoreCodeHash      tRestoreCodeHash
-	parseInc             tParseIncarnation
-	systemContractLookup map[common.Address][]common.CodeRecord
+	convertV3toV2   tConvertAccount
+	convertV2toV3   tConvertAccount
+	restoreCodeHash tRestoreCodeHash
+	parseInc        tParseIncarnation
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.AggregatorV3) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
-	}
-	if systemContractLookup != nil {
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			var err error
-			for _, list := range systemContractLookup {
-				for i := range list {
-					list[i].TxNumber, err = rawdbv3.TxNums.Min(tx, list[i].BlockNumber)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
 	}
 
 	return &DB{RwDB: db, agg: agg,
 		convertV3toV2: accounts.ConvertV3toV2, convertV2toV3: accounts.ConvertV2toV3,
 		restoreCodeHash: historyv2read.RestoreCodeHash, parseInc: accounts.DecodeIncarnationFromStorage,
-		systemContractLookup: systemContractLookup,
 	}, nil
 }
 func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
@@ -229,22 +209,6 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 			if err != nil {
 				return nil, nil, err
 			}
-			/*
-				var force *common.Hash
-				if tx.db.systemContractLookup != nil {
-					if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
-						p := sort.Search(len(records), func(i int) bool {
-							return records[i].TxNumber > asOfTs
-						})
-						hash := records[p-1].CodeHash
-						force = &hash
-					}
-				}
-				v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
-				if err != nil {
-					return nil, nil, err
-				}
-			*/
 			return k[:20], common.Copy(v), nil
 		})
 		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
@@ -373,32 +337,6 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if !ok || len(v) == 0 {
 			return v, ok, nil
 		}
-		/*
-			v, err = tx.db.convertV3toV2(v)
-			if err != nil {
-				return nil, false, err
-			}
-			var force *common.Hash
-			if tx.db.systemContractLookup != nil {
-				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
-					p := sort.Search(len(records), func(i int) bool {
-						return records[i].TxNumber > ts
-					})
-					hash := records[p-1].CodeHash
-					force = &hash
-				}
-			}
-			v, err = tx.db.restoreCodeHash(tx.MdbxTx, key, v, force)
-			if err != nil {
-				return nil, false, err
-			}
-			if len(v) > 0 {
-				v, err = tx.db.convertV2toV3(v)
-				if err != nil {
-					return nil, false, err
-				}
-			}
-		*/
 		return v, true, nil
 	case kv.StorageHistory:
 		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
@@ -473,12 +411,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 			panic(err)
 		}
 
-		var sc map[common.Address][]common.CodeRecord
-		if gspec != nil {
-			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
-		}
-
-		db, err = New(db, agg, sc)
+		db, err = New(db, agg)
 		if err != nil {
 			panic(err)
 		}

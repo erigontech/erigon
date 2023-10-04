@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -54,19 +53,17 @@ type PlainState struct {
 	blockNr                      uint64
 	storage                      map[libcommon.Address]*btree.BTree
 	trace                        bool
-	systemContractLookup         map[libcommon.Address][]libcommon.CodeRecord
 }
 
-func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
 	if histV3 {
 		panic("Please use HistoryStateReaderV3 with HistoryV3")
 	}
 	ps := &PlainState{
-		tx:                   tx,
-		blockNr:              blockNr,
-		storage:              make(map[libcommon.Address]*btree.BTree),
-		systemContractLookup: systemContractLookup,
+		tx:      tx,
+		blockNr: blockNr,
+		storage: make(map[libcommon.Address]*btree.BTree),
 	}
 
 	c1, _ := tx.Cursor(kv.E2AccountsHistory)
@@ -186,12 +183,7 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	}
 	if fromHistory {
 		//restore codehash
-		if records, ok := s.systemContractLookup[address]; ok {
-			p := sort.Search(len(records), func(i int) bool {
-				return records[i].BlockNumber > s.blockNr
-			})
-			a.CodeHash = records[p-1].CodeHash
-		} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+		if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 			if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 				if len(codeHash) > 0 {
 					a.CodeHash = libcommon.BytesToHash(codeHash)

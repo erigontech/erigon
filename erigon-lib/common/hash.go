@@ -171,9 +171,3 @@ func (h Hash) Value() (driver.Value, error) {
 func FromHex(in string) []byte {
 	return hexutility.MustDecodeHex(in)
 }
-
-type CodeRecord struct {
-	BlockNumber uint64
-	TxNumber    uint64
-	CodeHash    Hash
-}
