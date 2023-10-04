@@ -155,7 +155,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 		webseedUrls = append(webseedUrls, uri)
 	}
-	localCfgFile := filepath.Join(dirs.DataDir, "webseeds.toml") // datadir/webseeds.toml allowed
+	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
 		webseedFiles = append(webseedFiles, localCfgFile)
 	}
