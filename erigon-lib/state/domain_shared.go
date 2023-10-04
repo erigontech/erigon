@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -184,9 +183,8 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (txsFromBlockBeginn
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-	log.Debug("ClearRam", "commitment", resetCommitment, "tx", sd.txNum.Load(), "block", sd.blockNum.Load())
+	//sd.muMaps.Lock()
+	//defer sd.muMaps.Unlock()
 	sd.account = map[string][]byte{}
 	sd.code = map[string][]byte{}
 	sd.commitment = map[string][]byte{}
@@ -200,9 +198,9 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
-	sd.muMaps.Lock()
+	//sd.muMaps.Lock()
 	sd.puts(table, key, val)
-	sd.muMaps.Unlock()
+	//sd.muMaps.Unlock()
 }
 
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
@@ -241,9 +239,9 @@ func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
 
 // Get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
-	sd.muMaps.RLock()
+	//sd.muMaps.RLock()
 	v, ok = sd.get(table, key)
-	sd.muMaps.RUnlock()
+	//sd.muMaps.RUnlock()
 	return v, ok
 }
 
@@ -318,8 +316,8 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
+	//sd.muMaps.RLock()
+	//defer sd.muMaps.RUnlock()
 
 	for table, list := range readLists {
 		switch table {
