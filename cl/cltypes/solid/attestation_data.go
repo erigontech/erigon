@@ -17,7 +17,7 @@ import (
 // beaconBlockHash: 32 bytes
 // source: 40 bytes
 // target: 40 bytes
-const attestationDataBufferSize = 8 + 8 + 32 + 40*2
+const AttestationDataBufferSize = 8 + 8 + 32 + 40*2
 
 // AttestantionData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData []byte
@@ -74,7 +74,7 @@ func (a AttestationData) UnmarshalJSON(buf []byte) error {
 }
 
 func NewAttestationData() AttestationData {
-	return make([]byte, attestationDataBufferSize)
+	return make([]byte, AttestationDataBufferSize)
 }
 
 func (a AttestationData) Static() bool {
@@ -112,6 +112,31 @@ func (a AttestationData) SetValidatorIndex(validatorIndex uint64) {
 
 func (a AttestationData) SetBeaconBlockRoot(beaconBlockRoot libcommon.Hash) {
 	copy(a[16:], beaconBlockRoot[:])
+}
+
+func (a AttestationData) SetSlotWithRawBytes(b []byte) {
+	copy(a[:8], b)
+}
+
+func (a AttestationData) SetValidatorIndexWithRawBytes(b []byte) {
+	copy(a[8:16], b)
+
+}
+
+func (a AttestationData) RawSlot() []byte {
+	return a[:8]
+}
+
+func (a AttestationData) RawValidatorIndex() []byte {
+	return a[8:16]
+}
+
+func (a AttestationData) RawBeaconBlockRoot() []byte {
+	return a[16:48]
+}
+
+func (a AttestationData) SetBeaconBlockRootWithRawBytes(b []byte) {
+	copy(a[16:48], b)
 }
 
 func (a AttestationData) SetSource(c Checkpoint) {

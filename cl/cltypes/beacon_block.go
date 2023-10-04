@@ -86,25 +86,6 @@ func (b *SignedBeaconBlock) Version() clparams.StateVersion {
 }
 
 // Version returns beacon block version.
-func (b *SignedBeaconBlock) EncodeForStorage(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.getSchemaForStorage()...)
-}
-
-func (b *SignedBeaconBlock) DecodeForStorage(buf []byte, s int) error {
-	b.Block.Body.Version = clparams.StateVersion(s)
-	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
-	}
-	return ssz2.UnmarshalSSZ(buf, s, b.getSchemaForStorage()...)
-}
-
-// Version returns beacon block version.
-func (b *SignedBeaconBlock) getSchemaForStorage() []interface{} {
-	return append([]interface{}{b.Signature[:], &b.Block.Slot, &b.Block.ProposerIndex, b.Block.StateRoot[:], b.Block.ParentRoot[:]},
-		b.Block.Body.getSchema(true)...)
-}
-
-// Version returns beacon block version.
 func (b *BeaconBlock) Version() clparams.StateVersion {
 	return b.Body.Version
 }
