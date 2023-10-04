@@ -151,7 +151,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		defer d.wg.Done()
 
 		// Torrents that are already taken care of
-		torrentMap := map[metainfo.Hash]struct{}{}
 		//// First loop drops torrents that were downloaded or are already complete
 		//// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
