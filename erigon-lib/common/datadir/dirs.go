@@ -67,7 +67,7 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
-		Downloader:      filepath.Join(datadir, "downloader"),
+		Downloader:      filepath.Join(datadir, "snapshots", "db"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
@@ -153,6 +153,7 @@ func erigonV3foldersV31Migration(dirs Dirs) error {
 	return nil
 }
 
+// nolint
 func moveFiles(from, to string, ext string) error {
 	files, err := os.ReadDir(from)
 	if err != nil {
