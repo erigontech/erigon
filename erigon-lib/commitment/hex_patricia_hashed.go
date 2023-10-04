@@ -27,10 +27,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -253,6 +254,13 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 	return nil
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen int) error {
 	extraLen := 0
 	if cell.apl > 0 {
@@ -272,7 +280,7 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 		if cell.downHashedLen > 0 {
 			copy(cell.downHashedKey[extraLen:], cell.downHashedKey[:cell.downHashedLen])
 		}
-		cell.downHashedLen += extraLen
+		cell.downHashedLen = minInt(extraLen+cell.downHashedLen, len(cell.downHashedKey))
 		var hashedKeyOffset, downOffset int
 		if cell.apl > 0 {
 			if err := hashKey(keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
@@ -284,7 +292,7 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
 			}
-			if err := hashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
+			if err := hashKey(keccak, cell.spk[:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
 				return err
 			}
 		}
@@ -736,6 +744,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		}
 	} else if cell.hl > 0 {
 		buf = append(buf, cell.h[:cell.hl]...)
+	} else if storageRootHashIsSet {
+		buf = append(buf, storageRootHash[:]...)
+		copy(cell.h[:], storageRootHash[:])
 	} else {
 		buf = append(buf, EmptyRootHash...)
 	}
@@ -871,10 +882,14 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 			return nil
 		}
 		upCell = &hph.root
+		err := upCell.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)
+		if err != nil {
+			return err
+		}
 		touched = hph.rootTouched
 		present = hph.rootPresent
 		if hph.trace {
-			fmt.Printf("unfold root, touched %t, present %t, column %d\n", touched, present, col)
+			fmt.Printf("unfold root, touched %t, present %t, column %d downHashedKey %x\n", touched, present, col, upCell.downHashedKey[:upCell.downHashedLen])
 		}
 	} else {
 		upDepth = hph.depths[hph.activeRows-1]
@@ -895,6 +910,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	hph.touchMap[row] = 0
 	hph.afterMap[row] = 0
 	hph.branchBefore[row] = false
+
 	if upCell.downHashedLen == 0 {
 		// root unfolded
 		depth = upDepth + 1
@@ -969,15 +985,15 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", hph.activeRows, hph.currentKey[:hph.currentKeyLen], hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
 	}
 	// Move information to the row above
-	row := hph.activeRows - 1
 	var upCell *Cell
-	var col int
-	var upDepth int
-	if hph.activeRows == 1 {
+	var col, upDepth int
+	row := hph.activeRows - 1
+	if row == 0 {
 		if hph.trace {
 			fmt.Printf("upcell is root\n")
 		}
 		upCell = &hph.root
+		col = int(upCell.downHashedKey[0])
 	} else {
 		upDepth = hph.depths[hph.activeRows-2]
 		col = int(hph.currentKey[upDepth-1])
@@ -987,7 +1003,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell = &hph.grid[row-1][col]
 	}
 
-	depth := hph.depths[hph.activeRows-1]
+	depth := hph.depths[row]
 	updateKey = hexToCompact(hph.currentKey[:updateKeyLen])
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
@@ -1047,7 +1063,18 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		// Delete if it existed
 		if hph.branchBefore[row] {
 			//branchData, _, err = hph.EncodeBranchDirectAccess(0, row, depth)
-			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			branchData, _, err = EncodeBranch(0, hph.touchMap[row], hph.afterMap[row], func(nb int, skip bool) (*Cell, error) {
+				if skip || nb != nibble {
+					return nil, nil
+				}
+				cell := &hph.grid[row][nibble]
+				cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+				if err != nil {
+					return nil, err
+				}
+				fmt.Printf("fold 1 Cellhash %x\n", cellHash)
+				return cell, nil
+			})
 			if err != nil {
 				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1119,7 +1146,6 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 
 		var lastNibble int
 		var err error
-		_ = cellGetter
 
 		//branchData, lastNibble, err = hph.EncodeBranchDirectAccess(bitmap, row, depth, branchData)
 		branchData, lastNibble, err = EncodeBranch(bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
@@ -1248,11 +1274,6 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	//// set root hash field if it's not a cell to correctly encode trie state
-	//if hph.root.apl == 0 && hph.root.spl == 0 && !bytes.Equal(hph.root.h[:], rh) {
-	//	copy(hph.root.h[:], rh[1:])
-	//	hph.root.hl = len(rh) - 1
-	//}
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
@@ -1353,10 +1374,10 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Updat
 	})
 
 	for i, update := range updates {
-		// if hph.trace {
-		fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
-			i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
-		// }
+		if hph.trace {
+			fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
+				i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(update.hashedKey) {
 			if branchData, updateKey, err := hph.fold(); err != nil {
