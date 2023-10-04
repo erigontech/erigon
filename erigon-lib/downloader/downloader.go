@@ -114,7 +114,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
 		return nil, err
 	}
-	if err := d.addTorrentFilesFromDisk(); err != nil {
+	if err := d.addTorrentFilesFromDisk(false); err != nil {
 		return nil, err
 	}
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -124,7 +124,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
+		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 		}
 	}()
@@ -199,7 +199,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		}
 		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addTorrentFilesFromDisk()
+		d.addTorrentFilesFromDisk(false)
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
