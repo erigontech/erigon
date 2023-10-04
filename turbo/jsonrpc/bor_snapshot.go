@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -288,24 +289,8 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 
 	currentState := state.New(readerTemp)
 
-	// check block number range
-	if _, err := types2.BigIntIsWithinRange(currentHeader.Number, options.BlockNumberMin, options.BlockNumberMax); err != nil {
-		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of block range. err: " + err.Error()}
-	}
-
-	// check timestamp range
-	if _, err := types2.Uint64IsWithinRange(&currentHeader.Time, options.TimestampMin, options.TimestampMax); err != nil {
-		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of time range. err: " + err.Error()}
-	}
-
-	// check knownAccounts length (number of slots/accounts) should be less than 1000
-	if options.KnownAccountStorageConditions.CountStorageEntries() >= 1000 {
-		return common.Hash{}, &KnownAccountsLimitExceededError{Message: "limit exceeded. err: " + err.Error()}
-	}
-
-	// check knownAccounts
-	if err := currentState.ValidateKnownAccounts(options.KnownAccountStorageConditions); err != nil {
-		return common.Hash{}, &TransactionConditionsValidationError{Message: "storage error. err: " + err.Error()}
+	if err := stagedsync.ValidateTransactionConditions(&options, currentHeader, currentState, true); err != nil {
+		return common.Hash{}, err
 	}
 
 	// put options data in Tx, to use it later while block building
@@ -633,15 +618,3 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 
 	return snap, nil
 }
-
-type TransactionConditionsValidationError struct{ Message string }
-
-func (e *TransactionConditionsValidationError) ErrorCode() int { return -32003 }
-
-func (e *TransactionConditionsValidationError) Error() string { return e.Message }
-
-type KnownAccountsLimitExceededError struct{ Message string }
-
-func (e *KnownAccountsLimitExceededError) ErrorCode() int { return -32005 }
-
-func (e *KnownAccountsLimitExceededError) Error() string { return e.Message }

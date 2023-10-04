@@ -176,3 +176,15 @@ func Uint64IsWithinRange(num *uint64, min *uint64, max *uint64) (bool, error) {
 
 	return true, nil
 }
+
+type TransactionConditionsValidationError struct{ Message string }
+
+func (e *TransactionConditionsValidationError) ErrorCode() int { return -32003 }
+
+func (e *TransactionConditionsValidationError) Error() string { return e.Message }
+
+type KnownAccountsLimitExceededError struct{ Message string }
+
+func (e *KnownAccountsLimitExceededError) ErrorCode() int { return -32005 }
+
+func (e *KnownAccountsLimitExceededError) Error() string { return e.Message }

@@ -439,21 +439,7 @@ LOOP:
 
 		// not prioritising conditional transaction, yet.
 		if options := txn.GetOptions(); options != nil {
-			if _, err := types2.BigIntIsWithinRange(header.Number, options.BlockNumberMin, options.BlockNumberMax); err != nil {
-				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
-				txs.Pop()
-
-				continue
-			}
-
-			if _, err := types2.Uint64IsWithinRange(&header.Time, options.TimestampMin, options.TimestampMax); err != nil {
-				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
-				txs.Pop()
-
-				continue
-			}
-
-			if err := ibs.ValidateKnownAccounts(options.KnownAccountStorageConditions); err != nil {
+			if err := ValidateTransactionConditions(options, header, ibs, false); err != nil {
 				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
 				txs.Pop()
 
@@ -520,4 +506,30 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
+}
+
+func ValidateTransactionConditions(tc *types2.TransactionConditions, header *types.Header, ibs *state.IntraBlockState, lengthCheckFlag bool) error {
+	// check block number range
+	if _, err := types2.BigIntIsWithinRange(header.Number, tc.BlockNumberMin, tc.BlockNumberMax); err != nil {
+		return &types2.TransactionConditionsValidationError{Message: "out of block range. err: " + err.Error()}
+	}
+
+	// check timestamp range
+	if _, err := types2.Uint64IsWithinRange(&header.Time, tc.TimestampMin, tc.TimestampMax); err != nil {
+		return &types2.TransactionConditionsValidationError{Message: "out of time range. err: " + err.Error()}
+	}
+
+	// check knownAccounts
+	if err := ibs.ValidateKnownAccounts(tc.KnownAccountStorageConditions); err != nil {
+		return &types2.KnownAccountsLimitExceededError{Message: "limit exceeded. err: number of slots/accounts in KnownAccountStorageConditions exceeds the limit of 1000"}
+	}
+
+	if lengthCheckFlag {
+		// check knownAccounts length (number of slots/accounts) should be less than 1000
+		if tc.KnownAccountStorageConditions.CountStorageEntries() >= 1000 {
+			return &types2.KnownAccountsLimitExceededError{Message: "limit exceeded. err: number of slots/accounts in KnownAccountStorageConditions exceeds the limit of 1000"}
+		}
+	}
+
+	return nil
 }
