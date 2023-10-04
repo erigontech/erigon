@@ -289,12 +289,12 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 	currentState := state.New(readerTemp)
 
 	// check block number range
-	if err := currentHeader.ValidateBlockNumberOptions4337(options.BlockNumberMin, options.BlockNumberMax); err != nil {
+	if _, err := types2.BigIntIsWithinRange(currentHeader.Number, options.BlockNumberMin, options.BlockNumberMax); err != nil {
 		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of block range. err: " + err.Error()}
 	}
 
 	// check timestamp range
-	if err := currentHeader.ValidateTimestampOptions4337(options.TimestampMin, options.TimestampMax); err != nil {
+	if _, err := types2.Uint64IsWithinRange(&currentHeader.Time, options.TimestampMin, options.TimestampMax); err != nil {
 		return common.Hash{}, &TransactionConditionsValidationError{Message: "out of time range. err: " + err.Error()}
 	}
 

@@ -152,3 +152,27 @@ func (ka KnownAccountStorageConditions) CountStorageEntries() int {
 
 	return length
 }
+
+func BigIntIsWithinRange(num *big.Int, min *big.Int, max *big.Int) (bool, error) {
+	if min != nil && num.Cmp(min) == -1 {
+		return false, fmt.Errorf("provided number %v is less than minimum number: %v", num, min)
+	}
+
+	if max != nil && num.Cmp(max) == 1 {
+		return false, fmt.Errorf("provided number %v is greater than maximum number: %v", num, max)
+	}
+
+	return true, nil
+}
+
+func Uint64IsWithinRange(num *uint64, min *uint64, max *uint64) (bool, error) {
+	if min != nil && *num < *min {
+		return false, fmt.Errorf("provided number %v is less than minimum number: %v", num, min)
+	}
+
+	if max != nil && *num > *max {
+		return false, fmt.Errorf("provided number %v is greater than maximum number: %v", num, max)
+	}
+
+	return true, nil
+}

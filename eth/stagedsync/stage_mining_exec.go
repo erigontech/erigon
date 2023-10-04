@@ -439,14 +439,14 @@ LOOP:
 
 		// not prioritising conditional transaction, yet.
 		if options := txn.GetOptions(); options != nil {
-			if err := header.ValidateBlockNumberOptions4337(options.BlockNumberMin, options.BlockNumberMax); err != nil {
+			if _, err := types2.BigIntIsWithinRange(header.Number, options.BlockNumberMin, options.BlockNumberMax); err != nil {
 				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
 				txs.Pop()
 
 				continue
 			}
 
-			if err := header.ValidateTimestampOptions4337(options.TimestampMin, options.TimestampMax); err != nil {
+			if _, err := types2.Uint64IsWithinRange(&header.Time, options.TimestampMin, options.TimestampMax); err != nil {
 				log.Trace("Dropping conditional transaction", "from", from, "hash", txn.Hash(), "reason", err)
 				txs.Pop()
 

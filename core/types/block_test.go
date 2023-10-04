@@ -581,13 +581,13 @@ func TestValidateBlockNumberOptions4337(t *testing.T) {
 	}
 
 	for _, test := range testsPass {
-		if err := test.header.ValidateBlockNumberOptions4337(test.minBlockNumber, test.maxBlockNumber); err != nil {
+		if _, err := types2.BigIntIsWithinRange(test.header.Number, test.minBlockNumber, test.maxBlockNumber); err != nil {
 			t.Fatalf("test number %v should not have failed. err: %v", test.number, err)
 		}
 	}
 
 	for _, test := range testsFail {
-		if err := test.header.ValidateBlockNumberOptions4337(test.minBlockNumber, test.maxBlockNumber); err == nil {
+		if _, err := types2.BigIntIsWithinRange(test.header.Number, test.minBlockNumber, test.maxBlockNumber); err == nil {
 			t.Fatalf("test number %v should have failed. err is nil", test.number)
 		}
 	}
@@ -665,13 +665,13 @@ func TestValidateTimestampOptions4337(t *testing.T) {
 	}
 
 	for _, test := range testsPass {
-		if err := test.header.ValidateTimestampOptions4337(test.minTimestamp, test.maxTimestamp); err != nil {
+		if _, err := types2.Uint64IsWithinRange(&test.header.Time, test.minTimestamp, test.maxTimestamp); err != nil {
 			t.Fatalf("test number %v should not have failed. err: %v", test.number, err)
 		}
 	}
 
 	for _, test := range testsFail {
-		if err := test.header.ValidateTimestampOptions4337(test.minTimestamp, test.maxTimestamp); err == nil {
+		if _, err := types2.Uint64IsWithinRange(&test.header.Time, test.minTimestamp, test.maxTimestamp); err == nil {
 			t.Fatalf("test number %v should have failed. err is nil", test.number)
 		}
 	}
