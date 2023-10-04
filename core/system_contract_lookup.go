@@ -40,11 +40,11 @@ func init() {
 	addGnosisSpecialCase()
 }
 
-func allocToCodeRecords(allocs types.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
-	for addr, alloc := range allocs {
-		if len(alloc.Code) > 0 {
+func allocToCodeRecords(alloc types.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
+	for addr, account := range alloc {
+		if len(account.Code) > 0 {
 			list := byChain[addr]
-			codeHash, err := common.HashData(alloc.Code)
+			codeHash, err := common.HashData(account.Code)
 			if err != nil {
 				panic(fmt.Errorf("failed to hash system contract code: %s", err.Error()))
 			}
