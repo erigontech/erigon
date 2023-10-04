@@ -507,13 +507,16 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
-	t, err := d.torrentClient.AddMagnet(magnet.String())
+	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
+	if err != nil {
+		return err
+	}
+	spec.DisallowDataDownload = true
+	t, _, err := d.torrentClient.AddTorrentSpec(spec)
 	if err != nil {
 		//log.Warn("[downloader] add magnet link", "err", err)
 		return err
 	}
-	t.DisallowDataDownload()
-	t.AllowDataUpload()
 	d.wg.Add(1)
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
