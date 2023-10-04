@@ -121,7 +121,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
 		return nil, err
 	}
-	if err := d.addTorrentFilesFromDisk(); err != nil {
+	if err := d.addTorrentFilesFromDisk(false); err != nil {
 		return nil, err
 	}
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
@@ -131,7 +131,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		defer d.wg.Done()
 		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(); err != nil && !errors.Is(err, context.Canceled) {
+		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 		}
 	}()
@@ -161,52 +161,52 @@ func (d *Downloader) mainLoop(silent bool) error {
 		torrentMap := map[metainfo.Hash]struct{}{}
 		// First loop drops torrents that were downloaded or are already complete
 		// This improves efficiency of download by reducing number of active torrent (empirical observation)
-		for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
-			select {
-			case <-d.ctx.Done():
-				return
-			default:
-			}
-			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-t.GotInfo():
-				}
-				if t.Complete.Bool() {
-					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
-					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
-					t.Drop()
-					torrentMap[t.InfoHash()] = struct{}{}
-					continue
-				}
-				if err := sem.Acquire(d.ctx, 1); err != nil {
-					return
-				}
-				t.AllowDataDownload()
-				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
-				d.wg.Add(1)
-				go func(t *torrent.Torrent) {
-					defer d.wg.Done()
-					defer sem.Release(1)
-					select {
-					case <-d.ctx.Done():
-						return
-					case <-t.Complete.On():
-					}
-					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
-					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
-					t.Drop()
-				}(t)
-			}
-		}
-		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
-		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addTorrentFilesFromDisk()
+		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
+		//	select {
+		//	case <-d.ctx.Done():
+		//		return
+		//	default:
+		//	}
+		//	for _, t := range torrents {
+		//		if _, already := torrentMap[t.InfoHash()]; already {
+		//			continue
+		//		}
+		//		select {
+		//		case <-d.ctx.Done():
+		//			return
+		//		case <-t.GotInfo():
+		//		}
+		//		if t.Complete.Bool() {
+		//			atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+		//			atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+		//			t.Drop()
+		//			torrentMap[t.InfoHash()] = struct{}{}
+		//			continue
+		//		}
+		//		if err := sem.Acquire(d.ctx, 1); err != nil {
+		//			return
+		//		}
+		//		t.AllowDataDownload()
+		//		t.DownloadAll()
+		//		torrentMap[t.InfoHash()] = struct{}{}
+		//		d.wg.Add(1)
+		//		go func(t *torrent.Torrent) {
+		//			defer d.wg.Done()
+		//			defer sem.Release(1)
+		//			select {
+		//			case <-d.ctx.Done():
+		//				return
+		//			case <-t.Complete.On():
+		//			}
+		//			atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+		//			atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+		//			t.Drop()
+		//		}(t)
+		//	}
+		//}
+		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
+		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
+		//d.addTorrentFilesFromDisk()
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -354,16 +354,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 	if len(noMetadata) > 0 {
+		amount := len(noMetadata)
 		if len(noMetadata) > 5 {
 			noMetadata = append(noMetadata[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", strings.Join(noMetadata, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
+		amount := len(zeroProgress)
 		if len(zeroProgress) > 5 {
 			zeroProgress = append(zeroProgress[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", strings.Join(zeroProgress, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
 	}
 
 	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
@@ -411,7 +413,8 @@ func (d *Downloader) verifyFile(ctx context.Context, t *torrent.Torrent, complet
 
 func (d *Downloader) VerifyData(ctx context.Context) error {
 	total := 0
-	for _, t := range d.torrentClient.Torrents() {
+	torrents := d.torrentClient.Torrents()
+	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
 			total += t.NumPieces()
@@ -425,10 +428,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	{
 		d.logger.Info("[snapshots] Verify start")
 		defer d.logger.Info("[snapshots] Verify done")
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		logInterval := 20 * time.Second
-		logEvery := time.NewTicker(logInterval)
+		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 		d.wg.Add(1)
 		go func() {
@@ -449,7 +449,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
-	for _, t := range d.torrentClient.Torrents() {
+	for _, t := range torrents {
 		t := t
 		g.Go(func() error {
 			return d.verifyFile(ctx, t, completedPieces)
