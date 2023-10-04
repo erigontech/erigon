@@ -16,7 +16,7 @@ const (
 	// agg bits offset: 4 bytes
 	// attestationData: 128
 	// Signature: 96 bytes
-	attestationStaticBufferSize = 4 + attestationDataBufferSize + 96
+	attestationStaticBufferSize = 4 + AttestationDataBufferSize + 96
 
 	// offset is usually always the same
 	aggregationBitsOffset = 228
