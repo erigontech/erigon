@@ -65,13 +65,13 @@ require (
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/consensys/gnark-crypto v0.12.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dustin/go-humanize v1.0.0 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230912124304-94ed0e573c23 // indirect
 	github.com/go-llsqlite/crawshaw v0.0.0-20230910110433-7e901377eb6c // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/google/uuid v1.3.0 // indirect
+	github.com/google/uuid v1.3.1 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -111,10 +111,10 @@ require (
 	golang.org/x/tools v0.13.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	modernc.org/libc v1.22.3 // indirect
-	modernc.org/mathutil v1.5.0 // indirect
-	modernc.org/memory v1.5.0 // indirect
-	modernc.org/sqlite v1.21.1 // indirect
+	modernc.org/libc v1.24.1 // indirect
+	modernc.org/mathutil v1.6.0 // indirect
+	modernc.org/memory v1.6.0 // indirect
+	modernc.org/sqlite v1.26.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
