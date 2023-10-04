@@ -640,6 +640,8 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
+		incarnation := state.GetIncarnation(address)
+		state.SetIncarnation(address, incarnation+1)
 		state.SetCode(address, rewrittenCode)
 	}
 
