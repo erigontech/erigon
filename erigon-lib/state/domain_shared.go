@@ -198,6 +198,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
+	// disable mutex - becuse work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
 	sd.puts(table, key, val)
 	//sd.muMaps.Unlock()
