@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -206,12 +207,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	}
 
 	e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
-	//if e.historyV3 {
-	//	if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-	//		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-	//		return
-	//	}
-	//}
 
 	var finishProgressBefore, headersProgressBefore uint64
 	if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -237,25 +232,26 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
-	//if e.historyV3 {
-	//	if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
-	//		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-	//		return
-	//	}
-	//}
+	if e.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
 		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		//if e.historyV3 {
-		//	if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
-		//		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		//		return
-		//	}
-		//}
 	}
+	if e.historyV3 {
+		if err := rawdb.AppendCanonicalTxNums(tx, currentParentNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
+
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
