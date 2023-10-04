@@ -137,7 +137,7 @@ var createGasTests = []struct {
 }
 
 func TestCreateGas(t *testing.T) {
-	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
 

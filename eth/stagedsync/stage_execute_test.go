@@ -181,8 +181,8 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 func TestExec22(t *testing.T) {
 	logger := log.New()
 	ctx := context.Background()
-	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()))
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()))
 	agg := newAgg(t, logger)
 	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 

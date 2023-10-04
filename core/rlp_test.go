@@ -36,7 +36,7 @@ import (
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
+	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir))
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset

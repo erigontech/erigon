@@ -82,8 +82,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
-		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()))
+		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()))
 
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
@@ -175,7 +175,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}()
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
-	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
 	ss := &GrpcServer{p2p: &p2p.Config{}}
