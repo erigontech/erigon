@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type txNums struct{}
@@ -109,6 +111,7 @@ func (txNums) WriteForGenesis(tx kv.RwTx, maxTxNum uint64) (err error) {
 	return tx.Put(kv.MaxTxNum, k[:], v[:])
 }
 func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
+	log.Warn("[dbg] Trunc", "stack", dbg.Stack())
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
 	c, err := tx.RwCursor(kv.MaxTxNum)
