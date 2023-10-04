@@ -249,7 +249,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 // getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
 func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
-	return blockNum.IsInt64() && blockNum.Int64() >= -2
+	return blockNum.IsInt64() && blockNum.Int64() >= rpc.PendingBlockNumber.Int64()
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
