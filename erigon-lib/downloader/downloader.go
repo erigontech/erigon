@@ -152,54 +152,54 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 		// Torrents that are already taken care of
 		torrentMap := map[metainfo.Hash]struct{}{}
-		// First loop drops torrents that were downloaded or are already complete
-		// This improves efficiency of download by reducing number of active torrent (empirical observation)
-		for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
-			select {
-			case <-d.ctx.Done():
-				return
-			default:
-			}
-			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-t.GotInfo():
-				}
-				if t.Complete.Bool() {
-					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
-					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
-					t.Drop()
-					torrentMap[t.InfoHash()] = struct{}{}
-					continue
-				}
-				if err := sem.Acquire(d.ctx, 1); err != nil {
-					return
-				}
-				t.AllowDataDownload()
-				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
-				d.wg.Add(1)
-				go func(t *torrent.Torrent) {
-					defer d.wg.Done()
-					defer sem.Release(1)
-					select {
-					case <-d.ctx.Done():
-						return
-					case <-t.Complete.On():
-					}
-					atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
-					atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
-					t.Drop()
-				}(t)
-			}
-		}
-		atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
-		atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		d.addTorrentFilesFromDisk(false)
+		//// First loop drops torrents that were downloaded or are already complete
+		//// This improves efficiency of download by reducing number of active torrent (empirical observation)
+		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
+		//	select {
+		//	case <-d.ctx.Done():
+		//		return
+		//	default:
+		//	}
+		//	for _, t := range torrents {
+		//		if _, already := torrentMap[t.InfoHash()]; already {
+		//			continue
+		//		}
+		//		select {
+		//		case <-d.ctx.Done():
+		//			return
+		//		case <-t.GotInfo():
+		//		}
+		//		if t.Complete.Bool() {
+		//			atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+		//			atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+		//			t.Drop()
+		//			torrentMap[t.InfoHash()] = struct{}{}
+		//			continue
+		//		}
+		//		if err := sem.Acquire(d.ctx, 1); err != nil {
+		//			return
+		//		}
+		//		t.AllowDataDownload()
+		//		t.DownloadAll()
+		//		torrentMap[t.InfoHash()] = struct{}{}
+		//		d.wg.Add(1)
+		//		go func(t *torrent.Torrent) {
+		//			defer d.wg.Done()
+		//			defer sem.Release(1)
+		//			select {
+		//			case <-d.ctx.Done():
+		//				return
+		//			case <-t.Complete.On():
+		//			}
+		//			atomic.AddUint64(&d.stats.DroppedCompleted, uint64(t.BytesCompleted()))
+		//			atomic.AddUint64(&d.stats.DroppedTotal, uint64(t.Length()))
+		//			t.Drop()
+		//		}(t)
+		//	}
+		//}
+		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
+		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
+		//d.addTorrentFilesFromDisk(false)
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -347,16 +347,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 	if len(noMetadata) > 0 {
+		amount := len(noMetadata)
 		if len(noMetadata) > 5 {
 			noMetadata = append(noMetadata[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", strings.Join(noMetadata, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
 	}
 	if len(zeroProgress) > 0 {
+		amount := len(zeroProgress)
 		if len(zeroProgress) > 5 {
 			zeroProgress = append(zeroProgress[:5], "...")
 		}
-		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", strings.Join(zeroProgress, ","))
+		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
 	}
 
 	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
