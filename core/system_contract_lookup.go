@@ -31,7 +31,7 @@ func init() {
 			}
 			alloc, err := types.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
-				panic(fmt.Errorf("failed to decode genesis alloc: %v", err))
+				panic(fmt.Errorf("failed to decode block alloc: %v", err))
 			}
 			allocToCodeRecords(alloc, byChain, blockNum)
 		}
@@ -40,8 +40,8 @@ func init() {
 	addGnosisSpecialCase()
 }
 
-func allocToCodeRecords(alloc types.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
-	for addr, alloc := range alloc {
+func allocToCodeRecords(allocs types.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
+	for addr, alloc := range allocs {
 		if len(alloc.Code) > 0 {
 			list := byChain[addr]
 			codeHash, err := common.HashData(alloc.Code)
