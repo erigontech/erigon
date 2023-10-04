@@ -29,8 +29,9 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -206,7 +207,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		//}
 		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
-		//d.addTorrentFilesFromDisk()
+		//d.addTorrentFilesFromDisk(false)
 		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -261,6 +262,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 
+	var m runtime.MemStats
 	justCompleted := true
 	for {
 		select {
@@ -276,6 +278,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			stats := d.Stats()
 
+			dbg.ReadMemStats(&m)
 			if stats.Completed {
 				if justCompleted {
 					justCompleted = false
@@ -284,20 +287,24 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 
 				d.logger.Info("[snapshots] Seeding",
-					"up", common2.ByteCount(stats.UploadRate)+"/s",
+					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
 					"conns", stats.ConnectionsTotal,
-					"files", stats.FilesTotal)
+					"files", stats.FilesTotal,
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+				)
 				continue
 			}
 
 			d.logger.Info("[snapshots] Downloading",
-				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common2.ByteCount(stats.BytesCompleted), common2.ByteCount(stats.BytesTotal)),
-				"download", common2.ByteCount(stats.DownloadRate)+"/s",
-				"upload", common2.ByteCount(stats.UploadRate)+"/s",
+				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+				"download", common.ByteCount(stats.DownloadRate)+"/s",
+				"upload", common.ByteCount(stats.UploadRate)+"/s",
 				"peers", stats.PeersUnique,
 				"conns", stats.ConnectionsTotal,
-				"files", stats.FilesTotal)
+				"files", stats.FilesTotal,
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
 
 			if stats.PeersUnique == 0 {
 				ips := d.TorrentClient().BadPeerIPs()
