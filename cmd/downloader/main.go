@@ -122,6 +122,7 @@ func withFile(cmd *cobra.Command) {
 	}
 }
 
+var logger log.Logger
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
@@ -129,8 +130,11 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logger = debug.SetupCobra(cmd, "downloader")
+		logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
 		if err := Downloader(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -141,7 +145,6 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context, logger log.Logger) error {
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	dirs := datadir.New(datadirCli)
 	if err := checkChainName(dirs, chain); err != nil {
 		return err
