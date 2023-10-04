@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -15,8 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/pelletier/go-toml/v2"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -26,7 +28,6 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -121,6 +122,7 @@ func withFile(cmd *cobra.Command) {
 	}
 }
 
+var logger log.Logger
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
@@ -128,8 +130,11 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logger = debug.SetupCobra(cmd, "downloader")
+		logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
 		if err := Downloader(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -157,7 +162,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	logger.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
@@ -166,6 +171,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
+	cfg.ClientConfig.PieceHashersPerTorrent = runtime.NumCPU() * 4
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -175,12 +181,18 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	d, err := downloader.New(ctx, cfg, logger)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+
+	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx); err != nil {
+			return err
+		}
+	}
 
 	d.MainLoopInBackground(false)
 
@@ -199,12 +211,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer grpcServer.GracefulStop()
 
-	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx); err != nil {
-			return err
-		}
-	}
-
 	<-ctx.Done()
 	return nil
 }
@@ -215,7 +221,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(context.Background(), dirs.Snap)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
 		if err != nil {
 			return err
 		}
@@ -227,69 +233,73 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "integration")
-		dirs := datadir.New(datadirCli)
-		ctx := cmd.Context()
-
-		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			//removePieceCompletionStorage(snapDir)
-			files, err := downloader.AllTorrentPaths(dirs.Snap)
-			if err != nil {
-				return err
-			}
-			for _, filePath := range files {
-				if err := os.Remove(filePath); err != nil {
-					return err
-				}
-			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
-				return err
-			}
-		}
-
-		res := map[string]string{}
-		files, err := downloader.AllTorrentPaths(dirs.Snap)
-		if err != nil {
-			return err
-		}
-		for _, torrentFilePath := range files {
-			mi, err := metainfo.LoadFromFile(torrentFilePath)
-			if err != nil {
-				return err
-			}
-			info, err := mi.UnmarshalInfo()
-			if err != nil {
-				return err
-			}
-			res[info.Name] = mi.HashInfoBytes().String()
-		}
-		serialized, err := toml.Marshal(res)
-		if err != nil {
-			return err
-		}
-
-		if targetFile == "" {
-			fmt.Printf("%s\n", serialized)
-			return nil
-		}
-
-		oldContent, err := os.ReadFile(targetFile)
-		if err != nil {
-			return err
-		}
-		oldLines := map[string]string{}
-		if err := toml.Unmarshal(oldContent, &oldLines); err != nil {
-			return fmt.Errorf("unmarshal: %w", err)
-		}
-		if len(oldLines) >= len(res) {
-			logger.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
-			return nil
-		}
-		if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
-			return err
+		logger := debug.SetupCobra(cmd, "downloader")
+		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
+			log.Error(err.Error())
 		}
 		return nil
 	},
+}
+
+func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
+		//removePieceCompletionStorage(snapDir)
+		files, err := downloader.AllTorrentPaths(dirs)
+		if err != nil {
+			return err
+		}
+		for _, filePath := range files {
+			if err := os.Remove(filePath); err != nil {
+				return err
+			}
+		}
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
+			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
+		}
+	}
+
+	res := map[string]string{}
+	torrents, err := downloader.AllTorrentSpecs(dirs)
+	if err != nil {
+		return err
+	}
+	for _, t := range torrents {
+		// we don't release commitment history in this time. let's skip it here.
+		if strings.HasPrefix(t.DisplayName, "history/commitment") {
+			continue
+		}
+		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
+			continue
+		}
+		res[t.DisplayName] = t.InfoHash.String()
+	}
+	serialized, err := toml.Marshal(res)
+	if err != nil {
+		return err
+	}
+
+	if targetFile == "" {
+		fmt.Printf("%s\n", serialized)
+		return nil
+	}
+
+	oldContent, err := os.ReadFile(targetFile)
+	if err != nil {
+		return err
+	}
+	oldLines := map[string]string{}
+	if err := toml.Unmarshal(oldContent, &oldLines); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	if len(oldLines) >= len(res) {
+		logger.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
+		return nil
+	}
+	if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
+		return err
+	}
+	return nil
 }
 
 func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
