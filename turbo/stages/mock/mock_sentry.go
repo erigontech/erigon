@@ -716,7 +716,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
 	// Check if the latest header was imported or rolled back
 	if rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
