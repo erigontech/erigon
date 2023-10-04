@@ -102,6 +102,21 @@ func Flock(dirs Dirs) (*flock.Flock, bool, error) {
 	return l, locked, nil
 }
 
+// ApplyMigrations - if can get flock.
+func ApplyMigrations(dirs Dirs) error { //nolint
+	lock, locked, err := Flock(dirs)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	defer lock.Unlock()
+
+	// add your migration here
+	return nil
+}
+
 // nolint
 func moveFiles(from, to string, ext string) error {
 	files, err := os.ReadDir(from)
@@ -120,7 +135,6 @@ func moveFiles(from, to string, ext string) error {
 	return nil
 }
 
-// nolint
 func copyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
