@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	// Initialise systemContractCodeLookup
+	// Initialise SystemContractCodeLookup
 	for _, chainName := range []string{networkname.BorMainnetChainName, networkname.MumbaiChainName, networkname.BorDevnetChainName} {
 		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
