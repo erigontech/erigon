@@ -101,7 +101,7 @@ func DeleteFiles(dirs ...string) error {
 			return err
 		}
 		for _, fPath := range files {
-			if err := os.Remove(filepath.Join(dir, fPath)); err != nil {
+			if err := os.Remove(fPath); err != nil {
 				return err
 			}
 		}
