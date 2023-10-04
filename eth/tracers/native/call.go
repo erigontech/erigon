@@ -153,8 +153,6 @@ func (t *callTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	t.callstack[0].processOutput(output, err)
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
