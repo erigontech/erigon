@@ -471,7 +471,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if ok {
 		ts.Webseeds = append(ts.Webseeds, wsUrls...)
 	}
-	_, err = addTorrentFile(ctx, ts, d.torrentClient)
+	err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -548,7 +548,7 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
-func (d *Downloader) addTorrentFilesFromDisk() error {
+func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -561,13 +561,15 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		if ok {
 			ts.Webseeds = append(ts.Webseeds, ws...)
 		}
-		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
+		err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
 		}
 		select {
 		case <-logEvery.C:
-			log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			if !quiet {
+				log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			}
 		default:
 		}
 	}
