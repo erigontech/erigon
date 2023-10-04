@@ -232,12 +232,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
-	if e.historyV3 {
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
 		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
@@ -246,6 +240,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		}
 	}
 	if e.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
 		if err := rawdb.AppendCanonicalTxNums(tx, currentParentNumber+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
