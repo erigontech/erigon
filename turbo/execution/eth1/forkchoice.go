@@ -249,12 +249,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if e.historyV3 {
-			if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-		}
+		//if e.historyV3 {
+		//	if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
+		//		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		//		return
+		//	}
+		//}
 	}
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
