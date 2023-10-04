@@ -340,8 +340,6 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	if err != nil {
 		return fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 	}
-
-	//t.AllowDataUpload()
 	return nil
 }
 
