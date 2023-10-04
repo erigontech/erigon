@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -79,10 +78,6 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return nil, err
-	}
-
 	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -152,7 +147,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		defer d.wg.Done()
 
 		// Torrents that are already taken care of
-		torrentMap := map[metainfo.Hash]struct{}{}
 		//// First loop drops torrents that were downloaded or are already complete
 		//// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
@@ -201,7 +195,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
 		//d.addTorrentFilesFromDisk(false)
-		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
 			select {
@@ -210,24 +203,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-t.GotInfo():
-				}
 				if t.Complete.Bool() {
-					torrentMap[t.InfoHash()] = struct{}{}
 					continue
 				}
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
 				}
 				t.AllowDataDownload()
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-t.GotInfo():
+				}
 				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
 					defer d.wg.Done()

@@ -448,11 +448,11 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 
 func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
 	addrS := string(addr)
-	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
 	prevCode, _ := sd.LatestCode(addr)
 	if bytes.Equal(prevCode, code) {
 		return nil
 	}
+	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
