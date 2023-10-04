@@ -1066,6 +1066,8 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 
 			for addr, account := range allocs {
 				c.logger.Trace("change contract code", "address", addr)
+				incarnation := state.GetIncarnation(addr)
+				state.SetIncarnation(addr, incarnation+1)
 				state.SetCode(addr, account.Code)
 			}
 		}
