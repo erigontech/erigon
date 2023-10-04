@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"math/big"
@@ -92,7 +93,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 		MdbxDBSizeLimit: 64 * datasize.MB,
 	}
 
-	stack, err := node.New(nodeCfg, logger)
+	stack, err := node.New(context.Background(), nodeCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
