@@ -743,7 +743,7 @@ var (
 	}
 
 	WebSeedsFlag = cli.StringFlag{
-		Name:  "webseeds",
+		Name:  "webseed",
 		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
 		Value: "",
 	}

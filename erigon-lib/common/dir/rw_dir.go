@@ -101,7 +101,7 @@ func DeleteFiles(dirs ...string) error {
 			return err
 		}
 		for _, fPath := range files {
-			if err := os.Remove(filepath.Join(dir, fPath)); err != nil {
+			if err := os.Remove(fPath); err != nil {
 				return err
 			}
 		}
@@ -120,6 +120,9 @@ func ListFiles(dir string, extensions ...string) ([]string, error) {
 			continue
 		}
 		match := false
+		if len(extensions) == 0 {
+			match = true
+		}
 		for _, ext := range extensions {
 			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
 				match = true
