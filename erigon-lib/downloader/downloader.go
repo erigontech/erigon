@@ -210,15 +210,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if t.Complete.Bool() {
 					continue
 				}
+				if err := sem.Acquire(d.ctx, 1); err != nil {
+					return
+				}
+				t.AllowDataDownload()
 				select {
 				case <-d.ctx.Done():
 					return
 				case <-t.GotInfo():
 				}
-				if err := sem.Acquire(d.ctx, 1); err != nil {
-					return
-				}
-				t.AllowDataDownload()
 				t.DownloadAll()
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
