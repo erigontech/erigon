@@ -112,7 +112,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger},
+		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity},
 		logger:            logger,
 		verbosity:         verbosity,
 	}
@@ -480,7 +480,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if ok {
 		ts.Webseeds = append(ts.Webseeds, wsUrls...)
 	}
-	_, err = addTorrentFile(ctx, ts, d.torrentClient)
+	err = addTorrentFile(ctx, ts, d.torrentClient)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -553,9 +553,10 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	files = append(append(files, l...), l2...)
 	return files, nil
 }
-func (d *Downloader) addTorrentFilesFromDisk() error {
+func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
 	files, err := AllTorrentSpecs(d.cfg.Dirs)
 	if err != nil {
 		return err
@@ -565,13 +566,15 @@ func (d *Downloader) addTorrentFilesFromDisk() error {
 		if ok {
 			ts.Webseeds = append(ts.Webseeds, ws...)
 		}
-		_, err := addTorrentFile(d.ctx, ts, d.torrentClient)
+		err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
 		}
 		select {
 		case <-logEvery.C:
-			log.Info("[snapshots] Adding .torrent files from disk", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			if !quiet {
+				log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			}
 		default:
 		}
 	}

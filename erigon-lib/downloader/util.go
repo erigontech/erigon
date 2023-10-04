@@ -312,10 +312,10 @@ func saveTorrent(torrentFilePath string, res []byte) error {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client) error {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	default:
 	}
 	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
@@ -325,14 +325,11 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	}
 
 	ts.DisallowDataDownload = true
-	t, _, err := torrentClient.AddTorrentSpec(ts)
+	_, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
-		return nil, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+		return fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 	}
-
-	t.DisallowDataDownload()
-	t.AllowDataUpload()
-	return t, nil
+	return nil
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
