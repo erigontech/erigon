@@ -3,10 +3,12 @@ package bor
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -17,6 +19,8 @@ import (
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/xsleonard/go-merkle"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -71,6 +76,9 @@ var (
 	// diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
 	validatorHeaderBytesLength = length.Addr + 20 // address + power
+
+	// MaxCheckpointLength is the maximum number of blocks that can be requested for constructing a checkpoint root hash
+	MaxCheckpointLength = uint64(math.Pow(2, 15))
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -262,6 +270,7 @@ type Bor struct {
 	logger              log.Logger
 	closeCh             chan struct{} // Channel to signal the background processes to exit
 	frozenSnapshotsInit sync.Once
+	rootHashCache       *lru.ARCCache[string, string]
 }
 
 type signer struct {
@@ -379,6 +388,7 @@ func New(
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
@@ -411,6 +421,35 @@ func New(
 	}
 
 	return c
+}
+
+type rwWrapper struct {
+	kv.RoDB
+}
+
+func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return fmt.Errorf("Update not implemented")
+}
+
+func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return fmt.Errorf("UpdateNosync not implemented")
+}
+
+func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	return nil, fmt.Errorf("BeginRw not implemented")
+}
+
+func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+	return nil, fmt.Errorf("BeginRwNosync not implemented")
+}
+
+// This is used by the rpcdaemon which needs read only access to the provided data services
+func NewRo(db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+	return &Bor{
+		DB:          rwWrapper{db},
+		blockReader: blockReader,
+		logger:      logger,
+	}
 }
 
 // Type returns underlying consensus engine
@@ -470,7 +509,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return consensus.ErrFutureBlock
 	}
 
-	if err := validateHeaderExtraField(header.Extra); err != nil {
+	if err := ValidateHeaderExtraField(header.Extra); err != nil {
 		return err
 	}
 
@@ -515,9 +554,9 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	return c.verifyCascadingFields(chain, header, parents)
 }
 
-// validateHeaderExtraField validates that the extra-data contains both the vanity and signature.
+// ValidateHeaderExtraField validates that the extra-data contains both the vanity and signature.
 // header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
-func validateHeaderExtraField(extraBytes []byte) error {
+func ValidateHeaderExtraField(extraBytes []byte) error {
 	if len(extraBytes) < extraVanity {
 		return errMissingVanity
 	}
@@ -632,7 +671,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		for i, validator := range currentValidators {
 			copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
 		}
-		// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
+		// len(header.Extra) >= extraVanity+extraSeal has already been validated in ValidateHeaderExtraField, so this won't result in a panic
 		if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
 			return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
 		}
@@ -1255,37 +1294,35 @@ func (c *Bor) IsServiceTransaction(sender libcommon.Address, syscall consensus.S
 	return false
 }
 
-// APIs implements consensus.Engine, returning the user facing RPC API to allow
-// controlling the signer voting.
+// Depricated: To get the API use jsonrpc.APIList
 func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
-	return []rpc.API{{
-		Namespace: "bor",
-		Version:   "1.0",
-		Service:   &API{chain: chain, bor: c},
-		Public:    false,
-	}}
+	return []rpc.API{}
 }
 
 type FinalityAPI interface {
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
-func (c *Bor) Start(apiList []rpc.API, chainDB kv.RwDB, blockReader services.FullBlockReader) {
+type FinalityAPIFunc func(start uint64, end uint64) (string, error)
+
+func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
+	return f(start, end)
+}
+
+func (c *Bor) Start(chainDB kv.RwDB) {
 	if flags.Milestone {
-		borDB := c.DB
+		whitelist.RegisterService(c.DB)
+		borfinality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
+			FinalityAPIFunc(func(start uint64, end uint64) (string, error) {
+				ctx := context.Background()
+				tx, err := chainDB.BeginRo(ctx)
+				if err != nil {
+					return "", err
+				}
+				defer tx.Rollback()
 
-		whitelist.RegisterService(borDB)
-
-		var borAPI borfinality.BorAPI
-
-		for _, api := range apiList {
-			if api.Namespace == "bor" {
-				borAPI = api.Service.(FinalityAPI)
-				break
-			}
-		}
-
-		borfinality.Whitelist(c.HeimdallClient, borDB, chainDB, blockReader, c.logger, borAPI, c.closeCh)
+				return c.GetRootHash(ctx, tx, start, end)
+			}), c.closeCh)
 	}
 }
 
@@ -1414,6 +1451,81 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	return c.spanner.CommitSpan(heimdallSpan, syscall)
+}
+
+func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (string, error) {
+	length := end - start + 1
+	if length > MaxCheckpointLength {
+		return "", &MaxCheckpointLengthExceededError{Start: start, End: end}
+	}
+
+	cacheKey := strconv.FormatUint(start, 10) + "-" + strconv.FormatUint(end, 10)
+
+	if c.rootHashCache == nil {
+		c.rootHashCache, _ = lru.NewARC[string, string](100)
+	}
+
+	if root, known := c.rootHashCache.Get(cacheKey); known {
+		return root, nil
+	}
+
+	header := rawdb.ReadCurrentHeader(tx)
+	var currentHeaderNumber uint64 = 0
+	if header == nil {
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+	}
+	currentHeaderNumber = header.Number.Uint64()
+	if start > end || end > currentHeaderNumber {
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+	}
+	blockHeaders := make([]*types.Header, end-start+1)
+	for number := start; number <= end; number++ {
+		blockHeaders[number-start], _ = c.getHeaderByNumber(ctx, tx, number)
+	}
+
+	headers := make([][32]byte, NextPowerOfTwo(length))
+	for i := 0; i < len(blockHeaders); i++ {
+		blockHeader := blockHeaders[i]
+		header := crypto.Keccak256(AppendBytes32(
+			blockHeader.Number.Bytes(),
+			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
+			blockHeader.TxHash.Bytes(),
+			blockHeader.ReceiptHash.Bytes(),
+		))
+
+		var arr [32]byte
+		copy(arr[:], header)
+		headers[i] = arr
+	}
+	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
+	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
+		return "", err
+	}
+	root := hex.EncodeToString(tree.Root().Hash)
+
+	c.rootHashCache.Add(cacheKey, root)
+
+	return root, nil
+}
+
+func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
+	_, err := c.blockReader.BlockByNumber(ctx, tx, number)
+
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := c.blockReader.HeaderByNumber(ctx, tx, number)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if header == nil {
+		return nil, fmt.Errorf("block header not found: %d", number)
+	}
+
+	return header, nil
 }
 
 // CommitStates commit states

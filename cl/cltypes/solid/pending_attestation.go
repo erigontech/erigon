@@ -14,7 +14,7 @@ const (
 	// attestationData: 128
 	// InclusionDelay: 8 bytes
 	// ProposerIndex: 8 bytes
-	pendingAttestationStaticBufferSize = 4 + attestationDataBufferSize + 8 + 8
+	pendingAttestationStaticBufferSize = 4 + AttestationDataBufferSize + 8 + 8
 
 	// offset is usually always the same
 	pendingAggregationBitsOffset = 148
