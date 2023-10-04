@@ -207,13 +207,13 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 			for _, t := range torrents {
+				if t.Complete.Bool() {
+					continue
+				}
 				select {
 				case <-d.ctx.Done():
 					return
 				case <-t.GotInfo():
-				}
-				if t.Complete.Bool() {
-					continue
 				}
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
