@@ -449,7 +449,9 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 		})
 	}
 
-	g.Wait()
+	if err := g.Wait(); err != nil {
+		return err
+	}
 	// force fsync of db. to not loose results of validation on power-off
 	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
 }
