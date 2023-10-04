@@ -633,7 +633,7 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 	cfg.DefaultStorage = m
 
 	torrentClient, err = torrent.NewClient(cfg)
-	if err == nil {
+	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
 
