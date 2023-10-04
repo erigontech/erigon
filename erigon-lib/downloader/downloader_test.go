@@ -18,7 +18,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, "")
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
 	require.NoError(err)
 	defer d.Close()
 	err = d.AddInfoHashAsMagnetLink(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")

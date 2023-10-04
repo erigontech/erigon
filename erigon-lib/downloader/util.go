@@ -33,7 +33,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -191,15 +190,13 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 		})
 	}
 
-	var m runtime.MemStats
 Loop:
 	for int(i.Load()) < len(files) {
 		select {
 		case <-ctx.Done():
 			break Loop // g.Wait() will return right error
 		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 		}
 	}
 	if err := g.Wait(); err != nil {
@@ -293,13 +290,16 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
-func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
+func saveTorrent(torrentFilePath string, res []byte) error {
+	if len(res) == 0 {
+		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+	}
 	f, err := os.Create(torrentFilePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err = info.Write(f); err != nil {
+	if _, err = f.Write(res); err != nil {
 		return err
 	}
 	if err = f.Sync(); err != nil {
@@ -312,7 +312,12 @@ func saveTorrent(torrentFilePath string, info *metainfo.MetaInfo) error {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
 		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	} else {

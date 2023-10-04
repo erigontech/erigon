@@ -46,7 +46,6 @@ type GrpcServer struct {
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	defer s.d.applyWebseeds()
 
 	for i, it := range request.Items {
 		if it.Path == "" {

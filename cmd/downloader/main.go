@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -120,6 +122,7 @@ func withFile(cmd *cobra.Command) {
 	}
 }
 
+var logger log.Logger
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
@@ -127,8 +130,11 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logger = debug.SetupCobra(cmd, "downloader")
+		logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
 		if err := Downloader(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -156,7 +162,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	logger.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
@@ -165,6 +171,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
+	cfg.ClientConfig.PieceHashersPerTorrent = runtime.NumCPU() * 4
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -174,12 +181,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	d, err := downloader.New(ctx, cfg, logger)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.MainLoopInBackground(false)
 
@@ -258,6 +265,13 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	for _, t := range torrents {
+		// we don't release commitment history in this time. let's skip it here.
+		if strings.HasPrefix(t.DisplayName, "history/commitment") {
+			continue
+		}
+		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
+			continue
+		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
