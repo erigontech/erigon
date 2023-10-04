@@ -102,57 +102,6 @@ func Flock(dirs Dirs) (*flock.Flock, bool, error) {
 	return l, locked, nil
 }
 
-// ApplyMigrations - if can get flock.
-func ApplyMigrations(dirs Dirs) error {
-	lock, locked, err := Flock(dirs)
-	if err != nil {
-		return err
-	}
-	if !locked {
-		return nil
-	}
-	defer lock.Unlock()
-
-	if err := downloaderV2Migration(dirs); err != nil {
-		return err
-	}
-	if err := erigonV3foldersV31Migration(dirs); err != nil {
-		return err
-	}
-	return nil
-}
-
-func downloaderV2Migration(dirs Dirs) error {
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	if dir.Exist(filepath.Join(dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
-		from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
-		if err := os.Rename(from, to); err != nil {
-			//fall back to copy-file if folders are on different disks
-			if err := copyFile(from, to); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func erigonV3foldersV31Migration(dirs Dirs) error {
-	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
-	if dir.Exist(filepath.Join(dirs.Snap, "warm")) {
-		warmDir := filepath.Join(dirs.Snap, "warm")
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		os.Rename(filepath.Join(dirs.SnapHistory, "salt.txt"), filepath.Join(dirs.Snap, "salt.txt"))
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		moveFiles(warmDir, dirs.SnapDomain, ".kvei")
-		moveFiles(warmDir, dirs.SnapDomain, ".bt")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".vi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efei")
-		moveFiles(dirs.SnapHistory, dirs.SnapIdx, ".ef")
-	}
-	return nil
-}
-
 // nolint
 func moveFiles(from, to string, ext string) error {
 	files, err := os.ReadDir(from)
@@ -171,6 +120,7 @@ func moveFiles(from, to string, ext string) error {
 	return nil
 }
 
+// nolint
 func copyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
