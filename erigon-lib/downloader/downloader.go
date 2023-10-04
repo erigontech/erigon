@@ -419,8 +419,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	{
 		d.logger.Info("[snapshots] Verify start")
 		defer d.logger.Info("[snapshots] Verify done")
-		logInterval := 20 * time.Second
-		logEvery := time.NewTicker(logInterval)
+		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 		d.wg.Add(1)
 		go func() {
