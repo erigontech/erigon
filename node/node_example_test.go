@@ -17,6 +17,7 @@
 package node_test
 
 import (
+	"context"
 	"fmt"
 	log2 "log"
 
@@ -38,7 +39,7 @@ func (s *SampleLifecycle) Stop() error  { fmt.Println("Service stopping..."); re
 
 func ExampleLifecycle() {
 	// Create a network node to run protocols with the default values.
-	stack, err := node.New(&nodecfg.Config{}, log.New())
+	stack, err := node.New(context.Background(), &nodecfg.Config{}, log.New())
 	if err != nil {
 		log2.Fatalf("Failed to create network node: %v", err)
 	}
