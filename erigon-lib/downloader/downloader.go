@@ -419,26 +419,28 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	{
 		d.logger.Info("[snapshots] Verify start")
 		defer d.logger.Info("[snapshots] Verify done")
-
+		logInterval := 20 * time.Second
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-logEvery.C:
+					d.logger.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
+				}
+			}
+		}()
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-	g.Go(func() error {
-		logEvery := time.NewTicker(20 * time.Second)
-		defer logEvery.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-logEvery.C:
-				d.logger.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
-			}
-		}
-		return nil
-	})
+
 	for _, t := range torrents {
 		t := t
 		g.Go(func() error {
