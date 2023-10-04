@@ -120,6 +120,9 @@ func ListFiles(dir string, extensions ...string) ([]string, error) {
 			continue
 		}
 		match := false
+		if len(extensions) == 0 {
+			match = true
+		}
 		for _, ext := range extensions {
 			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
 				match = true
