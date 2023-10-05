@@ -224,7 +224,7 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	service := whitelist.GetWhitelistingService()
 
 	if service == nil {
-		return false, errors.New("Only available in Bor engine")
+		return false, errors.New("only available in Bor engine")
 	}
 
 	//Confirmation of 16 blocks on the endblock
