@@ -635,7 +635,7 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
-		GrowthStep(128 * datasize.MB).
+		GrowthStep(16 * datasize.MB).
 		Path(dbDir).
 		Open()
 	if err != nil {
