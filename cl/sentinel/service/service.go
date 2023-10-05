@@ -147,19 +147,22 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+	// prepare the http request
 	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
 		return nil, err
 	}
+	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
 	// for now this can't actually error. in the future, it can due to a network error
 	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
 	if err != nil {
-		// we remove, but dont ban the peer if we fail. this is because ma
+		// we remove, but dont ban the peer if we fail. this is because its probably not their fault, but maybe it is.
 		return nil, err
 	}
 	defer resp.Body.Close()
+	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
@@ -174,23 +177,26 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		}
 		return nil, errorMessage
 	}
+	// we should never get an invalid response to this. our responder should always set it on non-error response
 	isError, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
 	if err != nil {
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
-	// unknown error codes
+	// known error codes, just remove the peer
 	if isError == 3 || isError == 2 {
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
-		return nil, fmt.Errorf("peer server error")
+		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
+	// unknown error codes
 	if isError > 3 {
 		s.logger.Debug("peer returned unknown erro", "id", pid.String())
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
-		return nil, fmt.Errorf("peer returned unknown error")
+		return nil, fmt.Errorf("peer returned unknown error: %d", isError)
 	}
+	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -212,6 +218,8 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	go func() {
 		for i := 0; i < peers.MaxBadResponses; i++ {
+			// this is using return statements instead of continue, since it saves a few lines
+			// but me writing this comment has put them back.. oh no!!! anyways, returning true means we stop.
 			if func() bool {
 				peer, done, err := s.sentinel.Peers().Request()
 				if err != nil {
