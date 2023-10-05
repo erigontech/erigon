@@ -277,7 +277,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
@@ -292,10 +291,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	//chainConfig := fromdb.ChainConfig(chainDB)
-	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-	//	return err
-	//}
+	chainConfig := fromdb.ChainConfig(chainDB)
+	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
+		return err
+	}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
