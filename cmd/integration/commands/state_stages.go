@@ -169,6 +169,10 @@ func init() {
 
 func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	sn, borSn, agg := allSnapshots(ctx, db, logger1)
 	defer sn.Close()
 	defer borSn.Close()
