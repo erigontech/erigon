@@ -117,15 +117,6 @@ func (v *KnownAccountStorageCondition) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func InsertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](accounts KnownAccountStorageConditions, k libcommon.Address, v T) {
-	switch typedV := any(v).(type) {
-	case libcommon.Hash:
-		accounts[k] = &KnownAccountStorageCondition{StorageRootHash: &typedV}
-	case map[libcommon.Hash]libcommon.Hash:
-		accounts[k] = &KnownAccountStorageCondition{StorageSlotHashes: typedV}
-	}
-}
-
 type TransactionConditions struct {
 	KnownAccountStorageConditions KnownAccountStorageConditions `json:"knownAccounts"`
 	BlockNumberMin                *big.Int                      `json:"blockNumberMin"`

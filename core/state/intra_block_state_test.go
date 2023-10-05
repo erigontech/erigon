@@ -34,6 +34,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
@@ -350,13 +351,22 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
+func insertKnownAccounts[T libcommon.Hash | map[libcommon.Hash]libcommon.Hash](accounts KnownAccountStorageConditions, k libcommon.Address, v T) {
+	switch typedV := any(v).(type) {
+	case libcommon.Hash:
+		accounts[k] = &KnownAccountStorageCondition{StorageRootHash: &typedV}
+	case map[libcommon.Hash]libcommon.Hash:
+		accounts[k] = &KnownAccountStorageCondition{StorageSlotHashes: typedV}
+	}
+}
+
 func TestValidateKnownAccounts(t *testing.T) {
 	t.Parallel()
 
-	knownAccounts := make(types.KnownAccountStorageConditions)
+	knownAccounts := make(types2.KnownAccountStorageConditions)
 
-	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
-	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"), map[libcommon.Hash]libcommon.Hash{
+	insertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add1"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
+	insertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add2"), map[libcommon.Hash]libcommon.Hash{
 		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb"),
 		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ddd"),
 	})
@@ -381,7 +391,7 @@ func TestValidateKnownAccounts(t *testing.T) {
 
 	require.NoError(t, s.state.ValidateKnownAccounts(knownAccounts))
 
-	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1cf"))
+	insertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1cf"))
 
 	stateobjaddr3 := libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2")
 	storageaddr3 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000yyy")
@@ -394,8 +404,8 @@ func TestValidateKnownAccounts(t *testing.T) {
 	require.Error(t, err, "should have been an error")
 
 	// correct the previous mistake "0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1cf" -> "0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"
-	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
-	types.InsertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add3"), map[libcommon.Hash]libcommon.Hash{
+	insertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd1add1add1add1add1add1add1add1add1add2"), libcommon.HexToHash("0x2d6f8a898e7dec0bb7a50e8c142be32d7c98c096ff68ed57b9b08280d9aca1ce"))
+	insertKnownAccounts(knownAccounts, libcommon.HexToAddress("0xadd2add2add2add2add2add2add2add2add2add3"), map[libcommon.Hash]libcommon.Hash{
 		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000aaa"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000bbb"),
 		libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ccc"): libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000ddd"),
 	})
