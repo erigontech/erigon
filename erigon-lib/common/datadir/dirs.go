@@ -109,11 +109,6 @@ func ApplyMigrations(dirs Dirs) error {
 		return nil
 	}
 
-	need := downloaderV2MigrationNeeded(dirs)
-	if !need {
-		return nil
-	}
-
 	lock, locked, err := TryFlock(dirs)
 	if err != nil {
 		return err
