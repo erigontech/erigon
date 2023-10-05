@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"math"
 	"math/big"
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -459,7 +459,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	)
 
 	cfg.Genesis = gspec
-	pipelineStages := stages2.NewPipelineStages(ctx, db, &cfg, mock.sentriesClient, mock.Notifications,
+	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications,
 		snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
@@ -663,7 +663,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	for i := n; i < chain.Length(); i++ {
-		fmt.Println("z")
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
 		}
@@ -676,19 +675,19 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		}
 
 		if res.Result != execution.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.String())
+			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.Result.String())
 		}
 		receipt, err := ms.Eth1ExecutionService.UpdateForkChoice(ms.Ctx, &execution.ForkChoice{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Timeout:            math.MaxUint64,
+			Timeout:            uint64(86400 * time.Hour),
 		})
 		if err != nil {
 			return err
 		}
 		if receipt.Status != execution.ExecutionStatus_Success {
-			return fmt.Errorf("forkchoice failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.String())
+			return fmt.Errorf("forkchoice failed for block %d, code: %s", chain.Blocks[i].NumberU64(), receipt.Status.String())
 		}
 	}
 	return nil
