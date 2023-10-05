@@ -423,26 +423,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		db = remoteKv
 	}
 
-	var borKv kv.RoDB
-
-	if cfg.WithDatadir {
-		// bor (consensus) specific db
-		borDbPath := filepath.Join(cfg.DataDir, "bor")
-		{
-			// ensure db exist
-			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
-			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-			}
-			tmpDb.Close()
-		}
-		logger.Trace("Creating consensus db", "path", borDbPath)
-		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-		}
-		// Skip the compatibility check, until we have a schema in erigon-lib
-	} else {
+	if !cfg.WithDatadir {
 		if cfg.StateCache.CacheSize > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
@@ -477,12 +458,42 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	switch {
 	case cc != nil:
 		switch {
-		case cc.Bor != nil && borKv != nil:
-			genesisContractsClient := contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger)
+		case cc.Bor != nil:
+			var borKv kv.RoDB
 
-			spanner := span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger)
+			if cfg.WithDatadir {
+				// bor (consensus) specific db
+				borDbPath := filepath.Join(cfg.DataDir, "bor")
+				{
+					// ensure db exist
+					tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
+					if err != nil {
+						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+					}
+					tmpDb.Close()
+				}
+				logger.Trace("Creating consensus db", "path", borDbPath)
+				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+				}
+				// Skip the compatibility check, until we have a schema in erigon-lib
+			} else {
+				if cc.Bor != nil {
+					borKv, err = remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).
+						WithBucketsConfig(kv.BorTablesCfg).
+						Open()
 
-			engine = bor.NewRo(borKv, blockReader, spanner, genesisContractsClient, logger)
+					if err != nil {
+						return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to bor remoteKv: %w", err)
+					}
+				}
+			}
+
+			engine = bor.NewRo(borKv, blockReader,
+				span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
+				contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+
 		default:
 			engine = ethash.NewFaker()
 		}
