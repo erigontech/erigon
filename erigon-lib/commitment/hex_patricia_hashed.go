@@ -291,8 +291,10 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 		if cell.spl > 0 {
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
+			} else {
+				accountKeyLen = 0
 			}
-			if err := hashKey(keccak, cell.spk[:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
+			if err := hashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
 				return err
 			}
 		}
@@ -675,7 +677,11 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			hashedKeyOffset = depth - 64
 		}
 		singleton := depth <= 64
-		if err := hashKey(hph.keccak, cell.spk[hph.accountKeyLen:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
+		koffset := hph.accountKeyLen
+		if singleton {
+			koffset = 0
+		}
+		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
 			return nil, err
 		}
 		cell.downHashedKey[64-hashedKeyOffset] = 16 // Add terminator
@@ -744,9 +750,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		}
 	} else if cell.hl > 0 {
 		buf = append(buf, cell.h[:cell.hl]...)
-	} else if storageRootHashIsSet {
-		buf = append(buf, storageRootHash[:]...)
-		copy(cell.h[:], storageRootHash[:])
+		//} else if storageRootHashIsSet {
+		//	buf = append(buf, storageRootHash[:]...)
+		//	copy(cell.h[:], storageRootHash[:])
 	} else {
 		buf = append(buf, EmptyRootHash...)
 	}
@@ -1062,7 +1068,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			//branchData, _, err = hph.EncodeBranchDirectAccess(0, row, depth)
+			//branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
 			branchData, _, err = EncodeBranch(0, hph.touchMap[row], hph.afterMap[row], func(nb int, skip bool) (*Cell, error) {
 				if skip || nb != nibble {
 					return nil, nil
