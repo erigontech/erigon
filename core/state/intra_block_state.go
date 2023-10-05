@@ -835,41 +835,41 @@ func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types2.KnownAcco
 		return nil
 	}
 
-	for k, v := range knownAccounts {
-		tempAccount, err := sdb.stateReader.ReadAccountData(k)
+	for address, condition := range knownAccounts {
+		tempAccount, err := sdb.stateReader.ReadAccountData(address)
 		if err != nil {
-			return fmt.Errorf("error reading account data at: %v", k)
+			return fmt.Errorf("error reading account data at: %v", address)
 		}
 
 		// check if the value is hex string or an object
 		switch {
-		case v.IsSingle():
+		case condition.IsSingle():
 			if tempAccount != nil {
-				if *v.StorageRootHash != tempAccount.Root {
-					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", k, v.StorageRootHash, tempAccount.Root)
+				if *condition.StorageRootHash != tempAccount.Root {
+					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", address, condition.StorageRootHash, tempAccount.Root)
 				}
 			} else {
-				return fmt.Errorf("Storage Trie is nil for: %v", k)
+				return fmt.Errorf("Storage Trie is nil for: %v", address)
 			}
-		case v.IsStorage():
+		case condition.IsStorage():
 			if tempAccount != nil {
-				for slot, value := range v.StorageSlotHashes {
+				for slot, value := range condition.StorageSlotHashes {
 					slot := slot
-					tempByte, err := sdb.stateReader.ReadAccountStorage(k, tempAccount.Incarnation, &slot)
+					tempByte, err := sdb.stateReader.ReadAccountStorage(address, tempAccount.Incarnation, &slot)
 					if err != nil {
-						return fmt.Errorf("error reading account storage at: %v slot: %v", k, slot)
+						return fmt.Errorf("error reading account storage at: %v slot: %v", address, slot)
 					}
 
 					actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
 					if value != actualValue {
-						return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", k, slot, value, actualValue)
+						return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", address, slot, value, actualValue)
 					}
 				}
 			} else {
-				return fmt.Errorf("Storage Trie is nil for: %v", k)
+				return fmt.Errorf("Storage Trie is nil for: %v", address)
 			}
 		default:
-			return fmt.Errorf("impossible to validate known accounts: %v", k)
+			return fmt.Errorf("impossible to validate known accounts: %v", address)
 		}
 	}
 
