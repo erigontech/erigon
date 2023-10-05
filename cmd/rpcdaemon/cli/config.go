@@ -793,6 +793,14 @@ type remoteConsensusEngine struct {
 	engine consensus.EngineReader
 }
 
+func (e *remoteConsensusEngine) HasEngine() bool {
+	return e.engine != nil
+}
+
+func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
+	return e.engine
+}
+
 func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
 	var cc *chain.Config
 

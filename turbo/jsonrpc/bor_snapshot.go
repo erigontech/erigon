@@ -52,7 +52,13 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +109,13 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +146,13 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +180,13 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +318,13 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return BlockSigners{}, err
 	}
@@ -344,6 +374,12 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
+	bor, err := api.bor()
+
+	if err != nil {
+		return "", err
+	}
+
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -351,7 +387,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	}
 	defer tx.Rollback()
 
-	return api.bor.GetRootHash(ctx, tx, start, end)
+	return bor.GetRootHash(ctx, tx, start, end)
 }
 
 // Helper functions for Snapshot Type
