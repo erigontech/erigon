@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -26,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -455,13 +457,15 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	blockReader = remoteEth
 	eth = remoteEth
 
-	switch {
-	case cc != nil:
-		switch {
-		case cc.Bor != nil:
-			var borKv kv.RoDB
+	var remoteCE *remoteConsensusEngine
 
-			if cfg.WithDatadir {
+	if cfg.WithDatadir {
+		switch {
+		case cc != nil:
+			switch {
+			case cc.Bor != nil:
+				var borKv kv.RoDB
+
 				// bor (consensus) specific db
 				borDbPath := filepath.Join(cfg.DataDir, "bor")
 				{
@@ -478,28 +482,21 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
-			} else {
-				if cc.Bor != nil {
-					borKv, err = remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).
-						WithBucketsConfig(kv.BorTablesCfg).
-						Open()
 
-					if err != nil {
-						return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to bor remoteKv: %w", err)
-					}
-				}
+				engine = bor.NewRo(borKv, blockReader,
+					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
+					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+
+			default:
+				engine = ethash.NewFaker()
 			}
-
-			engine = bor.NewRo(borKv, blockReader,
-				span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-				contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
 
 		default:
 			engine = ethash.NewFaker()
 		}
-
-	default:
-		engine = ethash.NewFaker()
+	} else {
+		remoteCE = &remoteConsensusEngine{}
+		engine = remoteCE
 	}
 
 	go func() {
@@ -514,6 +511,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
+		}
+		if remoteCE != nil {
+			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
+				rootCancel()
+			}
 		}
 	}()
 
@@ -785,4 +787,84 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.L
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
+}
+
+type remoteConsensusEngine struct {
+	engine consensus.EngineReader
+}
+
+func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
+	var cc *chain.Config
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return false
+	}
+
+	if cc.Bor != nil {
+		borKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
+			WithBucketsConfig(kv.BorTablesCfg).
+			Open()
+
+		if err != nil {
+			return false
+		}
+
+		e.engine = bor.NewRo(borKv, blockReader,
+			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
+			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+	} else {
+		e.engine = ethash.NewFaker()
+	}
+
+	return true
+}
+
+func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
+	if e.engine != nil {
+		return e.engine.Author(header)
+	}
+
+	return libcommon.Address{}, fmt.Errorf("remote consensus engine not iinitialized")
+}
+
+func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+	if e.engine != nil {
+		return e.engine.IsServiceTransaction(sender, syscall)
+	}
+
+	return false
+}
+
+func (e *remoteConsensusEngine) Type() chain.ConsensusName {
+	if e.engine != nil {
+		return e.engine.Type()
+	}
+
+	return ""
+}
+
+func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
+	if e.engine != nil {
+		return e.engine.CalculateRewards(config, header, uncles, syscall)
+	}
+
+	return nil, fmt.Errorf("remote consensus engine not iinitialized")
+}
+
+func (e *remoteConsensusEngine) Close() error {
+	if e.engine != nil {
+		return e.engine.Close()
+	}
+
+	return nil
 }
