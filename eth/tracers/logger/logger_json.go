@@ -32,7 +32,7 @@ import (
 type JSONLogger struct {
 	encoder *json.Encoder
 	cfg     *LogConfig
-	env     vm.VMInterface
+	env     *vm.EVM
 }
 
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects

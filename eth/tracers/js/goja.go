@@ -95,7 +95,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 // JS functions on the relevant EVM hooks. It uses Goja as its JS engine.
 type jsTracer struct {
 	vm                *goja.Runtime
-	env               vm.VMInterface
+	env               *vm.EVM
 	toBig             toBigFn               // Converts a hex string into a JS bigint
 	toBuf             toBufFn               // Converts a []byte into a JS buffer
 	fromBuf           fromBufFn             // Converts an array, hex string or Uint8Array to a []byte

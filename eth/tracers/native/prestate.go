@@ -59,7 +59,7 @@ type accountMarshaling struct {
 
 type prestateTracer struct {
 	noopTracer
-	env       vm.VMInterface
+	env       *vm.EVM
 	pre       state
 	post      state
 	create    bool

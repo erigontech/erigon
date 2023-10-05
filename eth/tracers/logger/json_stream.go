@@ -30,7 +30,7 @@ type JsonStreamLogger struct {
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
-	env       vm.VMInterface
+	env       *vm.EVM
 }
 
 // NewStructLogger returns a new logger

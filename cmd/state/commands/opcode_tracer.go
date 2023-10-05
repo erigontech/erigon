@@ -114,7 +114,7 @@ type opcodeTracer struct {
 	saveBblocks bool
 	blockNumber uint64
 	depth       int
-	env         vm.VMInterface
+	env         *vm.EVM
 }
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {

@@ -116,7 +116,7 @@ type StructLogger struct {
 	logs    []StructLog
 	output  []byte
 	err     error
-	env     vm.VMInterface
+	env     *vm.EVM
 }
 
 // NewStructLogger returns a new logger
@@ -339,7 +339,7 @@ func WriteLogs(writer io.Writer, logs []*types.Log) {
 type mdLogger struct {
 	out io.Writer
 	cfg *LogConfig
-	env vm.VMInterface
+	env *vm.EVM
 }
 
 // NewMarkdownLogger creates a logger which outputs information in a format adapted

@@ -102,10 +102,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	loc := stack.Peek()
-	slot := libcommon.Hash(loc.Bytes32())
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32()); slotMod {
 		return params.ColdSloadCostEIP2929, nil
 	}
 	return params.WarmStorageReadCostEIP2929, nil

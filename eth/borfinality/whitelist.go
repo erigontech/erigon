@@ -94,7 +94,7 @@ func startNoAckMilestoneByIDService(config *config) {
 	RetryHeimdallHandler(handleNoAckMilestoneByID, config, tickerDuration, noAckMilestoneTimeout, fnName)
 }
 
-type heimdallHandler func(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error
+type heimdallHandler func(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error
 
 func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName)
@@ -144,12 +144,12 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 }
 
 // handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
+func handleWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, heimdall, verifier, config)
+	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, heimdallClient, verifier, config)
 
 	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
 	// means that array has partial elements and it failed for some block. We'll add those partial
@@ -164,18 +164,22 @@ func handleWhitelistCheckpoint(ctx context.Context, heimdall heimdall.IHeimdallC
 }
 
 // handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
+func handleMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	num, hash, err := fetchWhitelistMilestone(ctx, heimdall, verifier, config)
+	num, hash, err := fetchWhitelistMilestone(ctx, heimdallClient, verifier, config)
 
 	// If the current chain head is behind the received milestone, add it to the future milestone
 	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
 	// add that milestone to the future milestone list.
 	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
 		service.ProcessFutureMilestone(num, hash)
+	}
+
+	if errors.Is(err, heimdall.ErrServiceUnavailable) {
+		return nil
 	}
 
 	if err != nil {
@@ -187,11 +191,14 @@ func handleMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, con
 	return nil
 }
 
-func handleNoAckMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
+func handleNoAckMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
-	milestoneID, err := fetchNoAckMilestone(ctx, heimdall, config.logger)
+	milestoneID, err := fetchNoAckMilestone(ctx, heimdallClient, config.logger)
 
-	//If failed to fetch the no-ack milestone then it give the error.
+	if errors.Is(err, heimdall.ErrServiceUnavailable) {
+		return nil
+	}
+
 	if err != nil {
 		return err
 	}
@@ -201,12 +208,12 @@ func handleNoAckMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient
 	return nil
 }
 
-func handleNoAckMilestoneByID(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
+func handleNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
-		err := fetchNoAckMilestoneByID(ctx, heimdall, milestoneID, config.logger)
+		err := fetchNoAckMilestoneByID(ctx, heimdallClient, milestoneID, config.logger)
 		if err == nil {
 			service.RemoveMilestoneID(milestoneID)
 		}
