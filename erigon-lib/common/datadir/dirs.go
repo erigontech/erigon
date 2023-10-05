@@ -67,7 +67,7 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
-		Downloader:      filepath.Join(datadir, "snapshots", "downloader"),
+		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
@@ -105,7 +105,6 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 // ApplyMigrations - if can get flock.
 func ApplyMigrations(dirs Dirs) error {
 	need := downloaderV2MigrationNeeded(dirs)
-	fmt.Printf("need: %s\n", need)
 	if !need {
 		return nil
 	}
