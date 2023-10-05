@@ -90,3 +90,7 @@ caplin-recordings
 jwt.hex
 
 .tool-versions
+
+*__debug_bin*
+yarn.lock
+node_modules

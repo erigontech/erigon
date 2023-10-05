@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -726,4 +727,8 @@ func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int)
 }
 func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
 	panic("not implemented yet")
+}
+
+func (tx *tx) CHandle() unsafe.Pointer {
+	panic("CHandle not implemented")
 }

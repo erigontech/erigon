@@ -521,7 +521,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	var returnTd *big.Int
 	var lastD *big.Int
 	var lastTime uint64
-	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
+	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
 		_, bad := hd.badHeaders[link.hash]
 		if !bad && !link.persisted {

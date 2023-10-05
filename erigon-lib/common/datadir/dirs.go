@@ -17,7 +17,14 @@
 package datadir
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"syscall"
+
+	"github.com/gofrs/flock"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -30,7 +37,11 @@ type Dirs struct {
 	Chaindata       string
 	Tmp             string
 	Snap            string
+	SnapIdx         string
 	SnapHistory     string
+	SnapDomain      string
+	SnapAccessors   string
+	Downloader      string
 	TxPool          string
 	Nodes           string
 }
@@ -46,14 +57,131 @@ func New(datadir string) Dirs {
 		datadir = absdatadir
 	}
 
-	return Dirs{
+	dirs := Dirs{
 		RelativeDataDir: relativeDataDir,
 		DataDir:         datadir,
 		Chaindata:       filepath.Join(datadir, "chaindata"),
 		Tmp:             filepath.Join(datadir, "temp"),
 		Snap:            filepath.Join(datadir, "snapshots"),
+		SnapIdx:         filepath.Join(datadir, "snapshots", "idx"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
+		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
+		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
+		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
+	dir.MustExist(dirs.Chaindata, dirs.Tmp,
+		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
+		dirs.Downloader, dirs.TxPool, dirs.Nodes)
+	return dirs
+}
+
+var (
+	ErrDataDirLocked = errors.New("datadir already used by another process")
+
+	datadirInUseErrNos = map[uint]bool{11: true, 32: true, 35: true}
+)
+
+func convertFileLockError(err error) error {
+	//nolint
+	if errno, ok := err.(syscall.Errno); ok && datadirInUseErrNos[uint(errno)] {
+		return ErrDataDirLocked
+	}
+	return err
+}
+
+func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
+	// Lock the instance directory to prevent concurrent use by another instance as well as
+	// accidental use of the instance directory as a database.
+	l := flock.New(filepath.Join(dirs.DataDir, "LOCK"))
+	locked, err := l.TryLock()
+	if err != nil {
+		return nil, false, convertFileLockError(err)
+	}
+	return l, locked, nil
+}
+
+// ApplyMigrations - if can get flock.
+func ApplyMigrations(dirs Dirs) error {
+	need := downloaderV2MigrationNeeded(dirs)
+	if !need {
+		return nil
+	}
+
+	lock, locked, err := TryFlock(dirs)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	defer lock.Unlock()
+
+	// add your migration here
+
+	if err := downloaderV2Migration(dirs); err != nil {
+		return err
+	}
+	return nil
+}
+
+func downloaderV2MigrationNeeded(dirs Dirs) bool {
+	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
+}
+func downloaderV2Migration(dirs Dirs) error {
+	// move db from `datadir/snapshot/db` to `datadir/downloader`
+	if !downloaderV2MigrationNeeded(dirs) {
+		return nil
+	}
+	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
+	if err := os.Rename(from, to); err != nil {
+		//fall back to copy-file if folders are on different disks
+		if err := copyFile(from, to); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// nolint
+func moveFiles(from, to string, ext string) error {
+	files, err := os.ReadDir(from)
+	if err != nil {
+		return fmt.Errorf("ReadDir: %w, %s", err, from)
+	}
+	for _, f := range files {
+		if f.Type().IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ext {
+			continue
+		}
+		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
+	}
+	return nil
+}
+
+func copyFile(from, to string) error {
+	r, err := os.Open(from)
+	if err != nil {
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	defer r.Close()
+	w, err := os.Create(to)
+	if err != nil {
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	defer w.Close()
+	if _, err = w.ReadFrom(r); err != nil {
+		w.Close()
+		os.Remove(to)
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	if err = w.Sync(); err != nil {
+		w.Close()
+		os.Remove(to)
+		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
+	}
+	return nil
 }

@@ -1097,7 +1097,7 @@ func (*BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 			break
 		}
 	}
-	slices.SortFunc(toMerge, func(i, j Range) bool { return i.from < j.from })
+	slices.SortFunc(toMerge, func(i, j Range) int { return cmp.Compare(i.from, j.from) })
 	return toMerge
 }
 

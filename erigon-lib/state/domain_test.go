@@ -43,7 +43,7 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 	valsTable := "Vals"
 	historyKeysTable := "HistoryKeys"
 	historyValsTable := "HistoryVals"
-	settingsTable := "Settings"
+	settingsTable := "Settings" //nolint
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{

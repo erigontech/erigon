@@ -30,9 +30,10 @@ func createSentinel(cfg *sentinel2.SentinelConfig, db persistence.RawBeaconBlock
 	gossipTopics := []sentinel2.GossipTopic{
 		sentinel2.BeaconBlockSsz,
 		//sentinel.BeaconAggregateAndProofSsz,
-		//sentinel.VoluntaryExitSsz,
-		//sentinel.ProposerSlashingSsz,
-		//sentinel.AttesterSlashingSsz,
+		sentinel.VoluntaryExitSsz,
+		sentinel.ProposerSlashingSsz,
+		sentinel.AttesterSlashingSsz,
+		sentinel.BlsToExecutionChangeSsz,
 	}
 	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
 
