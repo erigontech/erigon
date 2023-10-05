@@ -3,16 +3,15 @@ package state
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -50,10 +49,9 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
 	t.Helper()
 	logger := log.New()
-	db := dbCfg(kv.ChainDB, filepath.Join(ddir, "chaindata")).MustOpen()
+	dirs := datadir2.New(ddir)
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
-
-	dirs := datadir.New(ddir)
 
 	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
