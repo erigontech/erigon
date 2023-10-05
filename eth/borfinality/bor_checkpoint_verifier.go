@@ -27,10 +27,6 @@ var (
 
 	// errEndBlock is returned when we're unable to fetch a block locally.
 	errEndBlock = errors.New("failed to get end block")
-
-	// TODO: Uncomment once metrics is added
-	// Metrics for collecting the rewindLength
-	// rewindLengthMeter = metrics.NewRegisteredMeter("chain/autorewind/length", nil)
 )
 
 type borVerifier struct {
@@ -147,22 +143,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 // Stop the miner if the mining process is running and rewind back the chain
 func rewindBack(rewindTo uint64) {
-	// TODO: Uncomment once minning is added
-
-	// if eth.Miner().Mining() {
-	// 	ch := make(chan struct{})
-	// 	eth.Miner().Stop(ch)
-
-	// 	<-ch
-	// 	rewind(eth, head, rewindTo)
-
-	// 	eth.Miner().Start(eth.etherbase)
-	// } else {
-	// rewind(config, head, rewindTo)
-	// }
-
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable
-
 	generics.BorMilestoneRewind.Store(&rewindTo)
 }
