@@ -2,8 +2,9 @@ package service
 
 import (
 	"context"
-	sentinel2 "github.com/ledgerwatch/erigon/cl/sentinel"
 	"net"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -19,16 +20,16 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel2.SentinelConfig, db persistence.RawBeaconBlockChain, logger log.Logger) (*sentinel2.Sentinel, error) {
-	sent, err := sentinel2.New(context.Background(), cfg, db, logger)
+func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(context.Background(), cfg, db, logger)
 	if err != nil {
 		return nil, err
 	}
 	if err := sent.Start(); err != nil {
 		return nil, err
 	}
-	gossipTopics := []sentinel2.GossipTopic{
-		sentinel2.BeaconBlockSsz,
+	gossipTopics := []sentinel.GossipTopic{
+		sentinel.BeaconBlockSsz,
 		//sentinel.BeaconAggregateAndProofSsz,
 		sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
@@ -56,7 +57,7 @@ func createSentinel(cfg *sentinel2.SentinelConfig, db persistence.RawBeaconBlock
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel2.SentinelConfig, db persistence.RawBeaconBlockChain, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := createSentinel(cfg, db, logger)
 	if err != nil {
