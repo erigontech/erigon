@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -70,6 +71,10 @@ func runErigon(cliCtx *cli.Context) error {
 	erigonInfoGauge.Set(1)
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
+		return err
+	}
+
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)

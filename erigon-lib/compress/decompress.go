@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
@@ -331,6 +332,10 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	}
 	b0 := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
 	return b0 + buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+}
+
+func (d *Decompressor) DataHandle() unsafe.Pointer {
+	return unsafe.Pointer(&d.data[0])
 }
 
 func (d *Decompressor) Size() int64 {
