@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unsafe"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -393,6 +394,9 @@ type Tx interface {
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+
+	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
+	CHandle() unsafe.Pointer
 }
 
 // RwTx
