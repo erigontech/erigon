@@ -673,15 +673,26 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		if err != nil {
 			return err
 		}
-
 		if res.Result != execution.ExecutionStatus_Success {
 			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.Result.String())
 		}
+
+		vRes, err := ms.Eth1ExecutionService.ValidateChain(ms.Ctx, &execution.ValidationRequest{
+			Hash:   gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
+			Number: chain.Blocks[i].NumberU64(),
+		})
+		if err != nil {
+			return err
+		}
+		if vRes.ValidationStatus != execution.ExecutionStatus_Success {
+			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), vRes.ValidationStatus.String())
+		}
+
 		receipt, err := ms.Eth1ExecutionService.UpdateForkChoice(ms.Ctx, &execution.ForkChoice{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Timeout:            uint64(86400 * time.Hour),
+			Timeout:            uint64(1 * time.Hour),
 		})
 		if err != nil {
 			return err
