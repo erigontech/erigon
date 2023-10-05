@@ -50,7 +50,7 @@ func (t *CreateTracer) captureStartOrEnter(from, to common.Address, create bool)
 	t.Creator = from
 }
 
-func (t *CreateTracer) CaptureStart(env vm.VMInterface, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *CreateTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.captureStartOrEnter(from, to, create)
 }
 

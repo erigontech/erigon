@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -415,7 +413,7 @@ func New(
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
 	for key, genesisAlloc := range c.config.BlockAlloc {
-		if _, err := decodeGenesisAlloc(genesisAlloc); err != nil {
+		if _, err := types.DecodeGenesisAlloc(genesisAlloc); err != nil {
 			panic(fmt.Sprintf("BUG: Block alloc '%s' in genesis is not correct: %v", key, err))
 		}
 	}
@@ -1041,25 +1039,10 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	return nil, types.Receipts{}, nil
 }
 
-func decodeGenesisAlloc(i interface{}) (types.GenesisAlloc, error) {
-	var alloc types.GenesisAlloc
-
-	b, err := json.Marshal(i)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(b, &alloc); err != nil {
-		return nil, err
-	}
-
-	return alloc, nil
-}
-
 func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
 	for blockNumber, genesisAlloc := range c.config.BlockAlloc {
 		if blockNumber == strconv.FormatUint(headerNumber, 10) {
-			allocs, err := decodeGenesisAlloc(genesisAlloc)
+			allocs, err := types.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
 				return fmt.Errorf("failed to decode genesis alloc: %v", err)
 			}
@@ -1128,7 +1111,6 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
-	systemcontracts.UpgradeBuildInSystemContract(config, header.Number, state, logger)
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

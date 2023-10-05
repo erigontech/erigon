@@ -22,7 +22,7 @@ func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
-func (ct *CallTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if ct.froms == nil {
 		ct.froms = map[libcommon.Address]struct{}{}
 		ct.tos = map[libcommon.Address]struct{}{}
