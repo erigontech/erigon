@@ -445,10 +445,18 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 
 // This is used by the rpcdaemon which needs read only access to the provided data services
 func NewRo(db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
+	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+
 	return &Bor{
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
+		recents:     recents,
+		signatures:  signatures,
+		spanCache:   btree.New(32),
+		execCtx:     context.Background(),
+		closeCh:     make(chan struct{}),
 	}
 }
 
@@ -467,7 +475,6 @@ func (c *Bor) Author(header *types.Header) (libcommon.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Bor) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-
 	return c.verifyHeader(chain, header, nil)
 }
 
