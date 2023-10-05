@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -27,6 +28,9 @@ var (
 
 	// errEndBlock is returned when we're unable to fetch a block locally.
 	errEndBlock = errors.New("failed to get end block")
+
+	//Metrics for collecting the rewindLength
+	rewindLengthMeter = metrics.GetOrCreateCounter("chain/autorewind/length")
 )
 
 type borVerifier struct {
@@ -124,7 +128,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 			log.Warn("Rewinding chain due to milestone endblock hash mismatch", "number", rewindTo)
 		}
 
-		rewindBack(rewindTo)
+		rewindBack(head, rewindTo)
 
 		return hash, errHashMismatch
 	}
@@ -142,7 +146,9 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 }
 
 // Stop the miner if the mining process is running and rewind back the chain
-func rewindBack(rewindTo uint64) {
+func rewindBack(head uint64, rewindTo uint64) {
+	rewindLengthMeter.Set(head - rewindTo)
+
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable
 	generics.BorMilestoneRewind.Store(&rewindTo)
