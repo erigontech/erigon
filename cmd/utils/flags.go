@@ -767,7 +767,7 @@ var (
 	WithHeimdallMilestones = cli.BoolFlag{
 		Name:  "bor.milestone",
 		Usage: "Enabling bor milestone processing",
-		Value: false,
+		Value: true,
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
