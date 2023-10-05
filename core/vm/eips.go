@@ -393,13 +393,13 @@ func enableEOF(jt *JumpTable) {
 	}
 	jt[DATALOAD] = &operation{
 		execute:     opDataLoad,
-		constantGas: GasFastestStep,
+		constantGas: GasSwiftStep,
 		numPop:      1,
 		numPush:     1,
 	}
 	jt[DATALOADN] = &operation{
 		execute:     opDataLoad,
-		constantGas: GasQuickStep,
+		constantGas: GasFastestStep,
 		numPop:      0,
 		numPush:     1,
 	}
