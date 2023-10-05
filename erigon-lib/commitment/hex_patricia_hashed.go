@@ -291,7 +291,8 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 		if cell.spl > 0 {
 			if depth >= 64 {
 				hashedKeyOffset = depth - 64
-			} else {
+			}
+			if depth == 0 {
 				accountKeyLen = 0
 			}
 			if err := hashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
@@ -678,7 +679,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		}
 		singleton := depth <= 64
 		koffset := hph.accountKeyLen
-		if singleton {
+		if depth == 0 {
 			koffset = 0
 		}
 		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
@@ -888,10 +889,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 			return nil
 		}
 		upCell = &hph.root
-		err := upCell.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)
-		if err != nil {
-			return err
-		}
 		touched = hph.rootTouched
 		present = hph.rootPresent
 		if hph.trace {
@@ -999,7 +996,6 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 			fmt.Printf("upcell is root\n")
 		}
 		upCell = &hph.root
-		col = int(upCell.downHashedKey[0])
 	} else {
 		upDepth = hph.depths[hph.activeRows-2]
 		col = int(hph.currentKey[upDepth-1])
@@ -1068,19 +1064,18 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			//branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
-			branchData, _, err = EncodeBranch(0, hph.touchMap[row], hph.afterMap[row], func(nb int, skip bool) (*Cell, error) {
-				if skip || nb != nibble {
-					return nil, nil
-				}
-				cell := &hph.grid[row][nibble]
-				cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-				if err != nil {
-					return nil, err
-				}
-				fmt.Printf("fold 1 Cellhash %x\n", cellHash)
-				return cell, nil
-			})
+			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			// branchData, _, err = EncodeBranch(0, hph.touchMap[row], hph.afterMap[row], func(nb int, skip bool) (*Cell, error) {
+			// 	if skip || nb != nibble {
+			// 		return nil, nil
+			// 	}
+			// 	cell := &hph.grid[row][nibble]
+			// 	_, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+			// 	if err != nil {
+			// 		return nil, err
+			// 	}
+			// 	return cell, nil
+			// })
 			if err != nil {
 				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
 			}

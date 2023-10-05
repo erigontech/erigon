@@ -264,8 +264,6 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 
 // TODO(awskii)
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
-	//t.Skip("awskii should fix issue with insertion of storage before account")
-
 	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
 		t.Helper()
 
