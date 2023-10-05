@@ -142,6 +142,10 @@ func (state *State) ProcessBlock(block types.Block) error {
 		return fmt.Errorf("some of the transactions were rejected")
 	}
 
+	if err := stateWriter.WriteHistory(); err != nil {
+		return fmt.Errorf("failed to write history: %v", err)
+	}
+
 	if err := rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64()); err != nil {
 		return err
 	}
