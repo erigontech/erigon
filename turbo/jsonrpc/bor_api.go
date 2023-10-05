@@ -4,6 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -25,15 +26,15 @@ type BorAPI interface {
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db    kv.RoDB // the chain db
-	borDb kv.RoDB // the consensus db
+	db  kv.RoDB // the chain db
+	bor *bor.Bor
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB, borDb kv.RoDB) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB, bor *bor.Bor) *BorImpl {
 	return &BorImpl{
 		BaseAPI: base,
 		db:      db,
-		borDb:   borDb,
+		bor:     bor,
 	}
 }
