@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -840,6 +841,59 @@ func (s *RoSnapshots) PrintDebug() {
 	}
 }
 
+func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm) error {
+	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
+	err := s.Headers.View(func(segments []*HeaderSegment) error {
+		for _, headerSegment := range segments {
+			mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.mappedSnapshot())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
+	err = s.Bodies.View(func(segments []*BodySegment) error {
+		for _, bodySegment := range segments {
+			mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.mappedSnapshot())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
+	err = s.Txs.View(func(segments []*TxnSegment) error {
+		for _, txnSegment := range segments {
+			mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.mappedSnapshot())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
+		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
+	}
+
+	for i := 0; i < len(mappedHeaderSnapshots); i++ {
+		mappedSnapshot := &silkworm.MappedChainSnapshot{
+			Headers: mappedHeaderSnapshots[i],
+			Bodies:  mappedBodySnapshots[i],
+			Txs:     mappedTxnSnapshots[i],
+		}
+		err := silkwormInstance.AddSnapshot(mappedSnapshot)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//_, fName := filepath.Split(sn.Path)
 	//log.Info("[snapshots] build idx", "file", fName)
@@ -1137,10 +1191,13 @@ type BlockRetire struct {
 func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
 	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
+
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+
 func (br *BlockRetire) borSnapshots() *BorRoSnapshots {
 	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
 }
+
 func (br *BlockRetire) HasNewFrozenFiles() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
@@ -1152,6 +1209,7 @@ func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo
 	blockFrom = blocksInSnapshots + 1
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
+
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
@@ -1182,6 +1240,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
+
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
 	if curBlockNum+999 < params.FullImmutabilityThreshold {
 		// To prevent overflow of uint64 below
@@ -1190,6 +1249,7 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
+
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
@@ -1238,6 +1298,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	}
 	return nil
 }
+
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return nil
@@ -1285,6 +1346,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		}
 	}()
 }
+
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
 	snapshots := br.snapshots()
 	snapshots.LogStat()
@@ -2335,4 +2397,23 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range tmpFiles {
 		_ = os.Remove(f)
 	}
+}
+
+func (sn *HeaderSegment) mappedSnapshot() *silkworm.MappedHeaderSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxHeaderHash.FilePath(), sn.idxHeaderHash.DataHandle(), sn.idxHeaderHash.Size())
+	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
+}
+
+func (sn *BodySegment) mappedSnapshot() *silkworm.MappedBodySnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxBodyNumber.FilePath(), sn.idxBodyNumber.DataHandle(), sn.idxBodyNumber.Size())
+	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
+}
+
+func (sn *TxnSegment) mappedSnapshot() *silkworm.MappedTxnSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.Seg.FilePath(), sn.Seg.DataHandle(), sn.Seg.Size())
+	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash.FilePath(), sn.IdxTxnHash.DataHandle(), sn.IdxTxnHash.Size())
+	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash2BlockNum.FilePath(), sn.IdxTxnHash2BlockNum.DataHandle(), sn.IdxTxnHash2BlockNum.Size())
+	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
 }

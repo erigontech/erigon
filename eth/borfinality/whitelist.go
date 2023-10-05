@@ -189,7 +189,7 @@ func handleMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, con
 
 func handleNoAckMilestone(ctx context.Context, heimdall heimdall.IHeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
-	milestoneID, err := fetchNoAckMilestone(ctx, heimdall)
+	milestoneID, err := fetchNoAckMilestone(ctx, heimdall, config.logger)
 
 	//If failed to fetch the no-ack milestone then it give the error.
 	if err != nil {
@@ -206,7 +206,7 @@ func handleNoAckMilestoneByID(ctx context.Context, heimdall heimdall.IHeimdallCl
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
-		err := fetchNoAckMilestoneByID(ctx, heimdall, milestoneID)
+		err := fetchNoAckMilestoneByID(ctx, heimdall, milestoneID, config.logger)
 		if err == nil {
 			service.RemoveMilestoneID(milestoneID)
 		}
