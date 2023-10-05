@@ -234,7 +234,7 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		return err
 	}
 	for retry := 0; ; retry++ {
-		l, locked, err := datadir.Flock(n.config.Dirs)
+		l, locked, err := datadir.TryFlock(n.config.Dirs)
 		if err != nil {
 			return err
 		}
