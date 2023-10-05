@@ -67,7 +67,7 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
-		Downloader:      filepath.Join(datadir, "snapshots", "db"),
+		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
@@ -91,7 +91,7 @@ func convertFileLockError(err error) error {
 	return err
 }
 
-func Flock(dirs Dirs) (*flock.Flock, bool, error) {
+func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
 	l := flock.New(filepath.Join(dirs.DataDir, "LOCK"))
@@ -104,7 +104,12 @@ func Flock(dirs Dirs) (*flock.Flock, bool, error) {
 
 // ApplyMigrations - if can get flock.
 func ApplyMigrations(dirs Dirs) error {
-	lock, locked, err := Flock(dirs)
+	need := downloaderV2MigrationNeeded(dirs)
+	if !need {
+		return nil
+	}
+
+	lock, locked, err := TryFlock(dirs)
 	if err != nil {
 		return err
 	}
@@ -113,43 +118,28 @@ func ApplyMigrations(dirs Dirs) error {
 	}
 	defer lock.Unlock()
 
+	// add your migration here
+
 	if err := downloaderV2Migration(dirs); err != nil {
 		return err
 	}
-	//if err := erigonV3foldersV31Migration(dirs); err != nil {
-	//	return err
-	//}
 	return nil
 }
 
+func downloaderV2MigrationNeeded(dirs Dirs) bool {
+	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
+}
 func downloaderV2Migration(dirs Dirs) error {
 	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	if dir.Exist(filepath.Join(dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
-		from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
-		if err := os.Rename(from, to); err != nil {
-			//fall back to copy-file if folders are on different disks
-			if err := copyFile(from, to); err != nil {
-				return err
-			}
-		}
+	if !downloaderV2MigrationNeeded(dirs) {
+		return nil
 	}
-	return nil
-}
-
-// nolint
-func erigonV3foldersV31Migration(dirs Dirs) error {
-	// migrate files db from `datadir/snapshot/warm` to `datadir/snapshots/domain`
-	if dir.Exist(filepath.Join(dirs.Snap, "warm")) {
-		warmDir := filepath.Join(dirs.Snap, "warm")
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		os.Rename(filepath.Join(dirs.SnapHistory, "salt.txt"), filepath.Join(dirs.Snap, "salt.txt"))
-		moveFiles(warmDir, dirs.SnapDomain, ".kv")
-		moveFiles(warmDir, dirs.SnapDomain, ".kvei")
-		moveFiles(warmDir, dirs.SnapDomain, ".bt")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".vi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efi")
-		moveFiles(dirs.SnapHistory, dirs.SnapAccessors, ".efei")
-		moveFiles(dirs.SnapHistory, dirs.SnapIdx, ".ef")
+	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
+	if err := os.Rename(from, to); err != nil {
+		//fall back to copy-file if folders are on different disks
+		if err := copyFile(from, to); err != nil {
+			return err
+		}
 	}
 	return nil
 }

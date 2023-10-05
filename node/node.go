@@ -234,7 +234,7 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		return err
 	}
 	for retry := 0; ; retry++ {
-		l, locked, err := datadir.Flock(n.config.Dirs)
+		l, locked, err := datadir.TryFlock(n.config.Dirs)
 		if err != nil {
 			return err
 		}
@@ -324,8 +324,9 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(log.Root()).
+		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
+			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 
 		if readonly {
