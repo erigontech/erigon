@@ -444,7 +444,8 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 // This is used by the rpcdaemon which needs read only access to the provided data services
-func NewRo(db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
+	genesisContracts GenesisContract, logger log.Logger) *Bor {
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
@@ -1335,6 +1336,10 @@ func (c *Bor) Start(chainDB kv.RwDB) {
 
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
+		if c.DB != nil {
+			c.DB.Close()
+		}
+
 		if c.HeimdallClient != nil {
 			c.HeimdallClient.Close()
 		}
@@ -1404,6 +1409,10 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 	var spanID uint64
 	if blockNum > zerothSpanEnd {
 		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
+	}
+
+	if c.HeimdallClient == nil {
+		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
 	}
 
 	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)

@@ -19,6 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -50,6 +55,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -145,7 +151,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			cfg.Dirs = datadir.New(cfg.DataDir)
+			var dataDir flags.DirectoryString
+			dataDir.Set(cfg.DataDir)
+			cfg.Dirs = datadir.New(string(dataDir))
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -270,9 +278,8 @@ func EmbeddedServices(ctx context.Context,
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
-	db kv.RoDB, borDb kv.RoDB,
-	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	stateCache kvcache.Cache, blockReader services.FullBlockReader,
+	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, agg *libstate.AggregatorV3, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("either remote db or local db must be specified")
@@ -297,6 +304,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	var allSnapshots *freezeblocks.RoSnapshots
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	onNewSnapshot := func() {}
+
+	var cc *chain.Config
+
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		dir.MustExist(cfg.Dirs.SnapHistory)
@@ -311,7 +321,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		db = rwKv
 
-		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
@@ -413,9 +422,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if db == nil {
 		db = remoteKv
 	}
+
+	var borKv kv.RoDB
+
 	if cfg.WithDatadir {
 		// bor (consensus) specific db
-		var borKv kv.RoDB
 		borDbPath := filepath.Join(cfg.DataDir, "bor")
 		{
 			// ensure db exist
@@ -431,7 +442,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
 		// Skip the compatibility check, until we have a schema in erigon-lib
-		borDb = borKv
 	} else {
 		if cfg.StateCache.CacheSize > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -464,6 +474,23 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	blockReader = remoteEth
 	eth = remoteEth
 
+	switch {
+	case cc != nil:
+		switch {
+		case cc.Bor != nil && borKv != nil:
+			genesisContractsClient := contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger)
+
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger)
+
+			engine = bor.NewRo(borKv, blockReader, spanner, genesisContractsClient, logger)
+		default:
+			engine = ethash.NewFaker()
+		}
+
+	default:
+		engine = ethash.NewFaker()
+	}
+
 	go func() {
 		if !remoteKv.EnsureVersionCompatibility() {
 			rootCancel()
@@ -480,7 +507,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}()
 
 	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot, logger)
-	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
+	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, agg, err
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
