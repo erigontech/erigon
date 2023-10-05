@@ -212,19 +212,16 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	if s.metrics {
-
-		str, err := rcmgrObs.NewStatsTraceReporter()
-		if err != nil {
-			return nil, err
-		}
-
-		rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, libp2p.ResourceManager(rmgr))
+	str, err := rcmgrObs.NewStatsTraceReporter()
+	if err != nil {
+		return nil, err
 	}
+
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, libp2p.ResourceManager(rmgr))
 
 	gater, err := NewGater(cfg)
 	if err != nil {
