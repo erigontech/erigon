@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"

@@ -28,6 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
@@ -1915,4 +1916,8 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 		amount--
 	}
 	return nil
+}
+
+func (tx *MdbxTx) CHandle() unsafe.Pointer {
+	return tx.tx.CHandle()
 }

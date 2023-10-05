@@ -16,11 +16,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -29,8 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -277,7 +276,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
@@ -292,10 +290,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	//chainConfig := fromdb.ChainConfig(chainDB)
-	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-	//	return err
-	//}
+	chainConfig := fromdb.ChainConfig(chainDB)
+	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
+		return err
+	}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err

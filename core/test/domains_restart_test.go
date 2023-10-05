@@ -517,5 +517,5 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("old hash %x\n", oldHash)
-	require.EqualValues(t, oldHash, domainsHash)
+	require.EqualValues(t, oldHash, libcommon.BytesToHash(domainsHash))
 }
