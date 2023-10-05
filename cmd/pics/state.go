@@ -430,13 +430,13 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
 		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
 	}
