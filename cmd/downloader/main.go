@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,23 +12,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/pelletier/go-toml/v2"
-
+	"github.com/BurntSushi/toml"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -246,6 +245,10 @@ var printTorrentHashes = &cobra.Command{
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
 		files, err := downloader.AllTorrentPaths(dirs)
