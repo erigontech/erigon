@@ -1,9 +1,12 @@
 package jsonrpc
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -27,15 +30,33 @@ type BorAPI interface {
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db  kv.RoDB // the chain db
-	bor *bor.Bor
+	db kv.RoDB // the chain db
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB, bor *bor.Bor) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB) *BorImpl {
 	return &BorImpl{
 		BaseAPI: base,
 		db:      db,
-		bor:     bor,
 	}
+}
+
+func (api *BorImpl) bor() (*bor.Bor, error) {
+	type lazy interface {
+		HasEngine() bool
+		Engine() consensus.EngineReader
+	}
+
+	switch engine := api.engine().(type) {
+	case *bor.Bor:
+		return engine, nil
+	case lazy:
+		if engine.HasEngine() {
+			if bor, ok := engine.Engine().(*bor.Bor); ok {
+				return bor, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("unknown or invalid consensus engine: %T", api.engine())
 }
