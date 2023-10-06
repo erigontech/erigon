@@ -632,7 +632,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("Found block num %d, ok %t\n", blockNum, ok)
 	}
 
 	if !ok {
