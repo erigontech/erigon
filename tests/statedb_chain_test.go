@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -98,20 +99,18 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	tx, err := m.DB.BeginRw(context.Background())
-	if err != nil {
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	}); err != nil {
 		panic(err)
 	}
-	defer tx.Rollback()
-
-	st := state.New(m.NewStateReader(tx))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
-	tx.Rollback()
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
@@ -122,24 +121,24 @@ func TestSelfDestructReceive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err = m.DB.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
-	// and that means that the state of the accounts written in the first block was correct.
-	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
-	st = state.New(m.NewStateReader(tx))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
-	}
-	if len(st.GetCode(contractAddress)) != 0 {
-		t.Error("expected empty code in contract at block 2", contractAddress.String())
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
+		// and that means that the state of the accounts written in the first block was correct.
+		// This test checks that the storage root of the account is properly set to the root of the empty tree
+		st := state.New(m.NewStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
+		}
+		if len(st.GetCode(contractAddress)) != 0 {
+			t.Error("expected empty code in contract at block 2", contractAddress.String())
+		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
 
 }
