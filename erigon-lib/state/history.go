@@ -1085,22 +1085,23 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 			}
 		}
 
-		rec := HistoryRecord{binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:]), common.Copy(val)}
+		txNum := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+		val = common.Copy(val)
 		switch {
-		case rec.TxNum < beforeTxNum:
+		case txNum <= beforeTxNum:
 			nk, nv, err := c.Next()
 			if err != nil {
 				return nil, err
 			}
 
-			res = append(res, rec)
+			res = append(res, HistoryRecord{beforeTxNum, val})
 			if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
 				res = append(res, HistoryRecord{binary.BigEndian.Uint64(nk[len(nk)-8:]), common.Copy(nv)})
 				if err := c.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 			}
-		case rec.TxNum >= beforeTxNum:
+		case txNum > beforeTxNum:
 			pk, pv, err := c.Prev()
 			if err != nil {
 				return nil, err
@@ -1112,7 +1113,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 					return nil, err
 				}
 			}
-			res = append(res, rec)
+			res = append(res, HistoryRecord{beforeTxNum, val})
 		}
 		return res, nil
 	}
@@ -1124,7 +1125,6 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 	defer c.Close()
 
 	var val []byte
-	var txNum uint64
 	aux := hexutility.EncodeTs(beforeTxNum)
 	val, err = c.SeekBothRange(key, aux)
 	if err != nil {
@@ -1133,7 +1133,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 	if val == nil {
 		return nil, nil
 	}
-	txNum = binary.BigEndian.Uint64(val[:8])
+	txNum := binary.BigEndian.Uint64(val[:8])
 	val = common.Copy(val[8:])
 
 	switch {
