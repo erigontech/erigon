@@ -422,6 +422,7 @@ func persistValidatorSets(
 	var snap *bor.Snapshot
 
 	headers := make([]*types.Header, 0, 16)
+	var parent *types.Header
 
 	//nolint:govet
 	for snap == nil {
@@ -446,7 +447,9 @@ func persistValidatorSets(
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
 		// No explicit parents (or no more left), reach out to the database
-		if chain != nil {
+		if parent != nil {
+			header = parent
+		} else if chain != nil {
 			header = chain.GetHeader(hash, blockNum)
 			//logger.Info(fmt.Sprintf("header %d %x => %+v\n", header.Number.Uint64(), header.Hash(), header))
 		}
@@ -461,6 +464,9 @@ func persistValidatorSets(
 
 		headers = append(headers, header)
 		blockNum, hash = blockNum-1, header.ParentHash
+		if chain != nil {
+			parent = chain.GetHeader(hash, blockNum)
+		}
 
 		if chain != nil && blockNum < chain.FrozenBlocks() {
 			break
@@ -501,26 +507,28 @@ func persistValidatorSets(
 			}
 			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 			initialHeaders := make([]*types.Header, 0, 128)
+			parentHeader := zeroHeader
 			for i := uint64(1); i <= blockNum; i++ {
 				header := chain.GetHeaderByNumber(i)
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
-					if snap, err = snap.Apply(initialHeaders, logger); err != nil {
+					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
 						if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
 							u.UnwindTo(signErr.Number-1, signErr.Hash)
 						} else {
 							return fmt.Errorf("snap.Apply (inside loop): %w", err)
 						}
 					}
+					parentHeader = initialHeaders[len(initialHeaders)-1]
 					initialHeaders = initialHeaders[:0]
 				}
 				select {
 				case <-logEvery.C:
-					log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+					logger.Info("Computing validator proposer prorities (forward)", "blockNum", i)
 				default:
 				}
 			}
-			if snap, err = snap.Apply(initialHeaders, logger); err != nil {
+			if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
 				return fmt.Errorf("snap.Apply (outside loop): %w", err)
 			}
 		}
@@ -539,7 +547,7 @@ func persistValidatorSets(
 	prevSnap := snap.Number
 	if len(headers) > 0 {
 		var err error
-		if snap, err = snap.Apply(headers, logger); err != nil {
+		if snap, err = snap.Apply(parent, headers, logger); err != nil {
 			if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
 				u.UnwindTo(signErr.Number-1, signErr.Hash)
 			} else {

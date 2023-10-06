@@ -706,7 +706,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			header := chain.GetHeaderByNumber(i)
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
-				snap, err = snap.Apply(initialHeaders, c.logger)
+				snap, err = snap.Apply(nil, initialHeaders, c.logger)
 
 				if err != nil {
 					return nil, err
@@ -721,7 +721,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			}
 		}
 
-		if snap, err = snap.Apply(initialHeaders, c.logger); err != nil {
+		if snap, err = snap.Apply(nil, initialHeaders, c.logger); err != nil {
 			return nil, err
 		}
 	}
@@ -819,7 +819,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	}
 
 	var err error
-	if snap, err = snap.Apply(headers, c.logger); err != nil {
+	if snap, err = snap.Apply(nil, headers, c.logger); err != nil {
 		return nil, err
 	}
 
@@ -998,11 +998,6 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
-		// check and commit span
-		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-			c.logger.Error("Error while committing span", "err", err)
-			return nil, types.Receipts{}, err
-		}
 
 		if c.blockReader != nil {
 			// commit states
