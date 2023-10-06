@@ -35,8 +35,18 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 
 	var borImpl *BorImpl
 
-	if bor, ok := engine.(*bor.Bor); ok {
-		borImpl = NewBorAPI(base, db, bor) // bor (consensus) specific
+	type lazy interface {
+		HasEngine() bool
+		Engine() consensus.EngineReader
+	}
+
+	switch engine := engine.(type) {
+	case *bor.Bor:
+		borImpl = NewBorAPI(base, db)
+	case lazy:
+		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
+			borImpl = NewBorAPI(base, db)
+		}
 	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
