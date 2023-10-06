@@ -653,19 +653,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 			}
 		}
 	}
-	/*
-		snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-		if err != nil {
-			return err
-		}
-		// len(header.Extra) >= extraVanity+extraSeal has already been validated in ValidateHeaderExtraField, so this won't result in a panic
-		if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
-			return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
-		}
-
-		// All basic checks passed, verify the seal and return
-		return c.verifySeal(chain, header, parents, snap)
-	*/
 	return nil
 }
 
@@ -1053,16 +1040,9 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
-		// check and commit span
-		err := c.checkAndCommitSpan(state, header, cx, syscall)
-		if err != nil {
-			c.logger.Error("Error while committing span", "err", err)
-			return nil, nil, types.Receipts{}, err
-		}
-
 		if c.HeimdallClient != nil {
 			// commit states
-			if err = c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
@@ -1302,47 +1282,6 @@ func (c *Bor) Close() error {
 	})
 
 	return nil
-}
-
-func (c *Bor) checkAndCommitSpan(
-	state *state.IntraBlockState,
-	header *types.Header,
-	chain statefull.ChainContext,
-	syscall consensus.SystemCall,
-) error {
-	headerNumber := header.Number.Uint64()
-
-	span, err := c.spanner.GetCurrentSpan(syscall)
-	if err != nil {
-		return err
-	}
-
-	if c.needToCommitSpan(span, headerNumber) {
-		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain, syscall)
-		return err
-	}
-
-	return nil
-}
-
-func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool {
-	// if span is nil
-	if currentSpan == nil {
-		return false
-	}
-
-	// check span is not set initially
-	if currentSpan.EndBlock == 0 {
-		return true
-	}
-	sprintLength := c.config.CalculateSprint(headerNumber)
-
-	// if current block is first block of last sprint in current span
-	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return true
-	}
-
-	return false
 }
 
 func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {

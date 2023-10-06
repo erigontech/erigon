@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
@@ -248,7 +247,7 @@ func BorHeimdallForward(
 				return err
 			}
 		}
-		if err = persistValidatorSets(u, ctx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+		if err = persistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
 			return fmt.Errorf("persistValidatorSets: %w", err)
 		}
 	}
@@ -406,6 +405,7 @@ func fetchAndWriteSpans(
 func persistValidatorSets(
 	u Unwinder,
 	ctx context.Context,
+	tx kv.Tx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
 	chain consensus.ChainHeaderReader,
@@ -486,22 +486,17 @@ func persistValidatorSets(
 			hash := zeroHeader.Hash()
 
 			// get validators and current span
-			zeroSpanBytes, err := blockReader.Span(ctx, 0)
+			zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
 			if err != nil {
 				return err
 			}
-			var zeroSpan *span.HeimdallSpan
-			if err = json.Unmarshal(zeroSpanBytes, zeroSpan); err != nil {
+			var zeroSpan span.HeimdallSpan
+			if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
 				return err
 			}
 
-			validators := make([]*valset.Validator, len(zeroSpan.SelectedProducers))
-			for i := range zeroSpan.SelectedProducers {
-				validators[i] = &zeroSpan.SelectedProducers[i]
-			}
-
 			// new snap shot
-			snap = bor.NewSnapshot(config, signatures, 0, hash, validators, logger)
+			snap = bor.NewSnapshot(config, signatures, 0, hash, zeroSpan.ValidatorSet.Validators, logger)
 			if err := snap.Store(snapDb); err != nil {
 				return fmt.Errorf("snap.Store (0): %w", err)
 			}
@@ -513,8 +508,10 @@ func persistValidatorSets(
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-						if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
-							u.UnwindTo(signErr.Number-1, signErr.Hash)
+						if snap != nil {
+							// Error is not critical and means that the header is invalid
+							//u.UnwindTo(signErr.Number-1, signErr.Hash)
+							return fmt.Errorf("snap.Apply (inside loop): %w", err)
 						} else {
 							return fmt.Errorf("snap.Apply (inside loop): %w", err)
 						}

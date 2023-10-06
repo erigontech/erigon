@@ -235,7 +235,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	return result, nil
 }
 
-func (r *RemoteBlockReader) Span(ctx context.Context, spanId uint64) ([]byte, error) {
+func (r *RemoteBlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
 
@@ -1082,6 +1082,43 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
-func (r *BlockReader) Span(ctx context.Context, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	// Compute starting block of the span
+	var startBlock uint64
+	if spanId > 0 {
+		startBlock = (spanId-1)*spanLength + zerothSpanEnd + 1
+	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], spanId)
+	if startBlock >= r.FrozenBorBlocks() {
+		v, err := tx.GetOne(kv.BorSpans, buf[:])
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, fmt.Errorf("span %d not found", spanId)
+		}
+		return common.Copy(v), nil
+	}
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Spans()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.ranges.from > startBlock {
+			continue
+		}
+		if sn.ranges.to <= startBlock {
+			continue
+		}
+		if sn.idx.KeyCount() == 0 {
+			continue
+		}
+		offset := sn.idx.OrdinalLookup(spanId)
+		gg := sn.seg.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+		return common.Copy(result), nil
+	}
+	return nil, fmt.Errorf("span %d not found", spanId)
 }

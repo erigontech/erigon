@@ -39,7 +39,7 @@ type BorEventReader interface {
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, spanNum uint64) ([]byte, error)
+	Span(ctx context.Context, tx kv.Getter, spanNum uint64) ([]byte, error)
 }
 
 type CanonicalReader interface {

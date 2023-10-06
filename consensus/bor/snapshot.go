@@ -127,11 +127,13 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
+			logger.Error("out of range", "header", headers[0].Number.Uint64(), "parent", headers[i].Number.Uint64())
 			return nil, errOutOfRangeChain
 		}
 	}
 
 	if headers[0].Number.Uint64() != s.Number+1 {
+		logger.Error("out of range", "header", headers[0].Number.Uint64(), "snapshot", s.Number)
 		return nil, errOutOfRangeChain
 	}
 	// Iterate through the headers and create a new snapshot
@@ -161,7 +163,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 		}
 		if succession, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-			return nil, err
+			return snap, err
 		}
 
 		// add recents
@@ -170,13 +172,13 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		validSigner = true
 
 		if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, s.config) {
-			return nil, &BlockTooSoonError{number, succession}
+			return snap, &BlockTooSoonError{number, succession}
 		}
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
 			if err := ValidateHeaderExtraField(header.Extra); err != nil {
-				return nil, err
+				return snap, err
 			}
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 
@@ -188,7 +190,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		}
 
 		if number > 64 && !validSigner {
-			return nil, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
+			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
 		}
 		parent = header
 	}
