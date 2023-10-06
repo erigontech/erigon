@@ -1,6 +1,7 @@
 package commitment
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	t.Skip()
+	ctx := context.Background()
 
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
@@ -43,7 +45,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	fmt.Println("1. Running sequential updates over the bin trie")
 	var seqHash []byte
 	for i := 0; i < len(updates); i++ {
-		sh, branchNodeUpdates, err := trie.ProcessKeys(plainKeys[i : i+1])
+		sh, branchNodeUpdates, err := trie.ProcessKeys(ctx, plainKeys[i:i+1])
 		require.NoError(t, err)
 		require.Len(t, sh, length.Hash)
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
@@ -57,7 +59,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 
 	fmt.Println("2. Running batch updates over the bin trie")
 
-	batchHash, branchBatchUpdates, err := trieBatch.ProcessKeys(plainKeys)
+	batchHash, branchBatchUpdates, err := trieBatch.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 	ms2.applyBranchNodeUpdates(branchBatchUpdates)
 
@@ -84,6 +86,7 @@ func renderUpdates(branchNodeUpdates map[string]BranchData) {
 
 func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	t.Skip()
+	ctx := context.Background()
 
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
@@ -122,7 +125,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sequentialRoot, branchNodeUpdates, err := trieOne.ProcessKeys(plainKeys[i : i+1])
+		sequentialRoot, branchNodeUpdates, err := trieOne.ProcessKeys(ctx, plainKeys[i:i+1])
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
@@ -135,7 +138,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
+	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 	//renderUpdates(branchNodeUpdatesTwo)
 
@@ -151,6 +154,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
 }
 func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
+	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -171,7 +175,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	firstRootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 
 	t.Logf("root hash %x\n", firstRootHash)
@@ -190,7 +194,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	secondRootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 	require.NotEqualValues(t, firstRootHash, secondRootHash)
 
@@ -207,7 +211,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	thirdRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	thirdRootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 	require.NotEqualValues(t, secondRootHash, thirdRootHash)
 
@@ -217,6 +221,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 }
 
 func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
+	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -233,7 +238,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashBeforeEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	hashBeforeEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
@@ -250,7 +255,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashAfterEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+	hashAfterEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 	require.NoError(t, err)
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
