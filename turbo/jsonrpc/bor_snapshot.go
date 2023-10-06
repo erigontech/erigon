@@ -68,6 +68,13 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
+	// init consensus db
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -99,7 +106,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 		return nil, errUnknownBlock
 	}
 
-	author, err := api.bor.Author(header)
+	author, err := bor.Author(header)
 
 	return &author, err
 }
