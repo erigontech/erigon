@@ -586,7 +586,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 	return chain.NumberOfPoWBlocks()
 }
 
-func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
+func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
@@ -648,7 +648,8 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 	initialCycle := MockInsertAsInitialCycle
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook, false); err != nil {
+
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, nil, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook, false); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -707,16 +708,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 
-	tx, err := ms.DB.BeginRw(ms.Ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := ms.insertPoWBlocks(chain, tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
 	}
 	if err := ms.insertPoSBlocks(chain); err != nil {
