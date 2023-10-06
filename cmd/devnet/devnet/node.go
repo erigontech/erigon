@@ -1,7 +1,7 @@
 package devnet
 
 import (
-	context "context"
+	"context"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -167,7 +167,7 @@ func (n *node) run(ctx *cli.Context) error {
 		n.ethCfg.Bor.StateSyncConfirmationDelay = map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
 	}
 
-	n.ethNode, err = enode.New(n.nodeCfg, n.ethCfg, logger)
+	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
 
 	if metricsMux != nil {
 		diagnostics.Setup(ctx, metricsMux, n.ethNode)

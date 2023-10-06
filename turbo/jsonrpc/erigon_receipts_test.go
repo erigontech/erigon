@@ -214,7 +214,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.Block
 	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
-		err := m.InsertChain(chain, nil)
+		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}
 	return m

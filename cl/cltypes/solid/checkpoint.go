@@ -53,6 +53,22 @@ func (c Checkpoint) UnmarshalJSON(buf []byte) error {
 	return nil
 }
 
+func (c Checkpoint) SetRawEpoch(b []byte) {
+	copy(c[:8], b[:8])
+}
+
+func (c Checkpoint) SetRawBlockRoot(b []byte) {
+	copy(c[8:40], b[:32])
+}
+
+func (c Checkpoint) RawEpoch() []byte {
+	return c[:8]
+}
+
+func (c Checkpoint) RawBlockRoot() []byte {
+	return c[8:40]
+}
+
 // SetBlockRoot copies the given blockRoot into the correct location within the Checkpoint
 func (c Checkpoint) SetBlockRoot(blockRoot libcommon.Hash) {
 	copy(c[8:], blockRoot[:]) // copy the blockRoot into the Checkpoint starting at index 8

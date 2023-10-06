@@ -123,7 +123,7 @@ func TestSetupGenesis(t *testing.T) {
 				if err != nil {
 					return nil, nil, err
 				}
-				if err = m.InsertChain(chain, nil); err != nil {
+				if err = m.InsertChain(chain); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
