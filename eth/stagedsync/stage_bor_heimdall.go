@@ -148,12 +148,13 @@ func BorHeimdallForward(
 		if minedHeadNumber := minedHeader.Number.Uint64(); minedHeadNumber > headNumber {
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
-
-			if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
-				logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
-				dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
-				s.state.UnwindTo(minedHeadNumber-1, minedHeader.Hash())
-				return err
+			if service != nil {
+				if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
+					logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
+					dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
+					s.state.UnwindTo(minedHeadNumber-1, minedHeader.Hash())
+					return err
+				}
 			}
 		} else {
 			return fmt.Errorf("attempting to mine %d, which is behind current head: %d", minedHeadNumber, headNumber)

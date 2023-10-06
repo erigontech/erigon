@@ -61,7 +61,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetAuthor retrieves the author a block.
-func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) {
+func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -71,16 +71,30 @@ func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) 
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
+
+	//nolint:nestif
+	if blockNrOrHash == nil {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+			}
+		}
 	}
-	// Ensure we have an actually valid block
-	if header == nil {
+
+	// Ensure we have an actually valid block and return its snapshot
+	if header == nil || err != nil {
 		return nil, errUnknownBlock
 	}
-	author, err := author(api, tx, header)
+
+	author, err := api.bor.Author(header)
+
 	return &author, err
 }
 
@@ -259,6 +273,48 @@ type BlockSigners struct {
 type difficultiesKV struct {
 	Signer     common.Address
 	Difficulty uint64
+}
+
+// GetSnapshotProposer retrieves the in-turn signer at a given block.
+func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer tx.Rollback()
+
+	var header *types.Header
+	//nolint:nestif
+	if blockNrOrHash == nil {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			} else {
+				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+			}
+		}
+	}
+
+	if header == nil || err != nil {
+		return common.Address{}, errUnknownBlock
+	}
+
+	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
+	snap, err := api.GetSnapshot(&snapNumber)
+
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return snap.ValidatorSet.GetProposer().Address, nil
 }
 
 func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error) {
