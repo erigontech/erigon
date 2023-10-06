@@ -53,8 +53,8 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  atomic.Uint64
 	trace    bool
-	muMaps   sync.RWMutex
-	walLock  sync.RWMutex
+	//muMaps   sync.RWMutex
+	walLock sync.RWMutex
 
 	account    map[string][]byte
 	code       map[string][]byte
