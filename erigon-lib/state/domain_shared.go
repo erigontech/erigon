@@ -626,11 +626,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, saveStateAfter, trace bool)
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-	err = branchUpdates.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, err
+	if branchUpdates != nil {
+		err = branchUpdates.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return nil, err
+		}
+		branchUpdates.Close()
 	}
-	branchUpdates.Close()
 
 	if saveStateAfter {
 		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
