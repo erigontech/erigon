@@ -157,7 +157,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			if err := rs.ApplyState4(txTask, agg); err != nil {
+			if err := rs.ApplyState4(context.Background(), txTask, agg); err != nil {
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
