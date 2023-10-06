@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/borfinality/rawdb"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -32,20 +33,19 @@ type milestoneService interface {
 	ProcessFutureMilestone(num uint64, hash common.Hash)
 }
 
-// TODO: Uncomment once metrics is added
-// var (
-// 	//Metrics for collecting the whitelisted milestone number
-// 	whitelistedMilestoneMeter = metrics.NewRegisteredGauge("chain/milestone/latest", nil)
+var (
+	//Metrics for collecting the whitelisted milestone number
+	whitelistedMilestoneMeter = metrics.GetOrCreateCounter("chain_milestone_latest", true)
 
-// 	//Metrics for collecting the future milestone number
-// 	FutureMilestoneMeter = metrics.NewRegisteredGauge("chain/milestone/future", nil)
+	//Metrics for collecting the future milestone number
+	FutureMilestoneMeter = metrics.GetOrCreateCounter("chain_milestone_future", true)
 
-// 	//Metrics for collecting the length of the MilestoneIds map
-// 	MilestoneIdsLengthMeter = metrics.NewRegisteredGauge("chain/milestone/idslength", nil)
+	//Metrics for collecting the length of the MilestoneIds map
+	MilestoneIdsLengthMeter = metrics.GetOrCreateCounter("chain_milestone_idslength", true)
 
-// 	//Metrics for collecting the number of valid chains received
-// 	MilestoneChainMeter = metrics.NewRegisteredMeter("chain/milestone/isvalidchain", nil)
-// )
+	//Metrics for collecting the number of valid chains received
+	MilestoneChainMeter = metrics.GetOrCreateCounter("chain_milestone_isvalidchain")
+)
 
 // IsValidChain checks the validity of chain by comparing it
 // against the local milestone entries
@@ -58,34 +58,33 @@ func (m *milestone) IsValidChain(currentHeader uint64, chain []*types.Header) bo
 	m.finality.RLock()
 	defer m.finality.RUnlock()
 
-	// TODO: Uncomment once metrics is added
-	// var isValid bool = false
-	// defer func() {
-	// 	if isValid {
-	// 		MilestoneChainMeter.Mark(int64(1))
-	// 	} else {
-	// 		MilestoneChainMeter.Mark(int64(-1))
-	// 	}
-	// }()
+	var isValid bool = false
+	defer func() {
+		if isValid {
+			MilestoneChainMeter.Add(1)
+		} else {
+			MilestoneChainMeter.Add(-1)
+		}
+	}()
 
 	res := m.finality.IsValidChain(currentHeader, chain)
 
 	if !res {
-		// isValid = false
+		isValid = false
 		return false
 	}
 
 	if m.Locked && !m.IsReorgAllowed(chain, m.LockedMilestoneNumber, m.LockedMilestoneHash) {
-		// isValid = false
+		isValid = false
 		return false
 	}
 
 	if !m.IsFutureMilestoneCompatible(chain) {
-		// isValid = false
+		isValid = false
 		return false
 	}
 
-	// isValid = true
+	isValid = true
 	return true
 }
 
@@ -103,8 +102,7 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 		}
 	}
 
-	// TODO: Uncomment once metrics is added
-	// whitelistedMilestoneMeter.Update(int64(block))
+	whitelistedMilestoneMeter.Set(block)
 
 	m.UnlockSprint(block)
 }
@@ -143,9 +141,8 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uin
 		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 
-	// TODO: Uncomment once metrics is added
-	// milestoneIDLength := int64(len(m.LockedMilestoneIDs))
-	// MilestoneIdsLengthMeter.Update(milestoneIDLength)
+	milestoneIDLength := uint64(len(m.LockedMilestoneIDs))
+	MilestoneIdsLengthMeter.Set(milestoneIDLength)
 
 	m.finality.Unlock()
 }
@@ -279,8 +276,7 @@ func (m *milestone) enqueueFutureMilestone(key uint64, hash common.Hash) {
 		log.Error("Error in writing future milestone data to db", "err", err)
 	}
 
-	// TODO: Uncomment once metrics is added
-	// FutureMilestoneMeter.Update(int64(key))
+	FutureMilestoneMeter.Set(key)
 }
 
 // DequeueFutureMilestone remove the future milestone entry from the list.
