@@ -111,16 +111,22 @@ func TestSelfDestructReceive(t *testing.T) {
 	if st.Exist(contractAddress) {
 		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 	}
+	tx.Rollback()
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1), tx); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2), tx); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
+	tx, err = m.DB.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 	// and that means that the state of the accounts written in the first block was correct.
 	// This test checks that the storage root of the account is properly set to the root of the empty tree

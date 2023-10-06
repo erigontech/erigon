@@ -271,7 +271,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 		t.Fatal(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain, nil); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 

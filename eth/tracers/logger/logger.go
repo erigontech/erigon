@@ -116,7 +116,7 @@ type StructLogger struct {
 	logs    []StructLog
 	output  []byte
 	err     error
-	env     vm.VMInterface
+	env     *vm.EVM
 }
 
 // NewStructLogger returns a new logger
@@ -135,7 +135,7 @@ func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
@@ -339,7 +339,7 @@ func WriteLogs(writer io.Writer, logs []*types.Log) {
 type mdLogger struct {
 	out io.Writer
 	cfg *LogConfig
-	env vm.VMInterface
+	env *vm.EVM
 }
 
 // NewMarkdownLogger creates a logger which outputs information in a format adapted
@@ -373,7 +373,7 @@ func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, 
 `)
 }
 
-func (t *mdLogger) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	t.env = env
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }

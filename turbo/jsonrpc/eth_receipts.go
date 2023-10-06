@@ -626,23 +626,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-
-	if !ok && cc.Bor == nil {
-		return nil, nil
-	}
-
-	// if not ok and cc.Bor != nil then we might have a bor transaction.
-	// Note that Private API returns 0 if transaction is not found.
-	if !ok || blockNum == 0 {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && cc.Bor != nil {
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
-			return nil, nil
-		}
+	}
 
-		blockNum = *blockNumPtr
+	if !ok {
+		return nil, nil
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -664,19 +657,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var borTx types.Transaction
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
-			return nil, nil
+			borTx = types.NewBorTransaction()
 		}
 	}
-
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
 			return nil, err

@@ -767,7 +767,7 @@ var (
 	WithHeimdallMilestones = cli.BoolFlag{
 		Name:  "bor.milestone",
 		Usage: "Enabling bor milestone processing",
-		Value: false,
+		Value: true,
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
@@ -827,6 +827,12 @@ var (
 	DiagnosticsSessionsFlag = cli.StringSliceFlag{
 		Name:  "diagnostics.ids",
 		Usage: "Comma separated list of support session ids to connect to",
+	}
+
+	SilkwormPathFlag = cli.StringFlag{
+		Name:  "silkworm.path",
+		Usage: "Path to the silkworm_api library (enables embedded Silkworm execution)",
+		Value: "",
 	}
 )
 
@@ -1450,6 +1456,13 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.SilkwormEnabled = ctx.IsSet(SilkwormPathFlag.Name)
+	if cfg.SilkwormEnabled {
+		cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
+	}
+}
+
 // CheckExclusive verifies that only a single instance of the provided flags was
 // set by the user. Each flag might optionally be followed by a string type to
 // specialize it further.
@@ -1552,6 +1565,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
+	setSilkworm(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
@@ -1626,7 +1640,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.TxPool.OverrideCancunTime = cfg.OverrideCancunTime
 	}
 
-	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
+	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {
 		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
 	}
 
