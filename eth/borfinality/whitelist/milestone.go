@@ -276,7 +276,7 @@ func (m *milestone) enqueueFutureMilestone(key uint64, hash common.Hash) {
 		log.Error("Error in writing future milestone data to db", "err", err)
 	}
 
-	FutureMilestoneMeter.Set(uint64(key))
+	FutureMilestoneMeter.Set(key)
 }
 
 // DequeueFutureMilestone remove the future milestone entry from the list.

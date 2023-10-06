@@ -30,7 +30,7 @@ var (
 	errEndBlock = errors.New("failed to get end block")
 
 	//Metrics for collecting the rewindLength
-	rewindLengthMeter = metrics.GetOrCreateCounter("chain/autorewind/length")
+	rewindLengthMeter = metrics.GetOrCreateCounter("chain_autorewind_length")
 )
 
 type borVerifier struct {
