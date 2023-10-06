@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -488,6 +489,44 @@ func (d *DomainCommitted) Close() {
 	d.Domain.Close()
 	d.updates.keys = nil
 	d.updates.tree.Clear(true)
+}
+
+func (d *DomainCommitted) ComputeCommitmentFaster(ctx context.Context, trace bool) (rootHash []byte, branchUpdates *etl.Collector, err error) {
+	if dbg.DiscardCommitment() {
+		d.updates.List(true)
+		return nil, nil, nil
+	}
+	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
+
+	touchedKeys, _ := d.updates.List(true)
+	mxCommitmentKeys.Add(len(touchedKeys))
+
+	if len(touchedKeys) == 0 {
+		rootHash, err = d.patriciaTrie.RootHash()
+		return rootHash, nil, err
+	}
+
+	if len(touchedKeys) > 1 {
+		d.patriciaTrie.Reset()
+	}
+	// data accessing functions should be set once before
+	d.patriciaTrie.SetTrace(trace)
+
+	switch d.mode {
+	case CommitmentModeDirect:
+		rootHash, branchUpdates, err = d.patriciaTrie.(*commitment.HexPatriciaHashed).ProcessKeysFaster(ctx, touchedKeys)
+		if err != nil {
+			return nil, nil, err
+		}
+	case CommitmentModeUpdate:
+		panic("unsupported")
+	case CommitmentModeDisabled:
+		return nil, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
+	}
+
+	return rootHash, branchUpdates, err
 }
 
 // Evaluates commitment for processed state.

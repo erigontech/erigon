@@ -485,6 +485,97 @@ func TestHistoryScanFiles(t *testing.T) {
 	})
 }
 
+func TestHisory_Unwind(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+
+		h.SetTx(tx)
+		h.StartWrites()
+		unwindKeys := make([][]byte, 8)
+		for i := 0; i < len(unwindKeys); i++ {
+			unwindKeys[i] = []byte(fmt.Sprintf("unwind_key%d", i))
+		}
+
+		v, prev1 := make([]byte, 8), make([]byte, 8)
+		for i := uint64(0); i < txs; i += 6 {
+			h.SetTxNum(i)
+
+			binary.BigEndian.PutUint64(v, i)
+
+			for _, uk1 := range unwindKeys {
+				err := h.AddPrevValue(uk1, nil, v)
+				require.NoError(err)
+			}
+			copy(prev1, v)
+		}
+		err = h.Rotate().Flush(ctx, tx)
+		require.NoError(err)
+		h.FinishWrites()
+		require.NoError(tx.Commit())
+
+		collateAndMergeHistory(t, db, h, txs)
+
+		tx, err = db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		var keys, vals []string
+		_, _ = keys, vals
+
+		ic := h.MakeContext()
+		defer ic.Close()
+
+		for i := 0; i < len(unwindKeys); i++ {
+			it, err := ic.IdxRange(unwindKeys[i], 30, int(txs), order.Asc, -1, tx)
+			for it.HasNext() {
+				txN, err := it.Next()
+				require.NoError(err)
+				fmt.Printf("txN=%d\n", txN)
+			}
+			rec, err := h.unwindKey(unwindKeys[i], 32, tx)
+			require.NoError(err)
+			for _, r := range rec {
+				fmt.Printf("txn %d v=%x|%d\n", r.TxNum, r.Value, binary.BigEndian.Uint64(r.Value))
+			}
+			fmt.Printf("%x records %d\n", unwindKeys[i], len(rec))
+		}
+
+		// it, err := ic.HistoryRange(2, 200, order.Asc, -1, tx)
+		// require.NoError(err)
+		// uniq := make(map[string]int)
+		// for it.HasNext() {
+
+		// 	k, v, err := it.Next()
+		// 	require.NoError(err)
+		// 	keys = append(keys, fmt.Sprintf("%x", k))
+		// 	vals = append(vals, fmt.Sprintf("%x", v))
+		// 	uniq[fmt.Sprintf("%x", k)]++
+		// 	fmt.Printf("k=%x, v=%x\n", k, v)
+		// }
+		// for k, v := range uniq {
+		// 	if v > 1 {
+		// 		fmt.Printf("count k=%s, v=%d\n", k, v)
+		// 	}
+		// }
+
+	}
+	t.Run("small_values", func(t *testing.T) {
+		db, h := testDbAndHistory(t, false, logger)
+		defer db.Close()
+		defer h.Close()
+
+		test(t, h, db, 1000)
+	})
+}
+
 func TestIterateChanged(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)

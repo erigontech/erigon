@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -591,48 +592,45 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *SharedDomains) Commit(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
-	//t := time.Now()
-	//defer func() { log.Info("[dbg] [agg] commitment", "took", time.Since(t)) }()
-
-	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 
-	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
+	// if commitment mode is Disabled, there will be nothing to compute on.
+	rootHash, branchUpdates, err := sd.Commitment.ComputeCommitmentFaster(ctx, trace)
 	if err != nil {
 		return nil, err
 	}
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-	for pref, update := range branchNodeUpdates {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		prefix := []byte(pref)
-
+	loadFunc := func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, err := sd.LatestCommitment(prefix)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		stated := commitment.BranchData(stateValue)
 		merged, err := sd.Commitment.branchMerger.Merge(stated, update)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if bytes.Equal(stated, merged) {
-			continue
+			return nil
 		}
 		if trace {
 			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 
 		if err = sd.UpdateCommitmentData(prefix, merged, stated); err != nil {
-			return nil, err
+			return err
 		}
 		mxCommitmentBranchUpdates.Inc()
+		return nil
 	}
+
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	err = branchUpdates.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, err
+	}
+	branchUpdates.Close()
 
 	if saveStateAfter {
 		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
