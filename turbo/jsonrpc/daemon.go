@@ -44,7 +44,7 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 	case *bor.Bor:
 		borImpl = NewBorAPI(base, db)
 	case lazy:
-		if _, ok := engine.Engine().(*bor.Bor); ok {
+		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
 			borImpl = NewBorAPI(base, db)
 		}
 	}
