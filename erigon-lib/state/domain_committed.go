@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -490,7 +491,7 @@ func (d *DomainCommitted) Close() {
 }
 
 // Evaluates commitment for processed state.
-func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	if dbg.DiscardCommitment() {
 		d.updates.List(true)
 		return nil, nil, nil
@@ -513,12 +514,12 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(touchedKeys)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
 		if err != nil {
 			return nil, nil, err
 		}
 	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, updates)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
 		if err != nil {
 			return nil, nil, err
 		}

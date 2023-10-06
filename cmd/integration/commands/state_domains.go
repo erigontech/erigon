@@ -124,7 +124,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 	r := state.NewReaderV4(stateTx.(*temporal.Tx))
 
-	_, err = domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(ctx, 0, math.MaxUint64)
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}

@@ -316,6 +316,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
+	ctx := context.Background()
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
@@ -333,7 +334,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 		domains = agg.SharedDomains(ac)
 		defer domains.Close()
-		_, err := domains.SeekCommitment(0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
 		if err != nil {
 			return nil, err
 		}
@@ -351,7 +352,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	txNumIncrement := func() {
 		txNum++
 		if ethconfig.EnableHistoryV4InTest {
-			domains.SetTxNum(uint64(txNum))
+			domains.SetTxNum(ctx, uint64(txNum))
 		}
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,

@@ -53,7 +53,7 @@ Loop:
 	commitStep := 3
 
 	for ; i < int(maxTx); i++ {
-		domains.SetTxNum(uint64(i))
+		domains.SetTxNum(ctx, uint64(i))
 		for accs := 0; accs < 256; accs++ {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
@@ -65,7 +65,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.Commit(true, false)
+			rh, err := domains.Commit(ctx, true, false)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)

@@ -187,6 +187,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 }
 
 func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	ctx := context.Background()
 	block, statedb, err := GenesisToBlock(g, tmpDir)
 	if err != nil {
 		return nil, nil, err
@@ -241,7 +242,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		ww := stateWriter.(*state.WriterV4)
 		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
 		if !hasSnap {
-			rh, err := ww.Commitment(true, false)
+			rh, err := ww.Commitment(ctx, true, false)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -145,7 +145,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 	stateWriter.SetTx(tx)
 
 	return func(n, from, numberOfBlocks uint64) {
-			stateWriter.SetTxNum(n)
+			stateWriter.SetTxNum(context.Background(), n)
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &state.TxTask{

@@ -69,7 +69,7 @@ func TestRunnn(t *testing.T) {
 
 func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	t.Helper()
-
+	ctx := context.Background()
 	db, agg := dbAggregatorOnDatadir(t, datadir)
 
 	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup["sepolia"])
@@ -90,7 +90,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	defer domains.Close()
 	domains.SetTx(tx)
 
-	offt, err := domains.SeekCommitment(0, 1<<63-1)
+	offt, err := domains.SeekCommitment(ctx, 0, 1<<63-1)
 	require.NoError(t, err)
 	txn := domains.TxNum()
 	fmt.Printf("seek to block %d txn %d block beginning offset %d\n", domains.BlockNum(), txn, offt)

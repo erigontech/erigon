@@ -74,13 +74,13 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
+		domains.SetTxNum(ctx, txNum)
 		err := domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val, prev)
 		prev = val
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.Commit(true, false)
+			_, err := domains.Commit(ctx, true, false)
 			require.NoError(b, err)
 		}
 	}
