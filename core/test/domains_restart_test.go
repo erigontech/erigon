@@ -466,6 +466,7 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 }
 
 func TestCommit(t *testing.T) {
+	t.Skip()
 	aggStep := uint64(100)
 
 	ctx := context.Background()

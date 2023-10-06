@@ -556,7 +556,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger.Info("Work on state history blockSnapshots")
+	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
@@ -584,7 +584,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	logger.Info("Build state history blockSnapshots")
+	logger.Info("Build state history snapshots")
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
