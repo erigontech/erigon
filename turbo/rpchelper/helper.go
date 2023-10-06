@@ -58,7 +58,8 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			if whitelist.GetWhitelistingService() != nil {
 				num := borfinality.GetFinalizedBlockNumber(tx)
 				if num == 0 {
-					return 0, libcommon.Hash{}, false, errors.New("no finalized block")
+					// nolint
+					return 0, libcommon.Hash{}, false, errors.New("No finalized block")
 				}
 
 				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
