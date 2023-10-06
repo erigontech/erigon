@@ -1145,7 +1145,6 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 
 		res = append(res, HistoryRecord{beforeTxNum, val})
 		if nk != nil {
-			fmt.Printf("unwindKey1: %x, %d, %d, %x\n", nk, binary.BigEndian.Uint64(nv[:8]), len(nv[8:]), nv[8:])
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), common.Copy(nv[8:])})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err
@@ -1158,7 +1157,6 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 		}
 
 		if pk != nil {
-			fmt.Printf("unwindKey2: %x, %d, %d, %x\n", pk, binary.BigEndian.Uint64(pv[:8]), len(pv[8:]), pv[8:])
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[:8]), common.Copy(pv[8:])})
 			if err := c.DeleteCurrent(); err != nil {
 				return nil, err

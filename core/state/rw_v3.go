@@ -143,8 +143,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 					}
 					//fmt.Printf("applied %x DELETE\n", kb)
 				} else {
-					fmt.Printf("put alex3: %x, %d, %x\n", kb, len(prev), prev)
-					if err := domains.UpdateAccountData(kb, list.Vals[i], common.Copy(prev)); err != nil {
+					if err := domains.UpdateAccountData(kb, list.Vals[i], prev); err != nil {
 						return err
 					}
 					//acc.Reset()
@@ -196,7 +195,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		} else {
 			enc1 = accounts.SerialiseV3(&acc)
 		}
-		fmt.Printf("put alex2: %x, %d\n", addrBytes, len(enc0))
+
 		//fmt.Printf("+applied %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 		if err := domains.UpdateAccountData(addrBytes, enc1, enc0); err != nil {
 			return err
@@ -259,8 +258,6 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac *libstate.AggregatorV3Context, accumulator *shards.Accumulator) error {
 	var currentInc uint64
 
-	fmt.Printf("--unwind\n")
-	defer fmt.Printf("--unwind done\n")
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
@@ -398,17 +395,7 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := accounts.SerialiseV3(account)
-
-	bbu := make([]byte, account.EncodingLengthForStorage())
-	account.EncodeForStorage(bbu)
-	chk2 := accounts.NewAccount()
-	chk2.DecodeForStorage(bbu)
-
-	fmt.Printf("upd: %s, %d, balance=%s, nonce=%d, inc=%d, encoded:=%x\n", address, len(value), account.Balance.String(), account.Nonce, account.Incarnation, value)
-	chk := accounts.NewAccount()
-	accounts.DeserialiseV3(&chk, value)
-
-	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), common.Copy(value))
+	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 
 	if w.trace {
 		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -503,7 +490,6 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, nil
 	}
 
-	fmt.Printf("ReadAccountData [%x] %x\n", address, enc)
 	var acc accounts.Account
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil, err

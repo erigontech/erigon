@@ -207,8 +207,6 @@ func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
 	switch table {
 	case kv.AccountsDomain:
-		fmt.Printf("puts to ram: %x, %d\n", key, len(val))
-
 		if old, ok := sd.account[key]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
@@ -307,7 +305,6 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	//}()
 	v0, ok = sd.Get(kv.AccountsDomain, addr)
 	if ok {
-		fmt.Printf("get latest from ram: %x, %d\n", addr, len(v0))
 		return v0, nil
 	}
 	v, _, err = sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)

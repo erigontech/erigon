@@ -33,11 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-func TestName(t *testing.T) {
-	_ = "01010020e53ead3966bb0d9e938cebbd021d63a244d25f4c685930ec3a9d62abb7cc45610101"
-
-}
-
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {

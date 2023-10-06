@@ -604,15 +604,11 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-	if len(val) == 38 {
-		fmt.Printf("put wal: %x, %d, %x\n", key1, len(val), val)
-	}
 	return d.wal.addValue(key1, key2, val)
 }
 
 func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-	fmt.Printf("del hist: %x, %d\n", key1, len(prev))
 	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
@@ -736,7 +732,6 @@ func loadSkipFunc() etl.LoadFunc {
 }
 
 func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	fmt.Printf(" ------- wal flush! %s\n", d.d.filenameBase)
 	if d.discard || !d.buffered {
 		return nil
 	}
@@ -1488,7 +1483,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 			//fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
 			if edgeRecords[0].TxNum == txFrom && edgeRecords[0].Value != nil {
 				d.SetTxNum(edgeRecords[0].TxNum)
-				fmt.Printf("restore1, %x, %d, %x\n", k, len(edgeRecords[0].Value), edgeRecords[0].Value)
 				if err := restore.addValue(k, nil, edgeRecords[0].Value); err != nil {
 					return err
 				}
@@ -1499,7 +1493,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 			l, r := edgeRecords[0], edgeRecords[1]
 			if r.TxNum >= txFrom /*&& l.TxNum < txFrom*/ && r.Value != nil {
 				d.SetTxNum(l.TxNum)
-				fmt.Printf("restore2: %x, %d, %x\n", k, len(r.Value), r.Value)
 				if err := restore.addValue(k, nil, r.Value); err != nil {
 					return err
 				}
@@ -1957,7 +1950,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 				return nil, false, err
 			}
 			_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
-			fmt.Printf("get latest from db: %x, %d, %x\n", dc.valKeyBuf[:len(key)], len(v), v)
 			if err != nil {
 				return nil, false, fmt.Errorf("GetLatest value: %w", err)
 			}
