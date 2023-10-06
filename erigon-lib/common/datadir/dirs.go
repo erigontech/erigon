@@ -67,7 +67,7 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
-		Downloader:      filepath.Join(datadir, "snapshots", "downloader"),
+		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}
@@ -91,7 +91,7 @@ func convertFileLockError(err error) error {
 	return err
 }
 
-func Flock(dirs Dirs) (*flock.Flock, bool, error) {
+func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
 	l := flock.New(filepath.Join(dirs.DataDir, "LOCK"))
@@ -104,7 +104,12 @@ func Flock(dirs Dirs) (*flock.Flock, bool, error) {
 
 // ApplyMigrations - if can get flock.
 func ApplyMigrations(dirs Dirs) error { //nolint
-	lock, locked, err := Flock(dirs)
+	need := downloaderV2MigrationNeeded(dirs)
+	if !need {
+		return nil
+	}
+
+	lock, locked, err := TryFlock(dirs)
 	if err != nil {
 		return err
 	}
@@ -114,6 +119,28 @@ func ApplyMigrations(dirs Dirs) error { //nolint
 	defer lock.Unlock()
 
 	// add your migration here
+
+	if err := downloaderV2Migration(dirs); err != nil {
+		return err
+	}
+	return nil
+}
+
+func downloaderV2MigrationNeeded(dirs Dirs) bool {
+	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
+}
+func downloaderV2Migration(dirs Dirs) error {
+	// move db from `datadir/snapshot/db` to `datadir/downloader`
+	if !downloaderV2MigrationNeeded(dirs) {
+		return nil
+	}
+	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
+	if err := os.Rename(from, to); err != nil {
+		//fall back to copy-file if folders are on different disks
+		if err := copyFile(from, to); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

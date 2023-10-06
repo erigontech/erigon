@@ -1414,13 +1414,13 @@ func (a *AggregatorV3) BatchHistoryWriteEnd() {
 
 // ComputeCommitment evaluates commitment for processed state.
 // If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
-func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (a *AggregatorV3) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	// TODO: create new SharedDomain with new aggregator Context to compute commitment on most recent committed state.
 	//       for now we use only one sharedDomain -> no major difference among contexts.
 	//aggCtx := a.MakeContext()
 	//defer aggCtx.Close()
-	return a.domains.Commit(saveStateAfter, trace)
+	return a.domains.Commit(ctx, saveStateAfter, trace)
 }
 
 func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {

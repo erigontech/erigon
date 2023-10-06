@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -1278,7 +1279,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	pks := make(map[string]int, len(plainKeys))
@@ -1294,6 +1295,11 @@ func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, 
 
 	stagedCell := new(Cell)
 	for i, hashedKey := range hashedKeys {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", i+1, len(hashedKeys), plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
@@ -1362,7 +1368,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, 
 	return rootHash, branchNodeUpdates, nil
 }
 
-func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	for i, pk := range plainKeys {
@@ -1375,6 +1381,11 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Updat
 	})
 
 	for i, update := range updates {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		if hph.trace {
 			fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
 				i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])

@@ -532,7 +532,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		sd := agg.SharedDomains(ac)
 		defer sd.Close()
 		defer sd.StartWrites().FinishWrites()
-		if _, err = agg.ComputeCommitment(true, false); err != nil {
+		if _, err = agg.ComputeCommitment(ctx, true, false); err != nil {
 			return err
 		}
 		return err
@@ -556,7 +556,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger.Info("Work on state history blockSnapshots")
+	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
@@ -578,13 +578,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 		domains := agg.SharedDomains(ac)
 		domains.SetTx(tx)
-		domains.SetTxNum(lastTxNum)
+		domains.SetTxNum(ctx, lastTxNum)
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	logger.Info("Build state history blockSnapshots")
+	logger.Info("Build state history snapshots")
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}

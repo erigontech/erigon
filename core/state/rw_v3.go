@@ -204,21 +204,14 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	return nil
 }
 
-func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
-	//defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
-	rs.domains.SetTxNum(txNum)
-
-	return rs.domains.Commit(saveState, false)
-}
-
 func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) ApplyState4(txTask *TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(txTask.TxNum)
+	rs.domains.SetTxNum(ctx, txTask.TxNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
@@ -379,8 +372,8 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	}
 }
 
-func (w *StateWriterBufferedV3) SetTxNum(txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
+func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
+	w.rs.domains.SetTxNum(ctx, txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 

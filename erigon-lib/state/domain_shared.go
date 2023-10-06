@@ -53,8 +53,8 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  atomic.Uint64
 	trace    bool
-	muMaps   sync.RWMutex
-	walLock  sync.RWMutex
+	//muMaps   sync.RWMutex
+	walLock sync.RWMutex
 
 	account    map[string][]byte
 	code       map[string][]byte
@@ -128,11 +128,11 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.ClearRam(true)
 
 	// TODO what if unwinded to the middle of block? It should cause one more unwind until block beginning or end is not found.
-	_, err := sd.SeekCommitment(0, txUnwindTo)
+	_, err := sd.SeekCommitment(ctx, 0, txUnwindTo)
 	return err
 }
 
-func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (txsFromBlockBeginning uint64, err error) {
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, fromTx, toTx uint64) (txsFromBlockBeginning uint64, err error) {
 	bn, txn, err := sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
 	if err != nil {
 		return 0, err
@@ -178,7 +178,7 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (txsFromBlockBeginn
 	}
 
 	sd.SetBlockNum(blockNum)
-	sd.SetTxNum(txn)
+	sd.SetTxNum(ctx, txn)
 	return
 }
 
@@ -561,11 +561,11 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
-func (sd *SharedDomains) SetTxNum(txNum uint64) {
+func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		_, err := sd.Commit(true, sd.trace)
+		_, err := sd.Commit(ctx, true, sd.trace)
 		if err != nil {
 			panic(err)
 		}
@@ -590,7 +590,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) Commit(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	//t := time.Now()
 	//defer func() { log.Info("[dbg] [agg] commitment", "took", time.Since(t)) }()
 
@@ -598,13 +598,18 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 
-	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(trace)
+	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
 	if err != nil {
 		return nil, err
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 	for pref, update := range branchNodeUpdates {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		prefix := []byte(pref)
 
 		stateValue, err := sd.LatestCommitment(prefix)

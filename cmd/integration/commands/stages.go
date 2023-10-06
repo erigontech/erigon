@@ -682,7 +682,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		domains.SetTx(tx)
 
-		_, err := domains.SeekCommitment(0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
 		if err != nil {
 			return fmt.Errorf("seek commitment: %w", err)
 		}
@@ -711,6 +711,9 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
 
 	sn, borSn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
@@ -930,6 +933,9 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
 
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
@@ -954,7 +960,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				defer ct.Close()
 
 				doms.SetTx(tx)
-				_, err = doms.SeekCommitment(0, math.MaxUint64)
+				_, err = doms.SeekCommitment(ctx, 0, math.MaxUint64)
 				blockNum = doms.BlockNum()
 				return err
 			})

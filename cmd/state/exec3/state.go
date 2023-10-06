@@ -169,7 +169,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 

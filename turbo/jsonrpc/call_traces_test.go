@@ -53,7 +53,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -100,7 +100,7 @@ func TestCallTraceUnwind(t *testing.T) {
 
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
-	if err = m.InsertChain(chainA, nil); err != nil {
+	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
 	stream := jsoniter.ConfigDefault.BorrowStream(nil)
@@ -119,7 +119,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(0, 12), nil); err != nil {
+	if err = m.InsertChain(chainB.Slice(0, 12)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -134,7 +134,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(12, 20), nil); err != nil {
+	if err = m.InsertChain(chainB.Slice(12, 20)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -162,7 +162,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -209,7 +209,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	})
 	require.NoError(t, err, "generate chain")
 
-	err = m.InsertChain(chain, nil)
+	err = m.InsertChain(chain)
 	require.NoError(t, err, "inserting chain")
 
 	fromBlock, toBlock := uint64(1), uint64(15)

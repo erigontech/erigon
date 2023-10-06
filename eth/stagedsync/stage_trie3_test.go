@@ -15,6 +15,7 @@ import (
 )
 
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
+	ctx := context.Background()
 	dirs := datadir.New(t.TempDir())
 	v3, db, agg := temporal.NewTestDB(t, dirs, nil)
 	if !v3 {
@@ -50,7 +51,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	domains := agg.SharedDomains(ac)
 	domains.SetTx(tx)
 
-	expectedRoot, err := domains.Commit(true, false)
+	expectedRoot, err := domains.Commit(ctx, true, false)
 	require.NoError(t, err)
 	t.Logf("expected root is %x", expectedRoot)
 

@@ -1,6 +1,8 @@
 package state
 
 import (
+	"context"
+
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -60,9 +62,9 @@ func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
 func (w *WriterV4) WriteChangeSets() error { return nil }
 func (w *WriterV4) WriteHistory() error    { return nil }
 
-func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (w *WriterV4) Commitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	w.domains.SetTx(w.tx.(kv.RwTx))
-	return w.domains.Commit(saveStateAfter, trace)
+	return w.domains.Commit(ctx, saveStateAfter, trace)
 }
 func (w *WriterV4) Reset() {
 	//w.domains.Commitment.Reset()
