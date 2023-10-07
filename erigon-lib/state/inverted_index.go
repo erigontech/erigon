@@ -77,7 +77,7 @@ type InvertedIndex struct {
 	//  - don't need re-calc after files merge - because merge doesn't change `steps` where `key` was updated
 	warmLocalityIdx *LocalityIndex
 	coldLocalityIdx *LocalityIndex
-	tx              kv.RwTx
+	tx              kv.Tx
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
@@ -538,9 +538,7 @@ func (ic *InvertedIndexContext) Files() (res []string) {
 	return res
 }
 
-func (ii *InvertedIndex) SetTx(tx kv.RwTx) {
-	ii.tx = tx
-}
+func (ii *InvertedIndex) SetTx(tx kv.Tx) { ii.tx = tx }
 
 func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	ii.txNum = txNum
