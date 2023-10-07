@@ -632,6 +632,9 @@ var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
+	if !buffered {
+		panic("non-buffered wal is not supported anymore")
+	}
 	w := &invertedIndexWAL{ii: ii,
 		buffered:     buffered,
 		discard:      discard,
