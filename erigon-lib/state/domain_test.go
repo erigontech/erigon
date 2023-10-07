@@ -1230,7 +1230,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 	d.SetTx(tx)
 
 	d.historyLargeValues = true
-	d.StartUnbufferedWrites()
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -1251,6 +1251,8 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 		err := d.PutWithPrev(key, nil, value, nil)
 		require.NoError(t, err)
 	}
+	err = d.Rotate().Flush(context.Background(), tx)
+	require.NoError(t, err)
 
 	{
 		counter := 0
