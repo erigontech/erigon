@@ -652,21 +652,11 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-	if ii.buffered {
-		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
-			return err
-		}
-
-		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
-			return err
-		}
-	} else {
-		//if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-		//	return err
-		//}
-		//if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-		//	return err
-		//}
+	if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
+		return err
+	}
+	if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
+		return err
 	}
 	return nil
 }
