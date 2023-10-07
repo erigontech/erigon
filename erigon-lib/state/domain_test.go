@@ -670,7 +670,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	}
 }
 
-func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
+func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -685,7 +685,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	d.integrateFiles(sf, txFrom, txTo)
 
 	dc := d.MakeContext()
-	err = dc.Prune(ctx, d.tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+	err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 	dc.Close()
 	require.NoError(t, err)
 
@@ -971,7 +971,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			err = d.Rotate().Flush(ctx, tx)
 			require.NoError(t, err)
 
-			collateAndMergeOnce(t, d, step)
+			collateAndMergeOnce(t, d, tx, step)
 		}
 	}
 	err = d.Rotate().Flush(ctx, tx)

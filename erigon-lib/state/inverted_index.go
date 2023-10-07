@@ -77,7 +77,7 @@ type InvertedIndex struct {
 	//  - don't need re-calc after files merge - because merge doesn't change `steps` where `key` was updated
 	warmLocalityIdx *LocalityIndex
 	coldLocalityIdx *LocalityIndex
-	tx              kv.RwTx
+	tx              kv.Tx
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
@@ -538,9 +538,7 @@ func (ic *InvertedIndexContext) Files() (res []string) {
 	return res
 }
 
-func (ii *InvertedIndex) SetTx(tx kv.RwTx) {
-	ii.tx = tx
-}
+func (ii *InvertedIndex) SetTx(tx kv.Tx) { ii.tx = tx }
 
 func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	ii.txNum = txNum
@@ -550,9 +548,6 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.wal.add(key, key)
-}
-func (ii *InvertedIndex) add(key, indexKey []byte) error { //nolint
-	return ii.wal.add(key, indexKey)
 }
 
 func (ii *InvertedIndex) DiscardHistory() {
@@ -632,6 +627,9 @@ var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
+	if !buffered {
+		panic("non-buffered wal is not supported anymore")
+	}
 	w := &invertedIndexWAL{ii: ii,
 		buffered:     buffered,
 		discard:      discard,
@@ -652,21 +650,11 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-	if ii.buffered {
-		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
-			return err
-		}
-
-		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
-			return err
-		}
-	} else {
-		if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-			return err
-		}
-		if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-			return err
-		}
+	if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
+		return err
+	}
+	if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1683,106 +1671,6 @@ func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv
 		default:
 		}
 	}
-	return nil
-}
-
-// [txFrom; txTo)
-func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	keysCursor, err := ii.tx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	k, v, err := keysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = cmp.Min(txTo, txFrom+limit)
-	}
-	if txFrom >= txTo {
-		return nil
-	}
-
-	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
-	defer collector.Close()
-	collector.LogLvl(log.LvlDebug)
-
-	idxCForDeletes, err := ii.tx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxCForDeletes.Close()
-	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-
-	// Invariant: if some `txNum=N` pruned - it's pruned Fully
-	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		for ; v != nil; _, v, err = keysCursor.NextDup() {
-			if err != nil {
-				return err
-			}
-			if err := collector.Collect(v, nil); err != nil {
-				return err
-			}
-		}
-
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = ii.tx.Delete(ii.indexKeysTable, k); err != nil {
-			return err
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
-	}
-
-	if err := collector.Load(ii.tx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		for v, err := idxC.SeekBothRange(key, txKey[:]); v != nil; _, v, err = idxC.NextDup() {
-			if err != nil {
-				return err
-			}
-			txNum := binary.BigEndian.Uint64(v)
-			if txNum >= txTo {
-				break
-			}
-
-			if _, _, err = idxCForDeletes.SeekBothExact(key, v); err != nil {
-				return err
-			}
-			if err = idxCForDeletes.DeleteCurrent(); err != nil {
-				return err
-			}
-
-			select {
-			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		return nil
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-
 	return nil
 }
 

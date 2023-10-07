@@ -192,7 +192,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 	require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-	err = ii.prune(ctx, 0, 16, math.MaxUint64, logEvery)
+	ic := ii.MakeContext()
+	defer ic.Close()
+
+	err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -363,7 +366,9 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
+			ic := ii.MakeContext()
+			defer ic.Close()
+			err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
@@ -413,7 +418,9 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
+			ic := ii.MakeContext()
+			defer ic.Close()
+			err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 		}()
 	}
