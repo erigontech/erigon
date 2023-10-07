@@ -328,17 +328,19 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if ethconfig.EnableHistoryV4InTest {
-		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
 		ac := tx.(*temporal.Tx).AggCtx()
 
 		domains = agg.SharedDomains(ac)
 		defer agg.CloseSharedDomains()
 		domains.SetTx(tx)
+		//domains.StartWrites()
+		//defer domains.FinishWrites()
 		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
 		if err != nil {
 			return nil, err
 		}
+		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	}
 	txNum := -1
@@ -353,9 +355,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	txNumIncrement := func() {
 		txNum++
 		if ethconfig.EnableHistoryV4InTest {
-			if err := domains.Flush(ctx, tx); err != nil {
-				panic(err)
-			}
 			domains.SetTxNum(ctx, uint64(txNum))
 		}
 	}

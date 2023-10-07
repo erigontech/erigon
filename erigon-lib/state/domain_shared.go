@@ -894,3 +894,39 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	return nil
 }
+
+// TemporalDomain satisfaction
+func (sd *SharedDomains) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
+	switch name {
+	case kv.AccountsDomain:
+		return sd.LatestAccount(k)
+	case kv.StorageDomain:
+		if k2 != nil {
+			k = append(k, k2...)
+		}
+		return sd.LatestStorage(k)
+	case kv.CodeDomain:
+		return sd.LatestCode(k)
+	case kv.CommitmentDomain:
+		return sd.LatestCommitment(k)
+	default:
+		panic(name)
+	}
+	//DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+	/*
+		DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+		DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+		HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+
+		// IndexRange - return iterator over range of inverted index for given key `k`
+		// Asc semantic:  [from, to) AND from > to
+		// Desc semantic: [from, to) AND from < to
+		// Limit -1 means Unlimited
+		// from -1, to -1 means unbounded (StartOfTable, EndOfTable)
+		// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
+		// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
+		IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
+		HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+		DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+	*/
+}

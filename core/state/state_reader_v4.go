@@ -9,19 +9,19 @@ import (
 var _ StateReader = (*ReaderV4)(nil)
 
 type ReaderV4 struct {
-	tx kv.TemporalTx
+	tx kv.TemporalGetter
 }
 
-func NewReaderV4(tx kv.TemporalTx) *ReaderV4 {
+func NewReaderV4(tx kv.TemporalGetter) *ReaderV4 {
 	return &ReaderV4{tx: tx}
 }
 
 func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	enc, ok, err := r.tx.DomainGet(kv.AccountsDomain, address.Bytes(), nil)
+	enc, err := r.tx.DomainGet(kv.AccountsDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
-	if !ok || len(enc) == 0 {
+	if len(enc) == 0 {
 		return nil, nil
 	}
 	var a accounts.Account
@@ -32,11 +32,11 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 }
 
 func (r *ReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) (enc []byte, err error) {
-	enc, ok, err := r.tx.DomainGet(kv.StorageDomain, address.Bytes(), key.Bytes())
+	enc, err = r.tx.DomainGet(kv.StorageDomain, address.Bytes(), key.Bytes())
 	if err != nil {
 		return nil, err
 	}
-	if !ok || len(enc) == 0 {
+	if len(enc) == 0 {
 		return nil, nil
 	}
 	return enc, nil
@@ -46,11 +46,11 @@ func (r *ReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	code, ok, err := r.tx.DomainGet(kv.CodeDomain, address.Bytes(), nil)
+	code, err = r.tx.DomainGet(kv.CodeDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
-	if !ok || len(code) == 0 {
+	if len(code) == 0 {
 		return nil, nil
 	}
 	return code, nil
@@ -66,11 +66,11 @@ func (r *ReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, er
 }
 
 func (r *ReaderV4) ReadCommitment(prefix []byte) (enc []byte, err error) {
-	enc, ok, err := r.tx.DomainGet(kv.CommitmentDomain, prefix, nil)
+	enc, err = r.tx.DomainGet(kv.CommitmentDomain, prefix, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !ok || len(enc) == 0 {
+	if len(enc) == 0 {
 		return nil, nil
 	}
 	return enc, nil

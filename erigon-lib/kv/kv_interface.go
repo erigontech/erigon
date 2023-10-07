@@ -523,9 +523,12 @@ type (
 	InvertedIdx string
 )
 
+type TemporalGetter interface {
+	DomainGet(name Domain, k, k2 []byte) (v []byte, err error)
+}
 type TemporalTx interface {
 	Tx
-	DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 

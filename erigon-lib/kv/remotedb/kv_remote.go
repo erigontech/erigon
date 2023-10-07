@@ -652,12 +652,12 @@ func (tx *tx) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, 
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, ok bool, err error) {
+func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
 	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: string(name), K: k, K2: k2, Latest: true})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return reply.V, reply.Ok, nil
+	return reply.V, nil
 }
 
 func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
