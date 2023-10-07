@@ -35,14 +35,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 )
 
 // generate the messages and services
 type remoteOpts struct {
 	remoteKV    remote.KVClient
 	log         log.Logger
-	bucketsCfg  mdbx.TableCfgFunc
+	bucketsCfg  kv.TableCfg
 	DialAddress string
 	version     gointerfaces.Version
 }
@@ -86,8 +85,8 @@ func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) WithBucketsConfig(f mdbx.TableCfgFunc) remoteOpts {
-	opts.bucketsCfg = f
+func (opts remoteOpts) WithBucketsConfig(c kv.TableCfg) remoteOpts {
+	opts.bucketsCfg = c
 	return opts
 }
 
@@ -104,7 +103,7 @@ func (opts remoteOpts) Open() (*DB, error) {
 		buckets:      kv.TableCfg{},
 		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
-	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
+	customBuckets := opts.bucketsCfg
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
@@ -124,7 +123,7 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
 func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClient) remoteOpts {
-	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger, remoteKV: remoteKV}
+	return remoteOpts{bucketsCfg: kv.ChaindataTablesCfg, version: v, log: logger, remoteKV: remoteKV}
 }
 
 func (db *DB) PageSize() uint64       { panic("not implemented") }
