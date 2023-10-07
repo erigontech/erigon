@@ -38,16 +38,47 @@ func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 }
 
-func TestSendRawTransaction(t *testing.T) {
-	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
-	logger := log.New()
-
+// Do 1 step to start txPool
+func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
 	chain, err := core.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
 
-	oneBlockStep(chain, mockSentry, require, t)
+	// Send NewBlock message
+	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: chain.TopBlock,
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	require.NoError(err)
+
+	mockSentry.ReceiveWg.Add(1)
+	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
+		require.NoError(err)
+	}
+	// Send all the headers
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: chain.Headers,
+	})
+	require.NoError(err)
+	mockSentry.ReceiveWg.Add(1)
+	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
+		require.NoError(err)
+	}
+	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
+
+	initialCycle := mock.MockInsertAsInitialCycle
+	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, nil, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSendRawTransaction(t *testing.T) {
+	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
+	logger := log.New()
+
+	oneBlockStep(mockSentry, require, t)
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -84,43 +115,12 @@ func TestSendRawTransaction(t *testing.T) {
 	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
-// Do 1 step to start txPool
-func oneBlockStep(chain *core.ChainPack, mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	require.NoError(err)
-
-	oneBlockStep(chain, mockSentry, require, t)
-
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(err)
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, nil, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil, false); err != nil {
-		t.Fatal(err)
-	}
-
-}
-
 func TestSendRawTransactionUnprotected(t *testing.T) {
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
+
+	oneBlockStep(mockSentry, require, t)
+
 	expectedTxValue := uint64(4444)
 
 	// Create a legacy signer pre-155
