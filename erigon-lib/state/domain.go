@@ -638,37 +638,29 @@ func (d *Domain) put(key, val []byte) error {
 }
 
 // Deprecated
-func (d *Domain) Put(key1, key2, val []byte) error {
+func (dc *DomainContext) Put(key1, key2, val []byte) error {
 	key := common.Append(key1, key2)
-	dc := d.MakeContext()
-	original, _, err := dc.GetLatest(key, nil, d.tx)
+	original, _, err := dc.GetLatest(key, nil, dc.d.tx)
 	if err != nil {
 		return err
 	}
-	dc.Close()
 	if bytes.Equal(original, val) {
 		return nil
 	}
-	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
-		return err
-	}
-	return d.put(key, val)
+	return dc.d.PutWithPrev(key1, key2, val, original)
 }
 
 // Deprecated
-func (d *Domain) Delete(key1, key2 []byte) error {
+func (dc *DomainContext) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
-	dc := d.MakeContext()
-	original, found, err := dc.GetLatest(key, nil, d.tx)
-	dc.Close()
+	original, found, err := dc.GetLatest(key, nil, dc.d.tx)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return nil
 	}
-	return d.DeleteWithPrev(key1, key2, original)
+	return dc.d.DeleteWithPrev(key1, key2, original)
 }
 
 func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {

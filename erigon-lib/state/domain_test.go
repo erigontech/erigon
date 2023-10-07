@@ -277,24 +277,27 @@ func TestDomain_IterationBasic(t *testing.T) {
 	d.SetTx(tx)
 	d.StartWrites()
 	defer d.FinishWrites()
+	dc := d.MakeContext()
+	defer dc.Close()
 
 	d.SetTxNum(2)
-	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
+	dc.Close()
 
-	dc := d.MakeContext()
+	dc = d.MakeContext()
 	defer dc.Close()
 
 	{
@@ -528,39 +531,42 @@ func TestIterationMultistep(t *testing.T) {
 	d.SetTx(tx)
 	d.StartWrites()
 	defer d.FinishWrites()
+	dc := d.MakeContext()
+	defer dc.Close()
 
 	d.SetTxNum(2)
-	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
+	err = dc.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
 
 	d.SetTxNum(2 + 16)
-	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc3"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc3"), []byte("value1"))
 	require.NoError(t, err)
-	err = d.Put([]byte("addr2"), []byte("loc4"), []byte("value1"))
+	err = dc.Put([]byte("addr2"), []byte("loc4"), []byte("value1"))
 	require.NoError(t, err)
 
 	d.SetTxNum(2 + 16 + 16)
-	err = d.Delete([]byte("addr2"), []byte("loc1"))
+	err = dc.Delete([]byte("addr2"), []byte("loc1"))
 	require.NoError(t, err)
 
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
+	dc.Close()
 
 	for step := uint64(0); step <= 2; step++ {
 		func() {
@@ -576,8 +582,9 @@ func TestIterationMultistep(t *testing.T) {
 			require.NoError(t, err)
 		}()
 	}
+	dc.Close()
 
-	dc := d.MakeContext()
+	dc = d.MakeContext()
 	defer dc.Close()
 
 	{
@@ -736,22 +743,26 @@ func TestDomain_Delete(t *testing.T) {
 	d.SetTx(tx)
 	d.StartWrites()
 	defer d.FinishWrites()
+	dc := d.MakeContext()
+	defer dc.Close()
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		d.SetTxNum(txNum)
 		if txNum%2 == 0 {
-			err = d.Put([]byte("key1"), nil, []byte("value1"))
+			err = dc.Put([]byte("key1"), nil, []byte("value1"))
 		} else {
-			err = d.Delete([]byte("key1"), nil)
+			err = dc.Delete([]byte("key1"), nil)
 		}
 		require.NoError(err)
 	}
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(err)
 	collateAndMerge(t, db, tx, d, 1000)
+	dc.Close()
+
 	// Check the history
-	dc := d.MakeContext()
+	dc = d.MakeContext()
 	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
 		label := fmt.Sprintf("txNum=%d", txNum)
@@ -782,6 +793,8 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	d.SetTx(tx)
 	d.StartWrites()
 	defer d.FinishWrites()
+	dc := d.MakeContext()
+	defer dc.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -820,7 +833,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
-			err = d.Put(k[:], nil, v[:])
+			err = dc.Put(k[:], nil, v[:])
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
 				dat[keyNum] = make([]bool, txCount+1)
@@ -921,8 +934,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartUnbufferedWrites()
+	d.StartWrites()
 	defer d.FinishWrites()
+	dc := d.MakeContext()
+	defer dc.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -938,7 +953,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
-			err = d.Put(k[:], nil, v[:])
+			err = dc.Put(k[:], nil, v[:])
 			require.NoError(t, err)
 
 			list, ok := data[fmt.Sprintf("%d", keyNum)]
@@ -961,9 +976,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	}
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
+	dc.Close()
 
 	// Check the history
-	dc := d.MakeContext()
+	dc = d.MakeContext()
 	defer dc.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
