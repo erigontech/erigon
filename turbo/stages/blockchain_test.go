@@ -309,7 +309,9 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
-	TestReorgLongBlocks
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 
 	require := require.New(t)
 	// Create a pristine chain and database
