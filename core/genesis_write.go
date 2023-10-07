@@ -203,9 +203,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if ethconfig.EnableHistoryV4InTest {
 		ac := tx.(*temporal.Tx).AggCtx()
 		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		defer domains.Close()
-		domains.StartUnbufferedWrites()
-		defer domains.FinishWrites()
+		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
 		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
 	} else {
 		for addr, account := range g.Alloc {
@@ -228,7 +226,12 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
-	if !histV3 {
+
+	if histV3 {
+		if err := domains.Flush(ctx, tx); err != nil {
+			return nil, nil, err
+		}
+	} else {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
 				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)

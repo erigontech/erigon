@@ -426,13 +426,14 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	require.NoError(err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartUnbufferedWrites()
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	txs := uint64(1000)
 
 	dc := d.MakeContext()
 	defer dc.Close()
+	var prev [32][]byte
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -444,9 +445,8 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 				var v [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
-				prev, _, err := dc.GetLatest(k[:], nil, tx)
-				require.NoError(err)
-				err = d.PutWithPrev(k[:], nil, v[:], prev)
+				err = d.PutWithPrev(k[:], nil, v[:], prev[keyNum])
+				prev[keyNum] = v[:]
 
 				require.NoError(err)
 			}

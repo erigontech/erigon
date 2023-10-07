@@ -99,7 +99,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer domCtx.Close()
 
 	domains := agg.SharedDomains(domCtx)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 	domains.SetTx(tx)
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -208,6 +208,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	domCtx = agg.MakeContext()
 	domains = agg.SharedDomains(domCtx)
+	defer agg.CloseSharedDomains()
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -239,7 +240,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	domCtx = agg.MakeContext()
 	domains = agg.SharedDomains(domCtx)
-	defer domCtx.Close()
+	defer agg.CloseSharedDomains()
 	defer domains.Close()
 
 	tx, err = db.BeginRw(ctx)

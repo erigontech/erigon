@@ -265,7 +265,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartUnbufferedWrites()
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	txs := uint64(1000)

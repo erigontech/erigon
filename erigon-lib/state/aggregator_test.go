@@ -423,11 +423,12 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	defer ct.Close()
 	domains := agg.SharedDomains(ct)
 	defer domains.Close()
-	defer domains.StartUnbufferedWrites().FinishWrites()
+	defer domains.StartWrites().FinishWrites()
 	domains.SetTx(tx)
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
+		domains.Flush(ctx, tx)
 		ct.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -447,6 +448,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	rnd := rand.New(rand.NewSource(0))
 	keys := make([][]byte, txs/2)
 
+	var prev1, prev2 []byte
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
 		domains.SetTxNum(ctx, txNum)
@@ -463,16 +465,13 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
 
-		prev, _, err := ct.accounts.GetLatest(addr, nil, tx)
+		err = domains.UpdateAccountData(addr, buf, prev1)
 		require.NoError(t, err)
+		prev1 = buf
 
-		err = domains.UpdateAccountData(addr, buf, prev)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev2)
 		require.NoError(t, err)
-
-		prev, _, err = ct.storage.GetLatest(addr, loc, tx)
-		require.NoError(t, err)
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
-		require.NoError(t, err)
+		prev2 = []byte{addr[0], loc[0]}
 
 	}
 	require.NoError(t, commit(txNum))
