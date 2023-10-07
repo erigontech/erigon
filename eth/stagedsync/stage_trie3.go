@@ -27,6 +27,8 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	domains := agg.SharedDomains(ac)
 	defer agg.CloseSharedDomains()
+	domains.SetTx(tx)
+	defer domains.StartWrites().FinishWrites()
 
 	acc := domains.Account.MakeContext()
 	ccc := domains.Code.MakeContext()
@@ -35,7 +37,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer acc.Close()
 	defer ccc.Close()
 	defer stc.Close()
-	domains.SetTx(tx)
+
 	_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
 	if err != nil {
 		return nil, err
