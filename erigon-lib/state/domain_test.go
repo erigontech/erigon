@@ -281,19 +281,19 @@ func TestDomain_IterationBasic(t *testing.T) {
 	defer dc.Close()
 
 	d.SetTxNum(2)
-	err = dc.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc3"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr3"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr3"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
 	dc.Close()
 
@@ -535,33 +535,33 @@ func TestIterationMultistep(t *testing.T) {
 	defer dc.Close()
 
 	d.SetTxNum(2)
-	err = dc.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr1"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr1"), []byte("loc3"), []byte("value1"))
+	err = d.Put([]byte("addr1"), []byte("loc3"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr3"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr3"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr3"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
 
 	d.SetTxNum(2 + 16)
-	err = dc.Put([]byte("addr2"), []byte("loc1"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc1"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc2"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc2"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc3"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc3"), []byte("value1"), tx)
 	require.NoError(t, err)
-	err = dc.Put([]byte("addr2"), []byte("loc4"), []byte("value1"))
+	err = d.Put([]byte("addr2"), []byte("loc4"), []byte("value1"), tx)
 	require.NoError(t, err)
 
 	d.SetTxNum(2 + 16 + 16)
-	err = dc.Delete([]byte("addr2"), []byte("loc1"))
+	err = d.Delete([]byte("addr2"), []byte("loc1"), tx)
 	require.NoError(t, err)
 
 	err = d.Rotate().Flush(ctx, tx)
@@ -750,9 +750,9 @@ func TestDomain_Delete(t *testing.T) {
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		d.SetTxNum(txNum)
 		if txNum%2 == 0 {
-			err = dc.Put([]byte("key1"), nil, []byte("value1"))
+			err = d.Put([]byte("key1"), nil, []byte("value1"), tx)
 		} else {
-			err = dc.Delete([]byte("key1"), nil)
+			err = d.Delete([]byte("key1"), nil, tx)
 		}
 		require.NoError(err)
 	}
@@ -833,7 +833,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
-			err = dc.Put(k[:], nil, v[:])
+			err = d.Put(k[:], nil, v[:], tx)
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
 				dat[keyNum] = make([]bool, txCount+1)
@@ -953,7 +953,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
-			err = dc.Put(k[:], nil, v[:])
+			err = d.Put(k[:], nil, v[:], tx)
 			require.NoError(t, err)
 
 			list, ok := data[fmt.Sprintf("%d", keyNum)]
