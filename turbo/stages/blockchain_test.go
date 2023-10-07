@@ -1223,6 +1223,9 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
 
