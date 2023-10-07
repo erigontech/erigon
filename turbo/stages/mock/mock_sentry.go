@@ -675,7 +675,9 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		return err
 	}
 
-	status, lvh, err := wr.UpdateForkChoice(gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash))
+	tipHash := chain.TopBlock.Hash()
+
+	status, lvh, err := wr.UpdateForkChoice(tipHash, tipHash, tipHash)
 
 	if err != nil {
 		return err
@@ -685,7 +687,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		return nil
 	})
 	if status != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), vRes.ValidationStatus.String())
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
 	return nil
