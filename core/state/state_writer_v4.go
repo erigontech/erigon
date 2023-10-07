@@ -64,7 +64,7 @@ func (w *WriterV4) WriteHistory() error    { return nil }
 
 func (w *WriterV4) Commitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	w.domains.SetTx(w.tx.(kv.RwTx))
-	return w.domains.Commit(ctx, saveStateAfter, trace)
+	return w.domains.ComputeCommitment(ctx, saveStateAfter, trace)
 }
 func (w *WriterV4) Reset() {
 	//w.domains.Commitment.Reset()

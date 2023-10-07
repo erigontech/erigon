@@ -509,7 +509,7 @@ func TestCommit(t *testing.T) {
 	//err = domains.WriteAccountStorage(addr2, loc1, []byte("0401"), nil)
 	//require.NoError(t, err)
 
-	domainsHash, err := domains.Commit(ctx, true, true)
+	domainsHash, err := domains.ComputeCommitment(ctx, true, true)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)

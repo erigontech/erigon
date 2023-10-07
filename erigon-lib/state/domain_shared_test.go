@@ -65,7 +65,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.Commit(ctx, true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)

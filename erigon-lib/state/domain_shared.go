@@ -565,7 +565,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		_, err := sd.Commit(ctx, true, sd.trace)
+		_, err := sd.ComputeCommitment(ctx, true, sd.trace)
 		if err != nil {
 			panic(err)
 		}
@@ -590,7 +590,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) Commit(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	//t := time.Now()
 	//defer func() { log.Info("[dbg] [agg] commitment", "took", time.Since(t)) }()
 

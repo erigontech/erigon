@@ -65,7 +65,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 const MockInsertAsInitialCycle = false
@@ -749,27 +748,10 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	if ethconfig.EnableHistoryV4InTest {
+	if ms.HistoryV3 {
 		return state.NewReaderV4(tx.(kv.TemporalTx))
 	}
 	return state.NewPlainStateReader(tx)
-}
-
-func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
-	if ethconfig.EnableHistoryV4InTest {
-		//aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
-		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitment(context.Background(), false, false)
-		if err != nil {
-			panic(fmt.Errorf("ComputeCommitment: %w", err))
-		}
-		return libcommon.BytesToHash(rootBytes)
-	}
-
-	h, err := trie.CalcRoot("test", tx)
-	if err != nil {
-		panic(err)
-	}
-	return h
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg

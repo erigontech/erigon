@@ -209,7 +209,7 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 }
 
 func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstate.AggregatorV3) error {
-	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	rs.domains.SetTxNum(ctx, txTask.TxNum)
 

@@ -51,7 +51,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	domains := agg.SharedDomains(ac)
 	domains.SetTx(tx)
 
-	expectedRoot, err := domains.Commit(ctx, true, false)
+	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
 	t.Logf("expected root is %x", expectedRoot)
 
