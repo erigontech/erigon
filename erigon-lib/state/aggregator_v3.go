@@ -324,13 +324,13 @@ func (a *AggregatorV3) CloseSharedDomains() {
 	}
 }
 func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
-	//if a.domains == nil {
-	domains := NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
-	domains.SetInvertedIndices(a.tracesTo, a.tracesFrom, a.logAddrs, a.logTopics)
-	domains.StartWrites()
-	//}
-	domains.SetContext(ac)
-	return domains
+	if a.domains == nil {
+		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
+		a.domains.SetInvertedIndices(a.tracesTo, a.tracesFrom, a.logAddrs, a.logTopics)
+		a.domains.StartWrites()
+	}
+	a.domains.SetContext(ac)
+	return a.domains
 }
 
 func (a *AggregatorV3) SetCompressWorkers(i int) {
