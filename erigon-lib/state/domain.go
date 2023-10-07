@@ -615,18 +615,18 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return d.wal.addValue(key1, key2, nil)
 }
 
-func (d *Domain) update(key []byte) error {
+func (d *Domain) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *Domain) put(key, val []byte) error {
-	if err := d.update(key); err != nil {
+func (d *Domain) put(key, val []byte, tx kv.RwTx) error {
+	if err := d.update(key, tx); err != nil {
 		return err
 	}
 	invertedStep := ^(d.txNum / d.aggregationStep)
@@ -634,14 +634,14 @@ func (d *Domain) put(key, val []byte) error {
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return d.tx.Put(d.valsTable, keySuffix, val)
+	return tx.Put(d.valsTable, keySuffix, val)
 }
 
 // Deprecated
-func (d *Domain) Put(key1, key2, val []byte) error {
+func (d *Domain) Put(key1, key2, val []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
 	dc := d.MakeContext()
-	original, _, err := dc.GetLatest(key, nil, d.tx)
+	original, _, err := dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
@@ -653,14 +653,14 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	return d.put(key, val)
+	return d.put(key, val, tx)
 }
 
 // Deprecated
-func (d *Domain) Delete(key1, key2 []byte) error {
+func (d *Domain) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
 	dc := d.MakeContext()
-	original, found, err := dc.GetLatest(key, nil, d.tx)
+	original, found, err := dc.GetLatest(key, nil, tx)
 	dc.Close()
 	if err != nil {
 		return err
