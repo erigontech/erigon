@@ -68,6 +68,8 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 
 	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
+
+	BorSpan(spanId uint64) []byte
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)

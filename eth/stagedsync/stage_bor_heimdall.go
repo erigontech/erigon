@@ -508,13 +508,7 @@ func persistValidatorSets(
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-						if snap != nil {
-							// Error is not critical and means that the header is invalid
-							//u.UnwindTo(signErr.Number-1, signErr.Hash)
-							return fmt.Errorf("snap.Apply (inside loop): %w", err)
-						} else {
-							return fmt.Errorf("snap.Apply (inside loop): %w", err)
-						}
+						return fmt.Errorf("snap.Apply (inside loop): %w", err)
 					}
 					parentHeader = initialHeaders[len(initialHeaders)-1]
 					initialHeaders = initialHeaders[:0]

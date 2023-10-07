@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -995,6 +996,11 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
+			// check and commit span
+			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+				c.logger.Error("Error while committing span", "err", err)
+				return nil, types.Receipts{}, err
+			}
 			// commit states
 			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
@@ -1048,7 +1054,12 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
-		if c.HeimdallClient != nil {
+		if c.blockReader != nil {
+			// check and commit span
+			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+				c.logger.Error("Error while committing span", "err", err)
+				return nil, nil, types.Receipts{}, err
+			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
@@ -1296,6 +1307,47 @@ func (c *Bor) Close() error {
 	return nil
 }
 
+func (c *Bor) checkAndCommitSpan(
+	state *state.IntraBlockState,
+	header *types.Header,
+	chain statefull.ChainContext,
+	syscall consensus.SystemCall,
+) error {
+	headerNumber := header.Number.Uint64()
+
+	span, err := c.spanner.GetCurrentSpan(syscall)
+	if err != nil {
+		return err
+	}
+
+	if c.needToCommitSpan(span, headerNumber) {
+		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain, syscall)
+		return err
+	}
+
+	return nil
+}
+
+func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool {
+	// if span is nil
+	if currentSpan == nil {
+		return false
+	}
+
+	// check span is not set initially
+	if currentSpan.EndBlock == 0 {
+		return true
+	}
+	sprintLength := c.config.CalculateSprint(headerNumber)
+
+	// if current block is first block of last sprint in current span
+	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
+		return true
+	}
+
+	return false
+}
+
 func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 	c.logger.Debug("Getting span", "for block", blockNum)
 	var borSpan *span.HeimdallSpan
@@ -1354,12 +1406,10 @@ func (c *Bor) fetchAndCommitSpan(
 
 		heimdallSpan = *s
 	} else {
-		response, err := c.HeimdallClient.Span(c.execCtx, newSpanID)
-		if err != nil {
+		spanJson := chain.Chain.BorSpan(newSpanID)
+		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {
 			return err
 		}
-
-		heimdallSpan = *response
 	}
 
 	// check if chain id matches with heimdall span
