@@ -309,6 +309,8 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
+	TestReorgLongBlocks
+
 	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
