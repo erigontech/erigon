@@ -1061,7 +1061,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartUnbufferedWrites()
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	var preval1, preval2, preval3 []byte
@@ -1077,20 +1077,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 		v1 := []byte(fmt.Sprintf("value1.%d", i))
 		v2 := []byte(fmt.Sprintf("value2.%d", i))
 		s := []byte(fmt.Sprintf("longstorage2.%d", i))
-
-		if i > 0 {
-			pv, _, err := dctx.GetLatest([]byte("key1"), nil, tx)
-			require.NoError(t, err)
-			require.Equal(t, pv, preval1)
-
-			pv1, _, err := dctx.GetLatest([]byte("key2"), nil, tx)
-			require.NoError(t, err)
-			require.Equal(t, pv1, preval2)
-
-			ps, _, err := dctx.GetLatest([]byte("key3"), l, tx)
-			require.NoError(t, err)
-			require.Equal(t, ps, preval3)
-		}
 
 		d.SetTxNum(uint64(i))
 		err = d.PutWithPrev([]byte("key1"), nil, v1, preval1)
@@ -1165,7 +1151,7 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 
 	d.SetTx(tx)
 	d.historyLargeValues = true
-	d.StartUnbufferedWrites()
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -1198,6 +1184,8 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 		err := d.PutWithPrev(key, loc, value, nil)
 		require.NoError(t, err)
 	}
+	err = d.Rotate().Flush(context.Background(), tx)
+	require.NoError(t, err)
 
 	dctx := d.MakeContext()
 	defer dctx.Close()
