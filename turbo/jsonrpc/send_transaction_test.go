@@ -120,6 +120,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	unprotectedSigner := types.MakeFrontierSigner()
 
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *unprotectedSigner, mockSentry.Key)
+	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
