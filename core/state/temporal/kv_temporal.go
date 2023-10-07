@@ -142,8 +142,6 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	//db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -169,8 +167,6 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	//db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -212,7 +208,7 @@ func (tx *Tx) autoClose(mdbxTx *mdbx.MdbxTx) {
 	}
 	if !mdbxTx.IsRo() {
 		tx.db.agg.FinishWrites()
-		tx.db.agg.SetTx(nil)
+		//tx.db.agg.SetTx(nil)
 	}
 	if tx.aggCtx != nil {
 		tx.aggCtx.Close()
