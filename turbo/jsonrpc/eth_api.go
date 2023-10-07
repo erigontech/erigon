@@ -318,32 +318,34 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend      rpchelper.ApiBackend
-	txPool          txpool.TxpoolClient
-	mining          txpool.MiningClient
-	gasCache        *GasPriceCache
-	db              kv.RoDB
-	GasCap          uint64
-	ReturnDataLimit int
-	logger          log.Logger
+	ethBackend          rpchelper.ApiBackend
+	txPool              txpool.TxpoolClient
+	mining              txpool.MiningClient
+	gasCache            *GasPriceCache
+	db                  kv.RoDB
+	GasCap              uint64
+	ReturnDataLimit     int
+	AllowUnprotectedTxs bool
+	logger              log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, allowUnprotectedTxs bool, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
-		BaseAPI:         base,
-		db:              db,
-		ethBackend:      eth,
-		txPool:          txPool,
-		mining:          mining,
-		gasCache:        NewGasPriceCache(),
-		GasCap:          gascap,
-		ReturnDataLimit: returnDataLimit,
-		logger:          logger,
+		BaseAPI:             base,
+		db:                  db,
+		ethBackend:          eth,
+		txPool:              txPool,
+		mining:              mining,
+		gasCache:            NewGasPriceCache(),
+		GasCap:              gascap,
+		AllowUnprotectedTxs: allowUnprotectedTxs,
+		ReturnDataLimit:     returnDataLimit,
+		logger:              logger,
 	}
 }
 
