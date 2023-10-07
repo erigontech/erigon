@@ -998,31 +998,27 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err = m.DB.BeginRw(m.Ctx)
-	if err != nil {
-		fmt.Printf("beginro error: %v\n", err)
-		return
+	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
-	defer tx.Rollback()
-	if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
-	tx.Rollback()
 
 	// account mustn't be created post eip 161
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err = m.DB.BeginRw(m.Ctx)
-	if err != nil {
-		fmt.Printf("beginro error: %v\n", err)
-		return
+	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
-	defer tx.Rollback()
-	if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
-	require.NoError(t, err)
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
