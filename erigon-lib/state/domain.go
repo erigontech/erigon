@@ -672,6 +672,10 @@ func (d *Domain) Delete(key1, key2 []byte, tx kv.RwTx) error {
 }
 
 func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
+	if !buffered {
+		panic("non-buffered wal is not supported anymore")
+	}
+
 	w := &domainWAL{d: d,
 		tmpdir:      tmpdir,
 		buffered:    buffered,
@@ -759,37 +763,19 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	// }()
 
 	if d.largeValues {
-		if d.buffered {
-			if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
-				return err
-			}
-			if err := d.values.Collect(fullkey, value); err != nil {
-				return err
-			}
-			return nil
-		}
-		if err := d.d.tx.Put(d.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+		if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 			return err
 		}
-		if err := d.d.tx.Put(d.d.valsTable, fullkey, value); err != nil {
+		if err := d.values.Collect(fullkey, value); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	if d.buffered {
-		if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
-			return err
-		}
-		if err := d.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
-			return err
-		}
-		return nil
-	}
-	if err := d.d.tx.Put(d.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+	if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
-	if err := d.d.tx.Put(d.d.valsTable, fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
+	if err := d.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
 		return err
 	}
 	return nil

@@ -551,9 +551,6 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.wal.add(key, key)
 }
-func (ii *InvertedIndex) add(key, indexKey []byte) error { //nolint
-	return ii.wal.add(key, indexKey)
-}
 
 func (ii *InvertedIndex) DiscardHistory() {
 	ii.wal = ii.newWriter(ii.dirs.Tmp, false, true)
@@ -664,12 +661,12 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 			return err
 		}
 	} else {
-		if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-			return err
-		}
-		if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-			return err
-		}
+		//if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
+		//	return err
+		//}
+		//if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }

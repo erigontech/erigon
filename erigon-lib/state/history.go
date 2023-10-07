@@ -562,15 +562,15 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		h.historyKey = append(append(append(h.historyKey[:0], key1...), key2...), h.h.InvertedIndex.txNumBytes[:]...)
 		historyKey := h.historyKey[:lk+8]
 
-		if !h.buffered {
-			if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
-				return err
-			}
-			if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], historyKey[:lk]); err != nil {
-				return err
-			}
-			return nil
-		}
+		//if !h.buffered {
+		//	if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
+		//		return err
+		//	}
+		//	if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], historyKey[:lk]); err != nil {
+		//		return err
+		//	}
+		//	return nil
+		//}
 		if err := h.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
@@ -591,15 +591,15 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
-	if !h.buffered {
-		if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
-			return err
-		}
-		if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
-			return err
-		}
-		return nil
-	}
+	//if !h.buffered {
+	//	if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
+	//		return err
+	//	}
+	//	if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
+	//		return err
+	//	}
+	//	return nil
+	//}
 	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
