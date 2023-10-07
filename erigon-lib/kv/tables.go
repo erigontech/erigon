@@ -356,7 +356,6 @@ const (
 	StateCommitment = "StateCommitment"
 
 	// BOR
-
 	BorReceipts  = "BorReceipt"
 	BorFinality  = "BorFinality"
 	BorTxLookup  = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
@@ -704,6 +703,15 @@ var ChaindataTablesCfg = TableCfg{
 	RStorageIdx:              {Flags: DupSort},
 	RCodeKeys:                {Flags: DupSort},
 	RCodeIdx:                 {Flags: DupSort},
+}
+
+var BorTablesCfg = TableCfg{
+	BorReceipts:  {Flags: DupSort},
+	BorFinality:  {Flags: DupSort},
+	BorTxLookup:  {Flags: DupSort},
+	BorEvents:    {Flags: DupSort},
+	BorEventNums: {Flags: DupSort},
+	BorSpans:     {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

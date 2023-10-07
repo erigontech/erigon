@@ -13,14 +13,21 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -50,6 +57,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -145,7 +153,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			cfg.Dirs = datadir.New(cfg.DataDir)
+			var dataDir flags.DirectoryString
+			dataDir.Set(cfg.DataDir)
+			cfg.Dirs = datadir.New(string(dataDir))
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -270,9 +280,8 @@ func EmbeddedServices(ctx context.Context,
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
-	db kv.RoDB, borDb kv.RoDB,
-	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	stateCache kvcache.Cache, blockReader services.FullBlockReader,
+	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, agg *libstate.AggregatorV3, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("either remote db or local db must be specified")
@@ -297,6 +306,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	var allSnapshots *freezeblocks.RoSnapshots
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	onNewSnapshot := func() {}
+
+	var cc *chain.Config
+
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		dir.MustExist(cfg.Dirs.SnapHistory)
@@ -311,7 +323,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		db = rwKv
 
-		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
@@ -413,26 +424,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if db == nil {
 		db = remoteKv
 	}
-	if cfg.WithDatadir {
-		// bor (consensus) specific db
-		var borKv kv.RoDB
-		borDbPath := filepath.Join(cfg.DataDir, "bor")
-		{
-			// ensure db exist
-			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
-			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-			}
-			tmpDb.Close()
-		}
-		logger.Trace("Creating consensus db", "path", borDbPath)
-		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-		}
-		// Skip the compatibility check, until we have a schema in erigon-lib
-		borDb = borKv
-	} else {
+
+	if !cfg.WithDatadir {
 		if cfg.StateCache.CacheSize > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
@@ -464,6 +457,48 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	blockReader = remoteEth
 	eth = remoteEth
 
+	var remoteCE *remoteConsensusEngine
+
+	if cfg.WithDatadir {
+		switch {
+		case cc != nil:
+			switch {
+			case cc.Bor != nil:
+				var borKv kv.RoDB
+
+				// bor (consensus) specific db
+				borDbPath := filepath.Join(cfg.DataDir, "bor")
+				{
+					// ensure db exist
+					tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
+					if err != nil {
+						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+					}
+					tmpDb.Close()
+				}
+				logger.Trace("Creating consensus db", "path", borDbPath)
+				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+				}
+				// Skip the compatibility check, until we have a schema in erigon-lib
+
+				engine = bor.NewRo(borKv, blockReader,
+					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
+					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+
+			default:
+				engine = ethash.NewFaker()
+			}
+
+		default:
+			engine = ethash.NewFaker()
+		}
+	} else {
+		remoteCE = &remoteConsensusEngine{}
+		engine = remoteCE
+	}
+
 	go func() {
 		if !remoteKv.EnsureVersionCompatibility() {
 			rootCancel()
@@ -477,10 +512,15 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
+		if remoteCE != nil {
+			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
+				rootCancel()
+			}
+		}
 	}()
 
 	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot, logger)
-	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
+	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, agg, err
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -747,4 +787,92 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.L
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
+}
+
+type remoteConsensusEngine struct {
+	engine consensus.EngineReader
+}
+
+func (e *remoteConsensusEngine) HasEngine() bool {
+	return e.engine != nil
+}
+
+func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
+	return e.engine
+}
+
+func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
+	var cc *chain.Config
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return false
+	}
+
+	if cc.Bor != nil {
+		borKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
+			WithBucketsConfig(kv.BorTablesCfg).
+			Open()
+
+		if err != nil {
+			return false
+		}
+
+		e.engine = bor.NewRo(borKv, blockReader,
+			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
+			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+	} else {
+		e.engine = ethash.NewFaker()
+	}
+
+	return true
+}
+
+func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
+	if e.engine != nil {
+		return e.engine.Author(header)
+	}
+
+	return libcommon.Address{}, fmt.Errorf("remote consensus engine not iinitialized")
+}
+
+func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+	if e.engine != nil {
+		return e.engine.IsServiceTransaction(sender, syscall)
+	}
+
+	return false
+}
+
+func (e *remoteConsensusEngine) Type() chain.ConsensusName {
+	if e.engine != nil {
+		return e.engine.Type()
+	}
+
+	return ""
+}
+
+func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
+	if e.engine != nil {
+		return e.engine.CalculateRewards(config, header, uncles, syscall)
+	}
+
+	return nil, fmt.Errorf("remote consensus engine not iinitialized")
+}
+
+func (e *remoteConsensusEngine) Close() error {
+	if e.engine != nil {
+		return e.engine.Close()
+	}
+
+	return nil
 }

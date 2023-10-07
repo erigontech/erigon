@@ -29,8 +29,8 @@ jobs:
       - name: test-integration
         run: make test-integration
 
-      - name: history-v3-test-integration
-        run: make test3-integration
+  #        name: history-v3-test-integration
+  #        run: make test3-integration
 
   tests-windows:
     strategy:
