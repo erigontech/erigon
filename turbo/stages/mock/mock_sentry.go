@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/c2h5oh/datasize"
@@ -664,45 +664,28 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 
+	wr := eth1_chain_reader.NewChainReaderEth1(ms.Ctx, ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+
 	for i := n; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
 		}
-
-		res, err := ms.Eth1ExecutionService.InsertBlocks(ms.Ctx, &execution.InsertBlocksRequest{
-			Blocks: []*execution.Block{eth1_utils.ConvertBlockToRPC(chain.Blocks[i])},
-		})
-		if err != nil {
-			return err
-		}
-		if res.Result != execution.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.Result.String())
-		}
-
-		vRes, err := ms.Eth1ExecutionService.ValidateChain(ms.Ctx, &execution.ValidationRequest{
-			Hash:   gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Number: chain.Blocks[i].NumberU64(),
-		})
-		if err != nil {
-			return err
-		}
-		if vRes.ValidationStatus != execution.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), vRes.ValidationStatus.String())
-		}
-
-		receipt, err := ms.Eth1ExecutionService.UpdateForkChoice(ms.Ctx, &execution.ForkChoice{
-			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Timeout:            uint64(1 * time.Hour),
-		})
-		if err != nil {
-			return err
-		}
-		if receipt.Status != execution.ExecutionStatus_Success {
-			return fmt.Errorf("forkchoice failed for block %d, code: %s", chain.Blocks[i].NumberU64(), receipt.Status.String())
-		}
 	}
+	if err := wr.InsertBlocksAndWait(chain.Blocks); err != nil {
+		return err
+	}
+	vRes, err := ms.Eth1ExecutionService.ValidateChain(ms.Ctx, &execution.ValidationRequest{
+		Hash:   gointerfaces.ConvertHashToH256(chain.Blocks[chain.Length()-1].Hash()),
+		Number: chain.Blocks[chain.Length()-1].NumberU64(),
+	})
+	if err != nil {
+		return err
+	}
+	wr.UpdateForkChoice(gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash))
+	if vRes.ValidationStatus != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), vRes.ValidationStatus.String())
+	}
+
 	return nil
 }
 
