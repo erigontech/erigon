@@ -61,7 +61,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	defer ac.Close()
 
 	domains := agg.SharedDomains(ac)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 	defer domains.StartWrites().FinishWrites()
 
 	domains.SetTx(tx)

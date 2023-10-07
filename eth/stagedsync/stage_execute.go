@@ -327,8 +327,8 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	ac := tx.(*temporal.Tx).AggCtx()
 
 	domains := agg.SharedDomains(ac)
+	defer agg.CloseSharedDomains()
 	rs := state.NewStateV3(domains, logger)
-	defer domains.Close()
 	defer domains.StartWrites().FinishWrites()
 	domains.SetTx(tx)
 

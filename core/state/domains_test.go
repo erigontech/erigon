@@ -87,7 +87,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	defer domCtx.Close()
 
 	domains := agg.SharedDomains(domCtx)
-	defer domains.Close()
+	defer agg.CloseSharedDomains()
 	domains.SetTx(tx)
 
 	offt, err := domains.SeekCommitment(ctx, 0, 1<<63-1)

@@ -268,8 +268,7 @@ func ExecV3(ctx context.Context,
 
 	// MA setio
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
-	defer doms.Close()
-	defer doms.StartWrites().FinishWrites()
+	defer cfg.agg.CloseSharedDomains()
 	doms.SetTx(applyTx)
 	if applyTx != nil {
 		if dbg.DiscardHistory() {

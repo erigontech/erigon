@@ -575,10 +575,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 		ac := agg.MakeContext()
 		defer ac.Close()
-
-		domains := agg.SharedDomains(ac)
-		domains.SetTx(tx)
-		domains.SetTxNum(ctx, lastTxNum)
 		return nil
 	}); err != nil {
 		return err

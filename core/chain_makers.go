@@ -333,7 +333,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		ac := tx.(*temporal.Tx).AggCtx()
 
 		domains = agg.SharedDomains(ac)
-		defer domains.Close()
+		defer agg.CloseSharedDomains()
+		domains.SetTx(tx)
 		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
 		if err != nil {
 			return nil, err
@@ -352,6 +353,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	txNumIncrement := func() {
 		txNum++
 		if ethconfig.EnableHistoryV4InTest {
+			if err := domains.Flush(ctx, tx); err != nil {
+				panic(err)
+			}
 			domains.SetTxNum(ctx, uint64(txNum))
 		}
 	}
