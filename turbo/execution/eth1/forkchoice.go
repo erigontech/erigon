@@ -114,12 +114,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		hash   libcommon.Hash
 		number uint64
 	}
+	fmt.Println("XXX")
 	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
 	defer tx.Rollback()
+	fmt.Println("YYY")
 
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
