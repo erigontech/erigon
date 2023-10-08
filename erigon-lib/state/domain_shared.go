@@ -135,27 +135,27 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.ClearRam(true)
 
 	// TODO what if unwinded to the middle of block? It should cause one more unwind until block beginning or end is not found.
-	_, err := sd.SeekCommitment(ctx, 0, txUnwindTo)
+	_, err := sd.SeekCommitment(ctx, rwTx, 0, txUnwindTo)
 	return err
 }
 
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, fromTx, toTx uint64) (txsFromBlockBeginning uint64, err error) {
-	bn, txn, err := sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx, fromTx, toTx uint64) (txsFromBlockBeginning uint64, err error) {
+	bn, txn, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
 	if err != nil {
 		return 0, err
 	}
 
-	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(sd.roTx, txn)
+	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
 	if ok {
 		if err != nil {
 			return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
 		}
 
-		firstTxInBlock, err := rawdbv3.TxNums.Min(sd.roTx, blockNum)
+		firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
 		if err != nil {
 			return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
 		}
-		lastTxInBlock, err := rawdbv3.TxNums.Max(sd.roTx, blockNum)
+		lastTxInBlock, err := rawdbv3.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
 		}
@@ -556,14 +556,6 @@ func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 	sd.roTx = tx
-	sd.Commitment.SetTx(tx)
-	sd.Code.SetTx(tx)
-	sd.Account.SetTx(tx)
-	sd.Storage.SetTx(tx)
-	sd.TracesTo.SetTx(tx)
-	sd.TracesFrom.SetTx(tx)
-	sd.LogAddrs.SetTx(tx)
-	sd.LogTopics.SetTx(tx)
 }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains

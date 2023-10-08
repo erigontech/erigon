@@ -90,7 +90,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	defer agg.CloseSharedDomains()
 	domains.SetTx(tx)
 
-	offt, err := domains.SeekCommitment(ctx, 0, 1<<63-1)
+	offt, err := domains.SeekCommitment(ctx, tx, 0, 1<<63-1)
 	require.NoError(t, err)
 	txn := domains.TxNum()
 	fmt.Printf("seek to block %d txn %d block beginning offset %d\n", domains.BlockNum(), txn, offt)

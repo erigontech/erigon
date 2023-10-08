@@ -67,7 +67,6 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 	ic := ii.MakeContext()
 	defer ic.Close()
 	ic.StartWrites()
@@ -151,7 +150,6 @@ func TestInvIndexAfterPrune(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	ii.SetTx(tx)
 	ic := ii.MakeContext()
 	defer ic.Close()
 	ic.StartWrites()
@@ -188,7 +186,6 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	ii.SetTx(tx)
 
 	ii.integrateFiles(sf, 0, 16)
 
@@ -206,7 +203,6 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	ii.SetTx(tx)
 
 	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
 		var cur kv.Cursor
@@ -236,7 +232,6 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 	ic := ii.MakeContext()
 	defer ic.Close()
 	ic.StartWrites()
@@ -363,7 +358,6 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
@@ -415,7 +409,6 @@ func TestInvIndexRanges(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {

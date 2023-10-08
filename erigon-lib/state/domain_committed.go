@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -537,7 +538,7 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
+func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
 	if dbg.DiscardCommitment() {
 		return 0, 0, nil
 	}
@@ -550,7 +551,7 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 	}
 
 	var latestState []byte
-	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) error {
+	err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
 		if len(value) < 16 {
 			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}

@@ -126,7 +126,6 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -276,7 +275,6 @@ func TestDomain_IterationBasic(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -338,7 +336,6 @@ func TestDomain_AfterPrune(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer d.Close()
 	dc.StartWrites()
@@ -429,7 +426,6 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 
 	txs := uint64(1000)
 
@@ -532,7 +528,6 @@ func TestIterationMultistep(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -630,7 +625,6 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		defer tx.Rollback()
 	}
-	d.SetTx(tx)
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
 		c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx)
@@ -681,7 +675,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	ctx := context.Background()
 	txFrom, txTo := (step)*d.aggregationStep, (step+1)*d.aggregationStep
 
-	c, err := d.collate(ctx, step, txFrom, txTo, d.tx)
+	c, err := d.collate(ctx, step, txFrom, txTo, tx)
 	require.NoError(t, err)
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
@@ -746,7 +740,6 @@ func TestDomain_Delete(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -796,7 +789,6 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -939,7 +931,6 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -1066,7 +1057,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -1154,7 +1144,6 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.SetTx(tx)
 	d.historyLargeValues = true
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -1235,8 +1224,6 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.SetTx(tx)
-
 	d.historyLargeValues = true
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -1306,7 +1293,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.SetTx(tx)
 	d.aggregationStep = 20
 
 	keys, vals := generateInputData(t, 8, 16, 100)
@@ -1350,7 +1336,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
 
-		collation, err := d.collate(ctx, step, txFrom, txTo, d.tx)
+		collation, err := d.collate(ctx, step, txFrom, txTo, tx)
 		require.NoError(t, err)
 
 		sf, err := d.buildFiles(ctx, step, collation, ps)
@@ -1402,7 +1388,6 @@ func TestDomain_Unwind(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 
 	var preval1, preval2 []byte
 	maxTx := uint64(16)
@@ -1526,7 +1511,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	UseBpsTree = true
 
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer d.Close()
 	dc.StartWrites()
@@ -1560,7 +1544,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc.Close()
 
 	dc = d.MakeContext()
@@ -1601,7 +1584,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	UseBpsTree = true
 
-	d.SetTx(tx)
 	dc := d.MakeContext()
 	defer dc.Close()
 	dc.StartWrites()
@@ -1636,7 +1618,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	d.SetTx(tx)
 	dc.Close()
 
 	dc = d.MakeContext()

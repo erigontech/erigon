@@ -464,15 +464,6 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	if a.domains != nil {
 		a.domains.SetTx(tx)
 	}
-
-	a.accounts.SetTx(tx)
-	a.storage.SetTx(tx)
-	a.code.SetTx(tx)
-	a.commitment.SetTx(tx)
-	a.logAddrs.SetTx(tx)
-	a.logTopics.SetTx(tx)
-	a.tracesFrom.SetTx(tx)
-	a.tracesTo.SetTx(tx)
 }
 
 type AggV3Collation struct {

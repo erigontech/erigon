@@ -82,7 +82,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		h.SetTx(tx)
 		hc := h.MakeContext()
 		defer hc.Close()
 		hc.StartWrites()
@@ -196,7 +195,6 @@ func TestHistoryAfterPrune(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		h.SetTx(tx)
 		hc := h.MakeContext()
 		defer hc.Close()
 		hc.StartWrites()
@@ -239,7 +237,6 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		require.NoError(err)
-		h.SetTx(tx)
 
 		for _, table := range []string{h.indexKeysTable, h.historyValsTable, h.indexTable} {
 			var cur kv.Cursor
@@ -269,7 +266,6 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	h.SetTx(tx)
 	hc := h.MakeContext()
 	defer hc.Close()
 	hc.StartWrites()
@@ -357,7 +353,6 @@ func TestHistoryHistory(t *testing.T) {
 		require := require.New(t)
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
-		h.SetTx(tx)
 		defer tx.Rollback()
 
 		// Leave the last 2 aggregation steps un-collated
@@ -397,7 +392,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	ctx := context.Background()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
-	h.SetTx(tx)
 	defer tx.Rollback()
 
 	// Leave the last 2 aggregation steps un-collated

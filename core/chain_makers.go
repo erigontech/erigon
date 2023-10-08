@@ -336,7 +336,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		defer agg.CloseSharedDomains()
 		domains.SetTx(tx)
 		defer domains.StartWrites().FinishWrites()
-		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 		if err != nil {
 			return nil, err
 		}

@@ -277,7 +277,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	rs := state.NewStateV3(doms, logger)
-	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, 0, math.MaxUint64)
+	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx, 0, math.MaxUint64)
 	if err != nil {
 		return err
 	}

@@ -680,7 +680,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		defer agg.CloseSharedDomains()
 		domains.SetTx(tx)
 
-		_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 		if err != nil {
 			return fmt.Errorf("seek commitment: %w", err)
 		}
@@ -958,7 +958,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				defer ct.Close()
 
 				doms.SetTx(tx)
-				_, err = doms.SeekCommitment(ctx, 0, math.MaxUint64)
+				_, err = doms.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 				blockNum = doms.BlockNum()
 				return err
 			})
