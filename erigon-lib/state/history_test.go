@@ -83,10 +83,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		h.SetTx(tx)
-		h.StartWrites()
-		defer h.FinishWrites()
 		hc := h.MakeContext()
 		defer hc.Close()
+		hc.StartWrites()
+		defer hc.FinishWrites()
 
 		h.SetTxNum(2)
 		err = hc.AddPrevValue([]byte("key1"), nil, nil)
@@ -102,7 +102,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		flusher := h.Rotate()
+		flusher := hc.Rotate()
 
 		h.SetTxNum(7)
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
@@ -113,7 +113,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(err)
 
-		err = h.Rotate().Flush(ctx, tx)
+		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(0, 0, 8, tx)
@@ -197,10 +197,10 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		h.SetTx(tx)
-		h.StartWrites()
-		defer h.FinishWrites()
 		hc := h.MakeContext()
 		defer hc.Close()
+		hc.StartWrites()
+		defer hc.FinishWrites()
 
 		h.SetTxNum(2)
 		err = hc.AddPrevValue([]byte("key1"), nil, nil)
@@ -222,7 +222,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		err = hc.AddPrevValue([]byte("key3"), nil, nil)
 		require.NoError(err)
 
-		err = h.Rotate().Flush(ctx, tx)
+		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(0, 0, 16, tx)
@@ -270,10 +270,10 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites()
-	defer h.FinishWrites()
 	hc := h.MakeContext()
 	defer hc.Close()
+	hc.StartWrites()
+	defer hc.FinishWrites()
 
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
@@ -302,14 +302,14 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 			flusher = nil
 		}
 		if txNum%10 == 0 {
-			flusher = h.Rotate()
+			flusher = hc.Rotate()
 		}
 	}
 	if flusher != nil {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
-	err = h.Rotate().Flush(ctx, tx)
+	err = hc.Rotate().Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)

@@ -70,16 +70,23 @@ type SharedDomains struct {
 	TracesFrom *InvertedIndex
 }
 
-func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
+func NewSharedDomains(ac *AggregatorV3Context) *SharedDomains {
 	sd := &SharedDomains{
-		Account:    a,
+		aggCtx: ac,
+
+		Account:    ac.a.accounts,
 		account:    map[string][]byte{},
-		Code:       c,
+		Code:       ac.a.code,
 		code:       map[string][]byte{},
-		Storage:    s,
+		Storage:    ac.a.storage,
 		storage:    btree2.NewMap[string, []byte](128),
-		Commitment: comm,
+		Commitment: ac.a.commitment,
 		commitment: map[string][]byte{},
+
+		TracesTo:   ac.a.tracesTo,
+		TracesFrom: ac.a.tracesFrom,
+		LogAddrs:   ac.a.logAddrs,
+		LogTopics:  ac.a.logTopics,
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
@@ -101,7 +108,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 
-	if err := sd.aggCtx.accounts.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
 	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
@@ -443,7 +450,7 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, account, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.aggCtx.accounts.PutWithPrev(addr, nil, account, prevAccount)
+	return sd.aggCtx.account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
@@ -469,7 +476,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.aggCtx.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
+	if err := sd.aggCtx.account.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
@@ -784,14 +791,14 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.Account.StartWrites()
-	sd.Storage.StartWrites()
-	sd.Code.StartWrites()
-	sd.Commitment.StartWrites()
-	sd.LogAddrs.StartWrites()
-	sd.LogTopics.StartWrites()
-	sd.TracesFrom.StartWrites()
-	sd.TracesTo.StartWrites()
+	sd.aggCtx.account.StartWrites()
+	sd.aggCtx.storage.StartWrites()
+	sd.aggCtx.code.StartWrites()
+	sd.aggCtx.commitment.StartWrites()
+	sd.aggCtx.logAddrs.StartWrites()
+	sd.aggCtx.logTopics.StartWrites()
+	sd.aggCtx.tracesFrom.StartWrites()
+	sd.aggCtx.tracesTo.StartWrites()
 
 	if sd.account == nil {
 		sd.account = map[string][]byte{}
@@ -812,14 +819,14 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.Account.StartUnbufferedWrites()
-	sd.Storage.StartUnbufferedWrites()
-	sd.Code.StartUnbufferedWrites()
-	sd.Commitment.StartUnbufferedWrites()
-	sd.LogAddrs.StartUnbufferedWrites()
-	sd.LogTopics.StartUnbufferedWrites()
-	sd.TracesFrom.StartUnbufferedWrites()
-	sd.TracesTo.StartUnbufferedWrites()
+	sd.aggCtx.account.StartUnbufferedWrites()
+	sd.aggCtx.storage.StartUnbufferedWrites()
+	sd.aggCtx.code.StartUnbufferedWrites()
+	sd.aggCtx.commitment.StartUnbufferedWrites()
+	sd.aggCtx.logAddrs.StartUnbufferedWrites()
+	sd.aggCtx.logTopics.StartUnbufferedWrites()
+	sd.aggCtx.tracesFrom.StartUnbufferedWrites()
+	sd.aggCtx.tracesTo.StartUnbufferedWrites()
 
 	if sd.account == nil {
 		sd.account = map[string][]byte{}
@@ -841,14 +848,14 @@ func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.Account.FinishWrites()
-	sd.Storage.FinishWrites()
-	sd.Code.FinishWrites()
-	sd.Commitment.FinishWrites()
-	sd.LogAddrs.FinishWrites()
-	sd.LogTopics.FinishWrites()
-	sd.TracesFrom.FinishWrites()
-	sd.TracesTo.FinishWrites()
+	sd.aggCtx.account.FinishWrites()
+	sd.aggCtx.storage.FinishWrites()
+	sd.aggCtx.code.FinishWrites()
+	sd.aggCtx.commitment.FinishWrites()
+	sd.aggCtx.logAddrs.FinishWrites()
+	sd.aggCtx.logTopics.FinishWrites()
+	sd.aggCtx.tracesFrom.FinishWrites()
+	sd.aggCtx.tracesTo.FinishWrites()
 }
 
 func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {
@@ -861,27 +868,27 @@ func (sd *SharedDomains) BatchHistoryWriteEnd() {
 }
 
 func (sd *SharedDomains) DiscardHistory() {
-	sd.Account.DiscardHistory()
-	sd.Storage.DiscardHistory()
-	sd.Code.DiscardHistory()
-	sd.Commitment.DiscardHistory()
-	sd.LogAddrs.DiscardHistory()
-	sd.LogTopics.DiscardHistory()
-	sd.TracesFrom.DiscardHistory()
-	sd.TracesTo.DiscardHistory()
+	sd.aggCtx.account.DiscardHistory()
+	sd.aggCtx.storage.DiscardHistory()
+	sd.aggCtx.code.DiscardHistory()
+	sd.aggCtx.commitment.DiscardHistory()
+	sd.aggCtx.logAddrs.DiscardHistory()
+	sd.aggCtx.logTopics.DiscardHistory()
+	sd.aggCtx.tracesFrom.DiscardHistory()
+	sd.aggCtx.tracesTo.DiscardHistory()
 }
 func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 	return []flusher{
-		sd.Account.Rotate(),
-		sd.Storage.Rotate(),
-		sd.Code.Rotate(),
-		sd.Commitment.Domain.Rotate(),
-		sd.LogAddrs.Rotate(),
-		sd.LogTopics.Rotate(),
-		sd.TracesFrom.Rotate(),
-		sd.TracesTo.Rotate(),
+		sd.aggCtx.account.Rotate(),
+		sd.aggCtx.storage.Rotate(),
+		sd.aggCtx.code.Rotate(),
+		sd.aggCtx.commitment.Rotate(),
+		sd.aggCtx.logAddrs.Rotate(),
+		sd.aggCtx.logTopics.Rotate(),
+		sd.aggCtx.tracesFrom.Rotate(),
+		sd.aggCtx.tracesTo.Rotate(),
 	}
 }
 

@@ -84,7 +84,6 @@ type InvertedIndex struct {
 	// fields for history write
 	txNum      uint64
 	txNumBytes [8]byte
-	wal        *invertedIndexWAL
 	logger     log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -547,25 +546,25 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (ic *InvertedIndexContext) Add(key []byte) error {
-	return ic.ii.wal.add(key, key)
+	return ic.wal.add(key, key)
 }
 
-func (ii *InvertedIndex) DiscardHistory() {
-	ii.wal = ii.newWriter(ii.dirs.Tmp, false, true)
+func (ic *InvertedIndexContext) DiscardHistory() {
+	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, false, true)
 }
-func (ii *InvertedIndex) StartWrites() {
-	ii.wal = ii.newWriter(ii.dirs.Tmp, true, false)
+func (ic *InvertedIndexContext) StartWrites() {
+	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, true, false)
 }
-func (ii *InvertedIndex) StartUnbufferedWrites() {
-	ii.wal = ii.newWriter(ii.dirs.Tmp, false, false)
+func (ic *InvertedIndexContext) StartUnbufferedWrites() {
+	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, false, false)
 }
-func (ii *InvertedIndex) FinishWrites() {
+func (ii *InvertedIndexContext) FinishWrites() {
 	ii.wal.close()
 	ii.wal = nil
 }
 
-func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
-	wal := ii.wal
+func (ic *InvertedIndexContext) Rotate() *invertedIndexWAL {
+	wal := ic.wal
 	if wal != nil {
 		if wal.buffered {
 			if err := wal.index.Flush(); err != nil {
@@ -575,13 +574,13 @@ func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 				panic(err)
 			}
 		}
-		ii.wal = ii.newWriter(ii.wal.tmpdir, ii.wal.buffered, ii.wal.discard)
+		ic.wal = ic.newWriter(ic.wal.tmpdir, ic.wal.buffered, ic.wal.discard)
 	}
 	return wal
 }
 
 type invertedIndexWAL struct {
-	ii           *InvertedIndex
+	ic           *InvertedIndexContext
 	index        *etl.Collector
 	indexKeys    *etl.Collector
 	tmpdir       string
@@ -600,10 +599,10 @@ func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if ii.discard || !ii.buffered {
 		return nil
 	}
-	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ii.index.Load(tx, ii.ic.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := ii.indexKeys.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ii.indexKeys.Load(tx, ii.ic.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	ii.close()
@@ -626,20 +625,20 @@ func (ii *invertedIndexWAL) close() {
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
-func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
+func (ic *InvertedIndexContext) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
 	if !buffered {
 		panic("non-buffered wal is not supported anymore")
 	}
-	w := &invertedIndexWAL{ii: ii,
+	w := &invertedIndexWAL{ic: ic,
 		buffered:     buffered,
 		discard:      discard,
 		tmpdir:       tmpdir,
-		filenameBase: ii.filenameBase,
+		filenameBase: ic.ii.filenameBase,
 	}
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ii.logger)
-		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ii.logger)
+		w.index = etl.NewCollector(ic.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger)
+		w.indexKeys = etl.NewCollector(ic.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger)
 		w.index.LogLvl(log.LvlTrace)
 		w.indexKeys.LogLvl(log.LvlTrace)
 	}
@@ -650,10 +649,10 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-	if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
+	if err := ii.indexKeys.Collect(ii.ic.ii.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
+	if err := ii.index.Collect(indexKey, ii.ic.ii.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil
@@ -706,6 +705,8 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
+
+	wal *invertedIndexWAL
 
 	warmLocality *ctxLocalityIdx
 	coldLocality *ctxLocalityIdx

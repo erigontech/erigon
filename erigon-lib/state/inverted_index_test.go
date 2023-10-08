@@ -68,10 +68,10 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
 	ic := ii.MakeContext()
 	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ic.Add([]byte("key1"))
@@ -91,7 +91,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = ic.Add([]byte("key10"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(ctx, tx)
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -152,10 +152,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		}
 	}()
 	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
 	ic := ii.MakeContext()
 	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ic.Add([]byte("key1"))
@@ -171,7 +171,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(ctx, tx)
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -237,10 +237,10 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	require.NoError(err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
 	ic := ii.MakeContext()
 	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
 	var flusher flusher
 
@@ -260,13 +260,13 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			require.NoError(flusher.Flush(ctx, tx))
 		}
 		if txNum%10 == 0 {
-			flusher = ii.Rotate()
+			flusher = ic.Rotate()
 		}
 	}
 	if flusher != nil {
 		require.NoError(flusher.Flush(ctx, tx))
 	}
-	err = ii.Rotate().Flush(ctx, tx)
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
