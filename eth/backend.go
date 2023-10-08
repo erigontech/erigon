@@ -283,6 +283,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		logger: logger,
 	}
 
+	fmt.Printf("[dbg] is bor: %t\n", config.Genesis.Config.Bor != nil)
+
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, config.Genesis.Config.Bor != nil, logger)
