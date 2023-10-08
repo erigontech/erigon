@@ -70,23 +70,25 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	ii.SetTx(tx)
 	ii.StartWrites()
 	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
 
 	ii.SetTxNum(2)
-	err = ii.Add([]byte("key1"))
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
 	ii.SetTxNum(3)
-	err = ii.Add([]byte("key2"))
+	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
 	ii.SetTxNum(6)
-	err = ii.Add([]byte("key1"))
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ii.Add([]byte("key3"))
+	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
 	ii.SetTxNum(17)
-	err = ii.Add([]byte("key10"))
+	err = ic.Add([]byte("key10"))
 	require.NoError(t, err)
 
 	err = ii.Rotate().Flush(ctx, tx)
@@ -152,19 +154,21 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	ii.SetTx(tx)
 	ii.StartWrites()
 	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
 
 	ii.SetTxNum(2)
-	err = ii.Add([]byte("key1"))
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
 	ii.SetTxNum(3)
-	err = ii.Add([]byte("key2"))
+	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
 	ii.SetTxNum(6)
-	err = ii.Add([]byte("key1"))
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ii.Add([]byte("key3"))
+	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
 	err = ii.Rotate().Flush(ctx, tx)
@@ -191,8 +195,9 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	from, to := ii.stepsRangeInDB(tx)
 	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 	require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
+	ic.Close()
 
-	ic := ii.MakeContext()
+	ic = ii.MakeContext()
 	defer ic.Close()
 
 	err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
@@ -234,6 +239,8 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	ii.SetTx(tx)
 	ii.StartWrites()
 	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
 
 	var flusher flusher
 
@@ -245,7 +252,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			if txNum%keyNum == 0 {
 				var k [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
-				err = ii.Add(k[:])
+				err = ic.Add(k[:])
 				require.NoError(err)
 			}
 		}

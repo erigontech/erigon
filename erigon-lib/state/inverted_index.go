@@ -546,8 +546,8 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (ii *InvertedIndex) Add(key []byte) error {
-	return ii.wal.add(key, key)
+func (ic *InvertedIndexContext) Add(key []byte) error {
+	return ic.ii.wal.add(key, key)
 }
 
 func (ii *InvertedIndex) DiscardHistory() {

@@ -530,13 +530,13 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	switch table {
 	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.LogAddrs.Add(key)
+		err = sd.aggCtx.logAddrs.Add(key)
 	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.LogTopics.Add(key)
+		err = sd.aggCtx.logTopics.Add(key)
 	case kv.TblTracesToIdx:
-		err = sd.TracesTo.Add(key)
+		err = sd.aggCtx.tracesTo.Add(key)
 	case kv.TblTracesFromIdx:
-		err = sd.TracesFrom.Add(key)
+		err = sd.aggCtx.tracesFrom.Add(key)
 	default:
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
