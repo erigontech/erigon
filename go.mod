@@ -45,8 +45,9 @@ require (
 	github.com/google/gofuzz v1.2.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	github.com/hashicorp/golang-lru v0.5.1
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.4
-	github.com/hashicorp/golang-lru/v2 v2.0.4
+	github.com/hashicorp/golang-lru/v2 v2.0.6
 	github.com/holiman/uint256 v1.2.3
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
@@ -63,7 +64,7 @@ require (
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
-	github.com/pelletier/go-toml/v2 v2.0.8
+	github.com/pelletier/go-toml/v2 v2.1.0
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.0
 	github.com/prometheus/client_golang v1.16.0
@@ -86,14 +87,15 @@ require (
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.6
 	github.com/xsleonard/go-merkle v1.1.0
+	go.uber.org/atomic v1.11.0
 	go.uber.org/zap v1.25.0
-	golang.org/x/crypto v0.12.0
+	golang.org/x/crypto v0.13.0
 	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22
 	golang.org/x/net v0.14.0
 	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.12.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.57.0
+	google.golang.org/grpc v1.58.1
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -252,9 +254,9 @@ require (
 	go.uber.org/fx v1.19.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
-	golang.org/x/text v0.12.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/tools v0.9.3 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230525234030-28d5490b6b19 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 	lukechampine.com/uint128 v1.3.0 // indirect
@@ -273,3 +275,5 @@ require (
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
 replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+
+replace github.com/ledgerwatch/erigon-lib => github.com/wmitsuda/erigon-lib v0.0.0-20230924194436-60f414f28c94

@@ -247,6 +247,8 @@ type Config struct {
 	OverrideCancunTime *big.Int `toml:",omitempty"`
 
 	ForcePartialCommit bool
+
+	Ots2 bool
 }
 
 type Sync struct {

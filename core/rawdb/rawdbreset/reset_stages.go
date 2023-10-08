@@ -186,6 +186,17 @@ var Tables = map[stages.SyncStage][]string{
 	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
 	stages.StorageHistoryIndex: {kv.E2StorageHistory},
 	stages.Finish:              {},
+
+	stages.OtsContractIndexer:      {kv.OtsAllContracts, kv.OtsAllContractsCounter},
+	stages.OtsERC20Indexer:         {kv.OtsERC20, kv.OtsERC20Counter},
+	stages.OtsERC165Indexer:        {kv.OtsERC165, kv.OtsERC165Counter},
+	stages.OtsERC721Indexer:        {kv.OtsERC721, kv.OtsERC721Counter},
+	stages.OtsERC1155Indexer:       {kv.OtsERC1155, kv.OtsERC1155Counter},
+	stages.OtsERC1167Indexer:       {kv.OtsERC1167, kv.OtsERC1167Counter},
+	stages.OtsERC4626Indexer:       {kv.OtsERC4626, kv.OtsERC4626Counter},
+	stages.OtsERC20And721Transfers: {kv.OtsERC20TransferIndex, kv.OtsERC20TransferCounter, kv.OtsERC721TransferIndex, kv.OtsERC721TransferCounter},
+	stages.OtsERC20And721Holdings:  {kv.OtsERC20Holdings, kv.OtsERC721Holdings},
+	stages.OtsWithdrawals:          {kv.OtsWithdrawalIdx2Block, kv.OtsWithdrawalsIndex, kv.OtsWithdrawalsCounter},
 }
 var stateBuckets = []string{
 	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
@@ -214,6 +225,10 @@ var stateHistoryV3Buckets = []string{
 var stateHistoryV4Buckets = []string{
 	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys,
 	kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+}
+
+func ClearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
+	return clearStageProgress(tx, stagesList...)
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

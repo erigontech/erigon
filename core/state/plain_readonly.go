@@ -57,6 +57,13 @@ type PlainState struct {
 	systemContractLookup         map[libcommon.Address][]libcommon.CodeRecord
 }
 
+func (s *PlainState) Dispose() {
+	s.accHistoryC.Close()
+	s.storageHistoryC.Close()
+	s.accChangesC.Close()
+	s.storageChangesC.Close()
+}
+
 func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
 	if histV3 {

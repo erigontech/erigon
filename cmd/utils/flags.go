@@ -791,6 +791,11 @@ var (
 		Usage: "Max allowed page size for search methods",
 		Value: 25,
 	}
+	OtsV2Flag = cli.BoolFlag{
+		Name:  "experimental.ots2",
+		Usage: "Enable experimental Otterscan API V2",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1596,6 +1601,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
 	}
+
+	cfg.Ots2 = ctx.Bool(OtsV2Flag.Name)
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

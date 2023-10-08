@@ -24,8 +24,10 @@ func DefaultStages(ctx context.Context,
 	callTraces CallTracesCfg,
 	txLookup TxLookupCfg,
 	finish FinishCfg,
+	caCfg ContractAnalyzerCfg,
+	ots2Enabled bool,
 	test bool) []*Stage {
-	return []*Stage{
+	defaultStages := []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
@@ -248,10 +250,22 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 	}
+
+	// If ots2 is enabled, inject ots2 stages before finish stage
+	if ots2Enabled {
+		ots2Stages := OtsStages(ctx, caCfg)
+
+		newStages := defaultStages[:len(defaultStages)-1]
+		newStages = append(newStages, ots2Stages...)
+		newStages = append(newStages, defaultStages[len(defaultStages)-1])
+		defaultStages = newStages
+	}
+
+	return defaultStages
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
-	return []*Stage{
+func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, caCfg ContractAnalyzerCfg, ots2Enabled bool, test bool) []*Stage {
+	defaultStages := []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
@@ -427,6 +441,18 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			},
 		},
 	}
+
+	// If ots2 is enabled, inject ots2 stages before finish stage
+	if ots2Enabled {
+		ots2Stages := OtsStages(ctx, caCfg)
+
+		newStages := defaultStages[:len(defaultStages)-1]
+		newStages = append(newStages, ots2Stages...)
+		newStages = append(newStages, defaultStages[len(defaultStages)-1])
+		defaultStages = newStages
+	}
+
+	return defaultStages
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.

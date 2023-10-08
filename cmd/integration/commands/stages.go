@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
@@ -25,6 +26,7 @@ import (
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
+	"github.com/ledgerwatch/erigon-lib/common"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -33,11 +35,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -310,6 +314,364 @@ var cmdStageTxLookup = &cobra.Command{
 		}
 	},
 }
+
+func runResetStage(stg stages.SyncStage, mainBucket string, attrs *roaring64.Bitmap) func(cmd *cobra.Command, args []string) {
+	return func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		// Unset address attributes for associated bucket
+		if attrs != nil {
+			tx, err := db.BeginRw(ctx)
+			if err != nil {
+				logger.Error("Tx", "error", err)
+				return
+			}
+			defer tx.Rollback()
+
+			bucket, err := tx.CursorDupSort(mainBucket)
+			if err != nil {
+				logger.Error("Tx", "error", err)
+				return
+			}
+			defer bucket.Close()
+
+			k, v, err := bucket.First()
+			if err != nil {
+				logger.Error("Tx", "error", err)
+				return
+			}
+			for k != nil {
+				addr := common.BytesToAddress(v)
+				if err := stagedsync.RemoveAttributes(tx, addr, attrs); err != nil {
+					logger.Error("Tx", "error", err)
+					return
+				}
+
+				k, v, err = bucket.NextDup()
+				if err != nil {
+					logger.Error("Tx", "error", err)
+					return
+				}
+				if k == nil {
+					k, v, err = bucket.NextNoDup()
+					if err != nil {
+						logger.Error("Tx", "error", err)
+						return
+					}
+				}
+			}
+
+			if err := tx.Commit(); err != nil {
+				logger.Error("Tx", "error", err)
+				return
+			}
+		}
+
+		// Force reset stage and associated buckets
+		if err := rawdbreset.Reset(ctx, db, stg); err != nil {
+			log.Error("Error", "err", err)
+			return
+		}
+	}
+}
+
+var cmdResetOts2Alpha1 = &cobra.Command{
+	Use:   "reset_ots2_alpha1",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		bucketsList := []string{
+			kv.OtsAllContracts,
+			kv.OtsERC20,
+			kv.OtsERC165,
+			kv.OtsERC721,
+			kv.OtsERC1155,
+			kv.OtsERC1167,
+			kv.OtsERC4626,
+
+			kv.OtsAllContractsCounter,
+			kv.OtsERC20Counter,
+			kv.OtsERC165Counter,
+			kv.OtsERC721Counter,
+			kv.OtsERC1155Counter,
+			kv.OtsERC1167Counter,
+			kv.OtsERC4626Counter,
+
+			kv.OtsAddrAttributes,
+
+			kv.OtsERC20TransferIndex,
+			kv.OtsERC20TransferCounter,
+			kv.OtsERC721TransferIndex,
+			kv.OtsERC721TransferCounter,
+			kv.OtsERC20Holdings,
+			kv.OtsERC721Holdings,
+		}
+		stagesList := []stages.SyncStage{
+			stages.OtsContractIndexer,
+			stages.OtsERC20Indexer,
+			stages.OtsERC165Indexer,
+			stages.OtsERC721Indexer,
+			stages.OtsERC1155Indexer,
+			stages.OtsERC1167Indexer,
+			stages.OtsERC4626Indexer,
+			stages.OtsERC20And721Transfers,
+			stages.OtsERC20And721Holdings,
+		}
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			for _, b := range bucketsList {
+				if err := tx.ClearBucket(b); err != nil {
+					return err
+				}
+			}
+			if err := rawdbreset.ClearStageProgress(tx, stagesList...); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			log.Error("Error", "err", err)
+			return
+		}
+	},
+}
+
+var cmdResetOtsAllContracts = &cobra.Command{
+	Use:   "reset_ots_all_contracts",
+	Short: "",
+	Run:   runResetStage(stages.OtsContractIndexer, kv.OtsAllContracts, nil),
+}
+
+var cmdResetOtsERC20 = &cobra.Command{
+	Use:   "reset_ots_erc20",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC20Indexer, kv.OtsERC20, roaring64.BitmapOf(kv.ADDR_ATTR_ERC20)),
+}
+
+var cmdResetOtsERC165 = &cobra.Command{
+	Use:   "reset_ots_erc165",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC165Indexer, kv.OtsERC165, roaring64.BitmapOf(kv.ADDR_ATTR_ERC165)),
+}
+
+var cmdResetOtsERC721 = &cobra.Command{
+	Use:   "reset_ots_erc721",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC721Indexer, kv.OtsERC721, roaring64.BitmapOf(kv.ADDR_ATTR_ERC721, kv.ADDR_ATTR_ERC721_MD)),
+}
+
+var cmdResetOtsERC1155 = &cobra.Command{
+	Use:   "reset_ots_erc1155",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC1155Indexer, kv.OtsERC1155, roaring64.BitmapOf(kv.ADDR_ATTR_ERC1155)),
+}
+
+var cmdResetOtsERC1167 = &cobra.Command{
+	Use:   "reset_ots_erc1167",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC1167Indexer, kv.OtsERC1167, roaring64.BitmapOf(kv.ADDR_ATTR_ERC1167)),
+}
+
+var cmdResetOtsERC4626 = &cobra.Command{
+	Use:   "reset_ots_erc4626",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC4626Indexer, kv.OtsERC4626, roaring64.BitmapOf(kv.ADDR_ATTR_ERC4626)),
+}
+
+var cmdResetOtsERC20And721Transfers = &cobra.Command{
+	Use:   "reset_ots_erc20_721_transfers",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC20And721Transfers, "", nil),
+}
+
+var cmdResetOtsERC20And721Holdings = &cobra.Command{
+	Use:   "reset_ots_erc20_721_holdings",
+	Short: "",
+	Run:   runResetStage(stages.OtsERC20And721Holdings, "", nil),
+}
+
+var cmdResetOtsWithdrawals = &cobra.Command{
+	Use:   "reset_ots_withdrawals",
+	Short: "",
+	Run:   runResetStage(stages.OtsWithdrawals, "", nil),
+}
+
+func runUnwindStage(stg stages.SyncStage, mainBucket, counterBucket string, attrs *roaring64.Bitmap) func(cmd *cobra.Command, args []string) {
+	return func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		unwinder := stagedsync.NewGenericIndexerUnwinder(
+			mainBucket,
+			counterBucket,
+			attrs,
+		)
+		otsUnwind(ctx, db, stg, unwinder, logger)
+	}
+}
+
+func runUnwindLogStage(stg stages.SyncStage, unwinder stagedsync.UnwindExecutor) func(cmd *cobra.Command, args []string) {
+	return func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		otsUnwind(ctx, db, stg, unwinder, logger)
+	}
+}
+
+func otsUnwind(ctx context.Context, db kv.RwDB, stg stages.SyncStage, unwinder stagedsync.UnwindExecutor, logger log.Logger) {
+	chainConfig := fromdb.ChainConfig(db)
+	dirs := datadir.New(datadirCli)
+	engine, _, sync, _, _ := newSync(ctx, db, nil, logger)
+	must(sync.SetCurrentStage(stg))
+
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
+	s := stage(sync, nil, db, stg)
+
+	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
+
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageDbAwareCfg(db, dirs.Tmp, chainConfig, br, engine)
+	if unwind > 0 {
+		u := sync.NewUnwindState(stg, s.BlockNumber-unwind, s.BlockNumber)
+		err := stagedsync.GenericStageUnwindImpl(ctx, nil, cfg, u, unwinder)
+		if err != nil {
+			log.Error("Error", "err", err)
+		}
+	}
+}
+
+var cmdUnwindOtsAllContracts = &cobra.Command{
+	Use:   "unwind_ots_all_contracts",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsContractIndexer,
+		kv.OtsAllContracts,
+		kv.OtsAllContractsCounter,
+		nil,
+	),
+}
+
+var cmdUnwindOtsERC20 = &cobra.Command{
+	Use:   "unwind_ots_erc20",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC20Indexer,
+		kv.OtsERC20,
+		kv.OtsERC20Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC20),
+	),
+}
+
+var cmdUnwindOtsERC165 = &cobra.Command{
+	Use:   "unwind_ots_erc165",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC165Indexer,
+		kv.OtsERC165,
+		kv.OtsERC165Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC165),
+	),
+}
+
+var cmdUnwindOtsERC721 = &cobra.Command{
+	Use:   "unwind_ots_erc721",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC721Indexer,
+		kv.OtsERC721,
+		kv.OtsERC721Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC721, kv.ADDR_ATTR_ERC721_MD),
+	),
+}
+
+var cmdUnwindOtsERC1155 = &cobra.Command{
+	Use:   "unwind_ots_erc1155",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC1155Indexer,
+		kv.OtsERC1155,
+		kv.OtsERC1155Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC1155),
+	),
+}
+
+var cmdUnwindOtsERC1167 = &cobra.Command{
+	Use:   "unwind_ots_erc1167",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC1167Indexer,
+		kv.OtsERC1167,
+		kv.OtsERC1167Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC1167),
+	),
+}
+
+var cmdUnwindOtsERC4626 = &cobra.Command{
+	Use:   "unwind_ots_erc4626",
+	Short: "",
+	Run: runUnwindStage(
+		stages.OtsERC4626Indexer,
+		kv.OtsERC4626,
+		kv.OtsERC4626Counter,
+		roaring64.BitmapOf(kv.ADDR_ATTR_ERC4626),
+	),
+}
+
+var cmdUnwindOtsERC70And721Transfers = &cobra.Command{
+	Use:   "unwind_ots_erc20_721_transfers",
+	Short: "",
+	Run: runUnwindLogStage(
+		stages.OtsERC20And721Transfers,
+		stagedsync.NewGenericLogIndexerUnwinder(),
+	),
+}
+
+var cmdUnwindOtsERC70And721Holdings = &cobra.Command{
+	Use:   "unwind_ots_erc20_721_holdings",
+	Short: "",
+	Run: runUnwindLogStage(
+		stages.OtsERC20And721Holdings,
+		stagedsync.NewGenericLogHoldingsUnwinder(),
+	),
+}
+
+var cmdUnwindOtsWithdrawals = &cobra.Command{
+	Use:   "unwind_ots_withdrawals",
+	Short: "",
+	Run: runUnwindLogStage(
+		stages.OtsWithdrawals,
+		stagedsync.NewGenericBlockIndexerUnwinder(),
+	),
+}
+
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
@@ -576,6 +938,90 @@ func init() {
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
+
+	withDataDir(cmdResetOts2Alpha1)
+	rootCmd.AddCommand(cmdResetOts2Alpha1)
+
+	withDataDir(cmdResetOtsAllContracts)
+	rootCmd.AddCommand(cmdResetOtsAllContracts)
+
+	withDataDir(cmdResetOtsERC20)
+	rootCmd.AddCommand(cmdResetOtsERC20)
+
+	withDataDir(cmdResetOtsERC165)
+	rootCmd.AddCommand(cmdResetOtsERC165)
+
+	withDataDir(cmdResetOtsERC721)
+	rootCmd.AddCommand(cmdResetOtsERC721)
+
+	withDataDir(cmdResetOtsERC1155)
+	rootCmd.AddCommand(cmdResetOtsERC1155)
+
+	withDataDir(cmdResetOtsERC1167)
+	rootCmd.AddCommand(cmdResetOtsERC1167)
+
+	withDataDir(cmdResetOtsERC4626)
+	rootCmd.AddCommand(cmdResetOtsERC4626)
+
+	withDataDir(cmdResetOtsERC20And721Transfers)
+	rootCmd.AddCommand(cmdResetOtsERC20And721Transfers)
+
+	withDataDir(cmdResetOtsERC20And721Holdings)
+	rootCmd.AddCommand(cmdResetOtsERC20And721Holdings)
+
+	withDataDir(cmdResetOtsWithdrawals)
+	rootCmd.AddCommand(cmdResetOtsWithdrawals)
+
+	withDataDir(cmdUnwindOtsAllContracts)
+	withChain(cmdUnwindOtsAllContracts)
+	withUnwind(cmdUnwindOtsAllContracts)
+	rootCmd.AddCommand(cmdUnwindOtsAllContracts)
+
+	withDataDir(cmdUnwindOtsERC20)
+	withChain(cmdUnwindOtsERC20)
+	withUnwind(cmdUnwindOtsERC20)
+	rootCmd.AddCommand(cmdUnwindOtsERC20)
+
+	withDataDir(cmdUnwindOtsERC165)
+	withChain(cmdUnwindOtsERC165)
+	withUnwind(cmdUnwindOtsERC165)
+	rootCmd.AddCommand(cmdUnwindOtsERC165)
+
+	withDataDir(cmdUnwindOtsERC721)
+	withChain(cmdUnwindOtsERC721)
+	withUnwind(cmdUnwindOtsERC721)
+	rootCmd.AddCommand(cmdUnwindOtsERC721)
+
+	withDataDir(cmdUnwindOtsERC1155)
+	withChain(cmdUnwindOtsERC1155)
+	withUnwind(cmdUnwindOtsERC1155)
+	rootCmd.AddCommand(cmdUnwindOtsERC1155)
+
+	withDataDir(cmdUnwindOtsERC1167)
+	withChain(cmdUnwindOtsERC1167)
+	withUnwind(cmdUnwindOtsERC1167)
+	rootCmd.AddCommand(cmdUnwindOtsERC1167)
+
+	withDataDir(cmdUnwindOtsERC4626)
+	withChain(cmdUnwindOtsERC4626)
+	withUnwind(cmdUnwindOtsERC4626)
+	rootCmd.AddCommand(cmdUnwindOtsERC4626)
+
+	withDataDir(cmdUnwindOtsERC70And721Transfers)
+	withChain(cmdUnwindOtsERC70And721Transfers)
+	withUnwind(cmdUnwindOtsERC70And721Transfers)
+	rootCmd.AddCommand(cmdUnwindOtsERC70And721Transfers)
+
+	withDataDir(cmdUnwindOtsERC70And721Holdings)
+	withChain(cmdUnwindOtsERC70And721Holdings)
+	withUnwind(cmdUnwindOtsERC70And721Holdings)
+	rootCmd.AddCommand(cmdUnwindOtsERC70And721Holdings)
+
+	withDataDir(cmdUnwindOtsWithdrawals)
+	withChain(cmdUnwindOtsWithdrawals)
+	withUnwind(cmdUnwindOtsWithdrawals)
+	rootCmd.AddCommand(cmdUnwindOtsWithdrawals)
+
 	withDataDir(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
 
@@ -1502,6 +1948,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	cfg.Dirs = datadir.New(datadirCli)
 	allSn, _, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
+	cfg.Ots2 = true
 
 	blockReader, blockWriter := blocksIO(db, logger)
 	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)

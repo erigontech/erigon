@@ -1,3 +1,45 @@
+# Otterscan v2.1.0-alpha enabled Erigon
+
+This branch contains the experimental version of Erigon with Otterscan API **v2.1.0-alpha**.
+
+Compatibility:
+
+- Erigon v2.49.3
+- Otterscan v2.1.0-alpha
+
+> This version is compatible with v2.0.0-alpha. If you are currently running it, you can just replace the binary as there were no DB model breaking changes. New DB tables will be populated during the first run though.
+
+## Warnings/disclaimers (READ THIS FIRST!!!)
+
+This is an experimental build. Make sure you are aware of the following first:
+
+- Don't use this build on production servers.
+- Make sure you backup your Erigon node before trying this build.
+- This version is made available in source-code form only.
+- DB model will change on next alphas. There will **NOT** be migration scripts. You'll need to restore your original Erigon node from a backup.
+- For now it is compatible with Erigon 2 only, but the end game is to support Erigon 3 only. At some point in the future we may change it.
+- Enabling Otterscan v2 support will produce extra data inside Erigon DB, so you'll need more disk space than a regular Erigon node.
+- At the first run of this patched build, extra stages will produce new indexes from genesis, so there will be extra sync time. Once it reaches the tip, the extra stages will take neglegible time per block iteration.
+- **Alphas were not optimized for space/time (yet). The goal here was to implement the spec for all token/contract indexing support and prove it was doable.**
+
+## How to use it
+
+### Erigon
+
+Build this branch as usual with `make` command.
+
+Add the `--experimental.ots2` CLI argument to the `erigon` command. That'll enable Otterscan V2 extra stages.
+
+Also enable the `ots2` API namespace, i.e., `--http.api "eth,erigon,ots,ots2"`.
+
+### Otterscan
+
+See: https://github.com/otterscan/otterscan/blob/develop/docs/ots2.md
+
+> The rest of this document contains the original Erigon README.
+
+---
+
 # Erigon
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
