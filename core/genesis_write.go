@@ -49,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -231,17 +230,6 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		if err := domains.Flush(ctx, tx); err != nil {
 			return nil, nil, err
 		}
-	} else {
-		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
-			if err := csw.WriteChangeSets(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
-			}
-			if err := csw.WriteHistory(); err != nil {
-				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
-			}
-		}
-	}
-	if ethconfig.EnableHistoryV4InTest {
 		ww := stateWriter.(*state.WriterV4)
 		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
 		if !hasSnap {
@@ -251,6 +239,15 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 			}
 			if !bytes.Equal(rh, block.Root().Bytes()) {
 				fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
+			}
+		}
+	} else {
+		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
+			if err := csw.WriteChangeSets(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
+			}
+			if err := csw.WriteHistory(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 			}
 		}
 	}
