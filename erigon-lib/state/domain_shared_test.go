@@ -24,11 +24,8 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac)
+	domains := agg.SharedDomains(ac, rwTx)
 	defer domains.Close()
-	defer domains.StartWrites().FinishWrites()
-
-	domains.SetTx(rwTx)
 
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
@@ -44,9 +41,9 @@ Loop:
 	defer rwTx.Rollback()
 
 	ac = agg.MakeContext()
-	domains = agg.SharedDomains(ac)
-	domains.StartWrites()
-	domains.SetTx(rwTx)
+	defer ac.Close()
+	domains = agg.SharedDomains(ac, rwTx)
+	defer domains.Close()
 
 	i := 0
 	k0 := make([]byte, length.Addr)

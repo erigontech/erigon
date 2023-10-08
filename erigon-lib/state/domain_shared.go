@@ -70,7 +70,7 @@ type SharedDomains struct {
 	TracesFrom *InvertedIndex
 }
 
-func NewSharedDomains(ac *AggregatorV3Context) *SharedDomains {
+func NewSharedDomains(ac *AggregatorV3Context, tx kv.Tx) *SharedDomains {
 	sd := &SharedDomains{
 		aggCtx: ac,
 
@@ -87,6 +87,7 @@ func NewSharedDomains(ac *AggregatorV3Context) *SharedDomains {
 		TracesFrom: ac.a.tracesFrom,
 		LogAddrs:   ac.a.logAddrs,
 		LogTopics:  ac.a.logTopics,
+		roTx:       tx,
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
@@ -500,7 +501,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
-	err = sd.IterateStoragePrefix(sd.roTx, addr, func(k, v []byte) {
+	err = sd.IterateStoragePrefix(addr, func(k, v []byte) {
 		tombs = append(tombs, pair{k, v})
 	})
 	if err != nil {
@@ -645,7 +646,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
-func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte)) error {
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()
 
@@ -668,6 +669,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		}
 	}
 
+	roTx := sd.roTx
 	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
 	if err != nil {
 		return err
@@ -771,11 +773,15 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 }
 
 func (sd *SharedDomains) Close() {
-	//sd.FinishWrites()
+	sd.FinishWrites()
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
 	sd.commitment = nil
+	sd.LogAddrs = nil
+	sd.LogTopics = nil
+	sd.TracesFrom = nil
+	sd.TracesTo = nil
 }
 
 // StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`

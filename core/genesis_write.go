@@ -201,9 +201,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
-		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
+		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
+		defer domains.Close()
+		stateWriter = state.NewWriterV4(domains)
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {

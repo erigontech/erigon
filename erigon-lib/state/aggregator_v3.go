@@ -315,25 +315,8 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
-func (a *AggregatorV3) CloseSharedDomains() {
-	if a.domains != nil {
-		a.domains.FinishWrites()
-		a.domains.SetTx(nil)
-		a.domains.Close()
-		a.domains = nil
-	}
-}
-func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
-	/*
-		if a.domains == nil {
-			a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
-			a.domains.SetInvertedIndices(a.tracesTo, a.tracesFrom, a.logAddrs, a.logTopics)
-			a.domains.StartWrites()
-		}
-		a.domains.SetContext(ac)
-		return a.domains
-	*/
-	domains := NewSharedDomains(ac)
+func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context, tx kv.Tx) *SharedDomains {
+	domains := NewSharedDomains(ac, tx)
 	domains.StartWrites()
 	return domains
 }
@@ -775,19 +758,6 @@ func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
 		return a.db.View(ctx, func(tx kv.Tx) error { return a.tracesTo.warmup(ctx, txFrom, limit, tx) })
 	})
 	return e.Wait()
-}
-
-func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
-	if a.domains == nil {
-		a.SharedDomains(a.MakeContext())
-	}
-	a.domains.StartUnbufferedWrites()
-	return a
-}
-func (a *AggregatorV3) FinishWrites() {
-	if a.domains != nil {
-		a.domains.FinishWrites()
-	}
 }
 
 type flusher interface {

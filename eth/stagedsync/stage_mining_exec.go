@@ -94,9 +94,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	)
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
 		defer domains.Close()
-		stateWriter = state.NewWriterV4(tx.(*temporal.Tx), domains)
+		stateWriter = state.NewWriterV4(domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 	} else {
 		stateReader = state.NewPlainStateReader(tx)

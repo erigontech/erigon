@@ -136,9 +136,8 @@ func TestExec(t *testing.T) {
 
 func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 
-	domains := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
-	domains.SetTx(tx)
-	domains.StartWrites()
+	domains := agg.SharedDomains(tx.(*temporal.Tx).AggCtx(), tx)
+	defer domains.Close()
 
 	rs := state.NewStateV3(domains, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)

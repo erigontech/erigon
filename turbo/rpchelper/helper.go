@@ -154,8 +154,8 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		return state.NewWriterV4(tx.(*temporal.Tx), domains)
+		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
+		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }

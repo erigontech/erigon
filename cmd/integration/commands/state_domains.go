@@ -113,12 +113,11 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
-
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
+	domains := agg.SharedDomains(ac, stateTx)
+	defer agg.Close()
 
 	domains.SetTx(stateTx)
 

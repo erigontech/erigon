@@ -267,9 +267,8 @@ func ExecV3(ctx context.Context,
 	var err error
 
 	// MA setio
-	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
-	defer cfg.agg.CloseSharedDomains()
-	doms.SetTx(applyTx)
+	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx(), applyTx)
+	defer doms.Close()
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
 			doms.DiscardHistory()

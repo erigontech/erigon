@@ -326,11 +326,9 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	agg := tx.(*temporal.Tx).Agg()
 	ac := tx.(*temporal.Tx).AggCtx()
 
-	domains := agg.SharedDomains(ac)
-	defer agg.CloseSharedDomains()
+	domains := agg.SharedDomains(ac, tx)
+	defer domains.Close()
 	rs := state.NewStateV3(domains, logger)
-	defer domains.StartWrites().FinishWrites()
-	domains.SetTx(tx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)

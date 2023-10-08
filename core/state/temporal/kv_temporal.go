@@ -207,7 +207,7 @@ func (tx *Tx) autoClose(mdbxTx *mdbx.MdbxTx) {
 		closer.Close()
 	}
 	if !mdbxTx.IsRo() {
-		tx.db.agg.FinishWrites()
+		//tx.db.agg.FinishWrites()
 		//tx.db.agg.SetTx(nil)
 	}
 	if tx.aggCtx != nil {
