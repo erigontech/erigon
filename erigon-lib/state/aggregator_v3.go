@@ -333,10 +333,8 @@ func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
 		a.domains.SetContext(ac)
 		return a.domains
 	*/
-	domains := NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
-	domains.SetInvertedIndices(a.tracesTo, a.tracesFrom, a.logAddrs, a.logTopics)
+	domains := NewSharedDomains(ac)
 	domains.StartWrites()
-	domains.SetContext(ac)
 	return domains
 }
 
@@ -355,7 +353,7 @@ func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
 func (ac *AggregatorV3Context) Files() (res []string) {
-	res = append(res, ac.accounts.Files()...)
+	res = append(res, ac.account.Files()...)
 	res = append(res, ac.storage.Files()...)
 	res = append(res, ac.code.Files()...)
 	res = append(res, ac.commitment.Files()...)
@@ -406,8 +404,8 @@ func (ac *AggregatorV3Context) buildOptionalMissedIndices(ctx context.Context, w
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	ps := background.NewProgressSet()
-	if ac.accounts != nil {
-		g.Go(func() error { return ac.accounts.BuildOptionalMissedIndices(ctx, ps) })
+	if ac.account != nil {
+		g.Go(func() error { return ac.account.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.storage != nil {
 		g.Go(func() error { return ac.storage.BuildOptionalMissedIndices(ctx, ps) })
@@ -809,7 +807,7 @@ func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
 			cmp.Min(
-				ac.accounts.maxTxNumInFiles(cold),
+				ac.account.maxTxNumInFiles(cold),
 				ac.code.maxTxNumInFiles(cold)),
 			cmp.Min(
 				ac.storage.maxTxNumInFiles(cold),
@@ -888,7 +886,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), /*"limit", limit,
 		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 
-	if err := ac.accounts.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
 	if err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
@@ -921,8 +919,8 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 	}
 
 	histBlockNumProgress := tx2block(ac.maxTxNumInFiles(false))
-	str := make([]string, 0, len(ac.accounts.files))
-	for _, item := range ac.accounts.files {
+	str := make([]string, 0, len(ac.account.files))
+	for _, item := range ac.account.files {
 		bn := tx2block(item.endTxNum)
 		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.aggregationStep, bn/1_000))
 	}
@@ -1058,7 +1056,7 @@ func (r RangesV3) any() bool {
 
 func (ac *AggregatorV3Context) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
-	r.accounts = ac.accounts.findMergeRange(maxEndTxNum, maxSpan)
+	r.accounts = ac.account.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = ac.storage.findMergeRange(maxEndTxNum, maxSpan)
 	r.code = ac.code.findMergeRange(maxEndTxNum, maxSpan)
 	r.commitment = ac.commitment.findMergeRange(maxEndTxNum, maxSpan)
@@ -1121,7 +1119,7 @@ func (sf SelectedStaticFilesV3) Close() {
 
 func (ac *AggregatorV3Context) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
 	if r.accounts.any() {
-		sf.accounts, sf.accountsIdx, sf.accountsHist, sf.accountsI = ac.accounts.staticFilesInRange(r.accounts)
+		sf.accounts, sf.accountsIdx, sf.accountsHist, sf.accountsI = ac.account.staticFilesInRange(r.accounts)
 	}
 	if r.storage.any() {
 		sf.storage, sf.storageIdx, sf.storageHist, sf.storageI = ac.storage.staticFilesInRange(r.storage)
@@ -1412,7 +1410,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:
-		return ac.accounts.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		return ac.account.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.StorageHistoryIdx:
 		return ac.storage.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CodeHistoryIdx:
@@ -1433,7 +1431,7 @@ func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs,
 // -- range end
 
 func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	return ac.accounts.hc.GetNoStateWithRecent(addr, txNum, tx)
+	return ac.account.hc.GetNoStateWithRecent(addr, txNum, tx)
 }
 
 func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
@@ -1454,7 +1452,7 @@ func (ac *AggregatorV3Context) ReadAccountCodeNoStateWithRecent(addr []byte, txN
 	return ac.code.hc.GetNoStateWithRecent(addr, txNum, tx)
 }
 func (ac *AggregatorV3Context) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.accounts.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	return ac.account.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
 func (ac *AggregatorV3Context) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
@@ -1479,7 +1477,7 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 //   - other will not see "partial writes" or "new files appearance"
 type AggregatorV3Context struct {
 	a          *AggregatorV3
-	accounts   *DomainContext
+	account    *DomainContext
 	storage    *DomainContext
 	code       *DomainContext
 	commitment *DomainContext
@@ -1495,7 +1493,7 @@ type AggregatorV3Context struct {
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 	ac := &AggregatorV3Context{
 		a:          a,
-		accounts:   a.accounts.MakeContext(),
+		account:    a.accounts.MakeContext(),
 		storage:    a.storage.MakeContext(),
 		code:       a.code.MakeContext(),
 		commitment: a.commitment.MakeContext(),
@@ -1515,7 +1513,7 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	switch domain {
 	case kv.AccountsDomain:
-		return ac.accounts.DomainRange(tx, fromKey, toKey, ts, asc, limit)
+		return ac.account.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	case kv.StorageDomain:
 		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	case kv.CodeDomain:
@@ -1529,7 +1527,7 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
 	case kv.AccountsDomain:
-		return ac.accounts.DomainRangeLatest(tx, from, to, limit)
+		return ac.account.DomainRangeLatest(tx, from, to, limit)
 	case kv.StorageDomain:
 		return ac.storage.DomainRangeLatest(tx, from, to, limit)
 	case kv.CodeDomain:
@@ -1544,7 +1542,7 @@ func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, fro
 func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsDomain:
-		v, err := ac.accounts.GetAsOf(key, ts, tx)
+		v, err := ac.account.GetAsOf(key, ts, tx)
 		return v, v != nil, err
 	case kv.StorageDomain:
 		v, err := ac.storage.GetAsOf(key, ts, tx)
@@ -1562,7 +1560,7 @@ func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byt
 func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:
-		return ac.accounts.GetLatest(k, k2, tx)
+		return ac.account.GetLatest(k, k2, tx)
 	case kv.StorageDomain:
 		return ac.storage.GetLatest(k, k2, tx)
 	case kv.CodeDomain:
@@ -1583,7 +1581,7 @@ func (ac *AggregatorV3Context) Close() {
 	ac.a.leakDetector.Del(ac.id)
 	ac.a = nil
 
-	ac.accounts.Close()
+	ac.account.Close()
 	ac.storage.Close()
 	ac.code.Close()
 	ac.commitment.Close()

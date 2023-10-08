@@ -41,8 +41,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	defer domCtx.Close()
 	domains := agg.SharedDomains(domCtx)
 	defer domains.Close()
-	domains.StartWrites()
-
 	domains.SetTx(rwTx)
 
 	txs := uint64(100000)
