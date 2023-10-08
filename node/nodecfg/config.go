@@ -155,10 +155,9 @@ type Config struct {
 
 	TLSConnection bool
 	TLSCertFile   string
-	// AllowUnprotectedTxs allows non EIP-155 protected transactions to be send over RPC.
-	AllowUnprotectedTxs bool `toml:",omitempty"`
-	TLSKeyFile          string
-	TLSCACert           string
+
+	TLSKeyFile string
+	TLSCACert  string
 
 	MdbxPageSize    datasize.ByteSize
 	MdbxDBSizeLimit datasize.ByteSize
