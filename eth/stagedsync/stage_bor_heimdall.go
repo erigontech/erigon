@@ -553,7 +553,6 @@ func persistValidatorSets(
 					}
 				}
 				u.UnwindTo(snap.Number, badHash)
-				logger.Error("Hey", "number", snap.Number, "badHash", badHash, "err", err)
 			} else {
 				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
 			}
