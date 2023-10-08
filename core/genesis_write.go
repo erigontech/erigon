@@ -200,7 +200,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 
-	if ethconfig.EnableHistoryV4InTest {
+	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
 		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac)
 		defer tx.(*temporal.Tx).Agg().CloseSharedDomains()
