@@ -48,7 +48,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	txnChainId := txn.GetChainID()
 	chainId := cc.ChainID
 
-	if (txn.Protected() || !api.AllowUnprotectedTxs) && chainId.Cmp(txnChainId.ToBig()) != 0 {
+	if txn.Protected() && chainId.Cmp(txnChainId.ToBig()) != 0 {
 		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 	}
 
