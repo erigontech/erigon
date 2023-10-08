@@ -599,20 +599,20 @@ func (d *Domain) Close() {
 	d.reCalcRoFiles()
 }
 
-func (d *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
+func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	if err := d.d.History.AddPrevValue(key1, key2, preval); err != nil {
+	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-	return d.d.wal.addValue(key1, key2, val)
+	return dc.d.wal.addValue(key1, key2, val)
 }
 
-func (d *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
+func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-	if err := d.d.History.AddPrevValue(key1, key2, prev); err != nil {
+	if err := dc.hc.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
-	return d.d.wal.addValue(key1, key2, nil)
+	return dc.d.wal.addValue(key1, key2, nil)
 }
 
 func (d *Domain) update(key []byte, tx kv.RwTx) error {
@@ -650,7 +650,7 @@ func (d *Domain) Put(key1, key2, val []byte, tx kv.RwTx) error {
 		return nil
 	}
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
+	if err = dc.hc.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
 	return d.put(key, val, tx)

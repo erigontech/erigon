@@ -421,11 +421,11 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	return nil
 }
 
-func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
+func (h *HistoryContext) AddPrevValue(key1, key2, original []byte) (err error) {
 	if original == nil {
 		original = []byte{}
 	}
-	return h.wal.addPrevValue(key1, key2, original)
+	return h.h.wal.addPrevValue(key1, key2, original)
 }
 
 func (h *History) DiscardHistory() {
