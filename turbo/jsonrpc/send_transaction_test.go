@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -75,6 +76,9 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 }
 
 func TestSendRawTransaction(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
@@ -116,6 +120,9 @@ func TestSendRawTransaction(t *testing.T) {
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
