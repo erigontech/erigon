@@ -212,7 +212,7 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error)
 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
 
 	if signerIndex == -1 {
-		return -1, &UnauthorizedSignerError{s.Number + 1, signer.Bytes()}
+		return -1, &UnauthorizedSignerError{s.Number, signer.Bytes()}
 	}
 
 	tempIndex := signerIndex

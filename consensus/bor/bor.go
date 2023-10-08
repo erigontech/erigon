@@ -871,7 +871,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 
 	if !snap.ValidatorSet.HasAddress(signer) {
 		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number, signer.Bytes()}
+		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
 	}
 
 	succession, err := snap.GetSignerSuccessionNumber(signer)
