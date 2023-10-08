@@ -126,13 +126,11 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
-			logger.Error("out of range", "header", headers[0].Number.Uint64(), "parent", headers[i].Number.Uint64())
 			return nil, errOutOfRangeChain
 		}
 	}
 
 	if headers[0].Number.Uint64() != s.Number+1 {
-		logger.Error("out of range", "header", headers[0].Number.Uint64(), "snapshot", s.Number)
 		return nil, errOutOfRangeChain
 	}
 	// Iterate through the headers and create a new snapshot

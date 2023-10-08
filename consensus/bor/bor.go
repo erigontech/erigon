@@ -166,7 +166,6 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 	var signer libcommon.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
-	//log.Info(fmt.Sprintf("put to cache %d %x=>%x\n", header.Number.Uint64(), hash, signer))
 	sigcache.Add(hash, signer)
 
 	return signer, nil
@@ -1134,7 +1133,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	// Bail out if we're unauthorized to sign a block
 	if !snap.ValidatorSet.HasAddress(signer) {
 		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number, signer.Bytes()}
+		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
 	}
 
 	successionNumber, err := snap.GetSignerSuccessionNumber(signer)
