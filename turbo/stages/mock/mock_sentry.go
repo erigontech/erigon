@@ -463,7 +463,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, nil, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, histV3, false)
+	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3, false)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -673,16 +673,20 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	if err := wr.InsertBlocksAndWait(chain.Blocks); err != nil {
 		return err
 	}
-	vRes, err := ms.Eth1ExecutionService.ValidateChain(ms.Ctx, &execution.ValidationRequest{
-		Hash:   gointerfaces.ConvertHashToH256(chain.Blocks[chain.Length()-1].Hash()),
-		Number: chain.Blocks[chain.Length()-1].NumberU64(),
-	})
+
+	tipHash := chain.TopBlock.Hash()
+
+	status, lvh, err := wr.UpdateForkChoice(tipHash, tipHash, tipHash)
+
 	if err != nil {
 		return err
 	}
-	wr.UpdateForkChoice(gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash), gointerfaces.ConvertH256ToHash(vRes.LatestValidHash))
-	if vRes.ValidationStatus != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), vRes.ValidationStatus.String())
+	ms.DB.Update(ms.Ctx, func(tx kv.RwTx) error {
+		rawdb.WriteHeadBlockHash(tx, lvh)
+		return nil
+	})
+	if status != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
 	return nil

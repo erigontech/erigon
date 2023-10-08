@@ -127,6 +127,13 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	defer ticker.Stop()
 
 	for {
+		defer func() {
+			r := recover()
+			if r != nil {
+				log.Warn(fmt.Sprintf("service %s- run failed with panic", fnName), "err", r)
+			}
+		}()
+
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -176,6 +183,7 @@ func handleMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClien
 	// add that milestone to the future milestone list.
 	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
 		service.ProcessFutureMilestone(num, hash)
+		return nil
 	}
 
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
