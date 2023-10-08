@@ -38,6 +38,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+const PendingBlockNumber int64 = -2
+
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
@@ -249,7 +251,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 // getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
 func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
-	return blockNum.IsInt64() && blockNum.Int64() >= -2
+	return blockNum.IsInt64() && blockNum.Int64() >= PendingBlockNumber
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
