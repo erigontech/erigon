@@ -1425,11 +1425,12 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 	return fs
 }
 
-// AggregatorV3Context guarantee consistent View of files:
+// AggregatorV3Context guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
 //   - protecting useful files from removal
-//   - other will not see "partial writes" or "new files appearance"
+//   - user will not see "partial writes" or "new files appearance"
+//   - last reader removing garbage files inside `Close` method
 type AggregatorV3Context struct {
 	a          *AggregatorV3
 	account    *DomainContext
