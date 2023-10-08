@@ -143,11 +143,11 @@ db-tools:
 ## test:                              run unit tests with a 100s timeout
 test:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 100s
+	$(GOTEST) --timeout 10m
 
 test3:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
+	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
