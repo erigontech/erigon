@@ -396,6 +396,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		TraceCompatibility:   ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs:  ctx.Bool(utils.AllowUnprotectedTxs.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 
