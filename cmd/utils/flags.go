@@ -1195,11 +1195,10 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.IsSet(DataDirFlag.Name) {
-		cfg.Dirs.DataDir = ctx.String(DataDirFlag.Name)
+		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
-		cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, ctx.String(ChainFlag.Name))
+		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
-	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
@@ -1220,13 +1219,10 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 		panic(err)
 	}
 	if dirname != "" {
-		cfg.Dirs.DataDir = dirname
+		cfg.Dirs = datadir.New(dirname)
 	} else {
-		cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, chain)
+		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), chain))
 	}
-
-	cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, chain)
-	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 }
 
 func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
