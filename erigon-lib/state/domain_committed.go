@@ -307,21 +307,21 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-func (d *DomainCommitted) storeCommitmentState(aggCtx *AggregatorV3Context, blockNum uint64, rh []byte) error {
+func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint64, rh []byte) error {
 	state, err := d.PatriciaState()
 	if err != nil {
 		return err
 	}
-	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
+	cs := &commitmentState{txNum: dc.hc.ic.txNum, trieState: state, blockNum: blockNum}
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
 	}
 
 	if d.trace {
-		fmt.Printf("[commitment] put txn %d block %d rh %x\n", d.txNum, blockNum, rh)
+		fmt.Printf("[commitment] put txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
 	}
-	if err := aggCtx.commitment.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
+	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}
 	d.prevState = common.Copy(encoded)

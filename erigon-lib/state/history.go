@@ -552,18 +552,18 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	//	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
 	//}()
 
-	ii := h.hc.ic
+	ic := h.hc.ic
 
 	if h.largeValues {
 		lk := len(key1) + len(key2)
 
-		h.historyKey = append(append(append(h.historyKey[:0], key1...), key2...), h.hc.h.InvertedIndex.txNumBytes[:]...)
+		h.historyKey = append(append(append(h.historyKey[:0], key1...), key2...), ic.txNumBytes[:]...)
 		historyKey := h.historyKey[:lk+8]
 
 		if err := h.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
-		if err := ii.wal.indexKeys.Collect(ii.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+		if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], historyKey[:lk]); err != nil {
 			return err
 		}
 		return nil
@@ -574,7 +574,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	}
 
 	lk := len(key1) + len(key2)
-	h.historyKey = append(append(append(append(h.historyKey[:0], key1...), key2...), h.hc.h.InvertedIndex.txNumBytes[:]...), original...)
+	h.historyKey = append(append(append(append(h.historyKey[:0], key1...), key2...), ic.txNumBytes[:]...), original...)
 	historyKey := h.historyKey[:lk+8+len(original)]
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
@@ -583,7 +583,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
-	if err := ii.wal.indexKeys.Collect(ii.ii.txNumBytes[:], invIdxVal); err != nil {
+	if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], invIdxVal); err != nil {
 		return err
 	}
 	return nil
@@ -1204,6 +1204,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
+func (hc *HistoryContext) SetTxNum(v uint64) { hc.ic.SetTxNum(v) }
 func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }

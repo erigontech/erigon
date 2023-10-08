@@ -82,9 +82,7 @@ type InvertedIndex struct {
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
 	// fields for history write
-	txNum      uint64
-	txNumBytes [8]byte
-	logger     log.Logger
+	logger log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
@@ -539,9 +537,9 @@ func (ic *InvertedIndexContext) Files() (res []string) {
 
 func (ii *InvertedIndex) SetTx(tx kv.Tx) { ii.tx = tx }
 
-func (ii *InvertedIndex) SetTxNum(txNum uint64) {
-	ii.txNum = txNum
-	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
+func (ic *InvertedIndexContext) SetTxNum(txNum uint64) {
+	ic.txNum = txNum
+	binary.BigEndian.PutUint64(ic.txNumBytes[:], ic.txNum)
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
@@ -558,9 +556,11 @@ func (ic *InvertedIndexContext) StartWrites() {
 func (ic *InvertedIndexContext) StartUnbufferedWrites() {
 	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, false, false)
 }
-func (ii *InvertedIndexContext) FinishWrites() {
-	ii.wal.close()
-	ii.wal = nil
+func (ic *InvertedIndexContext) FinishWrites() {
+	if ic.wal != nil {
+		ic.wal.close()
+		ic.wal = nil
+	}
 }
 
 func (ic *InvertedIndexContext) Rotate() *invertedIndexWAL {
@@ -649,10 +649,10 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-	if err := ii.indexKeys.Collect(ii.ic.ii.txNumBytes[:], key); err != nil {
+	if err := ii.indexKeys.Collect(ii.ic.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := ii.index.Collect(indexKey, ii.ic.ii.txNumBytes[:]); err != nil {
+	if err := ii.index.Collect(indexKey, ii.ic.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil
@@ -706,7 +706,9 @@ type InvertedIndexContext struct {
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
-	wal *invertedIndexWAL
+	wal        *invertedIndexWAL
+	txNum      uint64
+	txNumBytes [8]byte
 
 	warmLocality *ctxLocalityIdx
 	coldLocality *ctxLocalityIdx

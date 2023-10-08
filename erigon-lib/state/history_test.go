@@ -88,15 +88,15 @@ func TestHistoryCollationBuild(t *testing.T) {
 		hc.StartWrites()
 		defer hc.FinishWrites()
 
-		h.SetTxNum(2)
+		hc.SetTxNum(2)
 		err = hc.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(3)
+		hc.SetTxNum(3)
 		err = hc.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(6)
+		hc.SetTxNum(6)
 		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
@@ -104,7 +104,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		flusher := hc.Rotate()
 
-		h.SetTxNum(7)
+		hc.SetTxNum(7)
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
 		require.NoError(err)
 		err = hc.AddPrevValue([]byte("key3"), nil, nil)
@@ -202,21 +202,21 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.StartWrites()
 		defer hc.FinishWrites()
 
-		h.SetTxNum(2)
+		hc.SetTxNum(2)
 		err = hc.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(3)
+		hc.SetTxNum(3)
 		err = hc.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(6)
+		hc.SetTxNum(6)
 		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		h.SetTxNum(7)
+		hc.SetTxNum(7)
 		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
 		require.NoError(err)
 		err = hc.AddPrevValue([]byte("key3"), nil, nil)
@@ -281,7 +281,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	var prevVal [32][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		h.SetTxNum(txNum)
+		hc.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
 				valNum := txNum / keyNum
@@ -474,10 +474,12 @@ func TestHistoryScanFiles(t *testing.T) {
 		require := require.New(t)
 
 		collateAndMergeHistory(t, db, h, txs)
+		hc := h.MakeContext()
+		defer hc.Close()
 		// Recreate domain and re-scan the files
-		txNum := h.txNum
+		txNum := hc.ic.txNum
 		require.NoError(h.OpenFolder())
-		h.SetTxNum(txNum)
+		hc.SetTxNum(txNum)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}

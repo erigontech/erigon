@@ -614,26 +614,26 @@ func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return dc.wal.addValue(key1, key2, nil)
 }
 
-func (d *Domain) update(key []byte, tx kv.RwTx) error {
+func (d *DomainContext) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
+	binary.BigEndian.PutUint64(invertedStep[:], ^(d.hc.ic.txNum / d.d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(d.d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *Domain) put(key, val []byte, tx kv.RwTx) error {
+func (d *DomainContext) put(key, val []byte, tx kv.RwTx) error {
 	if err := d.update(key, tx); err != nil {
 		return err
 	}
-	invertedStep := ^(d.txNum / d.aggregationStep)
+	invertedStep := ^(d.hc.ic.txNum / d.d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(d.valsTable, keySuffix, val)
+	return tx.Put(d.d.valsTable, keySuffix, val)
 }
 
 // Deprecated
@@ -650,7 +650,7 @@ func (d *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
 	if err = d.hc.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	return d.d.put(key, val, tx)
+	return d.put(key, val, tx)
 }
 
 // Deprecated
@@ -665,6 +665,8 @@ func (d *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	}
 	return d.DeleteWithPrev(key1, key2, original)
 }
+
+func (dc *DomainContext) SetTxNum(v uint64) { dc.hc.SetTxNum(v) }
 
 func (dc *DomainContext) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	if !buffered {
@@ -752,7 +754,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	d.aux = append(append(d.aux[:0], key1...), key2...)
 	fullkey := d.aux[:kl+8]
 	//TODO: we have ii.txNumBytes, need also have d.stepBytes. update it at d.SetTxNum()
-	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.d.txNum / d.dc.d.aggregationStep))
+	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
 	// defer func() {
 	// 	fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
 	// }()
@@ -1466,7 +1468,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 		case 1: // its value should be nil, actual value is in domain, BUT if txNum exactly match, need to restore
 			//fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
 			if edgeRecords[0].TxNum == txFrom && edgeRecords[0].Value != nil {
-				d.SetTxNum(edgeRecords[0].TxNum)
+				dc.SetTxNum(edgeRecords[0].TxNum)
 				if err := restore.addValue(k, nil, edgeRecords[0].Value); err != nil {
 					return err
 				}
@@ -1476,7 +1478,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 		case 2: // here one first value is before txFrom (holds txNum when value was set) and second is after (actual value at that txNum)
 			l, r := edgeRecords[0], edgeRecords[1]
 			if r.TxNum >= txFrom /*&& l.TxNum < txFrom*/ && r.Value != nil {
-				d.SetTxNum(l.TxNum)
+				dc.SetTxNum(l.TxNum)
 				if err := restore.addValue(k, nil, r.Value); err != nil {
 					return err
 				}

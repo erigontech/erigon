@@ -846,11 +846,11 @@ Loop:
 							return err
 						}
 					}
-					doms.StartWrites()
 					applyWorker.ResetTx(applyTx)
 					nc := applyTx.(*temporal.Tx).AggCtx()
 					doms.SetTx(applyTx)
 					doms.SetContext(nc)
+					doms.StartWrites()
 
 					return nil
 				}(); err != nil {

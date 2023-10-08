@@ -73,21 +73,21 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	ic.StartWrites()
 	defer ic.FinishWrites()
 
-	ii.SetTxNum(2)
+	ic.SetTxNum(2)
 	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(3)
+	ic.SetTxNum(3)
 	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(6)
+	ic.SetTxNum(6)
 	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(17)
+	ic.SetTxNum(17)
 	err = ic.Add([]byte("key10"))
 	require.NoError(t, err)
 
@@ -157,15 +157,15 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	ic.StartWrites()
 	defer ic.FinishWrites()
 
-	ii.SetTxNum(2)
+	ic.SetTxNum(2)
 	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(3)
+	ic.SetTxNum(3)
 	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(6)
+	ic.SetTxNum(6)
 	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 	err = ic.Add([]byte("key3"))
@@ -247,7 +247,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		ii.SetTxNum(txNum)
+		ic.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= module; keyNum++ {
 			if txNum%keyNum == 0 {
 				var k [8]byte

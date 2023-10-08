@@ -579,14 +579,14 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	}
 
 	sd.txNum.Store(txNum)
-	sd.Account.SetTxNum(txNum)
-	sd.Code.SetTxNum(txNum)
-	sd.Storage.SetTxNum(txNum)
-	sd.Commitment.SetTxNum(txNum)
-	sd.TracesTo.SetTxNum(txNum)
-	sd.TracesFrom.SetTxNum(txNum)
-	sd.LogAddrs.SetTxNum(txNum)
-	sd.LogTopics.SetTxNum(txNum)
+	sd.aggCtx.account.SetTxNum(txNum)
+	sd.aggCtx.code.SetTxNum(txNum)
+	sd.aggCtx.storage.SetTxNum(txNum)
+	sd.aggCtx.commitment.SetTxNum(txNum)
+	sd.aggCtx.tracesTo.SetTxNum(txNum)
+	sd.aggCtx.tracesFrom.SetTxNum(txNum)
+	sd.aggCtx.logAddrs.SetTxNum(txNum)
+	sd.aggCtx.logTopics.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
@@ -642,7 +642,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	}
 
 	if saveStateAfter {
-		if err := sd.Commitment.storeCommitmentState(sd.aggCtx, sd.blockNum.Load(), rootHash); err != nil {
+		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash); err != nil {
 			return nil, err
 		}
 	}
