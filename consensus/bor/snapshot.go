@@ -8,7 +8,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -160,7 +159,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 		// check if signer is in validator set
 		if !snap.ValidatorSet.HasAddress(signer) {
-			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
 		}
 		if succession, err = snap.GetSignerSuccessionNumber(signer); err != nil {
 			return snap, err
@@ -190,13 +189,12 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		}
 
 		if number > 64 && !validSigner {
-			return snap, &UnauthorizedSignerError{header.Hash(), number, signer.Bytes()}
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
 		}
 		parent = header
+		snap.Number = number
+		snap.Hash = header.Hash()
 	}
-
-	snap.Number += uint64(len(headers))
-	snap.Hash = headers[len(headers)-1].Hash()
 
 	return snap, nil
 }
@@ -214,7 +212,7 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error)
 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
 
 	if signerIndex == -1 {
-		return -1, &UnauthorizedSignerError{libcommon.Hash{}, s.Number + 1, signer.Bytes()}
+		return -1, &UnauthorizedSignerError{s.Number + 1, signer.Bytes()}
 	}
 
 	tempIndex := signerIndex

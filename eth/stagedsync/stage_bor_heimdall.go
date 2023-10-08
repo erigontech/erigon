@@ -11,6 +11,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -543,8 +544,16 @@ func persistValidatorSets(
 	if len(headers) > 0 {
 		var err error
 		if snap, err = snap.Apply(parent, headers, logger); err != nil {
-			if signErr, ok := err.(*bor.UnauthorizedSignerError); ok {
-				u.UnwindTo(signErr.Number-1, signErr.Hash)
+			if snap != nil {
+				var badHash common.Hash
+				for _, header := range headers {
+					if header.Number.Uint64() == snap.Number+1 {
+						badHash = header.Hash()
+						break
+					}
+				}
+				u.UnwindTo(snap.Number, badHash)
+				logger.Error("Hey", "number", snap.Number, "badHash", badHash, "err", err)
 			} else {
 				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
 			}

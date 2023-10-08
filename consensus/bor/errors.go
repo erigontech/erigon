@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 )
 
@@ -68,7 +67,6 @@ func (e *UnauthorizedProposerError) Error() string {
 
 // UnauthorizedSignerError is returned if a header is [being] signed by an unauthorized entity.
 type UnauthorizedSignerError struct {
-	Hash   libcommon.Hash
 	Number uint64
 	Signer []byte
 }
