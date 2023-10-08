@@ -315,12 +315,6 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
-func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context, tx kv.Tx) *SharedDomains {
-	domains := NewSharedDomains(ac, tx)
-	domains.StartWrites()
-	return domains
-}
-
 func (a *AggregatorV3) SetCompressWorkers(i int) {
 	a.accounts.compressWorkers = i
 	a.storage.compressWorkers = i

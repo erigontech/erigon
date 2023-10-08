@@ -10,6 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
@@ -93,8 +94,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		stateWriter state.WriterWithChangeSets
 	)
 	if histV3 {
-		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
+		domains := state2.NewSharedDomains(tx.(*temporal.Tx).AggCtx(), tx)
 		defer domains.Close()
 		stateWriter = state.NewWriterV4(domains)
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))

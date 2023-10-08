@@ -91,6 +91,7 @@ func NewSharedDomains(ac *AggregatorV3Context, tx kv.Tx) *SharedDomains {
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+	sd.StartWrites()
 	return sd
 }
 

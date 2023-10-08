@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -154,7 +155,7 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
+		domains := state2.NewSharedDomains(ac, tx)
 		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)

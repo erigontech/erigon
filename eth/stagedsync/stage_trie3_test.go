@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -48,7 +49,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}
 
 	ac := agg.MakeContext()
-	domains := agg.SharedDomains(ac)
+	domains := state.NewSharedDomains(ac)
 	domains.SetTx(tx)
 
 	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)

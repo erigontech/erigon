@@ -39,7 +39,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
-	domains := agg.SharedDomains(domCtx, rwTx)
+	domains := NewSharedDomains(domCtx, rwTx)
 	defer domains.Close()
 
 	txs := uint64(100000)
@@ -174,7 +174,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := agg.SharedDomains(domCtx, tx)
+	domains := NewSharedDomains(domCtx, tx)
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
@@ -246,7 +246,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
-	dom2 := anotherAgg.SharedDomains(ac2, tx)
+	dom2 := NewSharedDomains(ac2, tx)
 	defer dom2.Close()
 
 	_, err = dom2.SeekCommitment(ctx, rwTx, 0, 1<<63-1)
@@ -289,7 +289,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}()
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
-	domains := agg.SharedDomains(domCtx, tx)
+	domains := NewSharedDomains(domCtx, tx)
 	defer domains.Close()
 
 	txs := aggStep * 5
@@ -357,7 +357,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ac := newAgg.MakeContext()
 	defer ac.Close()
-	newDoms := newAgg.SharedDomains(ac, newTx)
+	newDoms := NewSharedDomains(ac, newTx)
 	defer newDoms.Close()
 
 	_, err = newDoms.SeekCommitment(ctx, newTx, 0, 1<<63-1)
@@ -410,7 +410,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 	ct := agg.MakeContext()
 	defer ct.Close()
-	domains := agg.SharedDomains(ct, tx)
+	domains := NewSharedDomains(ct, tx)
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
@@ -423,7 +423,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
 		ct = agg.MakeContext()
-		domains = agg.SharedDomains(ct, tx)
+		domains = NewSharedDomains(ct, tx)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
 	}
@@ -676,7 +676,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains := agg.SharedDomains(mc2, rwTx)
+	domains := NewSharedDomains(mc2, rwTx)
 	defer domains.Close()
 
 	keys, vals := generateInputData(t, 20, 16, 10)

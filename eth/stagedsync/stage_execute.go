@@ -323,10 +323,9 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	agg := tx.(*temporal.Tx).Agg()
 	ac := tx.(*temporal.Tx).AggCtx()
 
-	domains := agg.SharedDomains(ac, tx)
+	domains := libstate.NewSharedDomains(ac, tx)
 	defer domains.Close()
 	rs := state.NewStateV3(domains, logger)
 

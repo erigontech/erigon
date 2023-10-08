@@ -24,7 +24,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac, rwTx)
+	domains := NewSharedDomains(ac, rwTx)
 	defer domains.Close()
 
 	maxTx := stepSize
@@ -42,7 +42,7 @@ Loop:
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	domains = agg.SharedDomains(ac, rwTx)
+	domains = NewSharedDomains(ac, rwTx)
 	defer domains.Close()
 
 	i := 0

@@ -201,7 +201,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 
 	if histV3 {
 		ac := tx.(*temporal.Tx).AggCtx()
-		domains = tx.(*temporal.Tx).Agg().SharedDomains(ac, tx)
+		domains = state2.NewSharedDomains(ac, tx)
 		defer domains.Close()
 		stateWriter = state.NewWriterV4(domains)
 	} else {

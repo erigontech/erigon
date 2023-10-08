@@ -329,10 +329,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if histV3 {
-		agg := tx.(*temporal.Tx).Agg()
 		ac := tx.(*temporal.Tx).AggCtx()
-
-		domains = agg.SharedDomains(ac, tx)
+		domains = state2.NewSharedDomains(ac, tx)
 		defer domains.Close()
 		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 		if err != nil {

@@ -676,7 +676,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 
-		domains := agg.SharedDomains(ac, tx)
+		domains := libstate.NewSharedDomains(ac, tx)
 		defer domains.Close()
 
 		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
@@ -953,9 +953,15 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			err = v3db.Update(ctx, func(tx kv.RwTx) error {
 				ct := agg.MakeContext()
 				defer ct.Close()
-				doms := agg.SharedDomains(ct, tx)
+				doms := libstate.NewSharedDomains(ct, tx)
 				defer doms.Close()
 				_, err = doms.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+				if err != nil {
+					return err
+				}
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
 				blockNum = doms.BlockNum()
 				return err
 			})

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -116,10 +117,8 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains := agg.SharedDomains(ac, stateTx)
+	domains := state2.NewSharedDomains(ac, stateTx)
 	defer agg.Close()
-
-	domains.SetTx(stateTx)
 
 	r := state.NewReaderV4(stateTx.(*temporal.Tx))
 
