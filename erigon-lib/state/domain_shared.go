@@ -443,7 +443,7 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, account, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
+	return sd.aggCtx.accounts.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
@@ -455,21 +455,21 @@ func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
 	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
-		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
+		return sd.aggCtx.code.DeleteWithPrev(addr, nil, prevCode)
 	}
-	return sd.Code.PutWithPrev(addr, nil, code, prevCode)
+	return sd.aggCtx.code.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data, prev []byte) error {
 	sd.put(kv.CommitmentDomain, string(prefix), data)
-	return sd.Commitment.PutWithPrev(prefix, nil, data, prev)
+	return sd.aggCtx.commitment.PutWithPrev(prefix, nil, data, prev)
 }
 
 func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.Account.DeleteWithPrev(addr, nil, prev); err != nil {
+	if err := sd.aggCtx.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
@@ -481,7 +481,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	if len(pc) > 0 {
 		sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchCode)
 		sd.put(kv.CodeDomain, addrS, nil)
-		if err := sd.Code.DeleteWithPrev(addr, nil, pc); err != nil {
+		if err := sd.aggCtx.code.DeleteWithPrev(addr, nil, pc); err != nil {
 			return err
 		}
 	}
@@ -504,7 +504,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		ks := string(tomb.k)
 		sd.put(kv.StorageDomain, ks, nil)
 		sd.Commitment.TouchPlainKey(ks, nil, sd.Commitment.TouchStorage)
-		err = sd.Storage.DeleteWithPrev(tomb.k, nil, tomb.v)
+		err = sd.aggCtx.storage.DeleteWithPrev(tomb.k, nil, tomb.v)
 		if err != nil {
 			return err
 		}
@@ -522,9 +522,9 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 	sd.Commitment.TouchPlainKey(compositeS, value, sd.Commitment.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
 	if len(value) == 0 {
-		return sd.Storage.DeleteWithPrev(composite, nil, preVal)
+		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
 	}
-	return sd.Storage.PutWithPrev(composite, nil, value, preVal)
+	return sd.aggCtx.storage.PutWithPrev(composite, nil, value, preVal)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -635,7 +635,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	}
 
 	if saveStateAfter {
-		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
+		if err := sd.Commitment.storeCommitmentState(sd.aggCtx, sd.blockNum.Load(), rootHash); err != nil {
 			return nil, err
 		}
 	}
