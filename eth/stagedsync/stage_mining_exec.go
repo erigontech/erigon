@@ -115,7 +115,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		} else {
 
 			yielded := mapset.NewSet[[32]byte]()
-			simulationTx := memdb.NewHashBatch(tx, quit, cfg.tmpdir, logger)
+			simulationTx := membatch.NewHashBatch(tx, quit, cfg.tmpdir, logger)
 			defer simulationTx.Rollback()
 			executionAt, err := s.ExecutionAt(tx)
 			if err != nil {

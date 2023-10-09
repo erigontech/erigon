@@ -16,7 +16,7 @@
 
 //go:build !js
 
-package memdb
+package membatch
 
 import (
 	"bytes"
