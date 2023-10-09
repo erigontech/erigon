@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -42,8 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -140,7 +139,7 @@ func StageExecuteBlocksCfg(
 func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
-	batch ethdb.Database,
+	batch kv.StatelessRwTx,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -206,7 +205,7 @@ func executeBlock(
 }
 
 func newStateReaderWriter(
-	batch ethdb.Database,
+	batch kv.StatelessRwTx,
 	tx kv.RwTx,
 	block *types.Block,
 	writeChangesets bool,
@@ -415,12 +414,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var stoppedErr error
 
-	var batch ethdb.DbWithPendingMutations
+	var batch kv.PendingMutations
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
+	batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
 	// avoids stacking defers within the loop
 	defer func() {
-		batch.Rollback()
+		batch.Close()
 	}()
 
 	var readAhead chan uint64
@@ -508,7 +507,7 @@ Loop:
 		if shouldUpdateProgress {
 			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
 			currentStateGas = 0
-			if err = batch.Commit(); err != nil {
+			if err = batch.Flush(ctx, tx); err != nil {
 				return err
 			}
 			if err = s.Update(tx, stageProgress); err != nil {
@@ -525,7 +524,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
+			batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
 		}
 
 		gas = gas + block.GasUsed()
@@ -543,7 +542,7 @@ Loop:
 	if err = s.Update(batch, stageProgress); err != nil {
 		return err
 	}
-	if err = batch.Commit(); err != nil {
+	if err = batch.Flush(ctx, tx); err != nil {
 		return fmt.Errorf("batch commit: %w", err)
 	}
 
@@ -647,7 +646,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
-	gasState float64, batch ethdb.DbWithPendingMutations, logger log.Logger) (uint64, uint64, time.Time) {
+	gasState float64, batch kv.PendingMutations, logger log.Logger) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
