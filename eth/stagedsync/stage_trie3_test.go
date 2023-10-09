@@ -49,8 +49,9 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}
 
 	ac := agg.MakeContext()
-	domains := state.NewSharedDomains(ac)
-	domains.SetTx(tx)
+	defer ac.Close()
+	domains := state.NewSharedDomains(tx)
+	defer domains.Close()
 
 	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
