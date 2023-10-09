@@ -982,7 +982,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		var err error
 		prevVal, err = sd.DomainGet(domain, k1, k2)
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 	switch domain {
