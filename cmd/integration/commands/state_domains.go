@@ -17,10 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -117,10 +115,10 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains := state2.NewSharedDomains(ac, stateTx)
+	domains := state2.NewSharedDomains(stateTx)
 	defer agg.Close()
 
-	r := state.NewReaderV4(stateTx.(*temporal.Tx))
+	r := state.NewReaderV4(domains)
 
 	_, err = domains.SeekCommitment(ctx, stateTx, 0, math.MaxUint64)
 	if err != nil && startTxNum != 0 {

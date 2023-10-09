@@ -49,8 +49,9 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}
 
 	ac := agg.MakeContext()
-	domains := state.NewSharedDomains(ac)
-	domains.SetTx(tx)
+	defer ac.Close()
+	domains := state.NewSharedDomains(tx)
+	defer domains.Close()
 
 	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
@@ -68,7 +69,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	// start another tx
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer tx.Commit()
+	defer tx.Rollback()
 
 	buckets, err := tx.ListBuckets()
 	require.NoError(t, err)

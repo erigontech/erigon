@@ -35,27 +35,17 @@ const (
 	RO TxFlags = 0x02
 )
 
-// DBGetter wraps the database read operations.
-type DBGetter interface {
-	kv.Getter
-
-	// Get returns the value for a given key if it's present.
-	Get(bucket string, key []byte) ([]byte, error)
-}
-
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
-	DBGetter
+	kv.Getter
 	kv.Putter
 	kv.Deleter
 	kv.Closer
 
-	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	ReadSequence(bucket string) (uint64, error)
-	RwKV() kv.RwDB
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
@@ -80,15 +70,10 @@ type DbWithPendingMutations interface {
 	// ... some calculations on `tx`
 	// tx.Commit()
 	//
-	Commit() error
+	Flush(ctx context.Context, tx kv.RwTx) error
 
 	Rollback()
 	BatchSize() int
-}
-
-type HasRwKV interface {
-	RwKV() kv.RwDB
-	SetRwKV(kv kv.RwDB)
 }
 
 type HasTx interface {

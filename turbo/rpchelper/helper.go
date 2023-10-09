@@ -12,7 +12,6 @@ import (
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/borfinality"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
@@ -154,8 +153,7 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 }
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		ac := tx.(*temporal.Tx).AggCtx()
-		domains := state2.NewSharedDomains(ac, tx)
+		domains := state2.NewSharedDomains(tx)
 		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)

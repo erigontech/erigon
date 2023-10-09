@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -335,21 +336,33 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
+func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	tx, err := kv.BeginRo(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	miningBatch := memdb.NewMemoryBatch(tx, tmpDir)
-	defer miningBatch.Rollback()
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	var miningBatch kv.RwTx
+	if histV3 {
+		sd := state.NewSharedDomains(tx)
+		defer sd.Close()
+		miningBatch = sd
+	} else {
+		mb := memdb.NewMemoryBatch(tx, tmpDir)
+		defer mb.Rollback()
+		miningBatch = mb
+	}
 
 	if err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
 		return err

@@ -23,8 +23,7 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
-	ac := tx.(*temporal.Tx).AggCtx()
-	domains := state.NewSharedDomains(ac, tx)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
 
 	acc := domains.Account.MakeContext()

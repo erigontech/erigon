@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,7 +25,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(ac, rwTx)
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
 
 	maxTx := stepSize
@@ -42,7 +43,7 @@ Loop:
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	domains = NewSharedDomains(ac, rwTx)
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
 
 	i := 0
@@ -57,7 +58,7 @@ Loop:
 			pv, err := domains.LatestAccount(k0)
 			require.NoError(t, err)
 
-			err = domains.UpdateAccountData(k0, v, pv)
+			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv)
 			require.NoError(t, err)
 		}
 

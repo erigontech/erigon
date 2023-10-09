@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -94,9 +93,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		stateWriter state.WriterWithChangeSets
 	)
 	if histV3 {
-		domains := state2.NewSharedDomains(tx.(*temporal.Tx).AggCtx(), tx)
-		defer domains.Close()
-		stateWriter = state.NewWriterV4(domains)
+		//domains := state2.NewSharedDomains(tx)
+		//defer domains.Close()
+		stateWriter = state.NewWriterV4(tx.(kv.TemporalPutDel))
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 	} else {
 		stateReader = state.NewPlainStateReader(tx)
@@ -129,20 +128,21 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		} else {
 
 			yielded := mapset.NewSet[[32]byte]()
-			simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
-			defer simulationTx.Rollback()
+			var simulationTx kv.RwTx
+			var simStateReader state.StateReader
+			if histV3 {
+				simulationTx = state2.NewSharedDomains(tx)
+				simStateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+				//simStateReader = state.NewSimReaderV4(simulationTx)
+			} else {
+				simulationTx = memdb.NewHashBatch(tx, quit, cfg.tmpdir, logger)
+				simStateReader = state.NewPlainStateReader(tx)
+			}
 			executionAt, err := s.ExecutionAt(tx)
 			if err != nil {
 				return err
 			}
 
-			var simStateReader state.StateReader
-			if histV3 {
-				//simStateReader = state.NewReaderV4(tx.(kv.TemporalTx))
-				simStateReader = state.NewSimReaderV4(simulationTx)
-			} else {
-				simStateReader = state.NewPlainStateReader(tx)
-			}
 			for {
 				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, simStateReader, logger)
 				if err != nil {
@@ -201,7 +201,7 @@ func getNextTransactions(
 	header *types.Header,
 	amount uint16,
 	executionAt uint64,
-	simulationTx *memdb.MemoryMutation,
+	simulationTx kv.Putter,
 	alreadyYielded mapset.Set[[32]byte],
 	simStateReader state.StateReader,
 	logger log.Logger,
@@ -259,7 +259,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation, simStateReader state.StateReader, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx kv.Putter, simStateReader state.StateReader, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
