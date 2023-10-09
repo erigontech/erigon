@@ -148,6 +148,10 @@ func (db *DB) EnsureVersionCompatibility() bool {
 
 func (db *DB) Close() {}
 
+func (db *DB) CHandle() unsafe.Pointer {
+	panic("CHandle not implemented")
+}
+
 func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	select {
 	case <-ctx.Done():
