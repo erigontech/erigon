@@ -69,7 +69,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	// start another tx
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer tx.Commit()
+	defer tx.Rollback()
 
 	buckets, err := tx.ListBuckets()
 	require.NoError(t, err)
