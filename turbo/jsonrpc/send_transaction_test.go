@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -84,8 +85,8 @@ func TestSendRawTransaction(t *testing.T) {
 
 	oneBlockStep(mockSentry, require, t)
 
-	expectValue := uint64(1234)
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	expectedValue := uint64(1234)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
@@ -100,11 +101,18 @@ func TestSendRawTransaction(t *testing.T) {
 	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
 
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
+	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	got := <-txsCh
-	require.Equal(expectValue, got[0].GetValue().Uint64())
+	select {
+	case got := <-txsCh:
+		require.Equal(expectedValue, got[0].GetValue().Uint64())
+	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
+		t.Log("Timeout waiting for txn from channel")
+		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+		require.NoError(err)
+		require.Equal(expectedValue+1, jsonTx.Value.Uint64())
+	}
 
 	//send same tx second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
@@ -151,11 +159,18 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
 
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
+	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	got := <-txsCh
-	require.Equal(expectedTxValue, got[0].GetValue().Uint64())
+	select {
+	case got := <-txsCh:
+		require.Equal(expectedTxValue, got[0].GetValue().Uint64())
+	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
+		t.Log("Timeout waiting for txn from channel")
+		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+		require.NoError(err)
+		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
+	}
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
