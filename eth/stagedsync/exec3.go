@@ -22,8 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -186,14 +184,14 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 
-		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-			return err
-		}
-		if dbg.MdbxLockInRam() {
-			if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
-				return err
-			}
-		}
+		//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+		//	return err
+		//}
+		//if dbg.MdbxLockInRam() {
+		//	if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
+		//		return err
+		//	}
+		//}
 	}
 
 	var blockNum, stageProgress uint64
@@ -267,7 +265,7 @@ func ExecV3(ctx context.Context,
 	var err error
 
 	// MA setio
-	doms := state2.NewSharedDomains(applyTx.(*temporal.Tx).AggCtx(), applyTx)
+	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
@@ -783,9 +781,9 @@ Loop:
 					break
 				}
 
-				if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-					return err
-				}
+				//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+				//	return err
+				//}
 
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
@@ -828,10 +826,10 @@ Loop:
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-								return err
-							}
-							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+							//if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+							//	return err
+							//}
+							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
 							return nil
@@ -846,7 +844,7 @@ Loop:
 						}
 					}
 					applyWorker.ResetTx(applyTx)
-					nc := applyTx.(*temporal.Tx).AggCtx()
+					nc := applyTx.(state2.HasAggCtx).AggCtx()
 					doms.SetTx(applyTx)
 					doms.SetContext(nc)
 					doms.StartWrites()

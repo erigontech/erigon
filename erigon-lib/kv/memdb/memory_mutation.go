@@ -320,7 +320,7 @@ func (m *MemoryMutation) CreateBucket(bucket string) error {
 	return m.memTx.CreateBucket(bucket)
 }
 
-func (m *MemoryMutation) Flush(tx kv.RwTx) error {
+func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListBuckets()
 	if err != nil {
@@ -328,6 +328,11 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Obliterate buckets who are to be deleted
 	for bucket := range m.clearedTables {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if err := tx.ClearBucket(bucket); err != nil {
 			return err
 		}
@@ -342,6 +347,11 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if isTablePurelyDupsort(bucket) {
 			cbucket, err := m.memTx.CursorDupSort(bucket)
 			if err != nil {

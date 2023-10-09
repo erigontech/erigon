@@ -200,8 +200,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	var domains *state2.SharedDomains
 
 	if histV3 {
-		ac := tx.(*temporal.Tx).AggCtx()
-		domains = state2.NewSharedDomains(ac, tx)
+		domains = state2.NewSharedDomains(tx)
 		defer domains.Close()
 		stateWriter = state.NewWriterV4(domains)
 	} else {
@@ -230,10 +229,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		if err := domains.Flush(ctx, tx); err != nil {
 			return nil, nil, err
 		}
-		ww := stateWriter.(*state.WriterV4)
 		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
 		if !hasSnap {
-			rh, err := ww.Commitment(ctx, true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			if err != nil {
 				return nil, nil, err
 			}

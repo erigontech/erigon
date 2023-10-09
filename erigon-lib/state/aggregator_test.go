@@ -37,9 +37,9 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
-	domCtx := agg.MakeContext()
-	defer domCtx.Close()
-	domains := NewSharedDomains(domCtx, rwTx)
+	ac := agg.MakeContext()
+	defer ac.Close()
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
 
 	txs := uint64(100000)
@@ -67,26 +67,26 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
-		err = domains.UpdateAccountData(addr, buf, nil)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil)
 		require.NoError(t, err)
 
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, _, err := domCtx.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
+			pv, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
 			require.NoError(t, err)
 
-			err = domains.UpdateCommitmentData(commKey2, v[:], pv)
+			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, _, err := domCtx.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
+			pv, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
 			require.NoError(t, err)
 
-			err = domains.UpdateCommitmentData(commKey1, v[:], pv)
+			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}
@@ -171,10 +171,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 			tx.Rollback()
 		}
 	}()
-	domCtx := agg.MakeContext()
-	defer domCtx.Close()
+	ac := agg.MakeContext()
+	defer ac.Close()
 
-	domains := NewSharedDomains(domCtx, tx)
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
@@ -202,13 +202,13 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		//keys[txNum-1] = append(addr, loc...)
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(rnd.Uint64()), nil, 0)
-		err = domains.UpdateAccountData(addr, buf, nil)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil)
 		require.NoError(t, err)
 
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
-		err = domains.UpdateCommitmentData(someKey, aux[:], nil)
+		err = domains.DomainPut(kv.CommitmentDomain, someKey, nil, aux[:], nil)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
@@ -246,7 +246,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
-	dom2 := NewSharedDomains(ac2, tx)
+	dom2 := NewSharedDomains(WrapTxWithCtx(tx, ac2))
 	defer dom2.Close()
 
 	_, err = dom2.SeekCommitment(ctx, rwTx, 0, 1<<63-1)
@@ -287,9 +287,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	domCtx := agg.MakeContext()
-	defer domCtx.Close()
-	domains := NewSharedDomains(domCtx, tx)
+	ac := agg.MakeContext()
+	defer ac.Close()
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
 	defer domains.Close()
 
 	txs := aggStep * 5
@@ -311,10 +311,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(1000000000000), nil, 0)
-		err = domains.UpdateAccountData(addr, buf[:], nil)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf[:], nil)
 		require.NoError(t, err)
 
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -355,9 +355,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	ac := newAgg.MakeContext()
+	ac = newAgg.MakeContext()
 	defer ac.Close()
-	newDoms := NewSharedDomains(ac, newTx)
+	newDoms := NewSharedDomains(WrapTxWithCtx(newTx, ac))
 	defer newDoms.Close()
 
 	_, err = newDoms.SeekCommitment(ctx, newTx, 0, 1<<63-1)
@@ -408,22 +408,22 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		}
 	}()
 
-	ct := agg.MakeContext()
-	defer ct.Close()
-	domains := NewSharedDomains(ct, tx)
+	ac := agg.MakeContext()
+	defer ac.Close()
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
 		domains.Flush(ctx, tx)
-		ct.Close()
+		ac.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
 
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
-		ct = agg.MakeContext()
-		domains = NewSharedDomains(ct, tx)
+		ac = agg.MakeContext()
+		domains = NewSharedDomains(WrapTxWithCtx(tx, ac))
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
 	}
@@ -451,11 +451,11 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
 
-		err = domains.UpdateAccountData(addr, buf, prev1)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, prev1)
 		require.NoError(t, err)
 		prev1 = buf
 
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev2)
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, prev2)
 		require.NoError(t, err)
 		prev2 = []byte{addr[0], loc[0]}
 
@@ -468,13 +468,13 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, _, err := ct.storage.GetLatest(addr, loc, tx)
+		prev, _, err := ac.storage.GetLatest(addr, loc, tx)
 		require.NoError(t, err)
-		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, prev)
 		require.NoError(t, err)
 	}
 
-	ct.Close()
+	ac.Close()
 	err = tx.Commit()
 	tx = nil
 
@@ -669,14 +669,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
-	mc2 := agg.MakeContext()
-	defer mc2.Close()
+	ac := agg.MakeContext()
+	defer ac.Close()
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains := NewSharedDomains(mc2, rwTx)
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
 
 	keys, vals := generateInputData(t, 20, 16, 10)
@@ -697,7 +697,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			prev, err := domains.LatestAccount(keys[j])
 			require.NoError(t, err)
 
-			err = domains.UpdateAccountData(keys[j], buf, prev)
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
@@ -709,11 +709,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
+	ac.Close()
 
-	ac := agg.MakeContext()
+	ac = agg.MakeContext()
+	defer ac.Close()
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
 	err = domains.Unwind(context.Background(), rwTx, pruneFrom)
 	require.NoError(t, err)
-	ac.Close()
 
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(ctx, uint64(i))
@@ -723,7 +726,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
 			require.NoError(t, err)
 
-			err = domains.UpdateAccountData(keys[j], buf, prev)
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev)
 			require.NoError(t, err)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			//require.NoError(t, err)
@@ -737,14 +740,16 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
+	ac.Close()
 
 	pruneFrom = 3
 
-	ac.Close()
-
 	ac = agg.MakeContext()
+	defer ac.Close()
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
+
 	err = domains.Unwind(context.Background(), rwTx, pruneFrom)
-	ac.Close()
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -755,7 +760,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
 			require.NoError(t, err)
 
-			err = domains.UpdateAccountData(keys[j], buf, prev)
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev)
 			require.NoError(t, err)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			//require.NoError(t, err)

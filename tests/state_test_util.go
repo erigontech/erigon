@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -260,7 +259,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	if ethconfig.EnableHistoryV4InTest {
 		var root libcommon.Hash
-		rootBytes, err := state2.NewSharedDomains(tx.(*temporal.Tx).AggCtx(), tx).ComputeCommitment(context2.Background(), false, false)
+		rootBytes, err := state2.NewSharedDomains(tx).ComputeCommitment(context2.Background(), false, false)
 		if err != nil {
 			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 		}

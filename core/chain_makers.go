@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
@@ -329,8 +328,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if histV3 {
-		ac := tx.(*temporal.Tx).AggCtx()
-		domains = state2.NewSharedDomains(ac, tx)
+		domains = state2.NewSharedDomains(tx)
 		defer domains.Close()
 		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 		if err != nil {
@@ -477,7 +475,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 		h := common.NewHasher()
 		defer common.ReturnHasherToPool(h)
 
-		it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -502,7 +500,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 			}
 		}
 
-		it, err = tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err = tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}

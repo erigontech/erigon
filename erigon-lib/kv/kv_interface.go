@@ -291,6 +291,9 @@ type RwDB interface {
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
+type HasRwKV interface {
+	RwKV() RwDB
+}
 
 type StatelessReadTx interface {
 	Getter
@@ -545,4 +548,19 @@ type TemporalTx interface {
 }
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
+}
+type TemporalPutDel interface {
+	// DomainPut
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte) error
+
+	// DomainDel
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte) error
 }

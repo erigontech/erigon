@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -46,6 +47,7 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
+	*memdb.Mapmutation
 	aggCtx *AggregatorV3Context
 	roTx   kv.Tx
 
@@ -70,9 +72,24 @@ type SharedDomains struct {
 	TracesFrom *InvertedIndex
 }
 
-func NewSharedDomains(ac *AggregatorV3Context, tx kv.Tx) *SharedDomains {
+type HasAggCtx interface {
+	AggCtx() *AggregatorV3Context
+}
+
+func NewSharedDomains(tx kv.Tx) *SharedDomains {
+	var ac *AggregatorV3Context
+	if casted, ok := tx.(HasAggCtx); ok {
+		ac = casted.AggCtx()
+	} else {
+		panic(fmt.Sprintf("type %T need AggCtx method", tx))
+	}
+	if tx == nil {
+		panic(fmt.Sprintf("tx is nil"))
+	}
+
 	sd := &SharedDomains{
-		aggCtx: ac,
+		Mapmutation: memdb.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
+		aggCtx:      ac,
 
 		Account:    ac.a.accounts,
 		account:    map[string][]byte{},
@@ -448,19 +465,15 @@ func (sd *SharedDomains) storageFn(plainKey []byte, cell *commitment.Cell) error
 	return nil
 }
 
-func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []byte) error {
+func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte) error {
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, account, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.aggCtx.account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
-func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
+func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
 	addrS := string(addr)
-	prevCode, _ := sd.LatestCode(addr)
-	if bytes.Equal(prevCode, code) {
-		return nil
-	}
 	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
@@ -469,12 +482,12 @@ func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
 	return sd.aggCtx.code.PutWithPrev(addr, nil, code, prevCode)
 }
 
-func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data, prev []byte) error {
+func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte) error {
 	sd.put(kv.CommitmentDomain, string(prefix), data)
 	return sd.aggCtx.commitment.PutWithPrev(prefix, nil, data, prev)
 }
 
-func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
+func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
@@ -502,8 +515,9 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
-	err = sd.IterateStoragePrefix(addr, func(k, v []byte) {
+	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
 		tombs = append(tombs, pair{k, v})
+		return nil
 	})
 	if err != nil {
 		return err
@@ -521,7 +535,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	return nil
 }
 
-func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
+func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []byte) error {
 	composite := addr
 	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
 		composite = make([]byte, 0, len(addr)+len(loc))
@@ -629,7 +643,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 
-		if err = sd.UpdateCommitmentData(prefix, merged, stated); err != nil {
+		if err = sd.updateCommitmentData(prefix, merged, stated); err != nil {
 			return nil, err
 		}
 		mxCommitmentBranchUpdates.Inc()
@@ -647,7 +661,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte)) error {
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()
 
@@ -767,7 +781,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			}
 		}
 		if len(lastVal) > 0 {
-			it(lastKey, lastVal)
+			if err := it(lastKey, lastVal); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -879,6 +895,8 @@ func (sd *SharedDomains) DiscardHistory() {
 func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
+	mut := sd.Mapmutation
+	sd.Mapmutation = memdb.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
 	return []flusher{
 		sd.aggCtx.account.Rotate(),
 		sd.aggCtx.storage.Rotate(),
@@ -888,6 +906,7 @@ func (sd *SharedDomains) rotate() []flusher {
 		sd.aggCtx.logTopics.Rotate(),
 		sd.aggCtx.tracesFrom.Rotate(),
 		sd.aggCtx.tracesTo.Rotate(),
+		mut,
 	}
 }
 
@@ -918,21 +937,67 @@ func (sd *SharedDomains) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err 
 	default:
 		panic(name)
 	}
-	//DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
-	/*
-		DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
-		DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-		HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+}
 
-		// IndexRange - return iterator over range of inverted index for given key `k`
-		// Asc semantic:  [from, to) AND from > to
-		// Desc semantic: [from, to) AND from < to
-		// Limit -1 means Unlimited
-		// from -1, to -1 means unbounded (StartOfTable, EndOfTable)
-		// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
-		// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
-		IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-		HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
-		DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
-	*/
+// DomainPut
+// Optimizations:
+//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+//   - user can append k2 into k1, then underlying methods will not preform append
+//   - if `val == nil` it will call DomainDel
+func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte) error {
+	if val == nil {
+		return sd.DomainDel(domain, k1, k2, prevVal)
+	}
+	if prevVal == nil {
+		var err error
+		prevVal, err = sd.DomainGet(domain, k1, k2)
+		if err != nil {
+			return nil
+		}
+	}
+	switch domain {
+	case kv.AccountsDomain:
+		return sd.updateAccountData(k1, val, prevVal)
+	case kv.StorageDomain:
+		return sd.writeAccountStorage(k1, k2, val, prevVal)
+	case kv.CodeDomain:
+		if bytes.Equal(prevVal, val) {
+			return nil
+		}
+		return sd.updateAccountCode(k1, val, prevVal)
+	case kv.CommitmentDomain:
+		return sd.updateCommitmentData(k1, val, prevVal)
+	default:
+		panic(domain)
+	}
+}
+
+// DomainDel
+// Optimizations:
+//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+//   - user can append k2 into k1, then underlying methods will not preform append
+//   - if `val == nil` it will call DomainDel
+func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte) error {
+	if prevVal == nil {
+		var err error
+		prevVal, err = sd.DomainGet(domain, k1, k2)
+		if err != nil {
+			return nil
+		}
+	}
+	switch domain {
+	case kv.AccountsDomain:
+		return sd.deleteAccount(k1, prevVal)
+	case kv.StorageDomain:
+		return sd.writeAccountStorage(k1, k2, nil, prevVal)
+	case kv.CodeDomain:
+		if bytes.Equal(prevVal, nil) {
+			return nil
+		}
+		return sd.updateAccountCode(k1, nil, prevVal)
+	case kv.CommitmentDomain:
+		return sd.updateCommitmentData(k1, nil, prevVal)
+	default:
+		panic(domain)
+	}
 }
