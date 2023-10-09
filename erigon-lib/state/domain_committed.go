@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 )
 
 // Defines how to evaluate commitments
@@ -182,6 +181,7 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 }
 
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
+// No ordering guarantees is provided.
 func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 	switch t.mode {
 	case CommitmentModeDirect:
@@ -191,7 +191,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			plainKeys[i] = []byte(key)
 			i++
 		}
-		slices.SortFunc(plainKeys, func(i, j []byte) int { return bytes.Compare(i, j) })
+		// slices.SortFunc(plainKeys, func(i, j []byte) int { return bytes.Compare(i, j) })
 		if clear {
 			t.keys = make(map[string]struct{}, len(t.keys)/8)
 		}
