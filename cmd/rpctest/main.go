@@ -79,6 +79,19 @@ func main() {
 	}
 	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
+	var benchEthGetTransactionByHashCmd = &cobra.Command{
+		Use:   "benchEthGetTransactionByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthGetTransactionByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchEthGetTransactionByHashCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
 		Short: "",
@@ -311,6 +324,7 @@ func main() {
 	rootCmd.AddCommand(
 		benchEthGetBlockByHash,
 		benchEthCallCmd,
+		benchEthGetTransactionByHashCmd,
 		bench1Cmd,
 		bench2Cmd,
 		bench3Cmd,
