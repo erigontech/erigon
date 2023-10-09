@@ -374,6 +374,12 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 	if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 		return err
 	}
+	if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+		return err
+	}
+	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
+		return err
+	}
 	var ok bool
 	var err error
 	if ok, err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
@@ -383,13 +389,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
 			return err
 		}
-	}
-
-	if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
-		return err
-	}
-	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
-		return err
 	}
 	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
 		return err
