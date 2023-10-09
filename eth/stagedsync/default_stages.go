@@ -444,7 +444,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return BodiesForward(s, u, ctx, tx, bodies, false, false, logger)
+				return nil
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)
