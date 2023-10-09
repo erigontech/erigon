@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/etl"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -85,6 +84,7 @@ type HexPatriciaHashed struct {
 
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
+	branchMerger  *BranchMerger
 }
 
 func NewHexPatriciaHashed(accountKeyLen int,
@@ -100,6 +100,7 @@ func NewHexPatriciaHashed(accountKeyLen int,
 		accountFn:     accountFn,
 		storageFn:     storageFn,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
+		branchMerger:  NewHexBranchMerger(1024),
 	}
 }
 
@@ -1278,109 +1279,6 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 		return nil, err
 	}
 	return rh[1:], nil // first byte is 128+hash_len
-}
-
-func (hph *HexPatriciaHashed) ProcessKeysFaster(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchUpdates *etl.Collector, err error) {
-	// branchNodeUpdates = make(map[string]BranchData)
-
-	pks := make(map[string]int, len(plainKeys))
-	hashedKeys := make([][]byte, len(plainKeys))
-	for i, pk := range plainKeys {
-		hashedKeys[i] = hph.hashAndNibblizeKey(pk)
-		pks[string(hashedKeys[i])] = i
-	}
-
-	sort.Slice(hashedKeys, func(i, j int) bool {
-		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
-	})
-
-	branchUpdates = etl.NewCollector("hex_patricia_hashed", "./etl-hph", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.New())
-	stagedCell := new(Cell)
-	for i, hashedKey := range hashedKeys {
-		select {
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
-		default:
-		}
-		plainKey := plainKeys[pks[string(hashedKey)]]
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", i+1, len(hashedKeys), plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if branchData, updateKey, err := hph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				// branchNodeUpdates[string(updateKey)] = branchData
-				if err = branchUpdates.Collect(updateKey, branchData); err != nil {
-					branchUpdates.Close()
-					return nil, nil, fmt.Errorf("collecting branch update: %w", err)
-				}
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		// Update the cell
-		stagedCell.reset()
-		if len(plainKey) == hph.accountKeyLen {
-			if err := hph.accountFn(plainKey, stagedCell); err != nil {
-				return nil, nil, fmt.Errorf("accountFn for key %x failed: %w", plainKey, err)
-			}
-			if !stagedCell.Delete {
-				cell := hph.updateCell(plainKey, hashedKey)
-				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
-
-				if hph.trace {
-					fmt.Printf("accountFn update key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
-				}
-			}
-		} else {
-			if err = hph.storageFn(plainKey, stagedCell); err != nil {
-				return nil, nil, fmt.Errorf("storageFn for key %x failed: %w", plainKey, err)
-			}
-			if !stagedCell.Delete {
-				hph.updateCell(plainKey, hashedKey).setStorage(stagedCell.Storage[:stagedCell.StorageLen])
-				if hph.trace {
-					fmt.Printf("storageFn reading key %x => %x\n", plainKey, stagedCell.Storage[:stagedCell.StorageLen])
-				}
-			}
-		}
-
-		if stagedCell.Delete {
-			if hph.trace {
-				fmt.Printf("delete cell %x hash %x\n", plainKey, hashedKey)
-			}
-			hph.deleteCell(hashedKey)
-		}
-	}
-	// Folding everything up to the root
-	for hph.activeRows > 0 {
-
-		if branchData, updateKey, err := hph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			err = branchUpdates.Collect(updateKey, branchData)
-			if err != nil {
-				branchUpdates.Close()
-				return nil, nil, fmt.Errorf("collecting branch update: %w", err)
-			}
-		}
-	}
-
-	rootHash, err = hph.RootHash()
-	if err != nil {
-		branchUpdates.Close()
-		return nil, branchUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
-	}
-	if err = branchUpdates.Flush(); err != nil {
-		return nil, branchUpdates, fmt.Errorf("flushing branch updates: %w", err)
-	}
-	return rootHash, branchUpdates, nil
 }
 
 func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {

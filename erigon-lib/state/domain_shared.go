@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	math2 "math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -596,44 +596,49 @@ func (sd *SharedDomains) Commit(ctx context.Context, saveStateAfter, trace bool)
 	defer mxCommitmentRunning.Dec()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, branchUpdates, err := sd.Commitment.ComputeCommitmentFaster(ctx, trace)
+	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
 	if err != nil {
 		return nil, err
 	}
 
-	loadFunc := func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+
+	keys := make([][]byte, 0, len(branchNodeUpdates))
+	for k, _ := range branchNodeUpdates {
+		keys = append(keys, []byte(k))
+	}
+	sort.SliceStable(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+
+	for _, key := range keys {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		prefix := key
+		update := branchNodeUpdates[string(prefix)]
+
 		stateValue, err := sd.LatestCommitment(prefix)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		stated := commitment.BranchData(stateValue)
 		merged, err := sd.Commitment.branchMerger.Merge(stated, update)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if bytes.Equal(stated, merged) {
-			return nil
+			continue
 		}
 		if trace {
 			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 
 		if err = sd.UpdateCommitmentData(prefix, merged, stated); err != nil {
-			return err
-		}
-		mxCommitmentBranchUpdates.Inc()
-		return nil
-	}
-
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-	if branchUpdates != nil {
-		err = branchUpdates.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()})
-		if err != nil {
 			return nil, err
 		}
-		branchUpdates.Close()
+		mxCommitmentBranchUpdates.Inc()
 	}
-
 	if saveStateAfter {
 		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
 			return nil, err

@@ -476,10 +476,10 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if len(branch2) < 4 {
+	if len(branch2) == 0 {
 		return branch1, nil
 	}
-	if len(branch1) < 4 {
+	if len(branch1) == 0 {
 		return branch2, nil
 	}
 
@@ -561,6 +561,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
+					fmt.Printf("b1: %x %v\n", branch1, branch1)
+					fmt.Printf("b2: %x\n", branch2)
 					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected at least %d got %d bytes", pos1+int(l), len(branch1))
 				}
 				if l > 0 {

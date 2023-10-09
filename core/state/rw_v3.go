@@ -90,11 +90,11 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 	ExecTxsDone.Inc()
 
 	// this is done by sharedomains.SetTxNum.
-	//if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
-	//	if _, err := rs.Commitment(txNum, true); err != nil {
-	//		panic(fmt.Errorf("txnum %d: %w", txNum, err))
-	//	}
-	//}
+	// if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
+	// 	if _, err := rs.Commitment(txNum, true); err != nil {
+	// 		panic(fmt.Errorf("txnum %d: %w", txNum, err))
+	// 	}
+	// }
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
