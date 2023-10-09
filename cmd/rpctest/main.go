@@ -61,7 +61,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.BenchEthCall(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchEthCall(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -242,7 +245,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
