@@ -32,7 +32,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 
 	tx, err := e.db.BeginRo(e.ctx)
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could not begin tx: %s", err)
+		e.logger.Warn("[EngineBlockDownloader] Could not begin tx", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}

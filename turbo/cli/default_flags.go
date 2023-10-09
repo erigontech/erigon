@@ -74,6 +74,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGasCapFlag,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
+	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
@@ -161,6 +162,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelPortFlag,
 
 	&utils.OtsSearchMaxCapFlag,
+
+	&utils.SilkwormPathFlag,
 
 	&utils.TrustedSetupFile,
 }
