@@ -206,10 +206,10 @@ func (tx *Tx) autoClose(mdbxTx *mdbx.MdbxTx) {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	if !mdbxTx.IsRo() {
-		//tx.db.agg.FinishWrites()
-		//tx.db.agg.SetTx(nil)
-	}
+	//if !mdbxTx.IsRo() {
+	//tx.db.agg.FinishWrites()
+	//tx.db.agg.SetTx(nil)
+	//}
 	if tx.aggCtx != nil {
 		tx.aggCtx.Close()
 	}
