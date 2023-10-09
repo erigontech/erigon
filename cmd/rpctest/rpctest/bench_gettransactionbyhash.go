@@ -12,9 +12,12 @@ import (
 // but also can be used for comparing RPCDaemon with Geth or infura
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
+//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
 // recordFile stores all eth_GetTransactionByHash returned with success
-//	                 errorFile stores information when erigon and geth doesn't return same data
+//
+//	errorFile stores information when erigon and geth doesn't return same data
 func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
@@ -86,7 +89,7 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 					rec.Flush()
 					continue
 				} else {
-                                        return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
+					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
 				}
 			}
 		}
@@ -101,11 +104,11 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
 
 			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
-				return err;
+				return err
 			}
 		}
 
 		fmt.Println("\nProcessed Transactions: ", nTransactions)
 	}
-        return nil
+	return nil
 }
