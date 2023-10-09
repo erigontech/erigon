@@ -201,7 +201,7 @@ func getNextTransactions(
 	header *types.Header,
 	amount uint16,
 	executionAt uint64,
-	simulationTx kv.Putter,
+	simulationTx kv.StatelessRwTx,
 	alreadyYielded mapset.Set[[32]byte],
 	simStateReader state.StateReader,
 	logger log.Logger,
@@ -259,7 +259,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx kv.Putter, simStateReader state.StateReader, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx kv.StatelessRwTx, simStateReader state.StateReader, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false

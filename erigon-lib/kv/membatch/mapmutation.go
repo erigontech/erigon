@@ -123,7 +123,7 @@ func (m *Mapmutation) CHandle() unsafe.Pointer { return m.db.CHandle() }
 // Common pattern:
 //
 // batch := db.NewBatch()
-// defer batch.Rollback()
+// defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
 func NewHashBatch(tx kv.Tx, quit <-chan struct{}, tmpdir string, logger log.Logger) *Mapmutation {
@@ -142,13 +142,6 @@ func NewHashBatch(tx kv.Tx, quit <-chan struct{}, tmpdir string, logger log.Logg
 		tmpdir: tmpdir,
 		logger: logger,
 	}
-}
-
-func (m *Mapmutation) RwKV() kv.RwDB {
-	if casted, ok := m.db.(kv.HasRwKV); ok {
-		return casted.RwKV()
-	}
-	return nil
 }
 
 func (m *Mapmutation) getMem(table string, key []byte) ([]byte, bool) {
@@ -321,7 +314,6 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	return nil
 }
 
-func (m *Mapmutation) Commit() error { panic("don't call me on Mapmutation type") }
 func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	if m.db == nil {
 		return nil
@@ -339,7 +331,7 @@ func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (m *Mapmutation) Rollback() {
+func (m *Mapmutation) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = map[string]map[string][]byte{}
@@ -348,10 +340,8 @@ func (m *Mapmutation) Rollback() {
 	m.size = 0
 	m.clean()
 }
-
-func (m *Mapmutation) Close() {
-	m.Rollback()
-}
+func (m *Mapmutation) Commit() error { panic("not db txn, use .Flush method") }
+func (m *Mapmutation) Rollback()     { panic("not db txn, use .Close method") }
 
 func (m *Mapmutation) panicOnEmptyDB() {
 	if m.db == nil {

@@ -41,7 +41,7 @@ type MemoryMutation struct {
 // Common pattern:
 //
 // batch := NewMemoryBatch(db, tmpDir)
-// defer batch.Rollback()
+// defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
