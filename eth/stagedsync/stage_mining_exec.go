@@ -10,7 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
@@ -115,7 +115,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		} else {
 
 			yielded := mapset.NewSet[[32]byte]()
-			simulationTx := olddb.NewHashBatch(tx, quit, cfg.tmpdir, logger)
+			simulationTx := memdb.NewHashBatch(tx, quit, cfg.tmpdir, logger)
 			defer simulationTx.Rollback()
 			executionAt, err := s.ExecutionAt(tx)
 			if err != nil {

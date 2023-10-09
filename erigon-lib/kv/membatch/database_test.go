@@ -16,7 +16,7 @@
 
 //go:build !js
 
-package olddb
+package memdb
 
 import (
 	"bytes"
