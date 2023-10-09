@@ -581,6 +581,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
+		fmt.Printf("[commitment] running due to txNum reached aggregation step %d", txNum/sd.Account.aggregationStep)
 		_, err := sd.ComputeCommitment(ctx, true, sd.trace)
 		if err != nil {
 			panic(err)
