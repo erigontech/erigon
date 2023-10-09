@@ -333,7 +333,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", t.Metainfo().UrlList)
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
 				}
 			}
 		default:
