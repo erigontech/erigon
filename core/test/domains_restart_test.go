@@ -499,7 +499,7 @@ func TestCommit(t *testing.T) {
 		//err = domains.UpdateAccountData(ad, buf, nil)
 		//require.NoError(t, err)
 		//
-		err = domains.WriteAccountStorage(ad, loc1, []byte("0401"), nil)
+		err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil)
 		require.NoError(t, err)
 	}
 
