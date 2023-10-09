@@ -3,11 +3,11 @@ package heimdall
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon/borfinality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 )
 
 func MilestoneRewindPending() bool {
