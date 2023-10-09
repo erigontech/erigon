@@ -135,12 +135,12 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 	// fetch the end block hash
 	block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
-	if block == nil {
-		log.Debug("Current header behind the end block", "block", end)
-		return hash, errEndBlock
-	}
 	if err != nil {
 		log.Debug("Failed to get end block hash while whitelisting", "err", err)
+		return hash, errEndBlock
+	}
+	if block == nil {
+		log.Debug("Current header behind the end block", "block", end)
 		return hash, errEndBlock
 	}
 

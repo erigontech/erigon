@@ -33,7 +33,7 @@ func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHeim
 	// fetch the latest checkpoint from Heimdall
 	checkpoint, err := heimdallClient.FetchCheckpoint(ctx, -1)
 	if err != nil {
-		config.logger.Warn("Failed to fetch latest checkpoint for whitelisting", "err", err)
+		config.logger.Debug("Failed to fetch latest checkpoint for whitelisting", "err", err)
 		return blockNum, blockHash, errCheckpoint
 	}
 
