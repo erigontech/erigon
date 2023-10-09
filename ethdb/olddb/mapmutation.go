@@ -1,7 +1,6 @@
 package olddb
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"sync"
@@ -51,13 +50,6 @@ func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, logger log.Lo
 		tmpdir: tmpdir,
 		logger: logger,
 	}
-}
-
-func (m *mapmutation) RwKV() kv.RwDB {
-	if casted, ok := m.db.(ethdb.HasRwKV); ok {
-		return casted.RwKV()
-	}
-	return nil
 }
 
 func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
@@ -275,20 +267,8 @@ func (m *mapmutation) Close() {
 	m.Rollback()
 }
 
-func (m *mapmutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
-	panic("mutation can't start transaction, because doesn't own it")
-}
-
 func (m *mapmutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
 	}
-}
-
-func (m *mapmutation) SetRwKV(kv kv.RwDB) {
-	hasRwKV, ok := m.db.(ethdb.HasRwKV)
-	if !ok {
-		log.Warn("Failed to convert mapmutation type to HasRwKV interface")
-	}
-	hasRwKV.SetRwKV(kv)
 }

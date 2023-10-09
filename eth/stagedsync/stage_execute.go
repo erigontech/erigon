@@ -140,7 +140,7 @@ func StageExecuteBlocksCfg(
 func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
-	batch ethdb.Database,
+	batch kv.StatelessRwTx,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -206,7 +206,7 @@ func executeBlock(
 }
 
 func newStateReaderWriter(
-	batch ethdb.Database,
+	batch kv.StatelessRwTx,
 	tx kv.RwTx,
 	block *types.Block,
 	writeChangesets bool,
