@@ -172,7 +172,7 @@ func main() {}
 // 		log.Error("[DB] Failed", "reason", err)
 // 		return nil, err
 // 	}
-// 	defer tx.Rollback()
+// 	defer tx.Close()
 
 // 	if err := rawdb2.WriteBeaconState(tx, state); err != nil {
 // 		log.Error("[DB] Failed", "reason", err)
@@ -188,7 +188,7 @@ func main() {}
 // 		log.Error("[DB] Failed", "reason", err)
 // 		return err
 // 	}
-// 	defer tx.Rollback()
+// 	defer tx.Close()
 // 	if provided == nil {
 // 		return errors.New("no valid beacon data config found")
 // 	}

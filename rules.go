@@ -19,7 +19,7 @@ func txDeferRollback(m dsl.Matcher) {
 	//	if err != nil {
 	//		return err
 	//	}
-	//	defer tx.Rollback()
+	//	defer tx.Close()
 	//
 	//	... code which uses database in transaction
 	//
@@ -34,9 +34,9 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err := $db.Begin($ctx); $chk; $rollback`,
 		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
 	).
-		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
+		Where(!m["rollback"].Text.Matches(`defer .*\.Close()`)).
 		//At(m["rollback"]).
-		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
+		Report(`Add "defer $tx.Close()" right after transaction creation error check. 
 			If you are in the loop - consider use "$db.View" or "$db.Update" or extract whole transaction to function.
 			Without rollback in defer - app can deadlock on error or panic.
 			Rules are in ./rules.go file.

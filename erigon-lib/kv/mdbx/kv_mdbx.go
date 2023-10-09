@@ -535,7 +535,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	runtime.LockOSThread()
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Close()"
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
 	db.wg.Add(1)

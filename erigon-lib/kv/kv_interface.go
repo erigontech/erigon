@@ -55,14 +55,14 @@ import (
 //         snapshot files (build/merge) doesn't mutate any existing files - only producing new one!
 //         It means we don't need concept of "RwTx" for Snapshots.
 //         Files can become useless/garbage (merged to bigger file) - last reader of this file will
-//         remove it from FileSystem on tx.Rollback().
+//         remove it from FileSystem on tx.Close().
 //         Invariant: existing readers can't see new files, new readers can't see garbage files
 //
 // MediumLevel:
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
 //         - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
-//         - auto-close iterators on Commit/Rollback
-//         - auto-open/close agg.MakeContext() on Begin/Commit/Rollback
+//         - auto-close iterators on Commit/Close
+//         - auto-open/close agg.MakeContext() on Begin/Commit/Close
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
 //         - And TemporalRoTx/TemporalRwTx actaully open Read-Only files view (MakeContext) - no concept of "Read-Write view of snapshot files".
 //         - using next entities:
@@ -241,18 +241,18 @@ type RoDB interface {
 	View(ctx context.Context, f func(tx Tx) error) error
 
 	// BeginRo - creates transaction
-	// 	tx may be discarded by .Rollback() method
+	// 	tx may be discarded by .Close() method
 	//
 	// A transaction and its cursors must only be used by a single
 	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
+	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Close/Commit releases it)
 	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
 	//
 	// If this `parent` is non-NULL, the new transaction
 	//	will be a nested transaction, with the transaction indicated by parent
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
-	//	Commit and Rollback while it has active child transactions.
+	//	Commit and Close while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
 	PageSize() uint64
@@ -274,7 +274,7 @@ type RoDB interface {
 //	if err != nil {
 //		return err
 //	}
-//	defer tx.Rollback()
+//	defer tx.Close()
 //
 //	... code which uses database in transaction
 //
@@ -336,6 +336,16 @@ type StatelessWriteTx interface {
 type StatelessRwTx interface {
 	StatelessReadTx
 	StatelessWriteTx
+}
+
+// PendingMutations in-memory storage of changes
+// Later they can either be flushed to the database or abandon
+type PendingMutations interface {
+	StatelessRwTx
+	// Flush all in-memory data into `tx`
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	BatchSize() int
 }
 
 // Tx
@@ -403,7 +413,7 @@ type Tx interface {
 // WARNING:
 //   - RwTx is not threadsafe and may only be used in the goroutine that created it.
 //   - ReadOnly transactions do not lock goroutine to thread, RwTx does
-//   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Rollback
+//   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Close
 type RwTx interface {
 	Tx
 	StatelessWriteTx

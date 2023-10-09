@@ -1,6 +1,7 @@
 package membatch
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 type Mapmutation struct {
 	puts   map[string]map[string][]byte // table -> key -> value ie. blocks -> hash -> blockBod
-	db     kv.RwTx
+	db     kv.Tx
 	quit   <-chan struct{}
 	clean  func()
 	mu     sync.RWMutex
@@ -29,10 +30,10 @@ type Mapmutation struct {
 // Common pattern:
 //
 // batch := db.NewBatch()
-// defer batch.Rollback()
+// defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, logger log.Logger) *Mapmutation {
+func NewHashBatch(tx kv.Tx, quit <-chan struct{}, tmpdir string, logger log.Logger) *Mapmutation {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})
@@ -211,7 +212,7 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 				tx.CollectMetrics()
 			}
 		}
-		if err := collector.Load(m.db, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
+		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
 	}
@@ -220,13 +221,13 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	return nil
 }
 
-func (m *Mapmutation) Commit() error {
+func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	if m.db == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.doCommit(m.db); err != nil {
+	if err := m.doCommit(tx); err != nil {
 		return err
 	}
 
@@ -237,7 +238,7 @@ func (m *Mapmutation) Commit() error {
 	return nil
 }
 
-func (m *Mapmutation) Rollback() {
+func (m *Mapmutation) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = map[string]map[string][]byte{}
@@ -246,10 +247,8 @@ func (m *Mapmutation) Rollback() {
 	m.size = 0
 	m.clean()
 }
-
-func (m *Mapmutation) Close() {
-	m.Rollback()
-}
+func (m *Mapmutation) Commit() error { panic("not db txn, use .Flush method") }
+func (m *Mapmutation) Rollback()     { panic("not db txn, use .Close method") }
 
 func (m *Mapmutation) panicOnEmptyDB() {
 	if m.db == nil {

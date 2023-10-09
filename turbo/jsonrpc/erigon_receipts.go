@@ -451,7 +451,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 // 	if err != nil {
 // 		return nil, err
 // 	}
-// 	defer tx.Rollback()
+// 	defer tx.Close()
 
 // 	number := rawdb.ReadHeaderNumber(tx, hash)
 // 	if number == nil {
