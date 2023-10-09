@@ -296,7 +296,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		chainKv = backend.chainDB
+		chainKv = backend.chainDB //nolint
 	}
 
 	var chainConfig *chain.Config
