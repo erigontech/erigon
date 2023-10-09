@@ -860,7 +860,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		c.logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Trace("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -1407,7 +1407,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
 	}
 
-	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
+	c.logger.Debug("Span with given block number is not loaded", "fetching span", spanID)
 
 	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 	if err != nil {
