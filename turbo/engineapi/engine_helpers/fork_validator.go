@@ -158,8 +158,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		if err != nil {
 			return "", [32]byte{}, nil, err
 		}
-		panic(histV3)
-
 		var extendingFork kv.RwTx
 		if histV3 {
 			m := state.NewSharedDomains(tx)
