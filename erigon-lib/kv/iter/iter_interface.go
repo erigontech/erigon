@@ -28,7 +28,7 @@ package iter
 //   1. HasNext() is Idempotent
 //   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of iterators. Example: iter.Union
 //		- 1 value used by User and 1 value used internally by iter.Union
-//   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Close()` (by casting to `kv.Closer`)
+//   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Dual has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
