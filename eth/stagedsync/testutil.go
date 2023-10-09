@@ -122,7 +122,7 @@ func plainWriterGen(tx kv.RwTx) stateWriterGen {
 
 func domainWriterGen(tx kv.TemporalTx, domains *state2.SharedDomains) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewWriterV4(tx, domains)
+		return state.NewWriterV4(domains)
 	}
 }
 

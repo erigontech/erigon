@@ -23,11 +23,8 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
-	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
-
-	domains := agg.SharedDomains(ac)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-	defer domains.StartWrites().FinishWrites()
 
 	acc := domains.Account.MakeContext()
 	ccc := domains.Code.MakeContext()
@@ -37,7 +34,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, err := domains.SeekCommitment(ctx, 0, math.MaxUint64)
+	_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +70,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.Commit(ctx, true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			if err != nil {
 				return err
 			}
@@ -92,7 +89,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := domains.Commit(ctx, true, false)
+	rh, err := domains.ComputeCommitment(ctx, true, false)
 	if err != nil {
 		return nil, err
 	}

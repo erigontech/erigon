@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -16,10 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -113,18 +112,15 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac)
-	defer domains.Close()
-
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
+	domains := state2.NewSharedDomains(stateTx)
+	defer agg.Close()
 
-	domains.SetTx(stateTx)
+	r := state.NewReaderV4(domains)
 
-	r := state.NewReaderV4(stateTx.(*temporal.Tx))
-
-	_, err = domains.SeekCommitment(ctx, 0, math.MaxUint64)
+	_, err = domains.SeekCommitment(ctx, stateTx, 0, math.MaxUint64)
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}

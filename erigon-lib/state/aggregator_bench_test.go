@@ -38,6 +38,14 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	return db, agg
 }
 
+type txWithCtx struct {
+	kv.Tx
+	ac *AggregatorV3Context
+}
+
+func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorV3Context) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
+func (tx *txWithCtx) AggCtx() *AggregatorV3Context                { return tx.ac }
+
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -60,11 +68,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac)
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
 	defer domains.Close()
-	defer domains.StartWrites().FinishWrites()
-
-	domains.SetTx(tx)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -75,12 +80,12 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		val := <-vals
 		txNum := uint64(i)
 		domains.SetTxNum(ctx, txNum)
-		err := domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val, prev)
+		err := domains.DomainPut(kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev)
 		prev = val
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.Commit(ctx, true, false)
+			_, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(b, err)
 		}
 	}

@@ -521,22 +521,18 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := tx.(*mdbx.MdbxTx).WarmupDB(false); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if err = func() error {
 		ac := agg.MakeContext()
 		defer ac.Close()
-		sd := agg.SharedDomains(ac)
+		sd := libstate.NewSharedDomains(tx)
 		defer sd.Close()
-		defer sd.StartWrites().FinishWrites()
-		if _, err = agg.ComputeCommitment(ctx, true, false); err != nil {
+		if _, err = sd.ComputeCommitment(ctx, true, false); err != nil {
+			return err
+		}
+		if err := sd.Flush(ctx, tx); err != nil {
 			return err
 		}
 		return err
-	}(); err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -575,10 +571,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 		ac := agg.MakeContext()
 		defer ac.Close()
-
-		domains := agg.SharedDomains(ac)
-		domains.SetTx(tx)
-		domains.SetTxNum(ctx, lastTxNum)
 		return nil
 	}); err != nil {
 		return err

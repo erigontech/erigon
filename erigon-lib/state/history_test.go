@@ -82,36 +82,37 @@ func TestHistoryCollationBuild(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		h.SetTx(tx)
-		h.StartWrites()
-		defer h.FinishWrites()
+		hc := h.MakeContext()
+		defer hc.Close()
+		hc.StartWrites()
+		defer hc.FinishWrites()
 
-		h.SetTxNum(2)
-		err = h.AddPrevValue([]byte("key1"), nil, nil)
+		hc.SetTxNum(2)
+		err = hc.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(3)
-		err = h.AddPrevValue([]byte("key2"), nil, nil)
+		hc.SetTxNum(3)
+		err = hc.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(6)
-		err = h.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
+		hc.SetTxNum(6)
+		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
-		err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		flusher := h.Rotate()
+		flusher := hc.Rotate()
 
-		h.SetTxNum(7)
-		err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		hc.SetTxNum(7)
+		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
 		require.NoError(err)
-		err = h.AddPrevValue([]byte("key3"), nil, nil)
+		err = hc.AddPrevValue([]byte("key3"), nil, nil)
 		require.NoError(err)
 
 		err = flusher.Flush(ctx, tx)
 		require.NoError(err)
 
-		err = h.Rotate().Flush(ctx, tx)
+		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(0, 0, 8, tx)
@@ -194,31 +195,32 @@ func TestHistoryAfterPrune(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		h.SetTx(tx)
-		h.StartWrites()
-		defer h.FinishWrites()
+		hc := h.MakeContext()
+		defer hc.Close()
+		hc.StartWrites()
+		defer hc.FinishWrites()
 
-		h.SetTxNum(2)
-		err = h.AddPrevValue([]byte("key1"), nil, nil)
-		require.NoError(err)
-
-		h.SetTxNum(3)
-		err = h.AddPrevValue([]byte("key2"), nil, nil)
+		hc.SetTxNum(2)
+		err = hc.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(6)
-		err = h.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
-		require.NoError(err)
-		err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		hc.SetTxNum(3)
+		err = hc.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		h.SetTxNum(7)
-		err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		hc.SetTxNum(6)
+		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
-		err = h.AddPrevValue([]byte("key3"), nil, nil)
+		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		err = h.Rotate().Flush(ctx, tx)
+		hc.SetTxNum(7)
+		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		require.NoError(err)
+		err = hc.AddPrevValue([]byte("key3"), nil, nil)
+		require.NoError(err)
+
+		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(0, 0, 16, tx)
@@ -228,13 +230,13 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 
 		h.integrateFiles(sf, 0, 16)
+		hc.Close()
 
-		hc := h.MakeContext()
+		hc = h.MakeContext()
 		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
 		hc.Close()
 
 		require.NoError(err)
-		h.SetTx(tx)
 
 		for _, table := range []string{h.indexKeysTable, h.historyValsTable, h.indexTable} {
 			var cur kv.Cursor
@@ -264,9 +266,10 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	h.SetTx(tx)
-	h.StartUnbufferedWrites()
-	defer h.FinishWrites()
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+	defer hc.FinishWrites()
 
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
@@ -274,7 +277,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	var prevVal [32][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		h.SetTxNum(txNum)
+		hc.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
 				valNum := txNum / keyNum
@@ -284,7 +287,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
-				err = h.AddPrevValue(k[:], nil, prevVal[keyNum])
+				err = hc.AddPrevValue(k[:], nil, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
@@ -295,14 +298,14 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 			flusher = nil
 		}
 		if txNum%10 == 0 {
-			flusher = h.Rotate()
+			flusher = hc.Rotate()
 		}
 	}
 	if flusher != nil {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
-	err = h.Rotate().Flush(ctx, tx)
+	err = hc.Rotate().Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)
@@ -350,7 +353,6 @@ func TestHistoryHistory(t *testing.T) {
 		require := require.New(t)
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
-		h.SetTx(tx)
 		defer tx.Rollback()
 
 		// Leave the last 2 aggregation steps un-collated
@@ -390,7 +392,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	ctx := context.Background()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
-	h.SetTx(tx)
 	defer tx.Rollback()
 
 	// Leave the last 2 aggregation steps un-collated
@@ -467,10 +468,12 @@ func TestHistoryScanFiles(t *testing.T) {
 		require := require.New(t)
 
 		collateAndMergeHistory(t, db, h, txs)
+		hc := h.MakeContext()
+		defer hc.Close()
 		// Recreate domain and re-scan the files
-		txNum := h.txNum
+		txNum := hc.ic.txNum
 		require.NoError(h.OpenFolder())
-		h.SetTxNum(txNum)
+		hc.SetTxNum(txNum)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}

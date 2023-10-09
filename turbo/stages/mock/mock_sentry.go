@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/c2h5oh/datasize"
@@ -65,7 +65,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 const MockInsertAsInitialCycle = false
@@ -464,7 +463,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, nil, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, histV3, false)
+	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3, false)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -586,7 +585,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 	return chain.NumberOfPoWBlocks()
 }
 
-func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
+func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
@@ -648,7 +647,8 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 	initialCycle := MockInsertAsInitialCycle
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook, false); err != nil {
+
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, nil, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook, false); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -663,60 +663,38 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 
+	wr := eth1_chain_reader.NewChainReaderEth1(ms.Ctx, ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+
 	for i := n; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
 		}
-
-		res, err := ms.Eth1ExecutionService.InsertBlocks(ms.Ctx, &execution.InsertBlocksRequest{
-			Blocks: []*execution.Block{eth1_utils.ConvertBlockToRPC(chain.Blocks[i])},
-		})
-		if err != nil {
-			return err
-		}
-		if res.Result != execution.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), res.Result.String())
-		}
-
-		vRes, err := ms.Eth1ExecutionService.ValidateChain(ms.Ctx, &execution.ValidationRequest{
-			Hash:   gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Number: chain.Blocks[i].NumberU64(),
-		})
-		if err != nil {
-			return err
-		}
-		if vRes.ValidationStatus != execution.ExecutionStatus_Success {
-			return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[i].NumberU64(), vRes.ValidationStatus.String())
-		}
-
-		receipt, err := ms.Eth1ExecutionService.UpdateForkChoice(ms.Ctx, &execution.ForkChoice{
-			HeadBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			SafeBlockHash:      gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(chain.Blocks[i].Hash()),
-			Timeout:            uint64(1 * time.Hour),
-		})
-		if err != nil {
-			return err
-		}
-		if receipt.Status != execution.ExecutionStatus_Success {
-			return fmt.Errorf("forkchoice failed for block %d, code: %s", chain.Blocks[i].NumberU64(), receipt.Status.String())
-		}
 	}
+	if err := wr.InsertBlocksAndWait(chain.Blocks); err != nil {
+		return err
+	}
+
+	tipHash := chain.TopBlock.Hash()
+
+	status, lvh, err := wr.UpdateForkChoice(tipHash, tipHash, tipHash)
+
+	if err != nil {
+		return err
+	}
+	ms.DB.Update(ms.Ctx, func(tx kv.RwTx) error {
+		rawdb.WriteHeadBlockHash(tx, lvh)
+		return nil
+	})
+	if status != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
+	}
+
 	return nil
 }
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 
-	tx, err := ms.DB.BeginRw(ms.Ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := ms.insertPoWBlocks(chain, tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
 	}
 	if err := ms.insertPoSBlocks(chain); err != nil {
@@ -774,27 +752,10 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	if ethconfig.EnableHistoryV4InTest {
+	if ms.HistoryV3 {
 		return state.NewReaderV4(tx.(kv.TemporalTx))
 	}
 	return state.NewPlainStateReader(tx)
-}
-
-func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
-	if ethconfig.EnableHistoryV4InTest {
-		//aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
-		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitment(context.Background(), false, false)
-		if err != nil {
-			panic(fmt.Errorf("ComputeCommitment: %w", err))
-		}
-		return libcommon.BytesToHash(rootBytes)
-	}
-
-	h, err := trie.CalcRoot("test", tx)
-	if err != nil {
-		panic(err)
-	}
-	return h
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg

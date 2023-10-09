@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -41,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -259,8 +259,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	if ethconfig.EnableHistoryV4InTest {
 		var root libcommon.Hash
-		//aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
-		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx()).Commit(context2.Background(), false, false)
+		rootBytes, err := state2.NewSharedDomains(tx).ComputeCommitment(context2.Background(), false, false)
 		if err != nil {
 			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 		}

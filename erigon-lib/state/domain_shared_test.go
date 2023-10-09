@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,11 +25,8 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := agg.SharedDomains(ac)
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
-	defer domains.StartWrites().FinishWrites()
-
-	domains.SetTx(rwTx)
 
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
@@ -44,9 +42,9 @@ Loop:
 	defer rwTx.Rollback()
 
 	ac = agg.MakeContext()
-	domains = agg.SharedDomains(ac)
-	domains.StartWrites()
-	domains.SetTx(rwTx)
+	defer ac.Close()
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
 
 	i := 0
 	k0 := make([]byte, length.Addr)
@@ -60,12 +58,12 @@ Loop:
 			pv, err := domains.LatestAccount(k0)
 			require.NoError(t, err)
 
-			err = domains.UpdateAccountData(k0, v, pv)
+			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv)
 			require.NoError(t, err)
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.Commit(ctx, true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)

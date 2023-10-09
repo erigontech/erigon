@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/eth/filters"
-	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -32,8 +31,8 @@ type ErigonAPI interface {
 	// Receipt related (see ./erigon_receipts.go)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
-	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.ErigonLogs, error)
-	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions ethFilters.LogFilterOptions) (types.ErigonLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error)
+	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
 
