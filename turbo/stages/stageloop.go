@@ -24,8 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 
-	"github.com/ledgerwatch/erigon/borfinality/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"

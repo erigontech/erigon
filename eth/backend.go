@@ -90,9 +90,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common/debug"
 
-	"github.com/ledgerwatch/erigon/borfinality/flags"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"

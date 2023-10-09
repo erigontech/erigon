@@ -3,7 +3,7 @@ package borfinality
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/borfinality/whitelist"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 )
