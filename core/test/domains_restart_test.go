@@ -384,13 +384,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	domCtx = agg.MakeContext()
-	defer domCtx.Close()
-
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
+	domCtx = agg.MakeContext()
+	defer domCtx.Close()
 	domains = state.NewSharedDomains(tx)
 	defer domains.Close()
 
@@ -405,16 +404,14 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
+	tx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
 	domains = state.NewSharedDomains(tx)
 	defer domains.Close()
 
-	tx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	domains.SetTx(tx)
 	writer = state2.NewWriterV4(domains)
 
 	_, err = domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
