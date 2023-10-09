@@ -16,7 +16,7 @@
 
 //go:build !js
 
-package olddb
+package membatch
 
 import (
 	"bytes"
@@ -29,9 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -206,43 +203,4 @@ func TestParallelPutGet(t *testing.T) {
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
-}
-
-var hexEntries = map[string]string{
-	"6b": "89c6",
-	"91": "c476",
-	"a8": "0a514e",
-	"bb": "7a",
-	"bd": "fe76",
-	"c0": "12",
-}
-
-var startKey = common.FromHex("a0")
-var fixedBits = 3
-
-var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
-
-func TestWalk(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-
-	for k, v := range hexEntries {
-		err := tx.Put(testBucket, common.FromHex(k), common.FromHex(v))
-		if err != nil {
-			t.Fatalf("put failed: %v", err)
-		}
-	}
-
-	var gotKeys [][]byte
-	c, err := tx.Cursor(testBucket)
-	if err != nil {
-		panic(err)
-	}
-	defer c.Close()
-	err = ethdb.Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
-		gotKeys = append(gotKeys, common.CopyBytes(key))
-		return true, nil
-	})
-	assert.NoError(t, err)
-
-	assert.Equal(t, keysInRange, gotKeys)
 }
