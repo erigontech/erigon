@@ -1510,11 +1510,7 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	txs, err := MarshalTransactionsBinary(b.transactions)
-	if err != nil {
-		panic(err)
-	}
-	return &RawBody{Transactions: txs, Uncles: b.uncles, Withdrawals: b.withdrawals}
+	return b.Body().RawBody()
 }
 
 // RawBody creates a RawBody based on the body.
