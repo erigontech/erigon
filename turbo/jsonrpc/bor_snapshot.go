@@ -277,9 +277,9 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
-	bor, ok := api._engine.(*bor.Bor)
+	bor, err := api.bor()
 
-	if !ok {
+	if err != nil {
 		return false, errors.New("bor engine not available")
 	}
 

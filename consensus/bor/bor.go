@@ -442,12 +442,22 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 // This is used by the rpcdaemon which needs read only access to the provided data services
-func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	// get bor config
+	borConfig := chainConfig.Bor
+
+	// Set any missing consensus parameters to their defaults
+	if borConfig != nil && borConfig.CalculateSprint(0) == 0 {
+		borConfig.Sprint = defaultSprintLength
+	}
+
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	return &Bor{
+		chainConfig: chainConfig,
+		config:      borConfig,
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
