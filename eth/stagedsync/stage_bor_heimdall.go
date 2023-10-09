@@ -250,8 +250,17 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		if blockNum == 1 || (blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd-1)%spanLength) == 0) {
-			if lastSpanId, err = fetchAndWriteSpans(ctx, blockNum, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+		if blockNum == 1 {
+			if lastSpanId, err = fetchAndWriteSpans(ctx, 0, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+				return err
+			}
+			if lastSpanId, err = fetchAndWriteSpans(ctx, 1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+				return err
+			}
+		}
+		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd-1)%spanLength) == 0 {
+			spanId := 2 + (blockNum-zerothSpanEnd-1)/spanLength
+			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
@@ -380,17 +389,12 @@ func fetchAndWriteBorEvents(
 
 func fetchAndWriteSpans(
 	ctx context.Context,
-	blockNum uint64,
+	spanId uint64,
 	tx kv.RwTx,
 	heimdallClient heimdall.IHeimdallClient,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	var spanId uint64
-	if blockNum > zerothSpanEnd {
-		spanId = 1 + (blockNum-zerothSpanEnd-1)/spanLength
-	}
-	logger.Debug(fmt.Sprintf("[%s] Fetching span", logPrefix), "id", spanId)
 	response, err := heimdallClient.Span(ctx, spanId)
 	if err != nil {
 		return 0, err
@@ -404,6 +408,7 @@ func fetchAndWriteSpans(
 	if err = tx.Put(kv.BorSpans, spanIDBytes[:], spanBytes); err != nil {
 		return 0, err
 	}
+	logger.Debug(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanId)
 	return spanId, nil
 }
 
