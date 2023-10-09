@@ -169,6 +169,10 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	return idx, nil
 }
 
+func (idx *Index) DataHandle() unsafe.Pointer {
+	return unsafe.Pointer(&idx.data[0])
+}
+
 func (idx *Index) Size() int64        { return idx.size }
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }

@@ -16,6 +16,7 @@ package memdb
 import (
 	"bytes"
 	"context"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -40,7 +41,7 @@ type MemoryMutation struct {
 // Common pattern:
 //
 // batch := NewMemoryBatch(db, tmpDir)
-// defer batch.Rollback()
+// defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
@@ -504,4 +505,8 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 
 func (m *MemoryMutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
+}
+
+func (m *MemoryMutation) CHandle() unsafe.Pointer {
+	panic("CHandle not implemented")
 }

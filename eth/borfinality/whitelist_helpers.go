@@ -66,7 +66,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.IHeimd
 	milestone, err := heimdallClient.FetchMilestone(ctx)
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
 		config.logger.Debug("Failed to fetch latest milestone for whitelisting", "err", err)
-		return num, hash, errMilestone
+		return num, hash, err
 	}
 
 	if err != nil {
@@ -74,7 +74,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.IHeimd
 		return num, hash, errMilestone
 	}
 
-	config.logger.Info("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
+	config.logger.Debug("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
 
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
@@ -99,7 +99,7 @@ func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallC
 	milestoneID, err := heimdallClient.FetchLastNoAckMilestone(ctx)
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
 		logger.Debug("Failed to fetch latest no-ack milestone", "err", err)
-		return milestoneID, errMilestone
+		return milestoneID, err
 	}
 
 	if err != nil {

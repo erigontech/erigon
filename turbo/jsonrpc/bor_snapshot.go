@@ -52,7 +52,13 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +67,14 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetAuthor retrieves the author a block.
-func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) {
+func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
+	// init consensus db
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -71,16 +84,30 @@ func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) 
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
+
+	//nolint:nestif
+	if blockNrOrHash == nil {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+			}
+		}
 	}
-	// Ensure we have an actually valid block
-	if header == nil {
+
+	// Ensure we have an actually valid block and return its snapshot
+	if header == nil || err != nil {
 		return nil, errUnknownBlock
 	}
-	author, err := author(api, tx, header)
+
+	author, err := bor.Author(header)
+
 	return &author, err
 }
 
@@ -103,7 +130,13 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +167,13 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +201,13 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +245,7 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	service := whitelist.GetWhitelistingService()
 
 	if service == nil {
-		return false, errors.New("Only available in Bor engine")
+		return false, errors.New("only available in Bor engine")
 	}
 
 	//Confirmation of 16 blocks on the endblock
@@ -261,6 +306,48 @@ type difficultiesKV struct {
 	Difficulty uint64
 }
 
+// GetSnapshotProposer retrieves the in-turn signer at a given block.
+func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer tx.Rollback()
+
+	var header *types.Header
+	//nolint:nestif
+	if blockNrOrHash == nil {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			} else {
+				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+			}
+		}
+	}
+
+	if header == nil || err != nil {
+		return common.Address{}, errUnknownBlock
+	}
+
+	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
+	snap, err := api.GetSnapshot(&snapNumber)
+
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return snap.ValidatorSet.GetProposer().Address, nil
+}
+
 func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error) {
 	// init chain db
 	ctx := context.Background()
@@ -294,7 +381,13 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 
 	// init consensus db
-	borTx, err := api.bor.DB.BeginRo(ctx)
+	bor, err := api.bor()
+
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	borTx, err := bor.DB.BeginRo(ctx)
 	if err != nil {
 		return BlockSigners{}, err
 	}
@@ -344,6 +437,12 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
+	bor, err := api.bor()
+
+	if err != nil {
+		return "", err
+	}
+
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -351,7 +450,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	}
 	defer tx.Rollback()
 
-	return api.bor.GetRootHash(ctx, tx, start, end)
+	return bor.GetRootHash(ctx, tx, start, end)
 }
 
 // Helper functions for Snapshot Type
