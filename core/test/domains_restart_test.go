@@ -205,13 +205,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
+	tx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
 	domains = state.NewSharedDomains(tx)
 	defer domains.Close()
-
-	tx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
 
 	//{
 	//	cct := domains.Commitment.MakeContext()
