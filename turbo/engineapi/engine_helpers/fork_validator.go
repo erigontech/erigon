@@ -195,10 +195,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 			header *types.Header
 			body   *types.Body
 		)
-		body, criticalError = fv.blockReader.BodyWithTransactions(fv.ctx, tx, currentHash, unwindPoint)
-		if criticalError != nil {
-			return
-		}
 		header, criticalError = fv.blockReader.Header(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
@@ -208,13 +204,17 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 			status = engine_types.AcceptedStatus
 			return
 		}
-		headersChain = append([]*types.Header{header}, headersChain...)
-		if body == nil {
-			bodiesChain = append([]*types.RawBody{nil}, bodiesChain...)
-		} else {
-			bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
-
+		body, criticalError = fv.blockReader.BodyWithTransactions(fv.ctx, tx, currentHash, unwindPoint)
+		if criticalError != nil {
+			return
 		}
+		if body == nil {
+			criticalError = fmt.Errorf("found chain gap in block body at hash %s, number %d", currentHash, unwindPoint)
+			return
+		}
+
+		headersChain = append([]*types.Header{header}, headersChain...)
+		bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1

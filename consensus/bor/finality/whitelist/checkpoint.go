@@ -2,8 +2,8 @@ package whitelist
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/borfinality/rawdb"
 	"github.com/ledgerwatch/erigon/metrics"
 )
 

@@ -1,14 +1,14 @@
 // nolint
-package borfinality
+package finality
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -137,6 +137,10 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
 	if err != nil {
 		log.Debug("Failed to get end block hash while whitelisting", "err", err)
+		return hash, errEndBlock
+	}
+	if block == nil {
+		log.Debug("Current header behind the end block", "block", end)
 		return hash, errEndBlock
 	}
 
