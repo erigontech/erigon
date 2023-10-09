@@ -12,7 +12,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -47,7 +47,7 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
-	*memdb.Mapmutation
+	*membatch.Mapmutation
 	aggCtx *AggregatorV3Context
 	roTx   kv.Tx
 
@@ -88,7 +88,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
-		Mapmutation: memdb.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
+		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
 		aggCtx:      ac,
 
 		Account:    ac.a.accounts,
@@ -896,7 +896,7 @@ func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 	mut := sd.Mapmutation
-	sd.Mapmutation = memdb.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
+	sd.Mapmutation = membatch.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
 	return []flusher{
 		sd.aggCtx.account.Rotate(),
 		sd.aggCtx.storage.Rotate(),

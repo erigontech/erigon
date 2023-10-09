@@ -10,6 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -135,7 +135,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				simStateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 				//simStateReader = state.NewSimReaderV4(simulationTx)
 			} else {
-				simulationTx = memdb.NewHashBatch(tx, quit, cfg.tmpdir, logger)
+				simulationTx = membatch.NewHashBatch(tx, quit, cfg.tmpdir, logger)
 				simStateReader = state.NewPlainStateReader(tx)
 			}
 			executionAt, err := s.ExecutionAt(tx)
