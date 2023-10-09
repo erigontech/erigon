@@ -28,7 +28,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
@@ -1302,7 +1302,7 @@ func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
 func (c *Bor) Start(chainDB kv.RwDB) {
 	if flags.Milestone {
 		whitelist.RegisterService(c.DB)
-		borfinality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
+		finality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
 			FinalityAPIFunc(func(start uint64, end uint64) (string, error) {
 				ctx := context.Background()
 				tx, err := chainDB.BeginRo(ctx)

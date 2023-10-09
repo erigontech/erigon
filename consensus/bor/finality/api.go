@@ -1,4 +1,4 @@
-package borfinality
+package finality
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"

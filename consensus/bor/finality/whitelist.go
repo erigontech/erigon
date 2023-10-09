@@ -1,4 +1,4 @@
-package borfinality
+package finality
 
 import (
 	"context"
