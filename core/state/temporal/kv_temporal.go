@@ -199,10 +199,10 @@ func (tx *Tx) Rollback() {
 	}
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
-	tx.autoClose(mdbxTx)
+	tx.autoClose()
 	mdbxTx.Rollback()
 }
-func (tx *Tx) autoClose(mdbxTx *mdbx.MdbxTx) {
+func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
@@ -220,7 +220,7 @@ func (tx *Tx) Commit() error {
 	}
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
-	tx.autoClose(mdbxTx)
+	tx.autoClose()
 	return mdbxTx.Commit()
 }
 
