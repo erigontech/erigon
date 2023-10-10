@@ -92,18 +92,17 @@ func TestGenerateChain(t *testing.T) {
 		fmt.Printf("generate chain: %v\n", err)
 	}
 
+	// Import the chain. This runs all block validation rules.
+	if err := m.InsertChain(chain); err != nil {
+		fmt.Printf("insert error%v\n", err)
+		return
+	}
 	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
-
-	// Import the chain. This runs all block validation rules.
-	if err := m.InsertChain(chain, tx); err != nil {
-		fmt.Printf("insert error%v\n", err)
-		return
-	}
 
 	st := state.New(m.NewStateReader(tx))
 	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {

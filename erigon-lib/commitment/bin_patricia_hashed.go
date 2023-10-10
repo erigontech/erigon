@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -1184,7 +1185,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 	if branchData != nil {
 		if bph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
+			fmt.Printf("fold: update key: '%x', branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
 		}
 	}
 	return branchData, updateKey, nil
@@ -1275,7 +1276,7 @@ func (bph *BinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[1:], nil // first byte is 128+hash_len
 }
 
-func (bph *BinPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	pks := make(map[string]int, len(plainKeys))
@@ -1290,6 +1291,11 @@ func (bph *BinPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, 
 	})
 	stagedBinaryCell := new(BinaryCell)
 	for i, hashedKey := range hashedKeys {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		plainKey := plainKeys[i]
 		hashedKey = hexToBin(hashedKey)
 		if bph.trace {
@@ -1526,7 +1532,7 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (bph *BinPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	for i, pk := range plainKeys {
@@ -1539,6 +1545,11 @@ func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Updat
 	})
 
 	for i, plainKey := range plainKeys {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		update := updates[i]
 		if bph.trace {
 			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", update.plainKey, update.hashedKey, bph.currentKey[:bph.currentKeyLen])

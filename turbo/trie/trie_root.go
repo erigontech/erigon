@@ -8,11 +8,12 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -246,6 +247,10 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
+			if l.trace {
+				fmt.Printf("account %x => b %d n %d ch %x\n", k, &l.accountValue.Balance, l.accountValue.Nonce, l.accountValue.CodeHash)
+			}
+
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
@@ -423,7 +428,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 		}
 		if r.trace {
-			fmt.Printf("account %x =>b %d n %d ch %x\n", accountKey, &accountValue.Balance, accountValue.Nonce, accountValue.CodeHash)
+			fmt.Printf("account %x => b %d n %d ch %x\n", accountKey, &accountValue.Balance, accountValue.Nonce, accountValue.CodeHash)
 		}
 		if err := r.saveValueAccount(false, hasTree, accountValue, hash); err != nil {
 			return err

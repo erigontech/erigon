@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -121,51 +120,26 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
-				kb := []byte(key)
-				prev, err := domains.LatestAccount(kb)
-				if err != nil {
-					return fmt.Errorf("latest account %x: %w", kb, err)
-				}
-				if list.Vals[i] == nil {
-					if AssertReads {
-						original := txTask.AccountDels[key]
-						var originalBytes []byte
-						if original != nil {
-							originalBytes = accounts.SerialiseV3(original)
-						}
-						if !bytes.Equal(prev, originalBytes) {
-							panic(fmt.Sprintf("different prev value %x, %x, %x, %t, %t\n", kb, prev, originalBytes, prev == nil, originalBytes == nil))
-						}
-					}
-
-					if err := domains.DeleteAccount(kb, prev); err != nil {
-						return err
-					}
-					//fmt.Printf("applied %x DELETE\n", kb)
-				} else {
-					if err := domains.UpdateAccountData(kb, list.Vals[i], prev); err != nil {
-						return err
-					}
-					//acc.Reset()
-					//accounts.DeserialiseV3(&acc, list.Vals[k])
-					//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
+				//if AssertReads {
+				//	original := txTask.AccountDels[key]
+				//	var originalBytes []byte
+				//	if original != nil {
+				//		originalBytes = accounts.SerialiseV3(original)
+				//	}
+				//}
+				if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+					return err
 				}
 			}
 		case kv.CodeDomain:
 			for i, key := range list.Keys {
-				if err := domains.UpdateAccountCode([]byte(key), list.Vals[i]); err != nil {
+				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 					return err
 				}
 			}
 		case kv.StorageDomain:
 			for k, key := range list.Keys {
-				hkey := []byte(key)
-				prev, err := domains.LatestStorage(hkey)
-				if err != nil {
-					return fmt.Errorf("latest account %x: %w", key, err)
-				}
-				//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
-				if err := domains.WriteAccountStorage(hkey, nil, list.Vals[k], prev); err != nil {
+				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], nil); err != nil {
 					return err
 				}
 			}
@@ -197,28 +171,21 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		}
 
 		//fmt.Printf("+applied %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
-		if err := domains.UpdateAccountData(addrBytes, enc1, enc0); err != nil {
+		if err := domains.DomainPut(kv.AccountsDomain, addrBytes, nil, enc1, enc0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
-	//defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
-	rs.domains.SetTxNum(txNum)
-
-	return rs.domains.Commit(saveState, false)
-}
-
 func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) ApplyState4(txTask *TxTask, agg *libstate.AggregatorV3) error {
-	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstate.AggregatorV3) error {
+	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(txTask.TxNum)
+	rs.domains.SetTxNum(ctx, txTask.TxNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
@@ -262,7 +229,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	return nil
 }
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac *libstate.AggregatorV3Context, accumulator *shards.Accumulator) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, accumulator *shards.Accumulator) error {
 	var currentInc uint64
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -379,8 +346,8 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	}
 }
 
-func (w *StateWriterBufferedV3) SetTxNum(txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
+func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
+	w.rs.domains.SetTxNum(ctx, txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 
@@ -442,8 +409,9 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
-	err := w.rs.domains.IterateStoragePrefix(w.tx, address[:], func(k, v []byte) {
+	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		return nil
 	})
 	if err != nil {
 		return err

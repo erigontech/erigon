@@ -70,13 +70,6 @@ type Genesis struct {
 // GenesisAlloc specifies the initial state that is part of the genesis block.
 type GenesisAlloc map[common.Address]GenesisAccount
 
-type AuthorityRoundSeal struct {
-	/// Seal step.
-	Step uint64 `json:"step"`
-	/// Seal signature.
-	Signature common.Hash `json:"signature"`
-}
-
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common2.UnprefixedAddress]GenesisAccount)
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -87,6 +80,21 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 		(*ga)[common.Address(addr)] = a
 	}
 	return nil
+}
+
+func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
+	var alloc GenesisAlloc
+
+	b, err := json.Marshal(i)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(b, &alloc); err != nil {
+		return nil, err
+	}
+
+	return alloc, nil
 }
 
 // GenesisAccount is an account in the state of the genesis block.

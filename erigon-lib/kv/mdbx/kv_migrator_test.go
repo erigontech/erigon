@@ -37,10 +37,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	normalBucket := kv.ChaindataTables[15]
 	deprecatedBucket := kv.ChaindataDeprecatedTables[0]
-	migrator, ok := tx.(kv.BucketMigrator)
-	if !ok {
-		return
-	}
+	migrator := tx
 
 	// check thad buckets have unique DBI's
 	uniquness := map[kv.DBI]bool{}

@@ -11,23 +11,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/c2h5oh/datasize"
+	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,12 +35,14 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 )
 
 func main() {
@@ -146,6 +146,9 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
 	if err := checkChainName(dirs, chain); err != nil {
 		return err
 	}
@@ -243,6 +246,10 @@ var printTorrentHashes = &cobra.Command{
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
 		files, err := downloader.AllTorrentPaths(dirs)
@@ -371,7 +378,10 @@ func checkChainName(dirs datadir.Dirs, chainName string) error {
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Label(kv.ChainDB).MustOpen()
+	db := mdbx.NewMDBX(log.New()).
+		Path(dirs.Chaindata).Label(kv.ChainDB).
+		Flags(func(flags uint) uint { return flags | mdbx2.Accede }).
+		MustOpen()
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)

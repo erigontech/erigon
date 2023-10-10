@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -15,6 +16,7 @@ import (
 )
 
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
+	ctx := context.Background()
 	dirs := datadir.New(t.TempDir())
 	v3, db, agg := temporal.NewTestDB(t, dirs, nil)
 	if !v3 {
@@ -47,10 +49,11 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}
 
 	ac := agg.MakeContext()
-	domains := agg.SharedDomains(ac)
-	domains.SetTx(tx)
+	defer ac.Close()
+	domains := state.NewSharedDomains(tx)
+	defer domains.Close()
 
-	expectedRoot, err := domains.Commit(true, false)
+	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
 	t.Logf("expected root is %x", expectedRoot)
 
@@ -66,7 +69,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	// start another tx
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer tx.Commit()
+	defer tx.Rollback()
 
 	buckets, err := tx.ListBuckets()
 	require.NoError(t, err)

@@ -676,13 +676,10 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 
-		domains := agg.SharedDomains(ac)
+		domains := libstate.NewSharedDomains(tx)
 		defer domains.Close()
-		defer domains.StartWrites().FinishWrites()
 
-		domains.SetTx(tx)
-
-		_, err := domains.SeekCommitment(0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 		if err != nil {
 			return fmt.Errorf("seek commitment: %w", err)
 		}
@@ -955,12 +952,16 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			agg := v3db.Agg()
 			err = v3db.Update(ctx, func(tx kv.RwTx) error {
 				ct := agg.MakeContext()
-				doms := agg.SharedDomains(ct)
-				defer doms.Close()
 				defer ct.Close()
-
-				doms.SetTx(tx)
-				_, err = doms.SeekCommitment(0, math.MaxUint64)
+				doms := libstate.NewSharedDomains(tx)
+				defer doms.Close()
+				_, err = doms.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+				if err != nil {
+					return err
+				}
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
 				blockNum = doms.BlockNum()
 				return err
 			})
@@ -1012,7 +1013,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, historyV3, dirs, br, nil, genesis, syncCfg, agg)
+		/*badBlockHalt=*/ true, historyV3, dirs, br, nil, genesis, syncCfg, agg, nil)
 
 	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
 	if noCommit {
@@ -1642,7 +1643,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	notifications := &shards.Notifications{}
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, heimdallClient, logger)
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil, heimdallClient, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)

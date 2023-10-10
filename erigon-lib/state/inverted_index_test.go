@@ -67,29 +67,30 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
-	ii.SetTxNum(2)
-	err = ii.Add([]byte("key1"))
+	ic.SetTxNum(2)
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(3)
-	err = ii.Add([]byte("key2"))
+	ic.SetTxNum(3)
+	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(6)
-	err = ii.Add([]byte("key1"))
+	ic.SetTxNum(6)
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ii.Add([]byte("key3"))
-	require.NoError(t, err)
-
-	ii.SetTxNum(17)
-	err = ii.Add([]byte("key10"))
+	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(ctx, tx)
+	ic.SetTxNum(17)
+	err = ic.Add([]byte("key10"))
+	require.NoError(t, err)
+
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -149,25 +150,26 @@ func TestInvIndexAfterPrune(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
-	ii.SetTxNum(2)
-	err = ii.Add([]byte("key1"))
+	ic.SetTxNum(2)
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(3)
-	err = ii.Add([]byte("key2"))
+	ic.SetTxNum(3)
+	err = ic.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ii.SetTxNum(6)
-	err = ii.Add([]byte("key1"))
+	ic.SetTxNum(6)
+	err = ic.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ii.Add([]byte("key3"))
+	err = ic.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(ctx, tx)
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -184,21 +186,23 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	ii.SetTx(tx)
 
 	ii.integrateFiles(sf, 0, 16)
 
 	from, to := ii.stepsRangeInDB(tx)
 	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 	require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
+	ic.Close()
 
-	err = ii.prune(ctx, 0, 16, math.MaxUint64, logEvery)
+	ic = ii.MakeContext()
+	defer ic.Close()
+
+	err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	ii.SetTx(tx)
 
 	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
 		var cur kv.Cursor
@@ -228,21 +232,22 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
-	ii.StartWrites()
-	defer ii.FinishWrites()
+	ic := ii.MakeContext()
+	defer ic.Close()
+	ic.StartWrites()
+	defer ic.FinishWrites()
 
 	var flusher flusher
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		ii.SetTxNum(txNum)
+		ic.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= module; keyNum++ {
 			if txNum%keyNum == 0 {
 				var k [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
-				err = ii.Add(k[:])
+				err = ic.Add(k[:])
 				require.NoError(err)
 			}
 		}
@@ -250,13 +255,13 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			require.NoError(flusher.Flush(ctx, tx))
 		}
 		if txNum%10 == 0 {
-			flusher = ii.Rotate()
+			flusher = ic.Rotate()
 		}
 	}
 	if flusher != nil {
 		require.NoError(flusher.Flush(ctx, tx))
 	}
-	err = ii.Rotate().Flush(ctx, tx)
+	err = ic.Rotate().Flush(ctx, tx)
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
@@ -353,7 +358,6 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
@@ -363,7 +367,9 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
+			ic := ii.MakeContext()
+			defer ic.Close()
+			err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
@@ -403,7 +409,6 @@ func TestInvIndexRanges(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	ii.SetTx(tx)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
@@ -413,7 +418,9 @@ func TestInvIndexRanges(t *testing.T) {
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
+			ic := ii.MakeContext()
+			defer ic.Close()
+			err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 		}()
 	}

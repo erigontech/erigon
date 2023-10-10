@@ -4,6 +4,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"math/rand"
@@ -18,6 +19,7 @@ import (
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdate$ -fuzztime=300s ./commitment
 
 func Fuzz_ProcessUpdate(f *testing.F) {
+	ctx := context.Background()
 	ha, _ := hex.DecodeString("13ccfe8074645cab4cb42b423625e055f0293c87")
 	hb, _ := hex.DecodeString("73f822e709a0016bfaed8b5e81b5f86de31d6895")
 
@@ -48,7 +50,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+		rootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +60,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		rootHashAnother, branchNodeUpdates, err := hphAnother.ProcessKeys(plainKeys)
+		rootHashAnother, branchNodeUpdates, err := hphAnother.ProcessKeys(ctx, plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +79,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 	ha, _ := hex.DecodeString("0008852883b2850c7a48f4b0eea3ccc4c04e6cb6025e9e8f7db2589c7dae81517c514790cfd6f668903161349e")
-
+	ctx := context.Background()
 	f.Add(ha)
 
 	f.Fuzz(func(t *testing.T, build []byte) {
@@ -151,7 +153,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		err := ms.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashReview, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+		rootHashReview, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
@@ -160,7 +162,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashAnother, branchUpdatesAnother, err := hphAnother.ProcessKeys(plainKeys)
+		rootHashAnother, branchUpdatesAnother, err := hphAnother.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
 		ms2.applyBranchNodeUpdates(branchUpdatesAnother)
 
@@ -170,6 +172,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 }
 
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
+	ctx := context.Background()
 	var (
 		keysCount uint64 = 100
 		seed      int64  = 1234123415
@@ -205,7 +208,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
+		rootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)

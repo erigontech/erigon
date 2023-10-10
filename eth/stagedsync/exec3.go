@@ -22,8 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -186,14 +184,14 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 
-		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-			return err
-		}
-		if dbg.MdbxLockInRam() {
-			if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
-				return err
-			}
-		}
+		//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+		//	return err
+		//}
+		//if dbg.MdbxLockInRam() {
+		//	if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
+		//		return err
+		//	}
+		//}
 	}
 
 	var blockNum, stageProgress uint64
@@ -256,7 +254,7 @@ func ExecV3(ctx context.Context,
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
-		log.Warn(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
+		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
@@ -267,10 +265,8 @@ func ExecV3(ctx context.Context,
 	var err error
 
 	// MA setio
-	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
+	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
-	defer doms.StartWrites().FinishWrites()
-	doms.SetTx(applyTx)
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
 			doms.DiscardHistory()
@@ -278,7 +274,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	rs := state.NewStateV3(doms, logger)
-	offsetFromBlockBeginning, err := doms.SeekCommitment(0, math.MaxUint64)
+	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx, 0, math.MaxUint64)
 	if err != nil {
 		return err
 	}
@@ -332,7 +328,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false)
+			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false)
 			if err != nil {
 				return err
 			}
@@ -403,7 +399,7 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						_, err := agg.ComputeCommitment(true, false)
+						_, err := doms.ComputeCommitment(ctx, true, false)
 						if err != nil {
 							return err
 						}
@@ -430,7 +426,7 @@ func ExecV3(ctx context.Context,
 							rws.DrainNonBlocking()
 							applyWorker.ResetTx(tx)
 
-							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true)
+							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true)
 							if err != nil {
 								return err
 							}
@@ -755,7 +751,7 @@ Loop:
 				}
 
 				// MA applystate
-				if err := rs.ApplyState4(txTask, agg); err != nil {
+				if err := rs.ApplyState4(ctx, txTask, agg); err != nil {
 					return err
 				}
 
@@ -785,14 +781,14 @@ Loop:
 					break
 				}
 
-				if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-					return err
-				}
+				//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+				//	return err
+				//}
 
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
-				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -830,10 +826,10 @@ Loop:
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-								return err
-							}
-							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+							//if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+							//	return err
+							//}
+							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
 							return nil
@@ -847,11 +843,11 @@ Loop:
 							return err
 						}
 					}
-					doms.StartWrites()
 					applyWorker.ResetTx(applyTx)
-					nc := applyTx.(*temporal.Tx).AggCtx()
+					nc := applyTx.(state2.HasAggCtx).AggCtx()
 					doms.SetTx(applyTx)
 					doms.SetContext(nc)
+					doms.StartWrites()
 
 					return nil
 				}(); err != nil {
@@ -876,7 +872,7 @@ Loop:
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
 	if !dbg.DiscardCommitment() && b != nil {
-		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
 		}
@@ -910,11 +906,11 @@ Loop:
 }
 
 // applyTx is required only for debugging
-func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.AggregatorV3, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.AggregatorV3, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
-	rh, err := agg.ComputeCommitment(true, false)
+	rh, err := doms.ComputeCommitment(context.Background(), true, false)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
@@ -976,7 +972,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, err
 }
 
-func processResultQueue(in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -1002,13 +998,13 @@ func processResultQueue(in *state.QueueWithRetry, rws *state.ResultsQueue, outpu
 		}
 
 		if txTask.Final {
-			err := rs.ApplyState4(txTask, agg)
+			err := rs.ApplyState4(ctx, txTask, agg)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}
 			//if !bytes.Equal(rh, txTask.BlockRoot[:]) {
 			//	log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
-			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
+			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hashk mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			//}
 		}
 		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)

@@ -9,12 +9,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
+	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/borfinality"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -58,7 +58,8 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			if whitelist.GetWhitelistingService() != nil {
 				num := borfinality.GetFinalizedBlockNumber(tx)
 				if num == 0 {
-					return 0, libcommon.Hash{}, false, errors.New("no finalized block")
+					// nolint
+					return 0, libcommon.Hash{}, false, errors.New("No finalized block")
 				}
 
 				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
@@ -152,9 +153,8 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 }
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		ac := tx.(*temporal.Tx).AggCtx()
-		domains := tx.(*temporal.Tx).Agg().SharedDomains(ac)
-		return state.NewWriterV4(tx.(*temporal.Tx), domains)
+		domains := state2.NewSharedDomains(tx)
+		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }

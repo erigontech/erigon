@@ -135,17 +135,14 @@ func TestExec(t *testing.T) {
 }
 
 func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
-
-	domains := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
-	domains.SetTx(tx)
-	domains.StartWrites()
+	domains := libstate.NewSharedDomains(tx)
 
 	rs := state.NewStateV3(domains, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
 	stateWriter.SetTx(tx)
 
 	return func(n, from, numberOfBlocks uint64) {
-			stateWriter.SetTxNum(n)
+			stateWriter.SetTxNum(context.Background(), n)
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &state.TxTask{
@@ -157,7 +154,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			if err := rs.ApplyState4(txTask, agg); err != nil {
+			if err := rs.ApplyState4(context.Background(), txTask, agg); err != nil {
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {

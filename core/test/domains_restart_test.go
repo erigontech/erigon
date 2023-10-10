@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"math/big"
 	"math/rand"
 	"os"
 	"path"
@@ -18,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -95,9 +98,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := agg.SharedDomains(domCtx)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-	domains.SetTx(tx)
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
@@ -116,11 +118,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]libcommon.Hash, 0)
 
-		writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
+		writer = state2.NewWriterV4(domains)
 	)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
+		domains.SetTxNum(ctx, txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -150,7 +152,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 
 		if txNum%blockSize == 0 && interesting {
-			rh, err := writer.Commitment(true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
@@ -159,7 +161,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}
 
-	rh, err := writer.Commitment(true, false)
+	rh, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, rh, datadir)
 
@@ -203,11 +205,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	domCtx = agg.MakeContext()
-	domains = agg.SharedDomains(domCtx)
-
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	domCtx = agg.MakeContext()
+	defer domCtx.Close()
+	domains = state.NewSharedDomains(tx)
+	defer domains.Close()
 
 	//{
 	//	cct := domains.Commitment.MakeContext()
@@ -223,7 +226,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	_, err = domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -234,30 +237,27 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
-	domCtx = agg.MakeContext()
-	domains = agg.SharedDomains(domCtx)
-	defer domCtx.Close()
-	defer domains.Close()
-
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	domCtx = agg.MakeContext()
+	defer domCtx.Close()
+	domains = state.NewSharedDomains(tx)
+	defer domains.Close()
+	writer = state2.NewWriterV4(domains)
 
-	domains.SetTx(tx)
-	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
-
-	_, err = domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	require.NoError(t, err)
 
 	txToStart := domains.TxNum()
 
-	rh, err = writer.Commitment(false, false)
+	rh, err = domains.ComputeCommitment(ctx, false, false)
 	require.NoError(t, err)
 	t.Logf("restart hash %x\n", rh)
 
 	var i, j int
 	for txNum := txToStart; txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
+		domains.SetTxNum(ctx, txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -270,7 +270,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		i++
 
 		if txNum%blockSize == 0 /*&& txNum >= txs-aggStep */ {
-			rh, err := writer.Commitment(true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 			fmt.Printf("tx %d rh %x\n", txNum, rh)
 			require.EqualValues(t, hashes[j], rh)
@@ -303,10 +303,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := agg.SharedDomains(domCtx)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-
-	domains.SetTx(tx)
 
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
@@ -325,12 +323,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]libcommon.Hash, 0)
 
-		writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
+		writer = state2.NewWriterV4(domains)
 	)
 
 	testStartedFromTxNum := uint64(1)
 	for txNum := testStartedFromTxNum; txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
+		domains.SetTxNum(ctx, txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -350,7 +348,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 
 		if txNum%blockSize == 0 {
-			rh, err := writer.Commitment(true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 
 			hashes = append(hashes, rh)
@@ -360,7 +358,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		}
 	}
 
-	latestHash, err := writer.Commitment(true, false)
+	latestHash, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, latestHash, datadir)
 
@@ -386,13 +384,16 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	domCtx = agg.MakeContext()
-	domains = agg.SharedDomains(domCtx)
-
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
-	_, err = domains.SeekCommitment(0, math.MaxUint64)
+	domCtx = agg.MakeContext()
+	defer domCtx.Close()
+	domains = state.NewSharedDomains(tx)
+	defer domains.Close()
+
+	_, err = domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	tx.Rollback()
 	require.NoError(t, err)
 
@@ -403,32 +404,30 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
-	domCtx = agg.MakeContext()
-	domains = agg.SharedDomains(domCtx)
-	defer domCtx.Close()
-	defer domains.Close()
-
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	domCtx = agg.MakeContext()
+	defer domCtx.Close()
+	domains = state.NewSharedDomains(tx)
+	defer domains.Close()
 
-	domains.SetTx(tx)
-	writer = state2.NewWriterV4(tx.(*temporal.Tx), domains)
+	writer = state2.NewWriterV4(domains)
 
-	_, err = domains.SeekCommitment(0, math.MaxUint64)
+	_, err = domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	require.NoError(t, err)
 
 	txToStart := domains.TxNum()
 	require.EqualValues(t, txToStart, 0)
 	txToStart = testStartedFromTxNum
 
-	rh, err := writer.Commitment(false, false)
+	rh, err := domains.ComputeCommitment(ctx, false, false)
 	require.NoError(t, err)
 	require.EqualValues(t, libcommon.BytesToHash(rh), types.EmptyRootHash)
 
 	var i, j int
 	for txNum := txToStart; txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
+		domains.SetTxNum(ctx, txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -440,7 +439,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		i++
 
 		if txNum%blockSize == 0 {
-			rh, err := writer.Commitment(true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			require.NoError(t, err)
 			//fmt.Printf("tx %d rh %x\n", txNum, rh)
 			require.EqualValues(t, hashes[j], rh)
@@ -460,4 +459,58 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 	acc.Balance = *uint256.NewInt(uint64(rand.Int63()))
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	return &acc, addr
+}
+
+func TestCommit(t *testing.T) {
+	t.Skip()
+	aggStep := uint64(100)
+
+	ctx := context.Background()
+	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	domCtx := agg.MakeContext()
+	defer domCtx.Close()
+	domains := state.NewSharedDomains(tx)
+	defer domains.Close()
+
+	//buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
+
+	//addr1 := common.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
+	addr2 := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	loc1 := common.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	//err = domains.UpdateAccountData(addr2, buf, nil)
+	//require.NoError(t, err)
+
+	for i := 1; i < 3; i++ {
+		ad := common.CopyBytes(addr2)
+		ad[0] = byte(i)
+
+		//err = domains.UpdateAccountData(ad, buf, nil)
+		//require.NoError(t, err)
+		//
+		err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil)
+		require.NoError(t, err)
+	}
+
+	//err = domains.WriteAccountStorage(addr2, loc1, []byte("0401"), nil)
+	//require.NoError(t, err)
+
+	domainsHash, err := domains.ComputeCommitment(ctx, true, true)
+	require.NoError(t, err)
+	err = domains.Flush(ctx, tx)
+	require.NoError(t, err)
+
+	core.GenerateTrace = true
+	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true)
+	require.NoError(t, err)
+
+	t.Logf("old hash %x\n", oldHash)
+	require.EqualValues(t, oldHash, libcommon.BytesToHash(domainsHash))
 }

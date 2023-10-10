@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -749,15 +750,15 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 		if hph.trace {
 			fmt.Printf("needUnfolding root, rootChecked = %t\n", hph.rootChecked)
 		}
-		if hph.rootChecked && hph.root.downHashedLen == 0 && hph.root.hl == 0 {
-			// Previously checked, empty root, no unfolding needed
-			return 0
-		}
-		cell = &hph.root
-		if cell.downHashedLen == 0 && cell.hl == 0 && !hph.rootChecked {
+		if hph.root.downHashedLen == 0 && hph.root.hl == 0 {
+			if hph.rootChecked {
+				// Previously checked, empty root, no unfolding needed
+				return 0
+			}
 			// Need to attempt to unfold the root
 			return 1
 		}
+		cell = &hph.root
 	} else {
 		col := int(hashedKey[hph.currentKeyLen])
 		cell = &hph.grid[hph.activeRows-1][col]
@@ -798,6 +799,9 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	if err != nil {
 		return false, err
 	}
+	if hph.trace {
+		fmt.Printf("unfoldBranchNode [%x] depth %d, afterMap[%016b] touchMap[%016b]\n", hph.currentKey[:hph.currentKeyLen], depth, hph.afterMap[row], hph.touchMap[row])
+	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
@@ -805,6 +809,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	}
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(hexToCompact(hph.currentKey[:hph.currentKeyLen])), "row", row, "depth", depth, "deleted", deleted)
+		return false, fmt.Errorf("empty branch data read during unfold")
 	}
 	hph.branchBefore[row] = true
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
@@ -988,7 +993,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
 	if hph.trace {
-		fmt.Printf("touchMap[%d]=%016b, afterMap[%d]=%016b\n", row, hph.touchMap[row], row, hph.afterMap[row])
+		fmt.Printf("current key %x touchMap[%d]=%016b, afterMap[%d]=%016b\n", hph.currentKey[:hph.currentKeyLen], row, hph.touchMap[row], row, hph.afterMap[row])
 	}
 	switch partsCount {
 	case 0:
@@ -1156,7 +1161,8 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 	if branchData != nil {
 		if hph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
+			hh := CompactedKeyToHex(updateKey)
+			fmt.Printf("fold: update key: '%x' (len %d), branchData: [%x]\n", hh, len(hh), branchData)
 		}
 	}
 	return branchData, updateKey, nil
@@ -1251,7 +1257,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	pks := make(map[string]int, len(plainKeys))
@@ -1266,10 +1272,15 @@ func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, 
 	})
 
 	stagedCell := new(Cell)
-	for _, hashedKey := range hashedKeys {
+	for i, hashedKey := range hashedKeys {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
 		if hph.trace {
-			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", i+1, len(hashedKeys), plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -1335,7 +1346,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, 
 	return rootHash, branchNodeUpdates, nil
 }
 
-func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	for i, pk := range plainKeys {
@@ -1348,6 +1359,11 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Updat
 	})
 
 	for i, update := range updates {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
 		// if hph.trace {
 		fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
 			i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])

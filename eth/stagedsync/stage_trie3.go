@@ -23,11 +23,8 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
-	agg, ac := tx.(*temporal.Tx).Agg(), tx.(*temporal.Tx).AggCtx()
-
-	domains := agg.SharedDomains(ac)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-	defer domains.StartWrites().FinishWrites()
 
 	acc := domains.Account.MakeContext()
 	ccc := domains.Code.MakeContext()
@@ -37,14 +34,14 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, err := domains.SeekCommitment(0, math.MaxUint64)
+	_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
 	if err != nil {
 		return nil, err
 	}
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
-	domains.SetTxNum(toTxNum)
+	domains.SetTxNum(ctx, toTxNum)
 
 	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger.Info("Collecting account/storage keys")
@@ -73,7 +70,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.Commit(true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false)
 			if err != nil {
 				return err
 			}
@@ -92,7 +89,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := domains.Commit(true, false)
+	rh, err := domains.ComputeCommitment(ctx, true, false)
 	if err != nil {
 		return nil, err
 	}

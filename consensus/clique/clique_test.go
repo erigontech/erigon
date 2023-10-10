@@ -106,7 +106,7 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
-	if err := m.InsertChain(chain.Slice(0, 2), nil); err != nil {
+	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -123,7 +123,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if err := m.InsertChain(chain.Slice(2, chain.Length()), nil); err != nil {
+	if err := m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {

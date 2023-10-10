@@ -3,16 +3,15 @@ package state
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -50,10 +49,9 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.AggregatorV3) {
 	t.Helper()
 	logger := log.New()
-	db := dbCfg(kv.ChainDB, filepath.Join(ddir, "chaindata")).MustOpen()
+	dirs := datadir2.New(ddir)
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
-
-	dirs := datadir.New(ddir)
 
 	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
@@ -71,7 +69,7 @@ func TestRunnn(t *testing.T) {
 
 func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	t.Helper()
-
+	ctx := context.Background()
 	db, agg := dbAggregatorOnDatadir(t, datadir)
 
 	tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup["sepolia"])
@@ -88,11 +86,10 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := agg.SharedDomains(domCtx)
+	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-	domains.SetTx(tx)
 
-	offt, err := domains.SeekCommitment(0, 1<<63-1)
+	offt, err := domains.SeekCommitment(ctx, tx, 0, 1<<63-1)
 	require.NoError(t, err)
 	txn := domains.TxNum()
 	fmt.Printf("seek to block %d txn %d block beginning offset %d\n", domains.BlockNum(), txn, offt)

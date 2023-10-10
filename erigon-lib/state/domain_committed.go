@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -306,21 +308,21 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error {
+func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint64, rh []byte) error {
 	state, err := d.PatriciaState()
 	if err != nil {
 		return err
 	}
-	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
+	cs := &commitmentState{txNum: dc.hc.ic.txNum, trieState: state, blockNum: blockNum}
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
 	}
 
 	if d.trace {
-		fmt.Printf("[commitment] put txn %d block %d rh %x\n", d.txNum, blockNum, rh)
+		fmt.Printf("[commitment] put txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
 	}
-	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
+	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}
 	d.prevState = common.Copy(encoded)
@@ -490,7 +492,7 @@ func (d *DomainCommitted) Close() {
 }
 
 // Evaluates commitment for processed state.
-func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	if dbg.DiscardCommitment() {
 		d.updates.List(true)
 		return nil, nil, nil
@@ -513,12 +515,12 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(touchedKeys)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
 		if err != nil {
 			return nil, nil, err
 		}
 	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, updates)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -536,7 +538,7 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
+func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
 	if dbg.DiscardCommitment() {
 		return 0, 0, nil
 	}
@@ -549,7 +551,7 @@ func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainCont
 	}
 
 	var latestState []byte
-	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) error {
+	err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
 		if len(value) < 16 {
 			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}

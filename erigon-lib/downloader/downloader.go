@@ -29,6 +29,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -78,10 +79,6 @@ type AggStats struct {
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return nil, err
-	}
-
 	db, c, m, torrentClient, err := openClient(cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -151,7 +148,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		defer d.wg.Done()
 
 		// Torrents that are already taken care of
-		torrentMap := map[metainfo.Hash]struct{}{}
 		//// First loop drops torrents that were downloaded or are already complete
 		//// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
@@ -200,7 +196,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
 		//d.addTorrentFilesFromDisk(false)
-		clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
 			select {
@@ -209,24 +204,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-t.GotInfo():
-				}
 				if t.Complete.Bool() {
-					torrentMap[t.InfoHash()] = struct{}{}
 					continue
 				}
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
 				}
 				t.AllowDataDownload()
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-t.GotInfo():
+				}
 				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
 					defer d.wg.Done()
@@ -343,7 +333,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
 				}
 			}
 		default:
@@ -629,6 +619,7 @@ func openClient(dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
+		GrowthStep(16 * datasize.MB).
 		Path(dbDir).
 		Open()
 	if err != nil {
