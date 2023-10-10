@@ -304,7 +304,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
 	torrents := d.torrentClient.Torrents()
 	connStats := d.torrentClient.ConnStats()
-	peers := make(map[torrent.PeerID]string, 16)
+	peers := make(map[torrent.PeerID]struct{}, 16)
 
 	d.statsLock.Lock()
 	defer d.statsLock.Unlock()
@@ -324,7 +324,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			stats.MetadataReady++
 			for _, peer := range t.PeerConns() {
 				stats.ConnectionsTotal++
-				peers[peer.PeerID] = peer.PeerClientName.Load().(string)
+				peers[peer.PeerID] = struct{}{}
 			}
 			stats.BytesCompleted += uint64(t.BytesCompleted())
 			stats.BytesTotal += uint64(t.Length())
@@ -333,11 +333,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					peersOfThisFile := make(map[torrent.PeerID]string, 16)
+					peersOfThisFile := make(map[torrent.PeerID]struct{}, 16)
+					var peerNames []string
 					for _, peer := range t.PeerConns() {
-						peersOfThisFile[peer.PeerID] = peer.PeerClientName.Load().(string)
+						if _, ok := peersOfThisFile[peer.PeerID]; !ok {
+							peersOfThisFile[peer.PeerID] = struct{}{}
+							peerNames = append(peerNames, peer.PeerClientName.Load().(string))
+						}
 					}
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
+					if len(peerNames) > 3 {
+						peerNames = peerNames[:3]
+					}
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile), "peer_names", peerNames)
 				}
 			}
 		default:
