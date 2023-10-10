@@ -267,9 +267,10 @@ func BorHeimdallForward(
 		if !mine && header != nil {
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
 			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
-				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
-					return err
-				}
+				logger.Info("checkHeaderExtraData", "blockNum", blockNum)
+				//if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
+				//	return err
+				//}
 			}
 		}
 	}

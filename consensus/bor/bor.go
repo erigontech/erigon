@@ -631,48 +631,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
 		return ErrInvalidTimestamp
 	}
-
-	//sprintLength := c.config.CalculateSprint(number)
-
-	// Verify the validator list match the local contract
-	//
-	// Note: Here we fetch the data from span instead of contract
-	// as done in bor client. The contract (validator set) returns
-	// a fixed span for 0th span i.e. 0 - 255 blocks. Hence, the
-	// contract data and span data won't match for that. Skip validating
-	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
-	// once we start fetching validator data from contract.
-	/*
-		if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
-			var spanID uint64
-			if number+1 > zerothSpanEnd {
-				spanID = 1 + (number+1-zerothSpanEnd-1)/spanLength
-			}
-			producerSet, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
-
-			if err != nil {
-				return err
-			}
-
-			sort.Sort(valset.ValidatorsByAddress(producerSet))
-
-			headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
-
-			if err != nil {
-				return err
-			}
-
-			if len(producerSet) != len(headerVals) {
-				return errInvalidSpanValidators
-			}
-
-			for i, val := range producerSet {
-				if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-					return errInvalidSpanValidators
-				}
-			}
-		}
-	*/
 	return nil
 }
 
