@@ -112,12 +112,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) SetInvertedIndices(tracesTo, tracesFrom, logAddrs, logTopics *InvertedIndex) {
-	sd.TracesTo = tracesTo
-	sd.TracesFrom = tracesFrom
-	sd.LogAddrs = logAddrs
-	sd.LogTopics = logTopics
-}
+func (sd *SharedDomains) AggCtx() *AggregatorV3Context { return sd.aggCtx }
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
