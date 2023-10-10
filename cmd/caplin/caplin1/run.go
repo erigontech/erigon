@@ -103,7 +103,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 
 	{ // start ticking forkChoice
 		go func() {
-			tickInterval := time.NewTicker(2 * time.Millisecond)
+			tickInterval := time.NewTicker(50 * time.Millisecond)
 			for {
 				select {
 				case <-tickInterval.C:

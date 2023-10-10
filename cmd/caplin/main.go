@@ -32,17 +32,17 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
-	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
+	app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 func main() {
-	app := lightclientapp.MakeApp("caplin-phase1", runCaplinNode, flags.CLDefaultFlags)
+	app := app.MakeApp("caplin", runCaplinNode, flags.CLDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
