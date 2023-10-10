@@ -334,17 +334,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
 					peersOfThisFile := make(map[torrent.PeerID]struct{}, 16)
-					var peerNames []string
 					for _, peer := range t.PeerConns() {
-						if _, ok := peersOfThisFile[peer.PeerID]; !ok {
-							peersOfThisFile[peer.PeerID] = struct{}{}
-							peerNames = append(peerNames, peer.PeerClientName.Load().(string))
-						}
+						peersOfThisFile[peer.PeerID] = struct{}{}
 					}
-					if len(peerNames) > 3 {
-						peerNames = peerNames[:3]
-					}
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile), "peer_names", peerNames)
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 				}
 			}
 		default:
