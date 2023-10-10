@@ -121,6 +121,11 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
+}
+
+func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	// Find the link, remove it and all its descendands from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)

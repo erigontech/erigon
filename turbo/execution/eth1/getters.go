@@ -14,6 +14,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -139,8 +140,12 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if body == nil {
 			break
 		}
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, err
+		}
 		bodies = append(bodies, &execution.BlockBody{
-			Transactions: body.RawBody().Transactions,
+			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
@@ -171,8 +176,13 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		if err != nil {
 			return nil, err
 		}
+
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, err
+		}
 		bodies = append(bodies, &execution.BlockBody{
-			Transactions: body.RawBody().Transactions,
+			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
