@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
@@ -115,7 +114,7 @@ var (
 
 	// errInvalidSpanValidators is returned if a block contains an
 	// invalid list of validators (i.e. non divisible by 40 bytes).
-	errInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
+	ErrInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -262,8 +261,7 @@ type Bor struct {
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
-	fakeDiff  bool // Skip difficulty verifications
-	spanCache *btree.BTree
+	fakeDiff bool // Skip difficulty verifications
 
 	closeOnce           sync.Once
 	logger              log.Logger
@@ -398,7 +396,6 @@ func New(
 		spanner:                spanner,
 		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
-		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
@@ -454,7 +451,6 @@ func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 		logger:      logger,
 		recents:     recents,
 		signatures:  signatures,
-		spanCache:   btree.New(32),
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
@@ -530,7 +526,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	}
 
 	if isSprintEnd && signersBytes%validatorHeaderBytesLength != 0 {
-		return errInvalidSpanValidators
+		return ErrInvalidSpanValidators
 	}
 
 	// Ensure that the mix digest is zero as we don't have fork protection currently
@@ -626,7 +622,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return ErrInvalidTimestamp
 	}
 
-	sprintLength := c.config.CalculateSprint(number)
+	//sprintLength := c.config.CalculateSprint(number)
 
 	// Verify the validator list match the local contract
 	//
@@ -636,31 +632,37 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	// contract data and span data won't match for that. Skip validating
 	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
 	// once we start fetching validator data from contract.
-	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
-		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+	/*
+		if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
+			var spanID uint64
+			if number+1 > zerothSpanEnd {
+				spanID = 1 + (number+1-zerothSpanEnd-1)/spanLength
+			}
+			producerSet, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 
-		if err != nil {
-			return err
-		}
+			if err != nil {
+				return err
+			}
 
-		sort.Sort(valset.ValidatorsByAddress(producerSet))
+			sort.Sort(valset.ValidatorsByAddress(producerSet))
 
-		headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
+			headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
 
-		if err != nil {
-			return err
-		}
+			if err != nil {
+				return err
+			}
 
-		if len(producerSet) != len(headerVals) {
-			return errInvalidSpanValidators
-		}
-
-		for i, val := range producerSet {
-			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+			if len(producerSet) != len(headerVals) {
 				return errInvalidSpanValidators
 			}
+
+			for i, val := range producerSet {
+				if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+					return errInvalidSpanValidators
+				}
+			}
 		}
-	}
+	*/
 	return nil
 }
 
@@ -680,7 +682,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		// get validators and current span
 		var validators []*valset.Validator
 
-		validators, err = c.spanner.GetCurrentValidators(1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		validators, err = c.spanner.GetCurrentValidators(0, c.authorizedSigner.Load().signer, chain)
 
 		if err != nil {
 			return nil, err
@@ -934,7 +936,11 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		var spanID uint64
+		if number+1 > zerothSpanEnd {
+			spanID = 1 + (number+1-zerothSpanEnd-1)/spanLength
+		}
+		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1347,46 +1353,6 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 	return false
 }
 
-func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
-	c.logger.Debug("Getting span", "for block", blockNum)
-	var borSpan *span.HeimdallSpan
-	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
-		borSpan = item.(*span.HeimdallSpan)
-		return false
-	})
-
-	if borSpan != nil && borSpan.StartBlock <= blockNum && borSpan.EndBlock >= blockNum {
-		return borSpan, nil
-	}
-
-	// Span with given block block number is not loaded
-	// As span has fixed set of blocks (except 0th span), we can
-	// formulate it and get the exact ID we'd need to fetch.
-	var spanID uint64
-	if blockNum > zerothSpanEnd {
-		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
-	}
-
-	if c.HeimdallClient == nil {
-		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
-	}
-
-	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
-
-	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-	if err != nil {
-		return nil, err
-	}
-	borSpan = response
-	c.spanCache.ReplaceOrInsert(borSpan)
-
-	for c.spanCache.Len() > 128 {
-		c.spanCache.DeleteMin()
-	}
-
-	return borSpan, nil
-}
-
 func (c *Bor) fetchAndCommitSpan(
 	newSpanID uint64,
 	state *state.IntraBlockState,
@@ -1516,10 +1482,6 @@ func (c *Bor) CommitStates(
 
 func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
 	c.HeimdallClient = h
-}
-
-func (c *Bor) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error) {
-	return c.spanner.GetCurrentValidators(blockNumber, signer, getSpanForBlock)
 }
 
 //

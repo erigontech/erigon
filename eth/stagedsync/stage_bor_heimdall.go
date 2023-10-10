@@ -1,11 +1,13 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"sort"
 	"strconv"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -37,6 +40,8 @@ const (
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
+	extraVanity             = 32   // Fixed number of extra-data prefix bytes reserved for signer vanity
+	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
 type BorHeimdallCfg struct {
@@ -201,7 +206,7 @@ func BorHeimdallForward(
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	if !mine {
-		logger.Info("["+s.LogPrefix()+"] Processng sync events...", "from", lastBlockNum+1)
+		logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1)
 	}
 
 	var blockNum uint64
@@ -258,14 +263,22 @@ func BorHeimdallForward(
 				return err
 			}
 		}
-		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd-1)%spanLength) == 0 {
-			spanId := 2 + (blockNum-zerothSpanEnd-1)/spanLength
+		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd)%spanLength) == 0 {
+			spanId := 2 + (blockNum-zerothSpanEnd)/spanLength
 			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
 		if err = persistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
 			return fmt.Errorf("persistValidatorSets: %w", err)
+		}
+		if !mine && header != nil {
+			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -282,6 +295,46 @@ func BorHeimdallForward(
 	logger.Info("["+s.LogPrefix()+"] Sync events processed", "progress", blockNum-1, "lastSpanId", lastSpanId, "lastEventId", lastEventId, "total records", eventRecords, "fetch time", fetchTime, "process time", time.Since(processStart))
 
 	return
+}
+
+func checkHeaderExtraData(
+	u Unwinder,
+	ctx context.Context,
+	chain consensus.ChainHeaderReader,
+	blockNum uint64,
+	header *types.Header,
+) error {
+	var spanID uint64
+	if blockNum+1 > zerothSpanEnd {
+		spanID = 1 + (blockNum+1-zerothSpanEnd-1)/spanLength
+	}
+	spanBytes := chain.BorSpan(spanID)
+	var sp span.HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &sp); err != nil {
+		return err
+	}
+	producerSet := make([]*valset.Validator, len(sp.SelectedProducers))
+	for i := range sp.SelectedProducers {
+		producerSet[i] = &sp.SelectedProducers[i]
+	}
+
+	sort.Sort(valset.ValidatorsByAddress(producerSet))
+
+	headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
+	if err != nil {
+		return err
+	}
+
+	if len(producerSet) != len(headerVals) {
+		return bor.ErrInvalidSpanValidators
+	}
+
+	for i, val := range producerSet {
+		if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+			return bor.ErrInvalidSpanValidators
+		}
+	}
+	return nil
 }
 
 func fetchAndWriteBorEvents(
