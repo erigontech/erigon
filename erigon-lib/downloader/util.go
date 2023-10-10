@@ -31,7 +31,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -176,7 +175,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 8)
 	var i atomic.Int32
 
 	for _, file := range files {
