@@ -111,17 +111,11 @@ func BorHeimdallForward(
 		s.state.UnwindTo(unwindPoint, hash)
 
 		if unwindPoint < headNumber {
-			for blockNum := unwindPoint + 1; blockNum <= headNumber; blockNum++ {
-				if header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum); err == nil {
-					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum)
-					cfg.penalize(ctx, []headerdownload.PenaltyItem{
-						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
-					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-				}
-			}
+			logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", headNumber)
+			cfg.penalize(ctx, []headerdownload.PenaltyItem{
+				{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
+			dataflow.HeaderDownloadStates.AddChange(unwindPoint+1, dataflow.HeaderBad)
 			return fmt.Errorf("milestone block mismatch at %d", headNumber)
-		} else {
-			return
 		}
 	}
 
