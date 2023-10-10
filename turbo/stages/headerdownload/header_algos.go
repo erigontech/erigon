@@ -536,6 +536,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
+					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+						parentLink.RemoveChild(link)
+					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					return true, false, 0, lastTime, nil
 				}
