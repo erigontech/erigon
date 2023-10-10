@@ -58,7 +58,7 @@ func MiningStages(
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
 				//fmt.Println("SpawnMiningExecStage")
 				//defer fmt.Println("SpawnMiningExecStage", "DONE")
-				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
+				return SpawnMiningExecStage(s, tx, execCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
 			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
