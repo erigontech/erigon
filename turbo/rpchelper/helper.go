@@ -147,7 +147,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 
 func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 	if histV3 {
-		return state.NewReaderV4(tx.(kv.TemporalTx))
+		return state.NewReaderV4(tx.(kv.TemporalGetter))
 	}
 	return state.NewPlainStateReader(tx)
 }

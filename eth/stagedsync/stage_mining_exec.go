@@ -132,7 +132,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			var simStateReader state.StateReader
 			if histV3 {
 				simulationTx = state2.NewSharedDomains(tx)
-				simStateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+				simStateReader = state.NewReaderV4(tx.(kv.TemporalGetter))
 				//simStateReader = state.NewSimReaderV4(simulationTx)
 			} else {
 				simulationTx = membatch.NewHashBatch(tx, quit, cfg.tmpdir, logger)

@@ -753,7 +753,7 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	if ms.HistoryV3 {
-		return state.NewReaderV4(tx.(kv.TemporalTx))
+		return state.NewReaderV4(tx.(kv.TemporalGetter))
 	}
 	return state.NewPlainStateReader(tx)
 }
