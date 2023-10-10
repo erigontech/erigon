@@ -334,7 +334,6 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	} else {
 		ts.ChunkSize = 0
 	}
-
 	ts.DisallowDataDownload = true
 	_, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
