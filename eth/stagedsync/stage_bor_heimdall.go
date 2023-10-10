@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -106,22 +105,15 @@ func BorHeimdallForward(
 		// TODO set the hash and the headNumber to the milestone fork point
 
 		unwindPoint := *generics.BorMilestoneRewind.Load()
-		var reset uint64 = 0
+		var reset uint64 = 1
 		generics.BorMilestoneRewind.Store(&reset)
 		s.state.UnwindTo(unwindPoint, hash)
 
 		if unwindPoint < headNumber {
-			for blockNum := unwindPoint + 1; blockNum <= headNumber; blockNum++ {
-				if header, err = cfg.blockReader.HeaderByNumber(ctx, tx, blockNum); err == nil {
-					logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", blockNum)
-					cfg.penalize(ctx, []headerdownload.PenaltyItem{
-						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
-					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-				}
-			}
+			logger.Debug("[BorHeimdall] Verification failed for header", "hash", header.Hash(), "height", headNumber)
+			cfg.penalize(ctx, []headerdownload.PenaltyItem{
+				{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 			return fmt.Errorf("milestone block mismatch at %d", headNumber)
-		} else {
-			return
 		}
 	}
 
@@ -134,7 +126,6 @@ func BorHeimdallForward(
 			if service != nil {
 				if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
 					logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
-					dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(minedHeadNumber-1, minedHeader.Hash())
 					return err
 				}
@@ -211,7 +202,6 @@ func BorHeimdallForward(
 					logger.Debug("["+s.LogPrefix()+"] Verification failed for header", "height", blockNum, "hash", header.Hash())
 					cfg.penalize(ctx, []headerdownload.PenaltyItem{
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
-					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, header.Hash())
 					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 				}

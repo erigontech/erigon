@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"golang.org/x/exp/slices"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
@@ -120,11 +121,17 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.badHeaders[headerHash] = struct{}{}
 	// Find the link, remove it and all its descendands from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
 	}
+	x := *generics.BorMilestoneRewind.Load()
+	var reset uint64 = 0
+	generics.BorMilestoneRewind.Store(&reset)
+	if x == 1 {
+		return
+	}
+	hd.badHeaders[headerHash] = struct{}{}
 }
 
 func (hd *HeaderDownload) IsBadHeader(headerHash libcommon.Hash) bool {
