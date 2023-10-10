@@ -79,7 +79,7 @@ func Default() *torrent.ClientConfig {
 
 func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers []string, webseeds string) (*Cfg, error) {
 	torrentConfig := Default()
-	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU() * 2
+	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
 	torrentConfig.ExtendedHandshakeClientVersion = version
