@@ -136,10 +136,14 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	}
 	defer c.Close()
 
-	cnt, err := c.Count()
+	lastK, _, err := c.Last()
 	if err != nil {
 		return false, 0, err
 	}
+	if lastK == nil {
+		return false, 0, nil
+	}
+	cnt := binary.BigEndian.Uint64(lastK)
 
 	blockNum = uint64(sort.Search(int(cnt), func(i int) bool {
 		binary.BigEndian.PutUint64(seek[:], uint64(i))
