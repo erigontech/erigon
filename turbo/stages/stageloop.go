@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/params"
@@ -358,7 +358,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	//	defer sd.Close()
 	//	miningBatch = sd
 	//} else {
-	mb := memdb.NewMemoryBatch(tx, tmpDir)
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir)
 	defer mb.Rollback()
 	miningBatch = mb
 	//}
