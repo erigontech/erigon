@@ -1035,6 +1035,38 @@ type HistoryRecord struct {
 	Value []byte
 }
 
+// cursor management is not responsibility of unwindKey, caller should take care of it.
+func (hc *HistoryContext) unwindKey2(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
+	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
+	if err != nil {
+		return nil, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
+	}
+
+	res := make([]HistoryRecord, 0, 2)
+	for it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, HistoryRecord{TxNum: txn, Value: nil})
+		hc.GetNoStateWithRecent(key, txn, rwTx)
+		if len(res) == 2 {
+			break
+		}
+
+		switch {
+		case hc.h.historyLargeValues:
+			cur, err := hc.valsCursor(rwTx)
+			if err != nil {
+				return nil, err
+			}
+			cur.
+		}
+	}
+
+	return res, nil
+}
+
 // returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
 func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]HistoryRecord, error) {
 	res := make([]HistoryRecord, 0, 2)

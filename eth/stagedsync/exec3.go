@@ -797,9 +797,11 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
+
 					if err := doms.Flush(ctx, applyTx); err != nil {
 						return err
 					}
+					doms.FinishWrites()
 					doms.ClearRam(false)
 					t3 = time.Since(tt)
 
@@ -816,6 +818,7 @@ Loop:
 						}
 						doms.SetContext(nil)
 						doms.SetTx(nil)
+						fmt.Printf("[dbg] externalTx v3 commit %d\n", blockNum)
 
 						t4 = time.Since(tt)
 						tt = time.Now()

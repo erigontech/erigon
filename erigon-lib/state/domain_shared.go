@@ -920,9 +920,12 @@ func (sd *SharedDomains) rotate() []flusher {
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	flushers := sd.rotate()
 	for _, f := range flushers {
+		mxDomainFlushes.Inc()
 		if err := f.Flush(ctx, tx); err != nil {
+			mxDomainFlushes.Dec()
 			return err
 		}
+		mxDomainFlushes.Dec()
 	}
 	return nil
 }

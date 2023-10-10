@@ -62,6 +62,7 @@ var (
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
 	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
+	mxRunningFilesBuilding    = metrics.GetOrCreateCounter("domain_running_files_building")
 	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
 	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
@@ -75,6 +76,7 @@ var (
 	mxPruneSizeIndex          = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
 	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
+	mxDomainFlushes           = metrics.GetOrCreateCounter("domain_wal_flushes")
 	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
 	mxCommitmentRunning       = metrics.GetOrCreateCounter("domain_running_commitment")
 	mxCommitmentTook          = metrics.GetOrCreateSummary("domain_commitment_took")
@@ -1417,7 +1419,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	d := dc.d
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
 	}
 	defer keysCursorForDeletes.Close()
 	keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)

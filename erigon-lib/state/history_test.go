@@ -500,29 +500,31 @@ func TestHisory_Unwind(t *testing.T) {
 
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
+		hctx := h.MakeContext()
+		defer hctx.Close()
 
-		h.SetTx(tx)
-		h.StartWrites()
+		hctx.StartWrites()
+		// defer hctx.FinishWrites()
+
 		unwindKeys := make([][]byte, 8)
 		for i := 0; i < len(unwindKeys); i++ {
 			unwindKeys[i] = []byte(fmt.Sprintf("unwind_key%d", i))
 		}
 
-		v, prev1 := make([]byte, 8), make([]byte, 8)
+		v := make([]byte, 8)
 		for i := uint64(0); i < txs; i += 6 {
-			h.SetTxNum(i)
+			hctx.SetTxNum(i)
 
 			binary.BigEndian.PutUint64(v, i)
 
 			for _, uk1 := range unwindKeys {
-				err := h.AddPrevValue(uk1, nil, v)
+				err := hctx.AddPrevValue(uk1, nil, v)
 				require.NoError(err)
 			}
-			copy(prev1, v)
 		}
-		err = h.Rotate().Flush(ctx, tx)
+		err = hctx.Rotate().Flush(ctx, tx)
 		require.NoError(err)
-		h.FinishWrites()
+		hctx.FinishWrites()
 		require.NoError(tx.Commit())
 
 		collateAndMergeHistory(t, db, h, txs)
@@ -537,12 +539,17 @@ func TestHisory_Unwind(t *testing.T) {
 		defer ic.Close()
 
 		for i := 0; i < len(unwindKeys); i++ {
-			it, err := ic.IdxRange(unwindKeys[i], 30, int(txs), order.Asc, -1, tx)
-			for it.HasNext() {
-				txN, err := it.Next()
-				require.NoError(err)
-				fmt.Printf("txN=%d\n", txN)
-			}
+			// it, err := ic.IdxRange(unwindKeys[i], 30, int(txs), order.Asc, -1, tx)
+			val, found, err := ic.GetNoStateWithRecent(unwindKeys[i], 30, tx)
+			require.NoError(err)
+			require.True(found)
+			fmt.Printf("unwind key %x, val=%x (txn %d)\n", unwindKeys[i], val, binary.BigEndian.Uint64(val))
+
+			// for it.HasNext() {
+			// 	txN, err := it.Next()
+			// 	require.NoError(err)
+			// 	fmt.Printf("txN=%d\n", txN)
+			// }
 			rec, err := h.unwindKey(unwindKeys[i], 32, tx)
 			require.NoError(err)
 			for _, r := range rec {
