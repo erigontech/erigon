@@ -79,7 +79,7 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 			}
 			if bg.Error != nil {
-				fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
 				if rec != nil {
