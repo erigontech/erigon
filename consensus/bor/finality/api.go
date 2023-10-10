@@ -1,11 +1,11 @@
-package borfinality
+package finality
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 )
 
 func GetFinalizedBlockNumber(tx kv.Tx) uint64 {
@@ -29,6 +29,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) uint64 {
 
 	doExist, number, hash = service.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
+
 		blockHeader := rawdb.ReadHeaderByNumber(tx, number)
 
 		if blockHeader == nil {
