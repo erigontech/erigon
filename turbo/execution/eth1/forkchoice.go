@@ -207,7 +207,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		}
 	}
 
-	e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
+	e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice)
 	if e.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
