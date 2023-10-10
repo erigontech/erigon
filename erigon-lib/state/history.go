@@ -1056,11 +1056,11 @@ func (hc *HistoryContext) unwindKey2(key []byte, beforeTxNum uint64, rwTx kv.RwT
 
 		switch {
 		case hc.h.historyLargeValues:
-			cur, err := hc.valsCursor(rwTx)
-			if err != nil {
-				return nil, err
-			}
-			cur.
+			// cur, err := hc.valsCursor(rwTx)
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// cur.
 		}
 	}
 
