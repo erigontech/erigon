@@ -121,7 +121,6 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
-	hd.UnlinkHeader(headerHash)
 }
 
 func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
