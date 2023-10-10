@@ -114,7 +114,7 @@ func BorHeimdallForward(
 							{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 
 						dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-						s.state.UnwindTo(blockNum-1, header.Hash())
+						s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
 						return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 					}
 				}
@@ -132,7 +132,7 @@ func BorHeimdallForward(
 				if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
 					logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
 					dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
-					s.state.UnwindTo(minedHeadNumber-1, minedHeader.Hash())
+					s.state.UnwindTo(minedHeadNumber-1, ForkReset(minedHeader.Hash()))
 					return err
 				}
 			}
@@ -209,7 +209,7 @@ func BorHeimdallForward(
 					cfg.penalize(ctx, []headerdownload.PenaltyItem{
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-					s.state.UnwindTo(blockNum-1, header.Hash())
+					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
 					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}

@@ -16,7 +16,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -495,9 +494,9 @@ Loop:
 				}
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
-				u.UnwindTo(blockNum-1, blockHash /* badBlock */)
+				u.UnwindTo(blockNum-1, BadBlock(blockHash, err))
 			} else {
-				u.UnwindTo(blockNum-1, libcommon.Hash{} /* badBlock */)
+				u.UnwindTo(blockNum-1, ExecUnwind)
 			}
 			break Loop
 		}
