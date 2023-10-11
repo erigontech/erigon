@@ -102,7 +102,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity},
+		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed},
 		logger:            logger,
 		verbosity:         verbosity,
 	}

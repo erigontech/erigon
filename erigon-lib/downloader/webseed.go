@@ -25,9 +25,11 @@ import (
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
 // it allows download .torrent files and data files from trusted url's (for example: S3 signed url)
 type WebSeeds struct {
-	lock        sync.Mutex
-	byFileName  snaptype.WebSeedUrls // HTTP urls of data files
-	torrentUrls snaptype.TorrentUrls // HTTP urls of .torrent files
+	lock sync.Mutex
+
+	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
+	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
+	downloadTorrentFile bool
 
 	logger    log.Logger
 	verbosity log.Lvl
@@ -35,10 +37,7 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
-	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
-	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
-	//  - maybe need download new files if --snap.stop=true
-	//d.downloadTorrentFilesFromProviders(ctx, rootDir)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, providers []*url.URL, diskProviders []string) {
@@ -94,6 +93,12 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
 func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
+	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
+	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
+	//  - maybe need download new files if --snap.stop=true
+	if !d.downloadTorrentFile {
+		return
+	}
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}

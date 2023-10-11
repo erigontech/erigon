@@ -47,9 +47,12 @@ const DefaultNetworkChunkSize = 512 * 1024
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
 	DownloadSlots int
-	WebSeedUrls   []*url.URL
-	WebSeedFiles  []string
-	Dirs          datadir.Dirs
+
+	WebSeedUrls                     []*url.URL
+	WebSeedFiles                    []string
+	DownloadTorrentFilesFromWebseed bool
+
+	Dirs datadir.Dirs
 }
 
 func Default() *torrent.ClientConfig {
