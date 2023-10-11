@@ -105,11 +105,13 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 		addedNew++
+		_, fName := filepath.Split(name)
+		fmt.Printf("[dbg] a: %s, %s\n", name, fName)
 		if strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef") {
 			_, fName := filepath.Split(name)
 			fmt.Printf("[dbg] a: %s, %s\n", name, fName)
 			if strings.HasPrefix(fName, "commitment") {
-				d.logger.Log(d.verbosity, "[downloader] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
+				d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
 				continue
 			}
 		}
@@ -119,12 +121,12 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentUrlProvider(ctx, url)
 				if err != nil {
-					d.logger.Warn("[downloader] callTorrentUrlProvider", "err", err)
+					d.logger.Warn("[snapshots] callTorrentUrlProvider", "err", err)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[downloader] downloaded .torrent file from webseed", "name", name)
+				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
-					d.logger.Warn("[downloader] saveTorrent", "err", err)
+					d.logger.Warn("[snapshots] saveTorrent", "err", err)
 					continue
 				}
 				return nil
@@ -133,7 +135,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		})
 	}
 	if err := e.Wait(); err != nil {
-		d.logger.Warn("[downloader] webseed discover", "err", err)
+		d.logger.Warn("[snapshots] webseed discover", "err", err)
 	}
 }
 
