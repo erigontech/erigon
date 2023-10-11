@@ -498,6 +498,9 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 		return nil
 	}
 	fmt.Printf("[dbg] AddInfoHashAsMagnetLink: %s\n", name)
+	if name == "history/commitment.0-32.v" {
+		panic(name)
+	}
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())

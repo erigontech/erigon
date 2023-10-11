@@ -368,6 +368,9 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
 	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
 		fmt.Printf("[dbg] addPreConfiguredHashes: %s\n", it.Name)
+		if it.Name == "history/commitment.0-32.v" {
+			panic(it.Name)
+		}
 		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 			return err
 		}
