@@ -47,9 +47,12 @@ const DefaultNetworkChunkSize = 512 * 1024
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
 	DownloadSlots int
-	WebSeedUrls   []*url.URL
-	WebSeedFiles  []string
-	Dirs          datadir.Dirs
+
+	WebSeedUrls                     []*url.URL
+	WebSeedFiles                    []string
+	DownloadTorrentFilesFromWebseed bool
+
+	Dirs datadir.Dirs
 }
 
 func Default() *torrent.ClientConfig {
@@ -92,13 +95,9 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
-	if downloadRate.Bytes() < 500_000_000 {
-		b := 2 * DefaultNetworkChunkSize
-		if downloadRate.Bytes() > DefaultNetworkChunkSize {
-			b = int(2 * downloadRate.Bytes())
-		}
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), b) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
+	if downloadRate <= 512*datasize.MB {
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 	}
 
 	// debug
