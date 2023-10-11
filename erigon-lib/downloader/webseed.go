@@ -35,10 +35,7 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
-	// TODO: remote bucket may have garbage .torrent files:
-	//  - validate them before save
-	//  - don't download .torrent files which we already have
-	//d.downloadTorrentFilesFromProviders(ctx, rootDir)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, providers []*url.URL, diskProviders []string) {
