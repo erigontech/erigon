@@ -746,7 +746,11 @@ Loop:
 							return err
 						}
 					}
-					u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+					if errors.Is(err, consensus.ErrInvalidBlock) {
+						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+					} else {
+						u.UnwindTo(blockNum-1, ExecUnwind)
+					}
 					break Loop
 				}
 
@@ -949,7 +953,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-		u.UnwindTo(unwindTo, header.Hash())
+		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
 	return false, nil
 }
