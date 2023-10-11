@@ -118,7 +118,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 		Path(path).
 		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
-		MapSize(1024 * datasize.MB).
+		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
 		SyncPeriod(2 * time.Second).
