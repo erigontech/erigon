@@ -497,6 +497,7 @@ func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metai
 	if d.exists(name) {
 		return nil
 	}
+	fmt.Printf("[dbg] AddInfoHashAsMagnetLink: %s\n", name)
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
@@ -564,6 +565,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		if ok {
 			ts.Webseeds = append(ts.Webseeds, ws...)
 		}
+		fmt.Printf("[dbg] addTorrentFilesFromDisk: %s\n", ts.DisplayName)
 		err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
