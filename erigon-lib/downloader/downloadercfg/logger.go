@@ -18,7 +18,6 @@ package downloadercfg
 
 import (
 	"fmt"
-	"strings"
 
 	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/log/v3"
@@ -101,9 +100,9 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
-		if strings.Contains(str, "EOF") { // suppress useless errors
-			break
-		}
+		//if strings.Contains(str, "EOF") { // suppress useless errors
+		//	break
+		//}
 
 		log.Error(str)
 	case lg.Critical:
