@@ -324,9 +324,6 @@ func saveTorrent(torrentFilePath string, res []byte) error {
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
 func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client) error {
-	if ts.DisplayName == "history/commitment.0-32.v" {
-		panic(ts.DisplayName)
-	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
