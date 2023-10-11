@@ -50,7 +50,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 		}
 		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Debug("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
 		list = append(list, response)
@@ -60,7 +60,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 		response, err := d.readWebSeedsFile(webSeedFile)
 		if err != nil { // don't fail on error
 			_, fileName := filepath.Split(webSeedFile)
-			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
+			d.logger.Debug("[snapshots] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
 			continue
 		}
 		if len(diskProviders) > 0 {
@@ -126,12 +126,12 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentUrlProvider(ctx, url)
 				if err != nil {
-					d.logger.Warn("[snapshots] callTorrentUrlProvider", "err", err)
+					d.logger.Debug("[snapshots] callTorrentUrlProvider", "err", err)
 					continue
 				}
 				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
-					d.logger.Warn("[snapshots] saveTorrent", "err", err)
+					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
 				}
 				return nil
@@ -140,7 +140,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		})
 	}
 	if err := e.Wait(); err != nil {
-		d.logger.Warn("[snapshots] webseed discover", "err", err)
+		d.logger.Debug("[snapshots] webseed discover", "err", err)
 	}
 }
 
