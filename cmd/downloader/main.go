@@ -366,6 +366,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 
 // Add pre-configured
 func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
+	fmt.Printf("[dbg] prec: %+v\n", snapcfg.KnownCfg(chain, nil, nil).Preverified)
+	panic(1)
 	for _, it := range snapcfg.KnownCfg(chain, nil, nil).Preverified {
 		fmt.Printf("[dbg] addPreConfiguredHashes: %s\n", it.Name)
 		if it.Name == "history/commitment.0-32.v" {
