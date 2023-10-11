@@ -422,7 +422,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-		stateSync.UnwindTo(unwindPoint, libcommon.Hash{})
+		stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind)
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}

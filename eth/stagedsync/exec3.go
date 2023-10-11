@@ -746,7 +746,7 @@ Loop:
 							return err
 						}
 					}
-					u.UnwindTo(blockNum-1, header.Hash())
+					u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
 					break Loop
 				}
 
