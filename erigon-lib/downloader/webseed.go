@@ -35,7 +35,10 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
-	d.downloadTorrentFilesFromProviders(ctx, rootDir)
+	// TODO: remote bucket may have garbage .torrent files:
+	//  - validate them before save
+	//  - don't download .torrent files which we already have
+	//d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, providers []*url.URL, diskProviders []string) {
@@ -103,6 +106,14 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 		addedNew++
+		if strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef") {
+			_, fName := filepath.Split(name)
+			if strings.HasPrefix(fName, "commitment") {
+				d.logger.Log(d.verbosity, "[downloader] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
+				continue
+			}
+		}
+		name := name
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
@@ -111,6 +122,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					d.logger.Warn("[downloader] callTorrentUrlProvider", "err", err)
 					continue
 				}
+				d.logger.Log(d.verbosity, "[downloader] downloaded .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
 					d.logger.Warn("[downloader] saveTorrent", "err", err)
 					continue
