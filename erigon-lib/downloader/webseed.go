@@ -105,11 +105,8 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 		addedNew++
-		_, fName := filepath.Split(name)
-		fmt.Printf("[dbg] a: %s, %s\n", name, fName)
-		if strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef") {
+		if strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent") {
 			_, fName := filepath.Split(name)
-			fmt.Printf("[dbg] a: %s, %s\n", name, fName)
 			if strings.HasPrefix(fName, "commitment") {
 				d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
 				continue
