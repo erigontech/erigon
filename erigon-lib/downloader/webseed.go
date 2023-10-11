@@ -140,7 +140,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		})
 	}
 	if err := e.Wait(); err != nil {
-		d.logger.Warn("[snapshots] webseed discover", "err", err)
+		d.logger.Debug("[snapshots] webseed discover", "err", err)
 	}
 }
 
