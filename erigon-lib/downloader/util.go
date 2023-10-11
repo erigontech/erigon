@@ -155,7 +155,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 		return
 	}
 
-	fmt.Printf("[dbg] BuildTorrentIfNeed: %s\n", fName)
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return "", fmt.Errorf("createTorrentFileFromSegment: %w", err)
