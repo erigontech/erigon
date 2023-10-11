@@ -36,7 +36,7 @@ type WebSeeds struct {
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
 	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
-	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it
+	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
 	//d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
