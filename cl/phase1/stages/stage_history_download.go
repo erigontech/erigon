@@ -76,9 +76,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidHash := false
+	foundLatestEth1ValidBlock := false
 	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
-		foundLatestEth1ValidHash = true // skip this if we are not using an engine supporting direct insertion
+		foundLatestEth1ValidBlock = true // skip this if we are not using an engine supporting direct insertion
 	}
 
 	var currEth1Progress atomic.Int64
@@ -93,7 +93,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
-		if !foundLatestEth1ValidHash {
+
+		slot := blk.Block.Slot
+		if destinationSlot <= blk.Block.Slot {
+			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+				return false, err
+			}
+		}
+		if !foundLatestEth1ValidBlock {
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
@@ -104,21 +111,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
+			if currEth1Progress.Load()%100 == 0 {
+				return false, nil
+			}
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
+			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
 
-		slot := blk.Block.Slot
-		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
-				return false, err
-			}
-		}
-		return slot <= destinationSlot && foundLatestEth1ValidHash, nil
+		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
