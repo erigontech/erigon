@@ -64,39 +64,39 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Info("[downloader] " + r.String())
 	case lg.Info:
 		str := r.String()
-		if strings.Contains(str, "EOF") ||
-			strings.Contains(str, "spurious timer") ||
-			strings.Contains(str, "banning ip <nil>") { // suppress useless errors
-			break
-		}
+		//if strings.Contains(str, "EOF") ||
+		//	strings.Contains(str, "spurious timer") ||
+		//	strings.Contains(str, "banning ip <nil>") { // suppress useless errors
+		//	break
+		//}
 
 		log.Info(str)
 	case lg.Warning:
 		str := r.String()
-		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "banned ip") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "requested chunk too long") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "reservation cancelled") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "received invalid reject") { // suppress useless errors
-			break
-		}
+		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "banned ip") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "requested chunk too long") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "reservation cancelled") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "received invalid reject") { // suppress useless errors
+		//	break
+		//}
 
 		log.Warn(str)
 	case lg.Error:
@@ -108,18 +108,18 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Error(str)
 	case lg.Critical:
 		str := r.String()
-		if strings.Contains(str, "EOF") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "don't want conns") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "torrent closed") { // suppress useless errors
-			break
-		}
+		//if strings.Contains(str, "EOF") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "don't want conns") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "torrent closed") { // suppress useless errors
+		//	break
+		//}
 
 		log.Error(str)
 	default:
-		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
+		log.Info("[snapshots] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
 }
