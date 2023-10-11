@@ -97,7 +97,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate <= 512*datasize.MB {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), int(downloadRate.Bytes())) // default: unlimited
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*int(downloadRate.Bytes())) // default: unlimited
 	}
 
 	// debug
