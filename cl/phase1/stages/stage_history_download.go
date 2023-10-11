@@ -69,7 +69,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		destinationSlot = currentSlot - cfg.dbCfg.PruneDepth
 	}
 
-	executionBlocksCollector := etl.NewCollector("SpawnStageHistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	executionBlocksCollector := etl.NewCollector("HistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionBlocksCollector.Close()
 	// Start the procedure
 	logger.Info("Downloading History", "from", currentSlot)
@@ -169,6 +169,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
+
+	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
 	if err := executionBlocksCollector.Load(tx2, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
