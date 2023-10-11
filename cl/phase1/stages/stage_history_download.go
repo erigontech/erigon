@@ -38,7 +38,7 @@ type StageHistoryReconstructionCfg struct {
 	logger       log.Logger
 }
 
-const logIntervalTime = 3 * time.Minute
+const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB *sql.DB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
@@ -133,6 +133,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		for {
 			select {
 			case <-logInterval.C:
+				if cfg.engine.SupportInsertion() {
+					if ready, err := cfg.engine.Ready(); !ready {
+						if err != nil {
+							log.Warn("could not log progress", "err", err)
+						}
+						continue
+					}
+
+				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				speed := float64(prevProgress-currProgress) / float64(logIntervalTime/time.Second)
