@@ -97,6 +97,8 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	urlsByName := d.TorrentUrls()
+	//TODO:
+	// - what to do if node already synced?
 	for name, tUrls := range urlsByName {
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
@@ -105,6 +107,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		addedNew++
 		if strings.HasSuffix(name, ".v") || strings.HasSuffix(name, ".ef") {
 			_, fName := filepath.Split(name)
+			fmt.Printf("[dbg] a: %s, %s\n", name, fName)
 			if strings.HasPrefix(fName, "commitment") {
 				d.logger.Log(d.verbosity, "[downloader] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
 				continue
@@ -131,9 +134,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	}
 	if err := e.Wait(); err != nil {
 		d.logger.Warn("[downloader] webseed discover", "err", err)
-	}
-	if addedNew > 0 {
-		d.logger.Debug("[snapshots] downloaded .torrent from webseed", "amount", addedNew)
 	}
 }
 
