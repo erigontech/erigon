@@ -568,7 +568,6 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		if ok {
 			ts.Webseeds = append(ts.Webseeds, ws...)
 		}
-		fmt.Printf("[dbg] addTorrentFilesFromDisk: %s\n", ts.DisplayName)
 		err := addTorrentFile(d.ctx, ts, d.torrentClient)
 		if err != nil {
 			return err
