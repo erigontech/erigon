@@ -11,11 +11,12 @@
    limitations under the License.
 */
 
-package memdb
+package membatchwithdb
 
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,7 @@ func initializeDbNonDupSort(rwTx kv.RwTx) {
 }
 
 func TestPutAppendHas(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -59,7 +60,7 @@ func TestPutAppendHas(t *testing.T) {
 }
 
 func TestLastMiningDB(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -83,7 +84,7 @@ func TestLastMiningDB(t *testing.T) {
 }
 
 func TestLastMiningMem(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -107,7 +108,7 @@ func TestLastMiningMem(t *testing.T) {
 }
 
 func TestDeleteMining(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "")
@@ -133,7 +134,7 @@ func TestDeleteMining(t *testing.T) {
 }
 
 func TestFlush(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "")
@@ -153,7 +154,7 @@ func TestFlush(t *testing.T) {
 }
 
 func TestForEach(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -195,7 +196,7 @@ func TestForEach(t *testing.T) {
 }
 
 func TestForPrefix(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -234,7 +235,7 @@ func TestForPrefix(t *testing.T) {
 }
 
 func TestForAmount(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -267,7 +268,7 @@ func TestForAmount(t *testing.T) {
 }
 
 func TestGetOneAfterClearBucket(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -290,7 +291,7 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 }
 
 func TestSeekExactAfterClearBucket(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -326,7 +327,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 }
 
 func TestFirstAfterClearBucket(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -354,7 +355,7 @@ func TestFirstAfterClearBucket(t *testing.T) {
 }
 
 func TestIncReadSequence(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -377,7 +378,7 @@ func initializeDbDupSort(rwTx kv.RwTx) {
 }
 
 func TestNext(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -421,7 +422,7 @@ func TestNext(t *testing.T) {
 }
 
 func TestNextNoDup(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -448,7 +449,7 @@ func TestNextNoDup(t *testing.T) {
 }
 
 func TestDeleteCurrentDuplicates(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -482,7 +483,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 }
 
 func TestSeekBothRange(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	rwTx.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.1"))
 	rwTx.Put(kv.AccountChangeSet, []byte("key3"), []byte("value3.3"))
@@ -517,7 +518,7 @@ func initializeDbAutoConversion(rwTx kv.RwTx) {
 }
 
 func TestAutoConversion(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 
@@ -573,7 +574,7 @@ func TestAutoConversion(t *testing.T) {
 }
 
 func TestAutoConversionDelete(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 
@@ -610,7 +611,7 @@ func TestAutoConversionDelete(t *testing.T) {
 }
 
 func TestAutoConversionSeekBothRange(t *testing.T) {
-	_, rwTx := NewTestTx(t)
+	_, rwTx := memdb.NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 
