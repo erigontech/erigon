@@ -167,6 +167,10 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	opts.flags = opts.flags | mdbx.Readonly
 	return opts
 }
+func (opts MdbxOpts) Accede() MdbxOpts {
+	opts.flags = opts.flags | mdbx.Accede
+	return opts
+}
 
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
 	opts.syncPeriod = period
@@ -420,6 +424,7 @@ type MdbxKV struct {
 
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
 func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
+func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction

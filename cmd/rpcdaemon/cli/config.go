@@ -314,7 +314,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		dir.MustExist(cfg.Dirs.SnapHistory)
 		logger.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
@@ -468,16 +468,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 				// bor (consensus) specific db
 				borDbPath := filepath.Join(cfg.DataDir, "bor")
-				{
-					// ensure db exist
-					tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
-					if err != nil {
-						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-					}
-					tmpDb.Close()
-				}
-				logger.Trace("Creating consensus db", "path", borDbPath)
-				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
+				logger.Trace("[rpc] Opening Bor db", "path", borDbPath)
+				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Accede().Open()
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 				}

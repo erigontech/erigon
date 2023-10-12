@@ -303,7 +303,7 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 		name = "txpool"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("Expected a consensus name")
+			return nil, fmt.Errorf("expected a consensus name")
 		}
 	default:
 		name = "test"
@@ -360,7 +360,6 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 		default:
-			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 
 		return opts.Open()
