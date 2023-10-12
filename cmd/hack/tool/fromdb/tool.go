@@ -17,7 +17,7 @@ func ChainConfig(db kv.RoDB) (cc *chain.Config) {
 	})
 	tool.Check(err)
 	if cc == nil {
-		panic("database is not initalized")
+		panic("database is not initialized")
 	}
 	return cc
 }
