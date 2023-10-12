@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/log/v3"
@@ -481,11 +482,47 @@ func TestHistoryScanFiles(t *testing.T) {
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
+		db.Close()
 	})
 	t.Run("small_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
+		db.Close()
 	})
+}
+
+func TestHistory_UnwindExperiment(t *testing.T) {
+	db, h := testDbAndHistory(t, false, log.New())
+	defer db.Close()
+	defer h.Close()
+
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+	defer hc.FinishWrites()
+
+	key := common.FromHex("deadbeef")
+	loc := common.FromHex("1ceb00da")
+	var prevVal []byte
+	for i := 0; i < 8; i++ {
+		hc.SetTxNum(uint64(1 << i))
+		hc.AddPrevValue(key, loc, prevVal)
+		prevVal = []byte("d1ce" + fmt.Sprintf("%x", i))
+	}
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return hc.Rotate().Flush(context.Background(), tx)
+	})
+	require.NoError(t, err)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for i := 0; i < 32; i++ {
+		toRest, needRestore, needDelete, err := hc.ifUnwindKey(common.Append(key, loc), uint64(i), tx)
+		require.NoError(t, err)
+		fmt.Printf("i=%d tx %d toRest=%v, needRestore=%v, needDelete=%v\n", i, i, toRest, needRestore, needDelete)
+	}
 }
 
 func TestHisory_Unwind(t *testing.T) {
@@ -550,7 +587,7 @@ func TestHisory_Unwind(t *testing.T) {
 			// 	require.NoError(err)
 			// 	fmt.Printf("txN=%d\n", txN)
 			// }
-			rec, err := h.unwindKey(unwindKeys[i], 32, tx)
+			rec, err := ic.unwindKey(unwindKeys[i], 32, tx)
 			require.NoError(err)
 			for _, r := range rec {
 				fmt.Printf("txn %d v=%x|%d\n", r.TxNum, r.Value, binary.BigEndian.Uint64(r.Value))

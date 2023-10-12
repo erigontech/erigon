@@ -30,12 +30,9 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -49,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type History struct {
@@ -1035,147 +1033,200 @@ type HistoryRecord struct {
 	Value []byte
 }
 
-// cursor management is not responsibility of unwindKey, caller should take care of it.
-func (hc *HistoryContext) unwindKey2(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
+func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needRestoring, needDeleting bool, err error) {
+	it, err := hc.IdxRange(key, int(toTxNum)-1, math.MaxInt, order.Asc, -1, roTx)
+	if err != nil {
+		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
+	}
+
+	toRestore = new(HistoryRecord)
+	for it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return nil, false, false, err
+		}
+		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
+		if err != nil {
+			return nil, false, false, err
+		}
+		// fmt.Printf("+found %x %d %x\n", key, txn, v)
+		toRestore.TxNum = txn
+		toRestore.Value = v
+		if ok && len(v) == 0 {
+			continue
+		}
+		break
+	}
+	if len(toRestore.Value) == 0 && toRestore.TxNum == toTxNum {
+		return nil, false, false, nil
+	}
+
+	it, err = hc.IdxRange(key, 0, int(toTxNum)+1, order.Asc, -1, roTx)
+	if err != nil {
+		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
+	}
+
+	prev := uint64(math.MaxUint64)
+	for it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return nil, false, false, err
+		}
+		// fmt.Printf("-found %x %d\n", key, txn)
+		if txn >= toRestore.TxNum {
+			break
+		}
+		prev = txn
+	}
+	if prev != math.MaxUint64 {
+		toRestore.TxNum = prev
+	}
+	if toRestore.TxNum > toTxNum {
+		return nil, false, false, nil
+	}
+	// fmt.Printf("found %x %d %x\n", key, toRestore.TxNum, toRestore.Value)
+	return toRestore, true, false, nil
+
+	edges := make([]HistoryRecord, 0, 2)
+	// created, updated := false, false
+	// _ = updated
+	toRestore = &HistoryRecord{}
+	for it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return nil, false, false, err
+		}
+		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
+		if err != nil {
+			return nil, false, false, err
+		}
+		if !ok {
+			break
+		}
+
+		if v == nil {
+			// if txn == toTxNum {
+			return nil, false, false, nil
+			// }
+		}
+		if txn == toTxNum {
+			toRestore.TxNum = txn
+			toRestore.Value = v
+			return toRestore, true, false, nil
+		}
+		if txn > toTxNum {
+
+		}
+		// toRestore.Value = v
+		// if created {
+		// 	return toRestore, true, true, nil
+		// }
+
+		// if txn == toTxNum {
+		// 	created = true
+		// }
+		// if !created && txn == toTxNum {
+		// 	return &HistoryRecord{TxNum: txn, Value: v}, true, true, nil
+		// }
+
+		// if !created && txn <= toTxNum {
+		// 	created = true
+		// 	fmt.Printf("[history][%s] CREATED %x txn %d '%x'\n", hc.h.filenameBase, key, txn, v)
+		// } else if created && txn >= toTxNum {
+		// 	updated = true
+		// 	fmt.Printf("[history][%s] UPDATED %x txn %d '%x'\n", hc.h.filenameBase, key, txn, v)
+		// }
+
+		fmt.Printf("found %x %d %x\n", key, txn, v)
+		edges = append(edges, HistoryRecord{TxNum: txn, Value: v})
+		// if len(edges) == 2 || !it.HasNext() {
+		// 	break
+		// }
+	}
+	// if created && !updated {
+	// 	if edges[0].TxNum == toTxNum && edges[0].Value != nil {
+	// 		toRestore = &edges[0]
+	// 		fmt.Printf("[history][%s] unwind %x txn %d '%x'\n", hc.h.filenameBase, key, edges[0].TxNum, edges[0].Value)
+	// 		return toRestore, true, true, nil
+	// 	}
+	// }
+	// if created && updated {
+	// 	l, r := edges[0], edges[1]
+	// 	if l.TxNum == toTxNum && l.Value != nil {
+	// 		toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
+	// 		fmt.Printf("[history][%s] Lunwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
+	// 		return toRestore, true, true, nil
+	// 	}
+	// 	// if r.TxNum == toTxNum && r.Value != nil {
+	// 	if r.TxNum == toTxNum && r.Value != nil {
+	// 		toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
+	// 		fmt.Printf("[history][%s] Runwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
+	// 		return toRestore, true, true, nil
+	// 	}
+	// }
+
+	switch len(edges) {
+	case 1:
+		// its value should be nil, actual value is in domain, BUT if txNum exactly match, need to restore
+		if edges[0].TxNum == toTxNum && edges[0].Value != nil {
+			toRestore = &edges[0]
+			fmt.Printf("[history][%s] unwind %x txn %d '%x'\n", hc.h.filenameBase, key, edges[0].TxNum, edges[0].Value)
+			return toRestore, true, true, nil
+		}
+	case 2:
+		// here one first value is before txFrom (holds txNum when value was set) and second is after (actual value at that txNum)
+		l, r := edges[0], edges[1]
+		// if r.TxNum == toTxNum && r.Value != nil {
+		if r.TxNum == toTxNum && r.Value != nil {
+			toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
+			fmt.Printf("[history][%s] unwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
+			return toRestore, true, true, nil
+		}
+	default:
+		fmt.Printf("ifunwind %x found no (%d) edges\n", key, len(edges))
+		return nil, false, true, nil
+	}
+	return nil, false, false, nil
+}
+
+// returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
+func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
 	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
 	if err != nil {
 		return nil, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
 
+	truncate := func(s string, n int) string {
+		if len(s) > n {
+			return s[:n]
+		}
+		return s
+	}
+
 	res := make([]HistoryRecord, 0, 2)
-	for it.HasNext() {
-		txn, err := it.Next()
+	var finished bool
+	for txn, err := it.Next(); !finished; txn, err = it.Next() {
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, HistoryRecord{TxNum: txn, Value: nil})
-		hc.GetNoStateWithRecent(key, txn, rwTx)
+		v, ok, err := hc.GetNoStateWithRecent(key, txn, rwTx)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(key, common.FromHex("1079")) {
+			fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, truncate(fmt.Sprintf("%x", v), 80))
+		}
+		if !ok {
+			continue
+		}
+		res = append(res, HistoryRecord{TxNum: txn, Value: v})
 		if len(res) == 2 {
 			break
 		}
+		finished = !it.HasNext()
 
-		switch {
-		case hc.h.historyLargeValues:
-			// cur, err := hc.valsCursor(rwTx)
-			// if err != nil {
-			// 	return nil, err
-			// }
-			// cur.
-		}
 	}
 
-	return res, nil
-}
-
-// returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
-func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]HistoryRecord, error) {
-	res := make([]HistoryRecord, 0, 2)
-
-	if h.historyLargeValues {
-		c, err := tx.RwCursor(h.historyValsTable)
-		if err != nil {
-			return nil, err
-		}
-		defer c.Close()
-
-		seek := make([]byte, len(key)+8)
-		copy(seek, key)
-		binary.BigEndian.PutUint64(seek[len(key):], beforeTxNum)
-
-		kAndTxNum, val, err := c.Seek(seek)
-		if err != nil {
-			return nil, err
-		}
-		if len(kAndTxNum) == 0 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
-			// need to go back to the previous key
-			kAndTxNum, val, err = c.Prev()
-			if err != nil {
-				return nil, err
-			}
-			if len(kAndTxNum) == 0 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
-				return nil, nil
-			}
-		}
-
-		rec := HistoryRecord{binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:]), common.Copy(val)}
-		switch {
-		case rec.TxNum < beforeTxNum:
-			nk, nv, err := c.Next()
-			if err != nil {
-				return nil, err
-			}
-
-			res = append(res, rec)
-			if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
-				res = append(res, HistoryRecord{binary.BigEndian.Uint64(nk[len(nk)-8:]), common.Copy(nv)})
-				if err := c.DeleteCurrent(); err != nil {
-					return nil, err
-				}
-			}
-		case rec.TxNum >= beforeTxNum:
-			pk, pv, err := c.Prev()
-			if err != nil {
-				return nil, err
-			}
-
-			if pk != nil && bytes.Equal(pk[:len(pk)-8], key) {
-				res = append(res, HistoryRecord{binary.BigEndian.Uint64(pk[len(pk)-8:]), common.Copy(pv)})
-				if err := c.DeleteCurrent(); err != nil {
-					return nil, err
-				}
-			}
-			res = append(res, rec)
-		}
-		return res, nil
-	}
-
-	c, err := tx.RwCursorDupSort(h.historyValsTable)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-
-	var val []byte
-	aux := hexutility.EncodeTs(beforeTxNum)
-	val, err = c.SeekBothRange(key, aux)
-	if err != nil {
-		return nil, err
-	}
-	if val == nil {
-		return nil, nil
-	}
-	txNum := binary.BigEndian.Uint64(val[:8])
-	val = common.Copy(val[8:])
-
-	switch {
-	case txNum <= beforeTxNum:
-		nk, nv, err := c.NextDup()
-		if err != nil {
-			return nil, err
-		}
-
-		res = append(res, HistoryRecord{beforeTxNum, val})
-		if nk != nil {
-			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), common.Copy(nv[8:])})
-			if err := c.DeleteCurrent(); err != nil {
-				return nil, err
-			}
-		}
-	case txNum > beforeTxNum:
-		pk, pv, err := c.PrevDup()
-		if err != nil {
-			return nil, err
-		}
-
-		if pk != nil {
-			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pv[:8]), common.Copy(pv[8:])})
-			if err := c.DeleteCurrent(); err != nil {
-				return nil, err
-			}
-			// this case will be removed by pruning. Or need to implement cleaning through txTo
-		}
-		res = append(res, HistoryRecord{beforeTxNum, val})
-	}
 	return res, nil
 }
 
@@ -2325,11 +2376,38 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 			if err != nil {
 				return nil, err
 			}
-			dbIt = iter.TransformKV2U64(it, func(k, _ []byte) (uint64, error) {
+			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				if len(k) < 8 {
+					return 0, fmt.Errorf("unexpected large key length %d", len(k))
+				}
 				return binary.BigEndian.Uint64(k[len(k)-8:]), nil
 			})
 		} else {
-			panic("implement me")
+			from := make([]byte, len(key)+8)
+			copy(from, key)
+			var fromTxNum uint64
+			if startTxNum >= 0 {
+				fromTxNum = uint64(startTxNum)
+			}
+			binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
+
+			to := common.Copy(from)
+			toTxNum := uint64(math.MaxUint64)
+			if endTxNum >= 0 {
+				toTxNum = uint64(endTxNum)
+			}
+			binary.BigEndian.PutUint64(to[len(key):], toTxNum)
+
+			it, err := roTx.RangeDescend(hc.h.historyValsTable, from, to, limit)
+			if err != nil {
+				return nil, err
+			}
+			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				if len(k) < 8 {
+					return 0, fmt.Errorf("unexpected large key length %d", len(k))
+				}
+				return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+			})
 		}
 	} else {
 		if asc {
@@ -2347,6 +2425,9 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 				return nil, err
 			}
 			dbIt = iter.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+				if len(v) < 8 {
+					return 0, fmt.Errorf("unexpected small value length %d", len(v))
+				}
 				return binary.BigEndian.Uint64(v), nil
 			})
 		} else {
