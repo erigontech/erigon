@@ -602,8 +602,8 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	if bytes.Equal(key1, common.FromHex("001cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b")) {
-		// if bytes.Equal(key1, common.FromHex("3a220f351252089d385b29beca14e27f204c296a")) {
+	// if bytes.Equal(key1, common.FromHex("001cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b")) {
+	if bytes.Equal(key1, common.FromHex("3a220f351252089d385b29beca14e27f204c296a")) {
 		fmt.Printf("put [%d] %s: %x val %x, preval %x\n", dc.hc.ic.txNum, dc.d.filenameBase, key1, val, preval)
 	}
 	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
@@ -1462,53 +1462,19 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 			continue
 		}
 
-		// edgeRecords, err := dc.hc.unwindKey(k, txFrom, rwTx)
-		// if err != nil {
-		// 	return err
-		// }
-		// switch len(edgeRecords) {
-		// case 1: // its value should be nil, actual value is in domain, BUT if txNum exactly match, need to restore
-		// 	// fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
-		// 	if edgeRecords[0].TxNum == txFrom && edgeRecords[0].Value != nil {
-		// 		dc.SetTxNum(edgeRecords[0].TxNum)
-		// 		if err := restore.addValue(k, nil, edgeRecords[0].Value); err != nil {
-		// 			return err
-		// 		}
-		// 	} else if edgeRecords[0].TxNum < txFrom {
-		// 		continue
-		// 	}
-		// case 2: // here one first value is before txFrom (holds txNum when value was set) and second is after (actual value at that txNum)
-		// 	// fmt.Printf("[domain] unwind %x to tx %d neigbour txs are [%d, %d]\n", k, txFrom, edgeRecords[0].TxNum, edgeRecords[1].TxNum)
-		// 	l, r := edgeRecords[0], edgeRecords[1]
-		// 	if r.TxNum >= txFrom /*&& l.TxNum < txFrom*/ && r.Value != nil {
-		// 		dc.SetTxNum(l.TxNum)
-		// 		if err := restore.addValue(k, nil, r.Value); err != nil {
-		// 			return err
-		// 		}
-		// 	} else {
-		// 		continue
-		// 	}
-		// default:
-		// 	fmt.Printf("unwind %x to tx %d neigbour txs are:", k, txFrom)
-		// 	for _, r := range edgeRecords {
-		// 		fmt.Printf(" txn %d\n", r.TxNum)
-		// 	}
-		// 	fmt.Println()
-		// 	continue
-		// }
-
 		toRestore, needRestore, needDelete, err := dc.hc.ifUnwindKey(k, txFrom, rwTx)
 		if err != nil {
 			return fmt.Errorf("unwind key %s %x: %w", d.filenameBase, k, err)
 		}
-		fmt.Printf("[domain][%s] UNWIND %x to tx %d needDelete %v needRestore %v %+v\n", d.filenameBase, k, txFrom, needDelete, needRestore, toRestore)
 		if needRestore {
-			// continue
 			dc.SetTxNum(toRestore.TxNum)
 			if err := restore.addValue(k, nil, toRestore.Value); err != nil {
 				return err
 			}
-			fmt.Printf("[domain][%s] restore %x to txNum %d -> '%x'\n", d.filenameBase, k, toRestore.TxNum, toRestore.Value)
+			fmt.Printf("[domain][%s][toTx=%d] restore %x to txNum %d -> '%x'\n", d.filenameBase, txFrom, k, toRestore.TxNum, toRestore.Value)
+		}
+		if !needDelete {
+			continue
 		}
 
 		if d.domainLargeValues {

@@ -546,11 +546,10 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	//defer func() {
-	//	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, h.h.InvertedIndex.txNumBytes, original, h.largeValues, h.buffered)
-	//}()
-
 	ic := h.hc.ic
+	// defer func() {
+	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
+	// }()
 
 	if h.largeValues {
 		lk := len(key1) + len(key2)
@@ -1034,12 +1033,13 @@ type HistoryRecord struct {
 }
 
 func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needRestoring, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, int(toTxNum)-1, math.MaxInt, order.Asc, -1, roTx)
+	it, err := hc.IdxRange(key, int(toTxNum), math.MaxInt, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
 
 	toRestore = new(HistoryRecord)
+	found := false
 	for it.HasNext() {
 		txn, err := it.Next()
 		if err != nil {
@@ -1049,9 +1049,11 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		if err != nil {
 			return nil, false, false, err
 		}
+
 		// fmt.Printf("+found %x %d %x\n", key, txn, v)
 		toRestore.TxNum = txn
 		toRestore.Value = v
+		found = true
 		if ok && len(v) == 0 {
 			continue
 		}
@@ -1072,121 +1074,26 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		if err != nil {
 			return nil, false, false, err
 		}
-		// fmt.Printf("-found %x %d\n", key, txn)
-		if txn >= toRestore.TxNum {
+		// v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
+		// if err != nil {
+		// 	return nil, false, false, err
+		// }
+		// // fmt.Printf("-found %x %d\n", key, txn)
+		// fmt.Printf("-found %x %d ->%t %x\n", key, txn, ok, v)
+		if txn >= toTxNum {
 			break
 		}
 		prev = txn
 	}
+
 	if prev != math.MaxUint64 {
 		toRestore.TxNum = prev
 	}
-	if toRestore.TxNum > toTxNum {
+	if !found || toRestore.TxNum > toTxNum {
 		return nil, false, false, nil
 	}
 	// fmt.Printf("found %x %d %x\n", key, toRestore.TxNum, toRestore.Value)
-	return toRestore, true, false, nil
-
-	edges := make([]HistoryRecord, 0, 2)
-	// created, updated := false, false
-	// _ = updated
-	toRestore = &HistoryRecord{}
-	for it.HasNext() {
-		txn, err := it.Next()
-		if err != nil {
-			return nil, false, false, err
-		}
-		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
-		if err != nil {
-			return nil, false, false, err
-		}
-		if !ok {
-			break
-		}
-
-		if v == nil {
-			// if txn == toTxNum {
-			return nil, false, false, nil
-			// }
-		}
-		if txn == toTxNum {
-			toRestore.TxNum = txn
-			toRestore.Value = v
-			return toRestore, true, false, nil
-		}
-		if txn > toTxNum {
-
-		}
-		// toRestore.Value = v
-		// if created {
-		// 	return toRestore, true, true, nil
-		// }
-
-		// if txn == toTxNum {
-		// 	created = true
-		// }
-		// if !created && txn == toTxNum {
-		// 	return &HistoryRecord{TxNum: txn, Value: v}, true, true, nil
-		// }
-
-		// if !created && txn <= toTxNum {
-		// 	created = true
-		// 	fmt.Printf("[history][%s] CREATED %x txn %d '%x'\n", hc.h.filenameBase, key, txn, v)
-		// } else if created && txn >= toTxNum {
-		// 	updated = true
-		// 	fmt.Printf("[history][%s] UPDATED %x txn %d '%x'\n", hc.h.filenameBase, key, txn, v)
-		// }
-
-		fmt.Printf("found %x %d %x\n", key, txn, v)
-		edges = append(edges, HistoryRecord{TxNum: txn, Value: v})
-		// if len(edges) == 2 || !it.HasNext() {
-		// 	break
-		// }
-	}
-	// if created && !updated {
-	// 	if edges[0].TxNum == toTxNum && edges[0].Value != nil {
-	// 		toRestore = &edges[0]
-	// 		fmt.Printf("[history][%s] unwind %x txn %d '%x'\n", hc.h.filenameBase, key, edges[0].TxNum, edges[0].Value)
-	// 		return toRestore, true, true, nil
-	// 	}
-	// }
-	// if created && updated {
-	// 	l, r := edges[0], edges[1]
-	// 	if l.TxNum == toTxNum && l.Value != nil {
-	// 		toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
-	// 		fmt.Printf("[history][%s] Lunwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
-	// 		return toRestore, true, true, nil
-	// 	}
-	// 	// if r.TxNum == toTxNum && r.Value != nil {
-	// 	if r.TxNum == toTxNum && r.Value != nil {
-	// 		toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
-	// 		fmt.Printf("[history][%s] Runwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
-	// 		return toRestore, true, true, nil
-	// 	}
-	// }
-
-	switch len(edges) {
-	case 1:
-		// its value should be nil, actual value is in domain, BUT if txNum exactly match, need to restore
-		if edges[0].TxNum == toTxNum && edges[0].Value != nil {
-			toRestore = &edges[0]
-			fmt.Printf("[history][%s] unwind %x txn %d '%x'\n", hc.h.filenameBase, key, edges[0].TxNum, edges[0].Value)
-			return toRestore, true, true, nil
-		}
-	case 2:
-		// here one first value is before txFrom (holds txNum when value was set) and second is after (actual value at that txNum)
-		l, r := edges[0], edges[1]
-		// if r.TxNum == toTxNum && r.Value != nil {
-		if r.TxNum == toTxNum && r.Value != nil {
-			toRestore = &HistoryRecord{TxNum: l.TxNum, Value: r.Value}
-			fmt.Printf("[history][%s] unwind %x to tx %d neigbour txs are [%d, %d]\n", hc.h.filenameBase, key, toTxNum, edges[0].TxNum, edges[1].TxNum)
-			return toRestore, true, true, nil
-		}
-	default:
-		fmt.Printf("ifunwind %x found no (%d) edges\n", key, len(edges))
-		return nil, false, true, nil
-	}
-	return nil, false, false, nil
+	return toRestore, true, true, nil
 }
 
 // returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
