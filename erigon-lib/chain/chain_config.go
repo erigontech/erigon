@@ -69,6 +69,7 @@ type Config struct {
 
 	// Optional EIP-4844 parameters
 	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
+	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
@@ -214,6 +215,13 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 		return *c.MinBlobGasPrice
 	}
 	return 1
+}
+
+func (c *Config) GetTargetBlobGasPerBlock() uint64 {
+	if c.TargetBlobGasPerBlock != nil {
+		return *c.TargetBlobGasPerBlock
+	}
+	return 393216
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {

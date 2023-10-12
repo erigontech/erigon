@@ -317,15 +317,13 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		}
 		minBlobGasPrice := h.chainConfig.GetMinBlobGasPrice()
 		pendingBlobFee := minBlobGasPrice
-		excessBlobGas := misc.CalcExcessBlobGas(currentHeader)
 		if currentHeader.ExcessBlobGas != nil {
+			excessBlobGas := misc.CalcExcessBlobGas(currentHeader, h.chainConfig.GetTargetBlobGasPerBlock())
 			f, err := misc.GetBlobGasPrice(excessBlobGas, minBlobGasPrice, h.chainConfig.GetBlobGasPriceUpdateFraction())
 			if err != nil {
 				return err
 			}
-			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {
-				pendingBlobFee = f.Uint64()
-			}
+			pendingBlobFee = f.Uint64()
 		}
 
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)

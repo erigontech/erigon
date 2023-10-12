@@ -663,8 +663,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minBlobGasPrice := chainConfig.GetMinBlobGasPrice()
 		blobFee := minBlobGasPrice
 		if currentBlock.Header().ExcessBlobGas != nil {
-			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()), minBlobGasPrice, chainConfig.GetBlobGasPriceUpdateFraction())
-			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
+			excessBlobGas := misc.CalcExcessBlobGas(currentBlock.Header(), chainConfig.GetTargetBlobGasPerBlock())
+			b, err := misc.GetBlobGasPrice(excessBlobGas, minBlobGasPrice, chainConfig.GetBlobGasPriceUpdateFraction())
+			if err == nil {
 				blobFee = b.Uint64()
 			}
 		}
