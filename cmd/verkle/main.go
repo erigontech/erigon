@@ -37,14 +37,14 @@ const DumpSize = uint64(20000000000)
 func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	start := time.Now()
 
-	db, err := mdbx.Open(ctx, cfg.stateDb, log.Root(), true)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
 		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(ctx, cfg.verkleDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
 		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
@@ -89,14 +89,14 @@ func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger)
 }
 
 func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := mdbx.Open(ctx, cfg.stateDb, log.Root(), true)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
 		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(ctx, cfg.stateDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.stateDb, log.Root(), false)
 	if err != nil {
 		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
@@ -132,14 +132,14 @@ func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log
 
 func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	start := time.Now()
-	db, err := mdbx.Open(ctx, cfg.stateDb, log.Root(), true)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
 		logger.Error("Error while opening database", "err", err.Error())
 		return err
 	}
 	defer db.Close()
 
-	vDb, err := mdbx.Open(ctx, cfg.verkleDb, log.Root(), false)
+	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
 		logger.Error("Error while opening db transaction", "err", err.Error())
 		return err
@@ -192,7 +192,7 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 }
 
 func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := mdbx.Open(ctx, cfg.verkleDb, logger, false)
+	db, err := openDB(ctx, cfg.verkleDb, logger, false)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 }
 
 func dump(ctx context.Context, cfg optionsCfg) error {
-	db, err := mdbx.Open(ctx, cfg.verkleDb, log.Root(), false)
+	db, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 }
 
 func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
-	db, err := mdbx.Open(ctx, cfg.stateDb, log.Root(), false)
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), false)
 	if err != nil {
 		return err
 	}
@@ -340,7 +340,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 }
 
 func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := mdbx.Open(ctx, cfg.stateDb, logger, false)
+	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
 		return err
 	}
@@ -474,4 +474,19 @@ func main() {
 	default:
 		log.Warn("No valid --action specified, aborting")
 	}
+}
+
+func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
+	var db kv.RwDB
+	var err error
+	opts := mdbx.NewMDBX(logger).Path(path)
+	if accede {
+		opts = opts.Accede()
+	}
+	db, err = opts.Open(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
