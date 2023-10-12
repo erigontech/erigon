@@ -58,6 +58,18 @@ var (
 		Value: "dynamic-tx-node-0",
 	}
 
+	BaseRpcHostFlag = cli.StringFlag{
+		Name:  "rpc.host",
+		Usage: "The host of the base RPC service",
+		Value: "localhost",
+	}
+
+	BaseRpcPortFlag = cli.IntFlag{
+		Name:  "rpc.port",
+		Usage: "The port of the base RPC service",
+		Value: 8545,
+	}
+
 	WithoutHeimdallFlag = cli.BoolFlag{
 		Name:  "bor.withoutheimdall",
 		Usage: "Run without Heimdall service",
@@ -139,6 +151,8 @@ func main() {
 		&DataDirFlag,
 		&ChainFlag,
 		&ScenariosFlag,
+		&BaseRpcHostFlag,
+		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
 		&HeimdallgRPCAddressFlag,
@@ -305,6 +319,8 @@ func action(ctx *cli.Context) error {
 func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chain := ctx.String(ChainFlag.Name)
+	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)
+	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
 
 	faucetSource := accounts.NewAccount("faucet-source")
 
@@ -318,8 +334,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8545,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					//Snapshots:          true,
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -375,8 +391,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8545,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					BorStateSyncDelay:  5 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
@@ -422,8 +438,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30403,
 					BasePrivateApiAddr: "localhost:10190",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8645,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
@@ -457,8 +473,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 				Chain:              networkname.DevChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCHost:        "localhost",
-				BaseRPCPort:        8545,
+				BaseRPCHost:        baseRpcHost,
+				BaseRPCPort:        baseRpcPort,
 				Alloc: types.GenesisAlloc{
 					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 				},
