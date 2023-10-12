@@ -1392,7 +1392,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}).
 		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
+		Open(ctx)
 	if err != nil {
 		return err
 	}
