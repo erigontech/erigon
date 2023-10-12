@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
@@ -99,8 +98,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(excessBlobGas, minBlobGasPrice uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(minBlobGasPrice), uint256.NewInt(params.BlobGasPriceUpdateFraction), excessBlobGas)
+func GetBlobGasPrice(excessBlobGas, minBlobGasPrice, blobGasPriceUpdateFraction uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(minBlobGasPrice), uint256.NewInt(blobGasPriceUpdateFraction), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

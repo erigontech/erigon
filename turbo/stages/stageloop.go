@@ -319,7 +319,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		pendingBlobFee := minBlobGasPrice
 		excessBlobGas := misc.CalcExcessBlobGas(currentHeader)
 		if currentHeader.ExcessBlobGas != nil {
-			f, err := misc.GetBlobGasPrice(excessBlobGas, minBlobGasPrice)
+			f, err := misc.GetBlobGasPrice(excessBlobGas, minBlobGasPrice, h.chainConfig.GetBlobGasPriceUpdateFraction())
 			if err != nil {
 				return err
 			}
