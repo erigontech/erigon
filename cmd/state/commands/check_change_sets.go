@@ -94,7 +94,6 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint6
 	if chaindata != historyfile {
 		historyDb = kv2.MustOpen(historyfile)
 	}
-	ctx := context.Background()
 	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
