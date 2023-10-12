@@ -260,7 +260,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			validationError = err
 		} else {
-			criticalError = err
+			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
 			return
 		}
 	}
