@@ -570,7 +570,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(chainConfig, log.New())
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), chainConfig, log.New())
 	checkStateRoot := true
 	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot)
 }

@@ -390,7 +390,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 
 		to := execAtBlock - unwind
-		stateStages.UnwindTo(to, common2.Hash{})
+		stateStages.UnwindTo(to, stagedsync.StagedUnwind)
 
 		if err := tx.Commit(); err != nil {
 			return err

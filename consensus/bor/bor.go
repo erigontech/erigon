@@ -269,6 +269,7 @@ type Bor struct {
 	closeCh             chan struct{} // Channel to signal the background processes to exit
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
+	headerProgress      HeaderProgress
 }
 
 type signer struct {
@@ -442,12 +443,22 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 // This is used by the rpcdaemon which needs read only access to the provided data services
-func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	// get bor config
+	borConfig := chainConfig.Bor
+
+	// Set any missing consensus parameters to their defaults
+	if borConfig != nil && borConfig.CalculateSprint(0) == 0 {
+		borConfig.Sprint = defaultSprintLength
+	}
+
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	return &Bor{
+		chainConfig: chainConfig,
+		config:      borConfig,
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
@@ -462,6 +473,14 @@ func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 // Type returns underlying consensus engine
 func (c *Bor) Type() chain.ConsensusName {
 	return chain.BorConsensus
+}
+
+type HeaderProgress interface {
+	Progress() uint64
+}
+
+func (c *Bor) HeaderProgress(p HeaderProgress) {
+	c.headerProgress = p
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
@@ -1168,9 +1187,15 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
+	delay := time.Until(time.Unix(int64(header.Time), 0))
 	// wiggle was already accounted for in header.Time, this is just for logging
 	wiggle := time.Duration(successionNumber) * time.Duration(c.config.CalculateBackupMultiplier(number)) * time.Second
+
+	// temp for testing
+	if wiggle > 0 {
+		wiggle = 500 * time.Millisecond
+	}
+	// temp for testing
 
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeBor, BorRLP(header, c.config))
@@ -1179,15 +1204,21 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
-	// Wait until sealing is terminated or delay timeout.
-	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
-
 	go func() {
+		// Wait until sealing is terminated or delay timeout.
+		c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
+
 		select {
 		case <-stop:
-			c.logger.Info("Discarding sealing operation for block", "number", number)
+			c.logger.Info("Stopped sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
+
+			if c.headerProgress != nil && c.headerProgress.Progress() >= number {
+				c.logger.Info("Discarding sealing operation for block", "number", number)
+				return
+			}
+
 			if wiggle > 0 {
 				c.logger.Info(
 					"Sealed out-of-turn",

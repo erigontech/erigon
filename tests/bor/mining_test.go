@@ -67,7 +67,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(&genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(context.Background(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}

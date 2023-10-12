@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
@@ -179,7 +178,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(1500, libcommon.Hash{})
+					u.UnwindTo(1500, UnwindReason{})
 					return nil
 				}
 				return nil
@@ -272,7 +271,7 @@ func TestUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, libcommon.Hash{})
+					u.UnwindTo(500, UnwindReason{})
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -326,7 +325,7 @@ func TestUnwind(t *testing.T) {
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
-	state.UnwindTo(100, libcommon.Hash{})
+	state.UnwindTo(100, UnwindReason{})
 	err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
@@ -376,7 +375,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, libcommon.Hash{})
+					u.UnwindTo(500, UnwindReason{})
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -564,7 +563,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, libcommon.Hash{})
+					u.UnwindTo(500, UnwindReason{})
 					return s.Update(tx, 3000)
 				}
 				return nil
