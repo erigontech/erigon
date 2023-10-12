@@ -295,7 +295,7 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
+func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"
@@ -362,7 +362,7 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 		default:
 		}
 
-		return opts.Open()
+		return opts.Open(ctx)
 	}
 	var err error
 	db, err = openFunc(false)

@@ -14,7 +14,7 @@ type VerkleMarker struct {
 
 //nolint:gocritic
 func NewVerkleMarker(tempdir string) *VerkleMarker {
-	markedSlotsDb, err := mdbx.NewTemporaryMdbx(tempdir)
+	markedSlotsDb, err := mdbx.NewTemporaryMdbx(context.TODO(), tempdir)
 	if err != nil {
 		panic(err)
 	}

@@ -65,7 +65,7 @@ func importChain(cliCtx *cli.Context) error {
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(stack, ethCfg, logger)
+	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger)
 	if err != nil {
 		return err
 	}

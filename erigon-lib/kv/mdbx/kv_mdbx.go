@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -223,7 +225,7 @@ func PathDbMap() map[string]kv.RoDB {
 	return maps.Clone(pathDbMap)
 }
 
-func (opts MdbxOpts) Open() (kv.RwDB, error) {
+func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if dbg.WriteMap() {
 		opts = opts.WriteMap() //nolint
 	}
@@ -239,6 +241,21 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if dbg.MdbxReadAhead() {
 		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
 	}
+	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
+		for retry := 0; ; retry++ {
+			exists := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			if !exists && retry >= 5 {
+				return nil, fmt.Errorf("can't create database - because opening in readonly mode, label: %s, path: %s", opts.label.String(), opts.path)
+			}
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+	}
+
 	env, err := mdbx.NewEnv()
 	if err != nil {
 		return nil, err
@@ -401,7 +418,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 }
 
 func (opts MdbxOpts) MustOpen() kv.RwDB {
-	db, err := opts.Open()
+	db, err := opts.Open(context.Background())
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}
