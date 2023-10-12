@@ -4,7 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -38,7 +38,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	}
 	defer tx.Rollback()
 
-	tmpDb, err := mdbx.NewTemporaryMdbx(e.tmpdir)
+	tmpDb, err := mdbx.NewTemporaryMdbx(e.ctx, e.tmpdir)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -53,7 +53,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	}
 	defer tmpTx.Rollback()
 
-	memoryMutation := memdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
+	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
 	defer memoryMutation.Rollback()
 
 	startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
