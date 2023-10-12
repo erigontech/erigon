@@ -62,7 +62,7 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
+	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB).Accede()
 	if label == kv.ChainDB {
 		opts = opts.MapSize(8 * datasize.TB)
 	}
