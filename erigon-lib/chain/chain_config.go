@@ -69,6 +69,7 @@ type Config struct {
 
 	// Optional EIP-4844 parameters
 	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
+	MaxBlobGasPerBlock         *uint64 `json:"maxBlobGasPerBlock,omitempty"`
 	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
@@ -215,6 +216,13 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 		return *c.MinBlobGasPrice
 	}
 	return 1
+}
+
+func (c *Config) GetMaxBlobGasPerBlock() uint64 {
+	if c.MaxBlobGasPerBlock != nil {
+		return *c.MaxBlobGasPerBlock
+	}
+	return 786432
 }
 
 func (c *Config) GetTargetBlobGasPerBlock() uint64 {
