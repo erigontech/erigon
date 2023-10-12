@@ -101,6 +101,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
+		hd.stats.RejectedBadHeaders++
 		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
@@ -521,6 +522,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
+			hd.stats.RejectedBadHeaders++
 			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
@@ -540,6 +542,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 						parentLink.RemoveChild(link)
 					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
+					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
 				}
 			}
@@ -1061,6 +1064,8 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 }
 
 func (hd *HeaderDownload) ExtractStats() Stats {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	s := hd.stats
 	hd.stats = Stats{}
 	return s

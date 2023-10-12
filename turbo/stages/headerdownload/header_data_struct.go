@@ -253,6 +253,8 @@ type Stats struct {
 	SkeletonReqMaxBlock uint64
 	RespMinBlock        uint64
 	RespMaxBlock        uint64
+	InvalidHeaders      int
+	RejectedBadHeaders  int
 }
 
 type HeaderDownload struct {
