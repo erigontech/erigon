@@ -660,9 +660,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if currentBlock.BaseFee() != nil {
 			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
 		}
-		blobFee := uint64(params.MinBlobGasPrice)
+		minBlobGasPrice := chainConfig.GetMinBlobGasPrice()
+		blobFee := minBlobGasPrice
 		if currentBlock.Header().ExcessBlobGas != nil {
-			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()))
+			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()), minBlobGasPrice)
 			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
 				blobFee = b.Uint64()
 			}

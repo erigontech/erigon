@@ -791,7 +791,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if header.ExcessBlobGas == nil {
 			log.Warn("excess blob gas not set when trying to marshal blob tx")
 		} else {
-			blobGasPrice, err := misc.GetBlobGasPrice(*header.ExcessBlobGas)
+			blobGasPrice, err := misc.GetBlobGasPrice(*header.ExcessBlobGas, chainConfig.GetMinBlobGasPrice())
 			if err != nil {
 				log.Error(err.Error())
 			}

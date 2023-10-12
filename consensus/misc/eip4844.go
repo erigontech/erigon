@@ -99,8 +99,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(params.MinBlobGasPrice), uint256.NewInt(params.BlobGasPriceUpdateFraction), excessBlobGas)
+func GetBlobGasPrice(excessBlobGas, minBlobGasPrice uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(minBlobGasPrice), uint256.NewInt(params.BlobGasPriceUpdateFraction), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

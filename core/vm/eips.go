@@ -309,7 +309,7 @@ func enable6780(jt *JumpTable) {
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	excessBlobGas := interpreter.evm.Context().ExcessBlobGas
-	blobBaseFee, err := misc.GetBlobGasPrice(*excessBlobGas)
+	blobBaseFee, err := misc.GetBlobGasPrice(*excessBlobGas, interpreter.evm.ChainRules().MinBlobGasPrice)
 	if err != nil {
 		return nil, err
 	}

@@ -167,7 +167,6 @@ const (
 	RefundQuotientEIP3529 uint64 = 5
 
 	// EIP-4844: Shard Blob Transactions
-	MinBlobGasPrice                   = 1
 	BlobGasPriceUpdateFraction        = 3338477
 	PointEvaluationGas         uint64 = 50000
 )

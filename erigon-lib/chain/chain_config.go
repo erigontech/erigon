@@ -67,6 +67,9 @@ type Config struct {
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 
+	// Optional EIP-4844 parameters
+	MinBlobGasPrice *uint64 `json:"minBlobGasPrice,omitempty"`
+
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
@@ -203,6 +206,13 @@ func (c *Config) IsPrague(time uint64) bool {
 
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
+}
+
+func (c *Config) GetMinBlobGasPrice() uint64 {
+	if c.MinBlobGasPrice != nil {
+		return *c.MinBlobGasPrice
+	}
+	return 1
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -591,6 +601,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
 	IsEip1559FeeCollector, IsAura                           bool
+	MinBlobGasPrice                                         uint64
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -616,6 +627,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:              c.IsPrague(time),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
 		IsAura:                c.Aura != nil,
+		MinBlobGasPrice:       c.GetMinBlobGasPrice(),
 	}
 }
 

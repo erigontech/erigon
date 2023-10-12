@@ -16,6 +16,7 @@
   "terminalTotalDifficulty": 231707791542740786049188744689299064356246512,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1684934220,
+  "minBlobGasPrice": 1000000000,
   "aura": {
     "stepDuration": 5,
     "blockReward": 0,
