@@ -187,14 +187,14 @@ func BorHeimdallForward(
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
-	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
-	if err != nil {
-		return err
-	}
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
-	if err != nil {
-		return err
-	}
+	// recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+	// if err != nil {
+	// 	return err
+	// }
+	// signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	// if err != nil {
+	// 	return err
+	// }
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	if !mine {
@@ -248,7 +248,7 @@ func BorHeimdallForward(
 		}
 
 		if blockNum == 1 {
-			if lastSpanId, err = fetchAndWriteSpans(ctx, 0, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+			if _, err = fetchAndWriteSpans(ctx, 0, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 			if lastSpanId, err = fetchAndWriteSpans(ctx, 1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
@@ -257,16 +257,16 @@ func BorHeimdallForward(
 		}
 		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd)%spanLength) == 0 {
 			spanId := 1 + (blockNum-zerothSpanEnd)/spanLength
-			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+			if _, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId+1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
-		if err = persistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
-			return fmt.Errorf("persistValidatorSets: %w", err)
-		}
+		//if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+		//	return fmt.Errorf("persistValidatorSets: %w", err)
+		//}
 		if !mine && header != nil {
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
 			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
@@ -460,7 +460,8 @@ func fetchAndWriteSpans(
 	return spanId, nil
 }
 
-func persistValidatorSets(
+// Not used currently
+func PersistValidatorSets(
 	u Unwinder,
 	ctx context.Context,
 	tx kv.Tx,
