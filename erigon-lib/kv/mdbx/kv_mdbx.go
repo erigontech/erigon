@@ -244,7 +244,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {
 			exists := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
-			if !exists && retry >= 5 {
+			if exists {
+				break
+			}
+			if retry >= 5 {
 				return nil, fmt.Errorf("can't create database - because opening in readonly mode, label: %s, path: %s", opts.label.String(), opts.path)
 			}
 			select {
