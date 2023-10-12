@@ -105,6 +105,7 @@ func openDBDefault(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists boo
 			db.Close()
 			db = opts.Exclusive().MustOpen()
 			if err := migrator.Apply(db, datadirCli, logger); err != nil {
+
 				return nil, err
 			}
 
