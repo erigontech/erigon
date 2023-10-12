@@ -55,21 +55,20 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 
-	txs := make([]types.Transaction, len(body.Transactions))
-	for i, tx := range body.Transactions {
-		var err error
-		if txs[i], err = types.DecodeTransaction(tx); err != nil {
-			log.Error("broadcastNewBlock", "err", err)
-			return
-		}
+	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
+
+	if err != nil {
+		log.Error("broadcastNewBlock", "err", err)
 	}
 
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: types.NewBlock(header, txs, body.Uncles, nil, body.Withdrawals),
+		Block: block,
 		TD:    td,
 	})
+
 	if err != nil {
 		log.Error("broadcastNewBlock", "err", err)
+		return
 	}
 
 	req66 := proto_sentry.SendMessageToRandomPeersRequest{

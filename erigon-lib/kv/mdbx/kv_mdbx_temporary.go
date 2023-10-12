@@ -29,13 +29,13 @@ type TemporaryMdbx struct {
 	path string
 }
 
-func NewTemporaryMdbx(tempdir string) (kv.RwDB, error) {
+func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 	path, err := os.MkdirTemp(tempdir, "mdbx-temp")
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := Open(path, log.Root(), false)
+	db, err := NewMDBX(log.New()).Path(path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}

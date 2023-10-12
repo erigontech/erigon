@@ -399,6 +399,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
+						/*args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								HeimdallGRpc:     heimdallGrpc,
+							},
+							AccountSlots: 200,
+						},*/
 						args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
