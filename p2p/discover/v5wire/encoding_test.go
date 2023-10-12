@@ -18,6 +18,7 @@ package v5wire
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"flag"
