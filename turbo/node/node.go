@@ -119,7 +119,7 @@ func New(
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(node, ethConfig, logger)
+	ethereum, err := eth.New(ctx, node, ethConfig, logger)
 	if err != nil {
 		return nil, err
 	}

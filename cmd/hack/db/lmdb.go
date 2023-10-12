@@ -779,7 +779,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	var db kv.RwDB
 	db, err = kv2.NewMDBX(logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
-	}).Open()
+	}).Open(context.Background())
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}

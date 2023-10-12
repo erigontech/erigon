@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
@@ -43,7 +44,7 @@ func init() {
 }
 
 func newTestTable(t transport, tmpDir string) (*Table, *enode.DB) {
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}

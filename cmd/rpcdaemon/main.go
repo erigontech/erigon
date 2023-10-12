@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -20,7 +22,9 @@ func main() {
 		logger := debug.SetupCobra(cmd, "sentry")
 		db, backend, txPool, mining, stateCache, blockReader, engine, ff, agg, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
-			logger.Error("Could not connect to DB", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				logger.Error("Could not connect to DB", "err", err)
+			}
 			return nil
 		}
 		defer db.Close()

@@ -11,13 +11,14 @@
    limitations under the License.
 */
 
-package memdb
+package membatchwithdb
 
 import (
 	"bytes"
 	"context"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -45,7 +46,7 @@ type MemoryMutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
-	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
+	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
 		panic(err)

@@ -11,7 +11,7 @@
    limitations under the License.
 */
 
-package memdb
+package membatchwithdb
 
 import (
 	"bytes"

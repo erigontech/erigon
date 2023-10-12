@@ -64,12 +64,13 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
-		if number == nil {
-			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		if header == nil {
+			return nil, err
 		}
-		begin = *number
-		end = *number
+		begin = header.Number.Uint64()
+		end = header.Number.Uint64()
+
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
@@ -77,7 +78,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil, err
 		}
 
-		begin = latest
+		begin = 0
 		if crit.FromBlock != nil {
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()

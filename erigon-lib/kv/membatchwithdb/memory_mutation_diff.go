@@ -1,4 +1,4 @@
-package memdb
+package membatchwithdb
 
 import "github.com/ledgerwatch/erigon-lib/kv"
 
