@@ -641,6 +641,22 @@ type RawBlock struct {
 	Body   *RawBody
 }
 
+func (r RawBlock) AsBlock() (*Block, error) {
+	b := &Block{header: r.Header}
+	b.uncles = r.Body.Uncles
+	b.withdrawals = r.Body.Withdrawals
+	txs := make([]Transaction, len(r.Body.Transactions))
+
+	for i, tx := range r.Body.Transactions {
+		var err error
+		if txs[i], err = DecodeTransaction(tx); err != nil {
+			return nil, err
+		}
+	}
+
+	return b, nil
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
