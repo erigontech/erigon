@@ -256,8 +256,11 @@ func BorHeimdallForward(
 			}
 		}
 		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd)%spanLength) == 0 {
-			spanId := 2 + (blockNum-zerothSpanEnd)/spanLength
+			spanId := 1 + (blockNum-zerothSpanEnd)/spanLength
 			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+				return err
+			}
+			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId+1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 		}
@@ -267,10 +270,9 @@ func BorHeimdallForward(
 		if !mine && header != nil {
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
 			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
-				logger.Info("checkHeaderExtraData", "blockNum", blockNum)
-				//if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
-				//	return err
-				//}
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -454,7 +456,7 @@ func fetchAndWriteSpans(
 	if err = tx.Put(kv.BorSpans, spanIDBytes[:], spanBytes); err != nil {
 		return 0, err
 	}
-	logger.Debug(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanId)
+	logger.Info(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanId)
 	return spanId, nil
 }
 

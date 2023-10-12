@@ -1084,9 +1084,12 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	// Compute starting block of the span
-	var startBlock uint64
+	var startBlock, endBlock uint64
 	if spanId > 0 {
 		startBlock = (spanId-1)*spanLength + zerothSpanEnd + 1
+		endBlock = startBlock + spanLength - 1
+	} else {
+		endBlock = zerothSpanEnd
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1096,7 +1099,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			return nil, err
 		}
 		if v == nil {
-			return nil, fmt.Errorf("span %d not found", spanId)
+			return nil, fmt.Errorf("span %d not found (db)", spanId)
 		}
 		return common.Copy(v), nil
 	}
@@ -1105,7 +1108,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	segments := view.Spans()
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.ranges.from > startBlock {
+		if sn.ranges.from > endBlock {
 			continue
 		}
 		if sn.ranges.to <= startBlock {
@@ -1120,5 +1123,5 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		result, _ := gg.Next(nil)
 		return common.Copy(result), nil
 	}
-	return nil, fmt.Errorf("span %d not found", spanId)
+	return nil, fmt.Errorf("span %d not found (snapshots)", spanId)
 }
