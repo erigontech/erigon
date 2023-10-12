@@ -225,6 +225,8 @@ func PathDbMap() map[string]kv.RoDB {
 	return maps.Clone(pathDbMap)
 }
 
+var ErrDBDoesNotExists = fmt.Errorf("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
+
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if dbg.WriteMap() {
 		opts = opts.WriteMap() //nolint
@@ -248,7 +250,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				break
 			}
 			if retry >= 5 {
-				return nil, fmt.Errorf("can't create database - because opening in readonly mode, label: %s, path: %s", opts.label.String(), opts.path)
+				return nil, fmt.Errorf("%w, label: %s, path: %s", ErrDBDoesNotExists, opts.label.String(), opts.path)
 			}
 			select {
 			case <-time.After(500 * time.Millisecond):
