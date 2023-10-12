@@ -75,7 +75,6 @@ func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, dat
 		return err
 	}
 	defer historyDb.Close()
-	ctx := context.Background()
 	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
