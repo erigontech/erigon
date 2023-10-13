@@ -1071,23 +1071,17 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 			break
 		}
 	}
-	//if tnums[0].TxNum == math.MaxUint64 && tnums[1] == nil && tnums[2] == nil {
-	//	return nil, false, true, nil
-	//}
 	if tnums[1] != nil {
 		if tnums[0].TxNum != math.MaxUint64 {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value}
 			return toRestore, true, true, nil
 		}
-		//if tnums[2] != nil {
-		//	toRestore = &HistoryRecord{TxNum: tnums[1].TxNum, Value: tnums[2].Value}
-		//	return toRestore, true, true, nil
-		//}
 		return nil, false, true, nil
 	}
 	//if tnums[0].TxNum != math.MaxUint64 && tnums[2] != nil {
 	//	toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value}
-	//	return toRestore, true, false, nil
+	//	fmt.Printf("toRestore %x %d ->%t %x\n", key, toRestore.TxNum, true, toRestore.Value)
+	//	return toRestore, true, true, nil
 	//}
 	return nil, false, true, nil
 }

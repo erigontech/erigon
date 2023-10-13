@@ -603,9 +603,9 @@ func (d *Domain) Close() {
 func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	// if bytes.Equal(key1, common.FromHex("001cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b")) {
-	if bytes.Equal(key1, common.FromHex("3a220f351252089d385b29beca14e27f204c296a")) {
-		fmt.Printf("put [%d] %s: %x val %x, preval %x\n", dc.hc.ic.txNum, dc.d.filenameBase, key1, val, preval)
-	}
+	//if bytes.Equal(key1, common.FromHex("db7d6ab1f17c6b31909ae466702703daef9269cf")) {
+	//	fmt.Printf("put [%d] %s: %x val %x, preval %x\n", dc.hc.ic.txNum, dc.d.filenameBase, key1, val, preval)
+	//}
 	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
