@@ -440,17 +440,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
-				return err
-			}
-			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
-					return err
-				}
-			}
-			return nil
+			return rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files())
 		}); err != nil {
 			return err
+		}
+		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
+			if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+				return br.PruneAncientBlocks(tx, 100, false /* includeBor */)
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
