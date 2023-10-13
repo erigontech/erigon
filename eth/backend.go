@@ -660,10 +660,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if currentBlock.BaseFee() != nil {
 			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
 		}
-		blobFee := uint64(params.MinBlobGasPrice)
+		blobFee := chainConfig.GetMinBlobGasPrice()
 		if currentBlock.Header().ExcessBlobGas != nil {
-			b, err := misc.GetBlobGasPrice(misc.CalcExcessBlobGas(currentBlock.Header()))
-			if err == nil && b.Cmp(uint256.NewInt(0)) > 0 {
+			excessBlobGas := misc.CalcExcessBlobGas(chainConfig, currentBlock.Header())
+			b, err := misc.GetBlobGasPrice(chainConfig, excessBlobGas)
+			if err == nil {
 				blobFee = b.Uint64()
 			}
 		}
@@ -931,9 +932,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
+		b.HeaderProgress(s.sentriesClient.Hd)
 	} else if br, ok := s.engine.(*merge.Merge); ok {
 		if b, ok := br.InnerEngine().(*bor.Bor); ok {
 			borcfg = b
+			b.HeaderProgress(s.sentriesClient.Hd)
 		}
 	}
 
