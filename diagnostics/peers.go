@@ -3,12 +3,36 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
+
+type PeerNetworkInfo struct {
+	LocalAddress  string `json:"localAddress"`  // Local endpoint of the TCP data connection
+	RemoteAddress string `json:"remoteAddress"` // Remote endpoint of the TCP data connection
+	Inbound       bool   `json:"inbound"`
+	Trusted       bool   `json:"trusted"`
+	Static        bool   `json:"static"`
+}
+
+type PeerResponse struct {
+	ENR           string                 `json:"enr,omitempty"` // Ethereum Node Record
+	Enode         string                 `json:"enode"`         // Node URL
+	ID            string                 `json:"id"`            // Unique node identifier
+	Name          string                 `json:"name"`          // Name of the node, including client type, version, OS, custom data
+	ErrorCount    int                    `json:"errorCount"`    // Number of errors
+	LastSeenError string                 `json:"lastSeenError"` // Last seen error
+	Type          string                 `json:"type"`          // Type of connection
+	Caps          []string               `json:"caps"`          // Protocols advertised by this peer
+	Network       PeerNetworkInfo        `json:"network"`
+	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
+	BytesIn       int                    `json:"bytesIn"`   // Number of bytes received from the peer
+	BytesOut      int                    `json:"bytesOut"`  // Number of bytes sent to the peer
+}
 
 func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
@@ -19,29 +43,80 @@ func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.Er
 }
 
 func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {
-	reply, err := node.Backend().Peers(context.Background())
-
+	sentinelPeers, err := sentinelPeers(node)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	peers := make([]*p2p.PeerInfo, 0, len(reply.Peers))
+	sentryPeers, err := sentryPeers(node)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	allPeers := append(sentryPeers, sentinelPeers...)
+
+	json.NewEncoder(w).Encode(allPeers)
+}
+
+func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
+	var statisticsArray = make(map[string]*peers.PeerStatistics)
+	if diag, ok := node.Backend().Sentinel().(peers.PeerStatisticsGetter); ok {
+		statisticsArray = diag.GetPeersStatistics()
+	} else {
+		err := errors.New("Sentinel does not support peer statistics")
+		return nil, err
+	}
+
+	peers := make([]*PeerResponse, 0, len(statisticsArray))
+
+	for key, value := range statisticsArray {
+		peer := PeerResponse{
+			ENR:      "",
+			Enode:    "",
+			ID:       key,
+			Name:     "",
+			BytesIn:  int(value.BytesIn),
+			BytesOut: int(value.BytesOut),
+			Type:     "Sentinel",
+			Caps:     []string{},
+			Network: PeerNetworkInfo{
+				LocalAddress:  "",
+				RemoteAddress: "",
+				Inbound:       false,
+				Trusted:       false,
+				Static:        false,
+			},
+			Protocols: nil,
+		}
+
+		peers = append(peers, &peer)
+	}
+
+	return peers, nil
+}
+
+func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
+	reply, err := node.Backend().Peers(context.Background())
+
+	if err != nil {
+		return nil, err
+	}
+
+	peers := make([]*PeerResponse, 0, len(reply.Peers))
 
 	for _, rpcPeer := range reply.Peers {
-		peer := p2p.PeerInfo{
-			ENR:   rpcPeer.Enr,
-			Enode: rpcPeer.Enode,
-			ID:    rpcPeer.Id,
-			Name:  rpcPeer.Name,
-			Caps:  rpcPeer.Caps,
-			Network: struct {
-				LocalAddress  string `json:"localAddress"`
-				RemoteAddress string `json:"remoteAddress"`
-				Inbound       bool   `json:"inbound"`
-				Trusted       bool   `json:"trusted"`
-				Static        bool   `json:"static"`
-			}{
+		peer := PeerResponse{
+			ENR:      rpcPeer.Enr,
+			Enode:    rpcPeer.Enode,
+			ID:       rpcPeer.Id,
+			Name:     rpcPeer.Name,
+			BytesIn:  0,
+			BytesOut: 0,
+			Type:     "Sentry",
+			Caps:     rpcPeer.Caps,
+			Network: PeerNetworkInfo{
 				LocalAddress:  rpcPeer.ConnLocalAddr,
 				RemoteAddress: rpcPeer.ConnRemoteAddr,
 				Inbound:       rpcPeer.ConnIsInbound,
@@ -54,5 +129,5 @@ func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) 
 		peers = append(peers, &peer)
 	}
 
-	json.NewEncoder(w).Encode(peers)
+	return peers, nil
 }

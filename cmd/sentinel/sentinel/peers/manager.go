@@ -64,6 +64,7 @@ func (m *Manager) getPeer(id peer.ID) (peer *Peer) {
 	m.mu.Unlock()
 	return p
 }
+
 func (m *Manager) CtxPeer(ctx context.Context, id peer.ID, fn func(peer *Peer)) error {
 	p := m.getPeer(id)
 	select {

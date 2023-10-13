@@ -30,6 +30,8 @@ type SentinelServer struct {
 
 	mu     sync.RWMutex
 	logger log.Logger
+
+	peerStatistics map[string]*peers.PeerStatistics
 }
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
@@ -38,6 +40,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 		ctx:            ctx,
 		gossipNotifier: newGossipNotifier(),
 		logger:         logger,
+		peerStatistics: make(map[string]*peers.PeerStatistics),
 	}
 }
 
@@ -74,6 +77,18 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
+
+	_, found := s.peerStatistics[msg.GetPeer().Pid]
+
+	if found {
+		s.peerStatistics[msg.GetPeer().Pid].BytesOut += uint64(len(compressedData))
+	} else {
+		s.peerStatistics[msg.GetPeer().Pid] = &peers.PeerStatistics{
+			BytesIn:  0,
+			BytesOut: uint64(len(compressedData)),
+		}
+	}
+
 	var subscription *sentinel.GossipSubscription
 
 	switch msg.Type {
@@ -258,6 +273,7 @@ func (s *SentinelServer) ListenToGossip() {
 func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	var err error
 	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
+
 	data := pkt.GetData()
 
 	// If we use snappy codec then decompress it accordingly.
@@ -271,6 +287,18 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	if err != nil {
 		return err
 	}
+
+	_, found := s.peerStatistics[string(textPid)]
+
+	if found {
+		s.peerStatistics[string(textPid)].BytesIn += uint64(len(data))
+	} else {
+		s.peerStatistics[string(textPid)] = &peers.PeerStatistics{
+			BytesIn:  uint64(len(data)),
+			BytesOut: 0,
+		}
+	}
+
 	// Check to which gossip it belongs to.
 	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data, string(textPid))
@@ -289,4 +317,14 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 		s.gossipNotifier.notifyBlob(sentinelrpc.GossipType_BlobSidecarType, data, string(textPid), extractBlobSideCarIndex(*pkt.Topic))
 	}
 	return nil
+}
+
+func (s *SentinelServer) GetPeersStatistics() map[string]*peers.PeerStatistics {
+	stats := make(map[string]*peers.PeerStatistics)
+	for k, v := range s.peerStatistics {
+		stats[k] = v
+		delete(s.peerStatistics, k)
+	}
+
+	return stats
 }

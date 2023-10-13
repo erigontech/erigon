@@ -9,6 +9,14 @@ import (
 )
 
 // Record Peer data.
+type PeerStatisticsGetter interface {
+	GetPeersStatistics() map[string]*PeerStatistics
+}
+
+type PeerStatistics struct {
+	BytesIn  uint64
+	BytesOut uint64
+}
 type Peer struct {
 	Penalties int
 	Banned    bool

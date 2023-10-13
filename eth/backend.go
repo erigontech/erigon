@@ -89,6 +89,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common/debug"
 
+	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
@@ -196,6 +197,8 @@ type Ethereum struct {
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
+
+	sentinel rpcsentinel.SentinelClient
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -792,6 +795,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
+
+		backend.sentinel = client
+
 		go caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, sqlDb, rawBeaconBlockChainDb, beaconDB, dirs.Tmp, beacon.RouterConfiguration{Active: false})
 	}
 
@@ -1172,6 +1178,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
+
 	return &reply, nil
 }
 
@@ -1350,4 +1357,8 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 		return err
 	})
 	return currentTD, err
+}
+
+func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
+	return s.sentinel
 }
