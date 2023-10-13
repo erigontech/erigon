@@ -16,6 +16,7 @@
     "eip1559FeeCollector": "0x1559000000000000000000000000000000000000",
     "terminalTotalDifficulty": 340282366920938463463374607431768211454,
     "shanghaiTime": 1696271800,
+    "cancunTime": 1696272200,
     "minBlobGasPrice": 1000000000,
     "maxBlobGasPerBlock": 262144,
     "targetBlobGasPerBlock": 131072,
