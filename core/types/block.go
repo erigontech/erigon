@@ -1568,14 +1568,20 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
+
+	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	}
+
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+
 	if b.WithdrawalsHash() == nil {
 		if b.Withdrawals() != nil {
 			return errors.New("header missing WithdrawalsHash")
