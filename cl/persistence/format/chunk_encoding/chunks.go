@@ -1,23 +1,22 @@
-package snapshot_format
+package chunk_encoding
 
 import (
 	"encoding/binary"
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-type dataType int
+type DataType int
 
 const (
-	chunkDataType   dataType = 0
-	pointerDataType dataType = 1
+	ChunkDataType   DataType = 0
+	PointerDataType DataType = 1
 )
 
 // writeChunk writes a chunk to the writer.
-func writeChunk(w io.Writer, buf []byte, t dataType, snappy bool) error {
+func WriteChunk(w io.Writer, buf []byte, t DataType, snappy bool) error {
 	if snappy {
 		buf = utils.CompressSnappy(buf)
 	}
@@ -34,12 +33,12 @@ func writeChunk(w io.Writer, buf []byte, t dataType, snappy bool) error {
 	return nil
 }
 
-func readChunk(r io.Reader, snappy bool) (buf []byte, t dataType, err error) {
+func ReadChunk(r io.Reader, snappy bool) (buf []byte, t DataType, err error) {
 	prefix := make([]byte, 8)
 	if _, err := r.Read(prefix); err != nil {
-		return nil, dataType(0), err
+		return nil, DataType(0), err
 	}
-	t = dataType(prefix[0])
+	t = DataType(prefix[0])
 	prefix[0] = 0
 	fmt.Println(binary.BigEndian.Uint64(prefix))
 	buf = make([]byte, binary.BigEndian.Uint64(prefix))
@@ -50,12 +49,4 @@ func readChunk(r io.Reader, snappy bool) (buf []byte, t dataType, err error) {
 		buf, err = utils.DecompressSnappy(buf)
 	}
 	return buf, t, err
-}
-
-func readMetadataForBlock(r io.Reader) (clparams.StateVersion, error) {
-	b := []byte{0}
-	if _, err := r.Read(b); err != nil {
-		return 0, err
-	}
-	return clparams.StateVersion(b[0]), nil
 }

@@ -2,327 +2,236 @@ package beacon_indicies
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	_ "modernc.org/sqlite"
 )
 
-type SQLObject interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+// WriteBlockRootSlot writes the slot associated with a block root.
+func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
+	return tx.Put(kv.BlockRootToSlot, base_encoding.Encode64(slot), blockRoot[:])
 }
 
-func ReadBlockSlotByBlockRoot(ctx context.Context, tx SQLObject, blockRoot libcommon.Hash) (*uint64, error) {
-	var slot uint64
-
-	// Execute the query.
-	err := tx.QueryRowContext(ctx, "SELECT slot FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(&slot) // Note: blockRoot[:] converts [32]byte to []byte
+func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, error) {
+	slotBytes, err := tx.GetOne(kv.BlockRootToSlot, blockRoot[:])
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to retrieve slot for BeaconBlockRoot: %v", err)
+		return nil, err
 	}
-
-	return &slot, nil
+	if len(slotBytes) == 0 {
+		return nil, nil
+	}
+	slot := new(uint64)
+	*slot = base_encoding.Decode64(slotBytes)
+	return slot, nil
 }
 
-func ReadCanonicalBlockRoot(ctx context.Context, db SQLObject, slot uint64) (libcommon.Hash, error) {
-	var blockRoot libcommon.Hash
-
-	// Execute the query.
-	err := db.QueryRowContext(ctx, "SELECT beacon_block_root FROM beacon_indicies WHERE slot = ? AND canonical = 1", slot).Scan(&blockRoot)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return libcommon.Hash{}, nil
-		}
-		return libcommon.Hash{}, fmt.Errorf("failed to retrieve BeaconBlockRoot for slot: %v", err)
+// WriteBlockRootSlot writes the slot associated with a block root.
+func WriteStateRoot(tx kv.RwTx, blockRoot libcommon.Hash, stateRoot libcommon.Hash) error {
+	if err := tx.Put(kv.BlockRootToStateRoot, blockRoot[:], stateRoot[:]); err != nil {
+		return err
 	}
-
-	return blockRoot, nil
+	return tx.Put(kv.StateRootToBlockRoot, stateRoot[:], blockRoot[:])
 }
 
-func ReadStateRootByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+func ReadStateRootByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
 	var stateRoot libcommon.Hash
 
-	// Execute the query.
-	err := db.QueryRowContext(ctx, "SELECT state_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot).Scan(&stateRoot)
+	sRoot, err := tx.GetOne(kv.BlockRootToStateRoot, blockRoot[:])
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return libcommon.Hash{}, nil
-		}
-		return libcommon.Hash{}, fmt.Errorf("failed to retrieve BeaconBlockRoot for slot: %v", err)
+		return libcommon.Hash{}, err
 	}
+
+	copy(sRoot[:], sRoot)
 
 	return stateRoot, nil
 }
 
-func MarkRootCanonical(ctx context.Context, db SQLObject, slot uint64, blockRoot libcommon.Hash) error {
-	// First, reset the Canonical status for all other block roots with the same slot
-	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 0 WHERE slot = ?", slot); err != nil {
-		return fmt.Errorf("failed to reset canonical status for other block roots: %v", err)
+func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot libcommon.Hash) (libcommon.Hash, error) {
+	var blockRoot libcommon.Hash
+
+	bRoot, err := tx.GetOne(kv.StateRootToBlockRoot, stateRoot[:])
+	if err != nil {
+		return libcommon.Hash{}, err
 	}
 
-	// Next, mark the given blockRoot as canonical
-	if _, err := db.ExecContext(ctx, "UPDATE beacon_indicies SET canonical = 1 WHERE beacon_block_root = ?", blockRoot[:]); err != nil {
-		return fmt.Errorf("failed to mark block root as canonical: %v", err)
-	}
+	copy(blockRoot[:], bRoot)
 
-	return nil
+	return stateRoot, nil
 }
 
-func GenerateBlockIndicies(ctx context.Context, db SQLObject, signedBlock *cltypes.SignedBeaconBlock, forceCanonical bool) error {
-	block := signedBlock.Block
-	blockRoot, err := block.HashSSZ()
+func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (libcommon.Hash, error) {
+	var blockRoot libcommon.Hash
+
+	bRoot, err := tx.GetOne(kv.CanonicalBlockRoots, base_encoding.Encode64(slot))
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	copy(blockRoot[:], bRoot)
+	return blockRoot, nil
+}
+
+func MarkRootCanonical(ctx context.Context, tx kv.RwTx, slot uint64, blockRoot libcommon.Hash) error {
+	return tx.Put(kv.CanonicalBlockRoots, base_encoding.Encode64(slot), blockRoot[:])
+}
+
+func WriteBeaconBlockHeader(ctx context.Context, tx kv.RwTx, signedHeader *cltypes.SignedBeaconBlockHeader) error {
+	headersBytes, err := signedHeader.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
-
-	bodyRoot, err := block.Body.HashSSZ()
+	blockRoot, err := signedHeader.Header.HashSSZ()
 	if err != nil {
 		return err
 	}
+	return tx.Put(kv.BeaconBlockHeaders, blockRoot[:], headersBytes)
+}
 
+func WriteBeaconBlockHeaderAndIndicies(ctx context.Context, tx kv.RwTx, signedHeader *cltypes.SignedBeaconBlockHeader, forceCanonical bool) error {
+	blockRoot, err := signedHeader.Header.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if err := WriteBeaconBlockHeader(ctx, tx, signedHeader); err != nil {
+		return err
+	}
+	if err := WriteHeaderSlot(tx, blockRoot, signedHeader.Header.Slot); err != nil {
+		return err
+	}
+	if err := WriteStateRoot(tx, blockRoot, signedHeader.Header.Root); err != nil {
+		return err
+	}
+	if err := WriteParentBlockRoot(ctx, tx, blockRoot, signedHeader.Header.ParentRoot); err != nil {
+		return err
+	}
 	if forceCanonical {
-		_, err = db.ExecContext(ctx, "DELETE FROM beacon_indicies WHERE slot = ?;", block.Slot)
-		if err != nil {
-			return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
+		if err := MarkRootCanonical(ctx, tx, signedHeader.Header.Slot, signedHeader.Header.Root); err != nil {
+			return err
 		}
 	}
-	if _, err = db.ExecContext(ctx, "INSERT OR IGNORE INTO beacon_indicies (slot, proposer_index, beacon_block_root, state_root, parent_block_root, canonical, body_root, signature)  VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-		block.Slot,
-		block.ProposerIndex,
-		blockRoot[:],
-		block.StateRoot[:],
-		block.ParentRoot[:],
-		forceCanonical,
-		bodyRoot[:],
-		signedBlock.Signature[:]); err != nil {
-		return fmt.Errorf("failed to write block root to beacon_indicies: %v", err)
-	}
 
 	return nil
 }
 
-func ReadParentBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+func ReadParentBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
 	var parentRoot libcommon.Hash
 
-	// Execute the query.
-	err := db.QueryRowContext(ctx, "SELECT parent_block_root FROM beacon_indicies WHERE beacon_block_root = ?", blockRoot[:]).Scan(&parentRoot)
+	pRoot, err := tx.GetOne(kv.BlockRootToParentRoot, blockRoot[:])
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return libcommon.Hash{}, nil
-		}
-		return libcommon.Hash{}, fmt.Errorf("failed to retrieve ParentBlockRoot for BeaconBlockRoot: %v", err)
+		return libcommon.Hash{}, err
 	}
+
+	copy(parentRoot[:], pRoot)
 
 	return parentRoot, nil
 }
 
-func TruncateCanonicalChain(ctx context.Context, db SQLObject, slot uint64) error {
-	// Execute the query.
-	_, err := db.ExecContext(ctx, `
-		UPDATE beacon_indicies
-		SET canonical = 0
-		WHERE slot > ?;
-	`, slot)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("failed to truncate canonical chain: %v", err)
-	}
-
-	return nil
+func WriteParentBlockRoot(ctx context.Context, tx kv.RwTx, blockRoot, parentRoot libcommon.Hash) error {
+	return tx.Put(kv.BlockRootToParentRoot, blockRoot[:], parentRoot[:])
 }
 
-func PruneIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64) error {
-	_, err := db.ExecContext(ctx, "DELETE FROM beacon_indicies WHERE slot >= ? AND slot <= ?", fromSlot, toSlot)
+func TruncateCanonicalChain(ctx context.Context, tx kv.RwTx, slot uint64) error {
+	return tx.ForEach(kv.HeaderCanonical, base_encoding.Encode64(slot), func(k, _ []byte) error {
+		return tx.Delete(kv.CanonicalBlockRoots, k)
+	})
+}
+
+func RangeBlockRoots(ctx context.Context, tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot libcommon.Hash) bool) error {
+	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
 	if err != nil {
 		return err
 	}
-	return nil
-}
-
-func IterateBeaconIndicies(ctx context.Context, db SQLObject, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot, parentBlockRoot, stateRoot libcommon.Hash, canonical bool) bool) error {
-	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root, state_root, parent_block_root, canonical FROM beacon_indicies WHERE slot BETWEEN ? AND ?", fromSlot, toSlot)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var slot uint64
-		var beaconBlockRoot libcommon.Hash
-		var stateRoot libcommon.Hash
-		var parentBlockRoot libcommon.Hash
-		var canonical uint64
-
-		err := rows.Scan(&slot, &beaconBlockRoot, &stateRoot, &parentBlockRoot, &canonical)
-		if err != nil {
-			return err
-		}
-		if !fn(slot, beaconBlockRoot, parentBlockRoot, stateRoot, canonical != 0) {
+	for k, v, err := cursor.Seek(base_encoding.Encode64(fromSlot)); err == nil && k != nil && base_encoding.Decode64(k) <= toSlot; k, v, err = cursor.Next() {
+		if !fn(base_encoding.Decode64(k), libcommon.BytesToHash(v)) {
 			break
 		}
 	}
+	return err
+}
 
-	if err = rows.Err(); err != nil {
+func PruneBlockRoots(ctx context.Context, tx kv.RwTx, fromSlot, toSlot uint64) error {
+	cursor, err := tx.RwCursor(kv.CanonicalBlockRoots)
+	if err != nil {
 		return err
 	}
-
-	return nil
+	for k, _, err := cursor.Seek(base_encoding.Encode64(fromSlot)); err == nil && k != nil && base_encoding.Decode64(k) <= toSlot; k, _, err = cursor.Next() {
+		if err := cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return err
 }
 
-func ReadBeaconBlockRootsInSlotRange(ctx context.Context, db SQLObject, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
-	rows, err := db.QueryContext(ctx, "SELECT slot, beacon_block_root FROM beacon_indicies WHERE slot >= ? AND canonical > 0 LIMIT ?", fromSlot, count)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	roots := []libcommon.Hash{}
-	slots := []uint64{}
-	for rows.Next() {
-		var beaconBlockRoot libcommon.Hash
-		var slot uint64
-		err := rows.Scan(&slot, &beaconBlockRoot)
-		if err != nil {
-			return nil, nil, err
-		}
-		roots = append(roots, beaconBlockRoot)
+func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
+	blockRoots := make([]libcommon.Hash, 0, count)
+	slots := make([]uint64, 0, count)
+	err := RangeBlockRoots(ctx, tx, fromSlot, fromSlot+count, func(slot uint64, beaconBlockRoot libcommon.Hash) bool {
+		blockRoots = append(blockRoots, beaconBlockRoot)
 		slots = append(slots, slot)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, nil, err
-	}
-
-	return roots, slots, nil
+		return true
+	})
+	return blockRoots, slots, err
 }
 
-func ReadSignedHeaderByBlockRoot(ctx context.Context, db SQLObject, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
 	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
-	var canonical bool
-	var signature []byte
-	// Execute the query.
-	err := db.QueryRowContext(ctx, `SELECT 
-		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
-		FROM beacon_indicies WHERE beacon_block_root = ?`, blockRoot).Scan(
-		&h.Header.Slot,
-		&h.Header.ProposerIndex,
-		&h.Header.Root,
-		&h.Header.ParentRoot,
-		&canonical,
-		&h.Header.BodyRoot,
-		&signature,
-	)
-
+	headerBytes, err := tx.GetOne(kv.BeaconBlockHeaders, blockRoot[:])
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
+		return nil, false, err
 	}
-
-	copy(h.Signature[:], signature)
-	return h, canonical, nil
-}
-
-func ReadSignedHeaderByStateRoot(ctx context.Context, db SQLObject, stateRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
-	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
-	var canonical bool
-	var signature []byte
-	// Execute the query.
-	err := db.QueryRowContext(ctx, `SELECT 
-		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
-		FROM beacon_indicies WHERE state_root = ?`, stateRoot).Scan(
-		&h.Header.Slot,
-		&h.Header.ProposerIndex,
-		&h.Header.Root,
-		&h.Header.ParentRoot,
-		&canonical,
-		&h.Header.BodyRoot,
-		&signature,
-	)
-
+	if len(headerBytes) == 0 {
+		return nil, false, nil
+	}
+	if err := h.DecodeSSZ(headerBytes, 0); err != nil {
+		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %v", err)
+	}
+	canonical, err := ReadCanonicalBlockRoot(tx, h.Header.Slot)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("failed to retrieve BeaconHeader: %v", err)
+		return nil, false, err
 	}
-
-	copy(h.Signature[:], signature)
-	return h, canonical, nil
+	return h, canonical == blockRoot, nil
 }
 
-func parseRowsIntoHeaders(rows *sql.Rows) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
-	var signedHeaders []*cltypes.SignedBeaconBlockHeader
-	var canonicals []bool
-
-	for rows.Next() {
-		var canonical bool
-		var signature []byte
-		h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
-		err := rows.Scan(
-			&h.Header.Slot,
-			&h.Header.ProposerIndex,
-			&h.Header.Root,
-			&h.Header.ParentRoot,
-			&canonical,
-			&h.Header.BodyRoot,
-			&signature,
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-		copy(h.Signature[:], signature)
-		signedHeaders = append(signedHeaders, h)
-		canonicals = append(canonicals, canonical)
+func ReadSignedHeaderByStateRoot(ctx context.Context, tx kv.Tx, stateRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+	blockRoot, err := ReadBlockRootByStateRoot(tx, stateRoot)
+	if err != nil {
+		return nil, false, err
 	}
-	return signedHeaders, canonicals, nil
+	return ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
 }
 
-func ReadSignedHeadersBySlot(ctx context.Context, db SQLObject, slot uint64) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
-	// Execute the query.
-	rows, err := db.QueryContext(ctx, `SELECT 
-		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
-		FROM beacon_indicies WHERE slot = ?`, slot)
+// We dont support non-canonicals for the below methods
+
+func ReadSignedHeadersBySlot(ctx context.Context, tx kv.Tx, slot uint64) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+	root, err := ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-
-	return parseRowsIntoHeaders(rows)
-}
-
-func ReadSignedHeadersByParentRoot(ctx context.Context, db SQLObject, parentRoot libcommon.Hash) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
-	// Execute the query.
-	rows, err := db.QueryContext(ctx, `SELECT 
-		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
-		FROM beacon_indicies WHERE parent_root = ?`, parentRoot)
+	if root == (libcommon.Hash{}) {
+		return nil, nil, nil
+	}
+	h, _, err := ReadSignedHeaderByBlockRoot(ctx, tx, root)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-
-	return parseRowsIntoHeaders(rows)
+	if h == nil {
+		return nil, nil, nil
+	}
+	return []*cltypes.SignedBeaconBlockHeader{h}, []bool{true}, nil
 }
 
-func ReadSignedHeadersByParentRootAndSlot(ctx context.Context, db SQLObject, parentRoot libcommon.Hash, slot uint64) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
+func ReadSignedHeadersByParentRoot(ctx context.Context, tx kv.Tx, parentRoot libcommon.Hash) ([]*cltypes.SignedBeaconBlockHeader, []bool, error) {
 	// Execute the query.
-	rows, err := db.QueryContext(ctx, `SELECT 
-		slot, proposer_index, state_root, parent_block_root, canonical, body_root, signature 
-		FROM beacon_indicies WHERE parent_root = ? AND slot = ?`, parentRoot, slot)
+	slot, err := ReadBlockSlotByBlockRoot(tx, parentRoot)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-
-	return parseRowsIntoHeaders(rows)
+	if slot == nil {
+		return nil, nil, nil
+	}
+	return ReadSignedHeadersBySlot(ctx, tx, *slot)
 }

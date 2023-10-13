@@ -430,10 +430,19 @@ const (
 	BeaconBlocks = "BeaconBlock"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
-	// [slot] => [Finalized block root]
-	FinalizedBlockRoots = "FinalizedBlockRoots"
-	// [Root (block root/state root/eth1 root)] => Slot
-	RootSlotIndex = "RootSlotIndex"
+
+	// [slot] => [Canonical block root]
+	CanonicalBlockRoots = "CanonicalBlockRoots"
+	// [Root (block root] => Slot
+	BlockRootToSlot = "BlockRootToSlot"
+	// [Block Root] => [State Root]
+	BlockRootToStateRoot = "BlockRootToStateRoot"
+	StateRootToBlockRoot = "StateRootToBlockRoot"
+	// [Block Root] => [Parent Root]
+	BlockRootToParentRoot = "BlockRootToParentRoot"
+
+	// BlockRoot => Beacon Block Header
+	BeaconBlockHeaders = "BeaconBlockHeaders"
 
 	// LightClientStore => LightClientStore object
 	// LightClientFinalityUpdate => latest finality update
@@ -586,8 +595,12 @@ var ChaindataTables = []string{
 	// Beacon stuff
 	BeaconState,
 	BeaconBlocks,
-	FinalizedBlockRoots,
-	RootSlotIndex,
+	CanonicalBlockRoots,
+	BlockRootToSlot,
+	BlockRootToStateRoot,
+	StateRootToBlockRoot,
+	BlockRootToParentRoot,
+	BeaconBlockHeaders,
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
