@@ -630,7 +630,6 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
 	IsEip1559FeeCollector, IsAura                           bool
-	MinBlobGasPrice, BlobGasPriceUpdateFraction             uint64
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -641,23 +640,21 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 	}
 
 	return &Rules{
-		ChainID:                    new(big.Int).Set(chainID),
-		IsHomestead:                c.IsHomestead(num),
-		IsTangerineWhistle:         c.IsTangerineWhistle(num),
-		IsSpuriousDragon:           c.IsSpuriousDragon(num),
-		IsByzantium:                c.IsByzantium(num),
-		IsConstantinople:           c.IsConstantinople(num),
-		IsPetersburg:               c.IsPetersburg(num),
-		IsIstanbul:                 c.IsIstanbul(num),
-		IsBerlin:                   c.IsBerlin(num),
-		IsLondon:                   c.IsLondon(num),
-		IsShanghai:                 c.IsShanghai(time),
-		IsCancun:                   c.IsCancun(time),
-		IsPrague:                   c.IsPrague(time),
-		IsEip1559FeeCollector:      c.IsEip1559FeeCollector(num),
-		IsAura:                     c.Aura != nil,
-		MinBlobGasPrice:            c.GetMinBlobGasPrice(),
-		BlobGasPriceUpdateFraction: c.GetBlobGasPriceUpdateFraction(),
+		ChainID:               new(big.Int).Set(chainID),
+		IsHomestead:           c.IsHomestead(num),
+		IsTangerineWhistle:    c.IsTangerineWhistle(num),
+		IsSpuriousDragon:      c.IsSpuriousDragon(num),
+		IsByzantium:           c.IsByzantium(num),
+		IsConstantinople:      c.IsConstantinople(num),
+		IsPetersburg:          c.IsPetersburg(num),
+		IsIstanbul:            c.IsIstanbul(num),
+		IsBerlin:              c.IsBerlin(num),
+		IsLondon:              c.IsLondon(num),
+		IsShanghai:            c.IsShanghai(time),
+		IsCancun:              c.IsCancun(time),
+		IsPrague:              c.IsPrague(time),
+		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
+		IsAura:                c.Aura != nil,
 	}
 }
 

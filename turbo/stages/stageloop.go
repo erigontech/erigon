@@ -315,11 +315,10 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		if currentHeader.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
-		minBlobGasPrice := h.chainConfig.GetMinBlobGasPrice()
-		pendingBlobFee := minBlobGasPrice
+		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
-			excessBlobGas := misc.CalcExcessBlobGas(currentHeader, h.chainConfig.GetTargetBlobGasPerBlock())
-			f, err := misc.GetBlobGasPrice(excessBlobGas, minBlobGasPrice, h.chainConfig.GetBlobGasPriceUpdateFraction())
+			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)
+			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas)
 			if err != nil {
 				return err
 			}

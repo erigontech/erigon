@@ -203,12 +203,11 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
-	rules := st.evm.ChainRules()
-	if rules.IsCancun {
+	if st.evm.ChainRules().IsCancun {
 		if st.evm.Context().ExcessBlobGas == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
 		}
-		blobGasPrice, err := misc.GetBlobGasPrice(*st.evm.Context().ExcessBlobGas, rules.MinBlobGasPrice, rules.BlobGasPriceUpdateFraction)
+		blobGasPrice, err := misc.GetBlobGasPrice(st.evm.ChainConfig(), *st.evm.Context().ExcessBlobGas)
 		if err != nil {
 			return err
 		}
@@ -299,8 +298,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-	rules := st.evm.ChainRules()
-	if rules.IsLondon {
+	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context().BaseFee, st.msg.IsFree()); err != nil {
@@ -308,11 +306,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && rules.IsCancun {
+	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
 		if st.evm.Context().ExcessBlobGas == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
 		}
-		blobGasPrice, err := misc.GetBlobGasPrice(*st.evm.Context().ExcessBlobGas, rules.MinBlobGasPrice, rules.BlobGasPriceUpdateFraction)
+		blobGasPrice, err := misc.GetBlobGasPrice(st.evm.ChainConfig(), *st.evm.Context().ExcessBlobGas)
 		if err != nil {
 			return err
 		}
