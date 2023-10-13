@@ -442,6 +442,17 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
+func GnosisDencun0GenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.GnosisDencun0Config,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(1),
+		BaseFee:    big.NewInt(0x3b9aca00),
+		Alloc:      readPrealloc("allocs/gnosis_dencun0_devnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
