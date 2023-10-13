@@ -160,8 +160,8 @@ const (
 	InitCodeWordGas = 2
 
 	// EIP-4844: Shard Blob Transactions
-	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
-	BlobSize                    = FieldElementsPerBlob * 32
-	BlobGasPerBlob       uint64 = 0x20000
-	MaxBlobsPerBlock     uint64 = 3
+	FieldElementsPerBlob           = 4096 // each field element is 32 bytes
+	BlobSize                       = FieldElementsPerBlob * 32
+	BlobGasPerBlob          uint64 = 0x20000
+	DefaultMaxBlobsPerBlock uint64 = 6 // lower for Gnosis
 )

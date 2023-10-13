@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -237,6 +238,10 @@ func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
 		return *c.BlobGasPriceUpdateFraction
 	}
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
+}
+
+func (c *Config) GetMaxBlobsPerBlock() uint64 {
+	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

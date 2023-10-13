@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
@@ -122,7 +121,7 @@ func (s *EngineServer) validatePayloadBlobs(req *engine_types.ExecutionPayload,
 	for _, txn := range *transactions {
 		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
 	}
-	if len(actualBlobHashes) > int(fixedgas.MaxBlobsPerBlock) || req.BlobGasUsed.Uint64() > s.config.GetMaxBlobGasPerBlock() {
+	if len(actualBlobHashes) > int(s.config.GetMaxBlobsPerBlock()) || req.BlobGasUsed.Uint64() > s.config.GetMaxBlobGasPerBlock() {
 		s.logger.Warn("[NewPayload] blobs/blobGasUsed exceeds max per block",
 			"count", len(actualBlobHashes), "BlobGasUsed", req.BlobGasUsed.Uint64())
 		bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
