@@ -8,15 +8,17 @@ import (
 	"time"
 )
 
-// BenchEthCall compares response of Erigon with Geth
+// BenchEthGetTransactionByHash compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth or infura
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-//	                 recordFile stores all eth_call returned with success
-//	                 errorFile stores information when erigon and geth doesn't return same data
-func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
+// recordFile stores all eth_GetTransactionByHash returned with success
+//
+//	errorFile stores information when erigon and geth doesn't return same data
+func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -50,7 +52,7 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_call"}, resultsCh)
+		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, resultsCh)
 	}
 	var res CallResult
 
@@ -98,14 +100,10 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			nTransactions = nTransactions + 1
 
 			var request string
-			if latest {
-				request = reqGen.ethCallLatest(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input)
-			} else {
-				request = reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
-			}
+			request = reqGen.getTransactionByHash(tx.Hash)
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
 
-			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
 				return err
 			}
 		}
