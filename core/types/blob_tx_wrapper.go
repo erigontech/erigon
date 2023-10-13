@@ -271,7 +271,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	// the following check isn't strictly necessary as it would be caught by blob gas processing
 	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
 	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > fixedgas.MaxBlobsPerBlock {
+	if uint64(l1) > fixedgas.DefaultMaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	kzgCtx := libkzg.Ctx()
