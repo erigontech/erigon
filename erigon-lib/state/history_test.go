@@ -506,7 +506,8 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 	var prevVal []byte
 	for i := 0; i < 8; i++ {
 		hc.SetTxNum(uint64(1 << i))
-		hc.AddPrevValue(key, loc, prevVal)
+		err := hc.AddPrevValue(key, loc, prevVal)
+		require.NoError(t, err)
 		prevVal = []byte("d1ce" + fmt.Sprintf("%x", i))
 	}
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {
@@ -520,9 +521,84 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 
 	for i := 0; i < 32; i++ {
 		toRest, needRestore, needDelete, err := hc.ifUnwindKey(common.Append(key, loc), uint64(i), tx)
-		require.NoError(t, err)
 		fmt.Printf("i=%d tx %d toRest=%v, needRestore=%v, needDelete=%v\n", i, i, toRest, needRestore, needDelete)
+		require.NoError(t, err)
+		if i > 1 {
+			require.NotNil(t, toRest)
+			require.True(t, needRestore)
+			require.True(t, needDelete)
+			if 0 == (i&i - 1) {
+				require.Equal(t, uint64(i>>1), toRest.TxNum)
+				require.Equal(t, []byte("d1ce"+fmt.Sprintf("%x", i>>1)), toRest.Value)
+			}
+		} else {
+			require.Nil(t, toRest)
+			require.False(t, needRestore)
+			require.True(t, needDelete)
+		}
 	}
+}
+
+func TestHistory_IfUnwindKey(t *testing.T) {
+	db, h := testDbAndHistory(t, false, log.New())
+	defer h.Close()
+	defer db.Close()
+
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	// Add some test data
+	key := common.FromHex("1ceb00da")
+	var val []byte
+	for i := uint64(1); i <= 5; i++ {
+		hc.SetTxNum(i)
+		hc.AddPrevValue(key, nil, val)
+		val = []byte(fmt.Sprintf("value_%d", i))
+	}
+	err = hc.Rotate().Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+	hc.FinishWrites()
+
+	// Test case 1: key not found
+	toTxNum := uint64(0)
+	toRestore, needRestoring, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, toRestore)
+	require.False(t, needRestoring)
+	require.True(t, needDeleting)
+
+	// Test case 2: key found, but no value at toTxNum
+	toTxNum = 6
+	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, toRestore)
+	require.False(t, needRestoring)
+	require.True(t, needDeleting)
+
+	// Test case 3: key found, value at toTxNum, no value after toTxNum
+	toTxNum = 3
+	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, toRestore)
+	require.True(t, needRestoring)
+	require.True(t, needDeleting)
+	require.Equal(t, uint64(2), toRestore.TxNum)
+	require.Equal(t, []byte("value_2"), toRestore.Value)
+
+	// Test case 4: key found, value at toTxNum, value after toTxNum
+	toTxNum = 2
+	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, toRestore)
+	require.True(t, needRestoring)
+	require.True(t, needDeleting)
+	require.Equal(t, uint64(1), toRestore.TxNum)
+	require.Equal(t, []byte("value_1"), toRestore.Value)
 }
 
 func TestHisory_Unwind(t *testing.T) {

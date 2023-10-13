@@ -34,6 +34,8 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -46,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type History struct {
@@ -1033,7 +1034,7 @@ type HistoryRecord struct {
 }
 
 func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needRestoring, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, 0, math.MaxInt, order.Asc, -1, roTx)
+	it, err := hc.IdxRange(key, 0, int(toTxNum+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
@@ -1070,21 +1071,24 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 			break
 		}
 	}
-	if tnums[0].TxNum == math.MaxUint64 {
-		return nil, false, true, nil
-	}
+	//if tnums[0].TxNum == math.MaxUint64 && tnums[1] == nil && tnums[2] == nil {
+	//	return nil, false, true, nil
+	//}
 	if tnums[1] != nil {
-		toRestore.Value = tnums[1].Value
-		if tnums[0] != nil {
-			toRestore.TxNum = tnums[0].TxNum
+		if tnums[0].TxNum != math.MaxUint64 {
+			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value}
 			return toRestore, true, true, nil
 		}
-		if tnums[2] != nil {
-			toRestore.TxNum = tnums[0].TxNum
-			return toRestore, true, true, nil
-		}
+		//if tnums[2] != nil {
+		//	toRestore = &HistoryRecord{TxNum: tnums[1].TxNum, Value: tnums[2].Value}
+		//	return toRestore, true, true, nil
+		//}
 		return nil, false, true, nil
 	}
+	//if tnums[0].TxNum != math.MaxUint64 && tnums[2] != nil {
+	//	toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value}
+	//	return toRestore, true, false, nil
+	//}
 	return nil, false, true, nil
 }
 
