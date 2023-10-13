@@ -154,7 +154,7 @@ var ChiadoBootnodes = []string{
 	"enode://595160631241ea41b187b85716f9f9572a266daa940d74edbe3b83477264ce284d69208e61cf50e91641b1b4f9a03fa8e60eb73d435a84cf4616b1c969bc2512@3.69.35.13:30303",
 }
 
-var GnosisDencun0Bootnodes = []string{
+var GnosisDencun0DevnetBootnodes = []string{
 	"enode://1173ac15e8b67b171b440593d47c0a04ba97f6370e34f70aaedad6a4427f48ded14690ec3ee23737ea38babedb6b41c766f7839a1d02102c1c6556ddaaf3c450@45.56.117.136:30303",
 	"enode://aea708a6d33a324bac0d739a133ff6880eb7fd36cbea2c090e64cab81d3a8db34617e2a1c5ba36303176b2f66ab9749912009888b5a428910eaadec787913d72@45.79.223.31:30303",
 	"enode://d04978a2244dfffdad8b93e9f849cfdae22b157953267e9bab79dc7760f3ac8a54ebb49f53cf5f9f4c259c28d8779fb00fa541595600cb42ba02174659131b82@45.56.117.31:30303",
@@ -202,8 +202,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.ChiadoChainName:
 		return ChiadoBootnodes
-	case networkname.GnosisDencun0Name:
-		return GnosisDencun0Bootnodes
+	case networkname.GnosisDencun0DevnetName:
+		return GnosisDencun0DevnetBootnodes
 	default:
 		return []string{}
 	}

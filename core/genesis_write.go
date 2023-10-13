@@ -442,9 +442,9 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
-func GnosisDencun0GenesisBlock() *types.Genesis {
+func GnosisDencun0DevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.GnosisDencun0Config,
+		Config:     params.GnosisDencun0DevnetConfig,
 		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(1),
@@ -668,8 +668,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
-	case networkname.GnosisDencun0Name:
-		return GnosisDencun0GenesisBlock()
+	case networkname.GnosisDencun0DevnetName:
+		return GnosisDencun0DevnetGenesisBlock()
 	default:
 		return nil
 	}
