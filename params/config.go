@@ -242,6 +242,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
+	case networkname.GnosisDencun0Name:
+		return &GnosisDencun0GenesisHash
 	default:
 		return nil
 	}
@@ -299,6 +301,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,
+		GnosisDencun0Config.ChainID,
 	}
 	for _, id := range ids {
 		if id.Cmp(chainID) == 0 {

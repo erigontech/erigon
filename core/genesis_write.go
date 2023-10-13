@@ -668,6 +668,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.GnosisDencun0Name:
+		return GnosisDencun0GenesisBlock()
 	default:
 		return nil
 	}
