@@ -42,7 +42,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 512 * 1024
+const DefaultNetworkChunkSize = 256 * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
@@ -91,14 +91,9 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
-		b := 2 * DefaultNetworkChunkSize
-		if downloadRate.Bytes() > DefaultNetworkChunkSize {
-			b = int(2 * downloadRate.Bytes())
-		}
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), b) // default: unlimited
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	}
 
 	// debug

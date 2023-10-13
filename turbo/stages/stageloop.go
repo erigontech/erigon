@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/params"
@@ -347,7 +347,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	}
 	defer tx.Rollback()
 
-	miningBatch := memdb.NewMemoryBatch(tx, tmpDir)
+	miningBatch := membatchwithdb.NewMemoryBatch(tx, tmpDir)
 	defer miningBatch.Rollback()
 
 	if err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
@@ -409,7 +409,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-		stateSync.UnwindTo(unwindPoint, libcommon.Hash{})
+		stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind)
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}

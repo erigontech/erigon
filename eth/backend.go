@@ -215,7 +215,7 @@ const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
+func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	config.Snapshot.Enabled = config.Sync.UseSnapshots
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(libcommon.Big0) <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
@@ -229,7 +229,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// Assemble the Ethereum object
-	chainKv, err := node.OpenDatabase(stack.Config(), kv.ChainDB, "", false, logger)
+	chainKv, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +475,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		flags.Milestone = config.WithHeimdallMilestones
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
 	if config.SilkwormEnabled {
 		backend.silkworm, err = silkworm.New(config.SilkwormPath)
@@ -830,7 +830,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 		if badBlockHeader != nil {
 			unwindPoint := badBlockHeader.Number.Uint64() - 1
-			s.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
+			s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, fmt.Errorf("Init unwind")))
 		}
 	}
 
@@ -931,9 +931,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
+		b.HeaderProgress(s.sentriesClient.Hd)
 	} else if br, ok := s.engine.(*merge.Merge); ok {
 		if b, ok := br.InnerEngine().(*bor.Bor); ok {
 			borcfg = b
+			b.HeaderProgress(s.sentriesClient.Hd)
 		}
 	}
 

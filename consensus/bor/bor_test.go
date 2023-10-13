@@ -261,6 +261,11 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	validatorKey, _ := crypto.GenerateKey()
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 
+	/*fmt.Printf("Private: 0x%s\nPublic: 0x%s\nAddress: %s\n",
+	hex.EncodeToString(crypto.FromECDSA(validatorKey)),
+	hex.EncodeToString(crypto.MarshalPubkey(&validatorKey.PublicKey)),
+	strings.ToLower(validatorAddress.Hex()))*/
+
 	if heimdall.validatorSet == nil {
 		heimdall.validatorSet = valset.NewValidatorSet([]*valset.Validator{
 			{

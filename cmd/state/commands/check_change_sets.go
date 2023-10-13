@@ -56,13 +56,13 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "check_change_sets")
-		return CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, logger)
+		return CheckChangeSets(cmd.Context(), genesis, block, chaindata, historyfile, nocheck, logger)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, logger log.Logger) error {
+func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, logger log.Logger) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -77,7 +77,7 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 		interruptCh <- true
 	}()
 
-	db, err := kv2.NewMDBX(logger).Path(chaindata).Open()
+	db, err := kv2.NewMDBX(logger).Path(chaindata).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,6 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	if chaindata != historyfile {
 		historyDb = kv2.MustOpen(historyfile)
 	}
-	ctx := context.Background()
 	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -124,7 +123,7 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, allSnapshots, blockReader, logger)
+	engine := initConsensusEngine(ctx, chainConfig, allSnapshots, blockReader, logger)
 
 	for !interrupt {
 
@@ -278,7 +277,7 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	return nil
 }
 
-func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -292,5 +291,5 @@ func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots,
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil /* heimdallClient */, config.WithoutHeimdall, blockReader, true /* readonly */, logger)
+	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil /* heimdallClient */, config.WithoutHeimdall, blockReader, true /* readonly */, logger)
 }

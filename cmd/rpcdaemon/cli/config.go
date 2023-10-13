@@ -310,11 +310,20 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	var cc *chain.Config
 
 	if cfg.WithDatadir {
+		// Opening all databases in Accede and non-Readonly modes. Here is the motivation:
+		// Rpcdaemon must provide 2 features:
+		//     1. ability to start even if Erigon is down (to prevent cascade outage).
+		//     2. don't create databases by itself - because it doesn't know right parameters (Erigon may have cli flags: pagesize, etc...)
+		// Some databases (consensus, txpool, downloader) are woring in SafeNoSync mode - in this mode
+		//    power-off may leave db in recoverable-non-consistent state. Such db can be recovered only if open in non-Readonly mode.
+		// Accede mode preventing db-creation:
+		//    at first start RpcDaemon may start earlier than Erigon
+		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 		var rwKv kv.RwDB
 		dir.MustExist(cfg.Dirs.SnapHistory)
-		logger.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
+		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede().Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
@@ -468,22 +477,14 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 				// bor (consensus) specific db
 				borDbPath := filepath.Join(cfg.DataDir, "bor")
-				{
-					// ensure db exist
-					tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
-					if err != nil {
-						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-					}
-					tmpDb.Close()
-				}
-				logger.Trace("Creating consensus db", "path", borDbPath)
-				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
+				logger.Warn("[rpc] Opening Bor db", "path", borDbPath)
+				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Accede().Open(ctx)
 				if err != nil {
 					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
 
-				engine = bor.NewRo(borKv, blockReader,
+				engine = bor.NewRo(cc, borKv, blockReader,
 					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
 					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
 
@@ -827,7 +828,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
-		e.engine = bor.NewRo(borKv, blockReader,
+		e.engine = bor.NewRo(cc, borKv, blockReader,
 			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
 			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
 	} else {

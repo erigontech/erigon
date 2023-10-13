@@ -298,7 +298,7 @@ Loop:
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		u.UnwindTo(headerInserter.UnwindPoint(), libcommon.Hash{})
+		u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
@@ -374,9 +374,14 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		defer tx.Rollback()
 	}
 	// Delete canonical hashes that are being unwound
-	badBlock := u.BadBlock != (libcommon.Hash{})
-	if badBlock {
-		cfg.hd.ReportBadHeader(u.BadBlock)
+	unwindBlock := (u.Reason.Block != nil)
+	if unwindBlock {
+		if u.Reason.IsBadBlock() {
+			cfg.hd.ReportBadHeader(*u.Reason.Block)
+		}
+
+		cfg.hd.UnlinkHeader(*u.Reason.Block)
+
 		// Mark all descendants of bad block as bad too
 		headerCursor, cErr := tx.Cursor(kv.Headers)
 		if cErr != nil {
@@ -397,10 +402,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, unwindBlock); err != nil {
 		return err
 	}
-	if badBlock {
+	if unwindBlock {
 		var maxTd big.Int
 		var maxHash libcommon.Hash
 		var maxNum uint64 = 0

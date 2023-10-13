@@ -43,7 +43,7 @@ var stateRootCmd = &cobra.Command{
 	Short: "Exerimental command to re-execute blocks from beginning and compute state root",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "stateroot")
-		return StateRoot(genesis, block, datadirCli, logger)
+		return StateRoot(cmd.Context(), genesis, block, datadirCli, logger)
 	},
 }
 
@@ -60,7 +60,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	return br, bw
 }
 
-func StateRoot(genesis *types.Genesis, blockNum uint64, datadir string, logger log.Logger) error {
+func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, datadir string, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -70,12 +70,11 @@ func StateRoot(genesis *types.Genesis, blockNum uint64, datadir string, logger l
 		interruptCh <- true
 	}()
 	dirs := datadir2.New(datadir)
-	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer historyDb.Close()
-	ctx := context.Background()
 	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -89,7 +88,7 @@ func StateRoot(genesis *types.Genesis, blockNum uint64, datadir string, logger l
 	} else if err = os.RemoveAll(stateDbPath); err != nil {
 		return err
 	}
-	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
+	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open(ctx)
 	if err2 != nil {
 		return err2
 	}

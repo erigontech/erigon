@@ -82,7 +82,7 @@ func newUDPTestContext(ctx context.Context, t *testing.T, logger log.Logger) *ud
 	tmpDir := t.TempDir()
 
 	var err error
-	test.db, err = enode.OpenDB("", tmpDir)
+	test.db, err = enode.OpenDB(ctx, "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -620,7 +620,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}

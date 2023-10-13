@@ -641,6 +641,22 @@ type RawBlock struct {
 	Body   *RawBody
 }
 
+func (r RawBlock) AsBlock() (*Block, error) {
+	b := &Block{header: r.Header}
+	b.uncles = r.Body.Uncles
+	b.withdrawals = r.Body.Withdrawals
+	txs := make([]Transaction, len(r.Body.Transactions))
+
+	for i, tx := range r.Body.Transactions {
+		var err error
+		if txs[i], err = DecodeTransaction(tx); err != nil {
+			return nil, err
+		}
+	}
+
+	return b, nil
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
@@ -1510,16 +1526,28 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	return b.Body().RawBody()
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
 }
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	txs, err := MarshalTransactionsBinary(b.Transactions)
-	if err != nil {
-		panic(err)
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	for i, tx := range b.Transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
 	}
-	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	return br
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
