@@ -17,7 +17,9 @@
     "terminalTotalDifficulty": 340282366920938463463374607431768211454,
     "shanghaiTime": 1696271800,
     "minBlobGasPrice": 1000000000,
-    "blobPriceUpdateFraction": 1112826,
+    "maxBlobGasPerBlock": 262144,
+    "targetBlobGasPerBlock": 131072,
+    "blobGasPriceUpdateFraction": 1112826,
     "aura": {
       "stepDuration": 5,
       "blockReward": 0,
