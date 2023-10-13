@@ -1203,11 +1203,11 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	if curBlockNum <= params.FullImmutabilityThreshold {
+	if curBlockNum <= (params.FullImmutabilityThreshold / 2) {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
+	return canRetire(blockFrom, curBlockNum-(params.FullImmutabilityThreshold/2))
 }
 
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
