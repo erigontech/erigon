@@ -1033,67 +1033,59 @@ type HistoryRecord struct {
 }
 
 func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needRestoring, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, int(toTxNum), math.MaxInt, order.Asc, -1, roTx)
+	it, err := hc.IdxRange(key, 0, math.MaxInt, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
 
-	toRestore = new(HistoryRecord)
-	found := false
+	tnums := [3]*HistoryRecord{
+		{TxNum: uint64(math.MaxUint64)},
+	}
+
 	for it.HasNext() {
 		txn, err := it.Next()
 		if err != nil {
 			return nil, false, false, err
 		}
+		if txn < toTxNum {
+			tnums[0].TxNum = txn
+			// fmt.Printf("seen %x @tx %d\n", key, txn)
+			continue
+		}
+
 		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
 		if err != nil {
 			return nil, false, false, err
 		}
-
-		// fmt.Printf("+found %x %d %x\n", key, txn, v)
-		toRestore.TxNum = txn
-		toRestore.Value = v
-		found = true
-		if ok && len(v) == 0 {
-			continue
-		}
-		break
-	}
-	if len(toRestore.Value) == 0 && toRestore.TxNum == toTxNum {
-		return nil, false, false, nil
-	}
-
-	it, err = hc.IdxRange(key, 0, int(toTxNum)+1, order.Asc, -1, roTx)
-	if err != nil {
-		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
-	}
-
-	prev := uint64(math.MaxUint64)
-	for it.HasNext() {
-		txn, err := it.Next()
-		if err != nil {
-			return nil, false, false, err
-		}
-		// v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
-		// if err != nil {
-		// 	return nil, false, false, err
-		// }
-		// // fmt.Printf("-found %x %d\n", key, txn)
-		// fmt.Printf("-found %x %d ->%t %x\n", key, txn, ok, v)
-		if txn >= toTxNum {
+		if !ok {
 			break
 		}
-		prev = txn
-	}
+		// fmt.Printf("found %x %d ->%t %x\n", key, txn, ok, v)
 
-	if prev != math.MaxUint64 {
-		toRestore.TxNum = prev
+		if txn == toTxNum {
+			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
+		}
+		if txn > toTxNum {
+			tnums[2] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
+			break
+		}
 	}
-	if !found || toRestore.TxNum > toTxNum {
-		return nil, false, false, nil
+	if tnums[0].TxNum == math.MaxUint64 {
+		return nil, false, true, nil
 	}
-	// fmt.Printf("found %x %d %x\n", key, toRestore.TxNum, toRestore.Value)
-	return toRestore, true, true, nil
+	if tnums[1] != nil {
+		toRestore.Value = tnums[1].Value
+		if tnums[0] != nil {
+			toRestore.TxNum = tnums[0].TxNum
+			return toRestore, true, true, nil
+		}
+		if tnums[2] != nil {
+			toRestore.TxNum = tnums[0].TxNum
+			return toRestore, true, true, nil
+		}
+		return nil, false, true, nil
+	}
+	return nil, false, true, nil
 }
 
 // returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
@@ -1101,13 +1093,6 @@ func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx
 	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
 	if err != nil {
 		return nil, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
-	}
-
-	truncate := func(s string, n int) string {
-		if len(s) > n {
-			return s[:n]
-		}
-		return s
 	}
 
 	res := make([]HistoryRecord, 0, 2)
@@ -1120,9 +1105,9 @@ func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Equal(key, common.FromHex("1079")) {
-			fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, truncate(fmt.Sprintf("%x", v), 80))
-		}
+		// if bytes.Equal(key, common.FromHex("1079")) {
+		// 	fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, truncate(fmt.Sprintf("%x", v), 80))
+		// }
 		if !ok {
 			continue
 		}
