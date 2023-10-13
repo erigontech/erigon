@@ -249,7 +249,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
 		return err
 	}
-	expectedExcessBlobGas := misc.CalcExcessBlobGas(parent)
+	expectedExcessBlobGas := misc.CalcExcessBlobGas(chain.Config(), parent)
 	if *header.ExcessBlobGas != expectedExcessBlobGas {
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}

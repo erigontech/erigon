@@ -220,11 +220,13 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	maxBlobsPerBlock        uint64
 	logger                  log.Logger
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime, cancunTime *big.Int, logger log.Logger) (*TxPool, error) {
-	var err error
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
+	chainID uint256.Int, shanghaiTime, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
+) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
@@ -265,6 +267,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
+		maxBlobsPerBlock:        maxBlobsPerBlock,
 		logger:                  logger,
 	}
 
@@ -741,7 +744,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > fixedgas.MaxBlobsPerBlock {
+		if blobCount > p.maxBlobsPerBlock {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
