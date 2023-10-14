@@ -69,7 +69,7 @@ func main() {
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
-	var benchEthGetBlockByHash = &cobra.Command{
+	var benchEthGetBlockByHashCmd = &cobra.Command{
 		Use:   "benchEthGetBlockByHash",
 		Short: "",
 		Long:  ``,
@@ -80,7 +80,7 @@ func main() {
 			}
 		},
 	}
-	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+	with(benchEthGetBlockByHashCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var benchEthGetTransactionByHashCmd = &cobra.Command{
 		Use:   "benchEthGetTransactionByHash",
@@ -100,7 +100,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
+			err := rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	with(bench1Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
@@ -111,7 +114,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench2(erigonURL)
+			err := rpctest.Bench2(erigonURL)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	var bench3Cmd = &cobra.Command{
@@ -119,7 +125,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench3(erigonURL, gethURL)
+			err := rpctest.Bench3(erigonURL, gethURL)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	with(bench3Cmd, withErigonUrl, withGethUrl)
@@ -328,7 +337,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
-		benchEthGetBlockByHash,
+		benchEthGetBlockByHashCmd,
 		benchEthCallCmd,
 		benchEthGetTransactionByHashCmd,
 		bench1Cmd,
