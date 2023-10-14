@@ -87,7 +87,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		},
 	}
 	with(benchEthGetBlockByNumber2Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
