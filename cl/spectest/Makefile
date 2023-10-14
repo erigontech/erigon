@@ -7,13 +7,17 @@ tests:
 	mv consensus-spec-tests/tests .
 	rm -rf consensus-spec-tests
 	rm -rf tests/minimal
+	# not needed for now
+	rm -rf tests/mainnet/eip6110
+	# will not implement until i see it on a testnet
+	rm -rf tests/mainnet/deneb
 
 clean:
 	rm -rf junit.xml
 	rm -rf test_report.html
 
 mainnet:
-	go test -tags=spectest -run=/mainnet
+	go test -tags=spectest -run=/mainnet -failfast -v
 
 run:
 	go test -v
