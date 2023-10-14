@@ -78,7 +78,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []*checkpointValidator, epoch uint64) []uint64 {
 	filtered := make([]uint64, 0, len(validatorSet))
 	for validatorIndex, validator := range validatorSet {
-		if !validator.active(epoch) || validator.slashed {
+		if !validator.active || validator.slashed {
 			continue
 		}
 		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {

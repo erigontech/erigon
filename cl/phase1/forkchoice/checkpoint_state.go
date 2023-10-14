@@ -16,17 +16,10 @@ import (
 
 const randaoMixesLength = 65536
 
-// Active returns if validator is active for given epoch
-func (cv *checkpointValidator) active(epoch uint64) bool {
-	return cv.activationEpoch <= epoch && epoch < cv.exitEpoch
-}
-
 type checkpointValidator struct {
 	publicKey       [48]byte
-	activationEpoch uint64
-	exitEpoch       uint64
 	balance         uint64
-	slashed         bool
+	active, slashed bool
 }
 
 type shuffledSet struct {
@@ -52,11 +45,10 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {
 		validators[i] = &checkpointValidator{
-			publicKey:       validatorSet[i].PublicKey(),
-			activationEpoch: validatorSet[i].ActivationEpoch(),
-			exitEpoch:       validatorSet[i].ExitEpoch(),
-			balance:         validatorSet[i].EffectiveBalance(),
-			slashed:         validatorSet[i].Slashed(),
+			publicKey: validatorSet[i].PublicKey(),
+			active:    validatorSet[i].Active(epoch),
+			balance:   validatorSet[i].EffectiveBalance(),
+			slashed:   validatorSet[i].Slashed(),
 		}
 	}
 	mixes := solid.NewHashVector(randaoMixesLength)
@@ -120,7 +112,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 
 func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
 	for i, validator := range c.validators {
-		if !validator.active(epoch) {
+		if !validator.active {
 			continue
 		}
 		activeIndicies = append(activeIndicies, uint64(i))
