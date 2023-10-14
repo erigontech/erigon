@@ -103,3 +103,7 @@ func (*KZGCommitment) Clone() clonable.Clonable {
 func (*Eth1Header) Clone() clonable.Clonable {
 	return &Eth1Header{}
 }
+
+func (*Withdrawal) Clone() clonable.Clonable {
+	return &Withdrawal{}
+}

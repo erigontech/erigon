@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type Interface interface {
@@ -30,7 +29,7 @@ type SlotProcessor interface {
 
 type BlockHeaderProcessor interface {
 	ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error
-	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error
+	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
