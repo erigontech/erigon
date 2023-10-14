@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -103,13 +103,13 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 
-	sqlDB, err := sql.Open("sqlite", "caplin/db")
+	db := mdbx.MustOpen("caplin/db")
 	if err != nil {
 		return err
 	}
-	defer sqlDB.Close()
+	defer db.Close()
 
-	tx, err := sqlDB.Begin()
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -150,11 +150,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	if err != nil {
 		return err
 	}
-	sqlDB, err := sql.Open("sqlite", "caplin/db")
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
+
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
@@ -207,7 +203,13 @@ func (b *Epochs) Run(cctx *Context) error {
 
 	egg.SetLimit(b.Concurrency)
 
-	tx, err := sqlDB.Begin()
+	db := mdbx.MustOpen("caplin/db")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}

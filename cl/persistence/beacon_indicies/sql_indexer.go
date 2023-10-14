@@ -13,7 +13,7 @@ import (
 
 // WriteBlockRootSlot writes the slot associated with a block root.
 func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
-	return tx.Put(kv.BlockRootToSlot, base_encoding.Encode64(slot), blockRoot[:])
+	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64(slot))
 }
 
 func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, error) {
@@ -45,7 +45,7 @@ func ReadStateRootByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon
 		return libcommon.Hash{}, err
 	}
 
-	copy(sRoot[:], sRoot)
+	copy(stateRoot[:], sRoot)
 
 	return stateRoot, nil
 }
@@ -109,7 +109,7 @@ func WriteBeaconBlockHeaderAndIndicies(ctx context.Context, tx kv.RwTx, signedHe
 		return err
 	}
 	if forceCanonical {
-		if err := MarkRootCanonical(ctx, tx, signedHeader.Header.Slot, signedHeader.Header.Root); err != nil {
+		if err := MarkRootCanonical(ctx, tx, signedHeader.Header.Slot, blockRoot); err != nil {
 			return err
 		}
 	}
@@ -135,7 +135,7 @@ func WriteParentBlockRoot(ctx context.Context, tx kv.RwTx, blockRoot, parentRoot
 }
 
 func TruncateCanonicalChain(ctx context.Context, tx kv.RwTx, slot uint64) error {
-	return tx.ForEach(kv.HeaderCanonical, base_encoding.Encode64(slot), func(k, _ []byte) error {
+	return tx.ForEach(kv.CanonicalBlockRoots, base_encoding.Encode64(slot), func(k, _ []byte) error {
 		return tx.Delete(kv.CanonicalBlockRoots, k)
 	})
 }

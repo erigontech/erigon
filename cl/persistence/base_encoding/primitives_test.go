@@ -9,8 +9,7 @@ import (
 func Test64(t *testing.T) {
 	number := uint64(0x1234567890abcd)
 
-	buf := make([]byte, 8)
-	out := Encode64(number, buf)
+	out := Encode64(number)
 	require.Equal(t, len(out), 7)
 	require.Equal(t, Decode64(out), number)
 }
