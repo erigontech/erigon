@@ -101,6 +101,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
+		hd.stats.RejectedBadHeaders++
 		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
@@ -172,9 +173,10 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 		toRemove = toRemove[:len(toRemove)-1]
 		delete(hd.links, removal.hash)
 		hd.moveLinkToQueue(removal, NoQueue)
-		for child := removal.fChild; child != nil; child, child.next = child.next, nil {
+		for child := removal.fChild; child != nil; child = child.next {
 			toRemove = append(toRemove, child)
 		}
+		removal.ClearChildren()
 	}
 }
 
@@ -207,29 +209,12 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 	for hd.linkQueue.Len() > hd.linkLimit {
 		link := heap.Pop(&hd.linkQueue).(*Link)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-			var prevChild *Link
-			for child := parentLink.fChild; child != nil && child != link; child = child.next {
-				prevChild = child
-			}
-			if prevChild == nil {
-				parentLink.fChild = link.next
-			} else {
-				prevChild.next = link.next
-			}
+			parentLink.RemoveChild(link)
 		}
 		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
-			var prevChild *Link
-			for child := anchor.fLink; child != nil && child != link; child = child.next {
-				prevChild = child
-			}
-			if prevChild == nil {
-				anchor.fLink = link.next
-			} else {
-				prevChild.next = link.next
-			}
+			anchor.RemoveChild(link)
 			if anchor.fLink == nil {
 				hd.removeAnchor(anchor)
 			}
@@ -327,8 +312,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	for hd.persistedLinkQueue.Len() > 0 {
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Headers)
@@ -538,6 +522,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
+			hd.stats.RejectedBadHeaders++
 			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
@@ -553,7 +538,11 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
+					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+						parentLink.RemoveChild(link)
+					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
+					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
 				}
 			}
@@ -613,8 +602,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 	}
 	var blocksToTTD uint64
 	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil {
@@ -1076,6 +1064,8 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 }
 
 func (hd *HeaderDownload) ExtractStats() Stats {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	s := hd.stats
 	hd.stats = Stats{}
 	return s
