@@ -29,7 +29,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		return libcommon.Hash{}, 0, err
 	}
 	// Filter all validators deemed as bad
-	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.validators, justificationState.epoch)
+	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState, justificationState.epoch)
 	for {
 		// Filter out current head children.
 		unfilteredChildren := f.forkGraph.GetChildren(f.headHash)
@@ -75,10 +75,10 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 }
 
 // filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
-func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []*checkpointValidator, epoch uint64) []uint64 {
-	filtered := make([]uint64, 0, len(validatorSet))
-	for validatorIndex, validator := range validatorSet {
-		if !validator.active || validator.slashed {
+func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointState, epoch uint64) []uint64 {
+	filtered := make([]uint64, 0, len(c.validators))
+	for validatorIndex := range c.validators {
+		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}
 		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {
