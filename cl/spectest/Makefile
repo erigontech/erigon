@@ -3,7 +3,7 @@
 
 tests:
 	git clone https://github.com/ethereum/consensus-spec-tests
-	cd consensus-spec-tests && git lfs pull && cd ..
+	cd consensus-spec-tests && git checkout 70dc28b18c71f3ae080c02f51bd3421e0b60609b && git lfs pull && cd ..
 	mv consensus-spec-tests/tests .
 	rm -rf consensus-spec-tests
 	rm -rf tests/minimal
