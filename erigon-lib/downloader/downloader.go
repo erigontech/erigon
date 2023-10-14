@@ -216,7 +216,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					return
 				case <-t.GotInfo():
 				}
-				t.AllowDataDownload()
 				t.DownloadAll()
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
@@ -470,11 +469,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
-	wsUrls, ok := d.webseeds.ByFileName(ts.DisplayName)
-	if ok {
-		ts.Webseeds = append(ts.Webseeds, wsUrls...)
-	}
-	err = addTorrentFile(ctx, ts, d.torrentClient)
+	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -557,11 +552,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		ws, ok := d.webseeds.ByFileName(ts.DisplayName)
-		if ok {
-			ts.Webseeds = append(ts.Webseeds, ws...)
-		}
-		err := addTorrentFile(d.ctx, ts, d.torrentClient)
+		err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
 		if err != nil {
 			return err
 		}
