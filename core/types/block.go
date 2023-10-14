@@ -1579,6 +1579,10 @@ func (b *Block) HashCheck() error {
 		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
 	}
 
+	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
+	}
+
 	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
 		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
 	}
