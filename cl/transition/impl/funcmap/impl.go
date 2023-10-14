@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var _ machine.Interface = (*Impl)(nil)
@@ -41,7 +40,7 @@ func (i Impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBl
 	return i.FnProcessBlockHeader(s, block)
 }
 
-func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error {
+func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	return i.FnProcessWithdrawals(s, withdrawals)
 }
 
