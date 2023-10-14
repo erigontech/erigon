@@ -216,7 +216,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					return
 				case <-t.GotInfo():
 				}
-				t.AllowDataDownload()
 				t.DownloadAll()
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
