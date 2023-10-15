@@ -230,7 +230,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
+		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash.Close()
 		sn.IdxTxnHash = nil
@@ -242,7 +242,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash2BlockNum.FileName())
+		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash2BlockNum.Close()
 		sn.IdxTxnHash2BlockNum = nil
@@ -1540,7 +1540,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
@@ -1551,7 +1551,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
@@ -1563,7 +1563,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
