@@ -322,13 +322,19 @@ func saveTorrent(torrentFilePath string, res []byte) error {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client) error {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
+	wsUrls, ok := webseeds.ByFileName(ts.DisplayName)
+	if ok {
+		ts.Webseeds = append(ts.Webseeds, wsUrls...)
+	}
+
+	_, ok = torrentClient.Torrent(ts.InfoHash)
+	if !ok { // can set ChunkSize only for new torrents
 		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	} else {
 		ts.ChunkSize = 0
