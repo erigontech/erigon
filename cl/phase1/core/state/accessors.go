@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
@@ -192,7 +191,7 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 }
 
 // ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
+func ExpectedWithdrawals(b abstract.BeaconState) []*cltypes.Withdrawal {
 	// Get the current epoch, the next withdrawal index, and the next withdrawal validator index
 	currentEpoch := Epoch(b)
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
@@ -202,7 +201,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 	maxValidators := uint64(b.ValidatorLength())
 	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
 	bound := utils.Min64(maxValidators, maxValidatorsPerWithdrawalsSweep)
-	withdrawals := make([]*types.Withdrawal, 0, bound)
+	withdrawals := make([]*cltypes.Withdrawal, 0, bound)
 
 	// Loop through the validators to calculate expected withdrawals
 	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
@@ -214,7 +213,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 		// Check if the validator is fully withdrawable
 		if isFullyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance, currentEpoch) {
 			// Add a new withdrawal with the validator's withdrawal credentials and balance
-			newWithdrawal := &types.Withdrawal{
+			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   libcommon.BytesToAddress(wd[12:]),
@@ -224,7 +223,7 @@ func ExpectedWithdrawals(b abstract.BeaconState) []*types.Withdrawal {
 			nextWithdrawalIndex++
 		} else if isPartiallyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance) { // Check if the validator is partially withdrawable
 			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
-			newWithdrawal := &types.Withdrawal{
+			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   libcommon.BytesToAddress(wd[12:]),

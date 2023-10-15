@@ -82,7 +82,6 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 
 	blockId, err = blockIdFromRequest(r)
 	if err != nil {
-		fmt.Println("A")
 		httpStatus = http.StatusBadRequest
 		return
 	}

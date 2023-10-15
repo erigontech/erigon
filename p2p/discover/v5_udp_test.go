@@ -41,7 +41,7 @@ import (
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -573,7 +573,7 @@ func newUDPV5TestContext(ctx context.Context, t *testing.T, logger log.Logger) *
 	t.Cleanup(test.close)
 	var err error
 	tmpDir := t.TempDir()
-	test.db, err = enode.OpenDB("", tmpDir)
+	test.db, err = enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -627,7 +627,7 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr, logger 
 	ln := test.nodesByID[id]
 	if ln == nil {
 		tmpDir := test.t.TempDir()
-		db, err := enode.OpenDB("", tmpDir)
+		db, err := enode.OpenDB(context.Background(), "", tmpDir)
 		if err != nil {
 			panic(err)
 		}

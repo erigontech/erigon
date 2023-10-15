@@ -34,14 +34,14 @@ It expects the genesis file as argument.`,
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
-func initGenesis(ctx *cli.Context) error {
+func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(ctx, true /* rootLogger */); err != nil {
+	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
-	genesisPath := ctx.Args().First()
+	genesisPath := cliCtx.Args().First()
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
@@ -58,10 +58,10 @@ func initGenesis(ctx *cli.Context) error {
 	}
 
 	// Open and initialise both full and light databases
-	stack := MakeConfigNodeDefault(ctx, logger)
+	stack := MakeConfigNodeDefault(cliCtx, logger)
 	defer stack.Close()
 
-	chaindb, err := node.OpenDatabase(stack.Config(), kv.ChainDB, "", false, logger)
+	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}

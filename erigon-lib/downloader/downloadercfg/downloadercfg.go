@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
@@ -42,19 +43,25 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 512 * 1024
+const DefaultNetworkChunkSize = 256 * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
 	DownloadSlots int
-	WebSeedUrls   []*url.URL
-	WebSeedFiles  []string
-	Dirs          datadir.Dirs
+
+	WebSeedUrls                     []*url.URL
+	WebSeedFiles                    []string
+	DownloadTorrentFilesFromWebseed bool
+
+	Dirs datadir.Dirs
 }
 
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
+
+	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
+	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -91,20 +98,15 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
-		b := 2 * DefaultNetworkChunkSize
-		if downloadRate.Bytes() > DefaultNetworkChunkSize {
-			b = int(2 * downloadRate.Bytes())
-		}
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), b) // default: unlimited
+		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	}
 
 	// debug
-	//	torrentConfig.Debug = false
-	torrentConfig.Logger.WithFilterLevel(verbosity)
-	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
+	//torrentConfig.Debug = true
+	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
+	torrentConfig.Logger.SetHandlers(adapterHandler{})
 
 	if len(staticPeers) > 0 {
 		torrentConfig.NoDHT = false
@@ -155,7 +157,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 		webseedUrls = append(webseedUrls, uri)
 	}
-	localCfgFile := filepath.Join(dirs.DataDir, "webseeds.toml") // datadir/webseeds.toml allowed
+	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
 		webseedFiles = append(webseedFiles, localCfgFile)
 	}

@@ -67,7 +67,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	// Add proposer score boost if the block is timely
 	timeIntoSlot := (f.time - f.forkGraph.GenesisTime()) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < config.SecondsPerSlot/config.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval {
+	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot == (libcommon.Hash{}) {
 		f.proposerBoostRoot = blockRoot
 	}
 	if lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {

@@ -66,7 +66,7 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 	ddir, _ := os.MkdirTemp("", "")
 
@@ -153,7 +153,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 	ethCfg.DeprecatedTxPool.AccountSlots = 1000000
 	ethCfg.DeprecatedTxPool.GlobalSlots = 1000000
 
-	ethBackend, err := eth.New(stack, ethCfg, logger)
+	ethBackend, err := eth.New(ctx, stack, ethCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}

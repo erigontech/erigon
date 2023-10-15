@@ -3,10 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"strings"
 	"time"
+
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
@@ -137,7 +138,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	}
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
 		cfg.NetworkCfg.StaticPeers = common2.CliString2Array(ctx.String(flags.SentinelStaticPeersFlag.Name))
-		fmt.Println(cfg.NetworkCfg.StaticPeers)
 	}
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(flags.InitSyncFlag.Name)

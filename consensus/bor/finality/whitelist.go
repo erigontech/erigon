@@ -1,4 +1,4 @@
-package borfinality
+package finality
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -109,7 +109,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	}
 
 	if config.heimdall == nil {
-		log.Error("bor engine not available")
+		config.logger.Error("bor engine not available")
 		return
 	}
 
@@ -120,13 +120,20 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	cancel()
 
 	if err != nil {
-		log.Warn(fmt.Sprintf("unable to start the %s service - first run", fnName), "err", err)
+		config.logger.Warn(fmt.Sprintf("unable to start the %s service - first run", fnName), "err", err)
 	}
 
 	ticker := time.NewTicker(tickerDuration)
 	defer ticker.Stop()
 
 	for {
+		defer func() {
+			r := recover()
+			if r != nil {
+				log.Warn(fmt.Sprintf("service %s- run failed with panic", fnName), "err", r)
+			}
+		}()
+
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -135,7 +142,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 			cancel()
 
 			if err != nil {
-				log.Warn(fmt.Sprintf("unable to handle %s", fnName), "err", err)
+				config.logger.Warn(fmt.Sprintf("unable to handle %s", fnName), "err", err)
 			}
 		case <-config.closeCh:
 			return
@@ -176,6 +183,7 @@ func handleMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClien
 	// add that milestone to the future milestone list.
 	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
 		service.ProcessFutureMilestone(num, hash)
+		return nil
 	}
 
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {

@@ -1,12 +1,12 @@
-package borfinality
+package finality
 
 import (
 	"context"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -74,7 +74,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.IHeimd
 		return num, hash, errMilestone
 	}
 
-	config.logger.Info("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
+	config.logger.Debug("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
 
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
