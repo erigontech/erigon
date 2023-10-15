@@ -176,13 +176,36 @@ func BorHeimdallForward(
 	if k != nil {
 		lastEventId = binary.BigEndian.Uint64(k)
 	}
-	type LastFrozenEvent interface {
+	type LastFrozen interface {
 		LastFrozenEventID() uint64
+		LastFrozenSpanID() uint64
 	}
-	snapshotLastEventId := cfg.blockReader.(LastFrozenEvent).LastFrozenEventID()
+	snapshotLastEventId := cfg.blockReader.(LastFrozen).LastFrozenEventID()
 	if snapshotLastEventId > lastEventId {
 		lastEventId = snapshotLastEventId
 	}
+	sCursor, err := tx.Cursor(kv.BorSpans)
+	if err != nil {
+		return err
+	}
+	defer sCursor.Close()
+	k, _, err = sCursor.Last()
+	if err != nil {
+		return err
+	}
+	var nextSpanId uint64
+	if k != nil {
+		nextSpanId = binary.BigEndian.Uint64(k) + 1
+	}
+	snapshotLastSpanId := cfg.blockReader.(LastFrozen).LastFrozenSpanID()
+	if snapshotLastSpanId+1 > nextSpanId {
+		nextSpanId = snapshotLastSpanId + 1
+	}
+	var endSpanID uint64
+	if headNumber > zerothSpanEnd {
+		endSpanID = 2 + (headNumber-zerothSpanEnd)/spanLength
+	}
+
 	lastBlockNum := s.BlockNumber
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
@@ -247,23 +270,6 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		if blockNum == 1 {
-			if _, err = fetchAndWriteSpans(ctx, 0, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
-				return err
-			}
-			if lastSpanId, err = fetchAndWriteSpans(ctx, 1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
-				return err
-			}
-		}
-		if blockNum > zerothSpanEnd && ((blockNum-zerothSpanEnd)%spanLength) == 0 {
-			spanId := 1 + (blockNum-zerothSpanEnd)/spanLength
-			if _, err = fetchAndWriteSpans(ctx, spanId, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
-				return err
-			}
-			if lastSpanId, err = fetchAndWriteSpans(ctx, spanId+1, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
-				return err
-			}
-		}
 		//if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
 		//	return fmt.Errorf("persistValidatorSets: %w", err)
 		//}
@@ -274,6 +280,11 @@ func BorHeimdallForward(
 					return err
 				}
 			}
+		}
+	}
+	for spanID := nextSpanId; spanID <= endSpanID; spanID++ {
+		if lastSpanId, err = fetchAndWriteSpans(ctx, spanID, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+			return err
 		}
 	}
 

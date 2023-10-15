@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type RemoteBlockReader struct {
@@ -1082,14 +1083,26 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
+func (r *BlockReader) LastFrozenSpanID() uint64 {
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Spans()
+	if len(segments) == 0 {
+		return 0
+	}
+	lastSegment := segments[len(segments)-1]
+	var lastSpanID uint64
+	if lastSegment.ranges.to > zerothSpanEnd {
+		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
+	}
+	return lastSpanID
+}
+
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	// Compute starting block of the span
-	var startBlock, endBlock uint64
+	var startBlock uint64
 	if spanId > 0 {
 		startBlock = (spanId-1)*spanLength + zerothSpanEnd + 1
-		endBlock = startBlock + spanLength - 1
-	} else {
-		endBlock = zerothSpanEnd
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1108,10 +1121,23 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	segments := view.Spans()
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.ranges.from > endBlock {
+		if sn.idx == nil {
 			continue
 		}
-		if sn.ranges.to <= startBlock {
+		var spanFrom uint64
+		if sn.ranges.from > zerothSpanEnd {
+			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
+		}
+		if spanId < spanFrom {
+			log.Info("segment", "from", sn.ranges.from, "spanFrom", spanFrom, "spanId", spanId)
+			continue
+		}
+		var spanTo uint64
+		if sn.ranges.to > zerothSpanEnd {
+			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
+		}
+		if spanId >= spanTo {
+			log.Info("segment", "to", sn.ranges.to, "spanTo", spanTo, "spanId", spanId)
 			continue
 		}
 		if sn.idx.KeyCount() == 0 {
