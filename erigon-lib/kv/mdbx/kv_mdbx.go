@@ -304,9 +304,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	opts.pageSize = uint64(in.PageSize)
 
-	//nolint
-	//if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
-	//}
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
 	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
@@ -735,7 +732,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if !tx.db.ReadOnly() && !tx.db.Accede() {
+	if !(tx.db.ReadOnly() || tx.db.Accede()) {
 		nativeFlags |= mdbx.Create
 	}
 
