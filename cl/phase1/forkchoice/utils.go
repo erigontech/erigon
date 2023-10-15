@@ -22,7 +22,19 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint = justifiedCheckpoint
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Epoch() {
+		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint = finalizedCheckpoint
+
+	}
+}
+
+func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
+	for k := range f.checkpointStates {
+		checkpoint := solid.Checkpoint(k)
+		if checkpoint.Epoch() <= newFinalized.Epoch() {
+			delete(f.checkpointStates, k)
+			continue
+		}
 	}
 }
 
@@ -70,7 +82,7 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 // getCheckpointState computes and caches checkpoint states.
 func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	// check if it can be found in cache.
-	if state, ok := f.checkpointStates.Get(checkpointComparable(checkpoint)); ok {
+	if state, ok := f.checkpointStates[checkpointComparable(checkpoint)]; ok {
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
@@ -96,9 +108,9 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		validators[idx] = v
 		return true
 	})
-	checkpointState := newCheckpointState(f.forkGraph.Config(), validators,
+	checkpointState := newCheckpointState(f.forkGraph.Config(), f.anchorPublicKeys, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
-	f.checkpointStates.Add(checkpointComparable(checkpoint), checkpointState)
+	f.checkpointStates[checkpointComparable(checkpoint)] = checkpointState
 	return checkpointState, nil
 }
