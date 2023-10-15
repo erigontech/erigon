@@ -474,7 +474,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *StateReaderV3) ReadAccountStorage(address common.Address, _ uint64, key *common.Hash) ([]byte, error) {
 	var composite [20 + 32]byte
 	copy(composite[:], address[:])
 	copy(composite[20:], key.Bytes())
@@ -495,7 +495,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *StateReaderV3) ReadAccountCode(address common.Address, _ uint64, _ common.Hash) ([]byte, error) {
 	enc, err := r.rs.domains.LatestCode(address[:])
 	if err != nil {
 		return nil, err
