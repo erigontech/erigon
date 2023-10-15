@@ -8,6 +8,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -16,61 +17,85 @@ import (
 
 const randaoMixesLength = 65536
 
-// Active returns if validator is active for given epoch
-func (cv *checkpointValidator) active(epoch uint64) bool {
-	return cv.activationEpoch <= epoch && epoch < cv.exitEpoch
-}
-
-type checkpointValidator struct {
-	publicKey       [48]byte
-	activationEpoch uint64
-	exitEpoch       uint64
-	balance         uint64
-	slashed         bool
-}
-
-type shuffledSet struct {
-	set       []uint64
-	lenActive uint64
-}
-
-// We only keep in memory a fraction of the beacon state
+// We only keep in memory a fraction of the beacon state when it comes to checkpoint.
 type checkpointState struct {
-	beaconConfig      *clparams.BeaconChainConfig
-	randaoMixes       solid.HashVectorSSZ
-	shuffledSetsCache map[uint64]*shuffledSet // Map each epoch to its shuffled index
-	// public keys list
-	validators []*checkpointValidator
+	beaconConfig *clparams.BeaconChainConfig
+	randaoMixes  solid.HashVectorSSZ
+	shuffledSet  []uint64 // shuffled set of active validators
+	// validator data
+	balances []uint64
+	// These are flattened to save memory and anchor public keys are static and shared.
+	anchorPublicKeys []byte // flattened base public keys
+	publicKeys       []byte // flattened public keys
+	actives          []byte
+	slasheds         []byte
+
+	validatorSetSize int
 	// fork data
 	genesisValidatorsRoot libcommon.Hash
 	fork                  *cltypes.Fork
 	activeBalance, epoch  uint64 // current active balance and epoch
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
-	validators := make([]*checkpointValidator, len(validatorSet))
-	for i := range validatorSet {
-		validators[i] = &checkpointValidator{
-			publicKey:       validatorSet[i].PublicKey(),
-			activationEpoch: validatorSet[i].ActivationEpoch(),
-			exitEpoch:       validatorSet[i].ExitEpoch(),
-			balance:         validatorSet[i].EffectiveBalance(),
-			slashed:         validatorSet[i].Slashed(),
-		}
+func writeToBitset(bitset []byte, i int, value bool) {
+	bitIndex := i % 8
+	sliceIndex := i / 8
+	if value {
+		bitset[sliceIndex] = ((1 << bitIndex) | bitset[sliceIndex])
+	} else {
+		bitset[sliceIndex] &= ^(1 << uint(bitIndex))
 	}
+}
+
+func readFromBitset(bitset []byte, i int) bool {
+	bitIndex := i % 8
+	sliceIndex := i / 8
+	return (bitset[sliceIndex] & (1 << uint(bitIndex))) > 0
+}
+
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKeys []byte, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
+	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
+	publicKeys := make([]byte, (len(validatorSet)-(len(anchorPublicKeys)/length.Bytes48))*length.Bytes48)
+	balances := make([]uint64, len(validatorSet))
+
+	bitsetSize := (len(validatorSet) + 7) / 8
+	actives := make([]byte, bitsetSize)
+	slasheds := make([]byte, bitsetSize)
+	for i := range validatorSet {
+		balances[i] = validatorSet[i].EffectiveBalance()
+		writeToBitset(actives, i, validatorSet[i].Active(epoch))
+		writeToBitset(slasheds, i, validatorSet[i].Slashed())
+	}
+	// Add the post-anchor public keys as surplus
+	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
+		pos := i - len(anchorPublicKeys)/length.Bytes48
+		copy(publicKeys[pos*length.Bytes48:], validatorSet[i].PublicKeyBytes())
+	}
+
 	mixes := solid.NewHashVector(randaoMixesLength)
 	randaoMixes.CopyTo(mixes)
-	return &checkpointState{
+
+	// bitsets size
+	c := &checkpointState{
 		beaconConfig:          beaconConfig,
 		randaoMixes:           mixes,
-		validators:            validators,
+		balances:              balances,
+		anchorPublicKeys:      anchorPublicKeys,
+		publicKeys:            publicKeys,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		fork:                  fork,
-		shuffledSetsCache:     map[uint64]*shuffledSet{},
 		activeBalance:         activeBalance,
-		epoch:                 epoch,
+		slasheds:              slasheds,
+		actives:               actives,
+		validatorSetSize:      len(validatorSet),
+
+		epoch: epoch,
 	}
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	activeIndicies := c.getActiveIndicies(epoch)
+	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
+	return c
 }
 
 // getAttestingIndicies retrieves the beacon committee.
@@ -79,30 +104,14 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 	slot := attestation.Slot()
 	epoch := c.epochAtSlot(slot)
 	// Compute shuffled indicies
-	var shuffledIndicies []uint64
-	var lenIndicies uint64
 
-	beaconConfig := c.beaconConfig
-
-	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
-		beaconConfig.EpochsPerHistoricalVector
-	// Input for the seed hash.
-
-	if shuffledIndicesCached, ok := c.shuffledSetsCache[epoch]; ok {
-		shuffledIndicies = shuffledIndicesCached.set
-		lenIndicies = shuffledIndicesCached.lenActive
-	} else {
-		activeIndicies := c.getActiveIndicies(epoch)
-		lenIndicies = uint64(len(activeIndicies))
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, slot)
-		c.shuffledSetsCache[epoch] = &shuffledSet{set: shuffledIndicies, lenActive: uint64(len(activeIndicies))}
-	}
+	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
 	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.ValidatorIndex()
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
-	committee := shuffledIndicies[start:end]
+	committee := c.shuffledSet[start:end]
 
 	attestingIndices := []uint64{}
 	for i, member := range committee {
@@ -119,8 +128,8 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 }
 
 func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
-	for i, validator := range c.validators {
-		if !validator.active(epoch) {
+	for i := 0; i < c.validatorSetSize; i++ {
+		if !readFromBitset(c.actives, i) {
 			continue
 		}
 		activeIndicies = append(activeIndicies, uint64(i))
@@ -156,8 +165,12 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		publicKey := c.validators[v].publicKey
-		pks = append(pks, publicKey[:])
+		if v < uint64(len(c.anchorPublicKeys)) {
+			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
+		} else {
+			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
+			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:])
+		}
 		return true
 	})
 
