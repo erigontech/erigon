@@ -452,7 +452,7 @@ func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
 func (db *MdbxKV) openDBIs(buckets []string) error {
-	if db.ReadOnly() {
+	if db.ReadOnly() || db.Accede() {
 		return db.View(context.Background(), func(tx kv.Tx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
