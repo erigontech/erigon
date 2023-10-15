@@ -641,6 +641,23 @@ type RawBlock struct {
 	Body   *RawBody
 }
 
+func (r RawBlock) AsBlock() (*Block, error) {
+	b := &Block{header: r.Header}
+	b.uncles = r.Body.Uncles
+	b.withdrawals = r.Body.Withdrawals
+
+	txs := make([]Transaction, len(r.Body.Transactions))
+	for i, tx := range r.Body.Transactions {
+		var err error
+		if txs[i], err = DecodeTransaction(tx); err != nil {
+			return nil, err
+		}
+	}
+	b.transactions = txs
+
+	return b, nil
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
@@ -1510,16 +1527,28 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	return b.Body().RawBody()
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
 }
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	txs, err := MarshalTransactionsBinary(b.Transactions)
-	if err != nil {
-		panic(err)
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	for i, tx := range b.Transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
 	}
-	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	return br
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
@@ -1540,14 +1569,24 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
+
+	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	}
+
+	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
+	}
+
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+
 	if b.WithdrawalsHash() == nil {
 		if b.Withdrawals() != nil {
 			return errors.New("header missing WithdrawalsHash")

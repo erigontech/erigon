@@ -288,27 +288,17 @@ func ReadCurrentHeader(db kv.Getter) *types.Header {
 	return ReadHeader(db, headHash, *headNumber)
 }
 
-func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
-	var res []*types.Header
-	c, err := db.Cursor(kv.Headers)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
+func ReadHeadersByNumber(db kv.Getter, number uint64) (res []*types.Header, err error) {
 	prefix := hexutility.EncodeTs(number)
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-
+	if err = db.ForPrefix(kv.Headers, prefix, func(k, v []byte) error {
 		header := new(types.Header)
 		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+			return fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return res, nil
 }

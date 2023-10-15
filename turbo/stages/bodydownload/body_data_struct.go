@@ -6,6 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -51,6 +52,7 @@ type BodyDownload struct {
 	bodyCacheLimit   int // Limit of body Cache size
 	blockBufferSize  int
 	br               services.FullBlockReader
+	logger           log.Logger
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -62,7 +64,7 @@ type BodyRequest struct {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader) *BodyDownload {
+func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[TripleHash]uint64),
 		bodyCacheLimit:   bodyCacheLimit,
@@ -82,6 +84,7 @@ func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit in
 		bodyCache:       btree.NewG[BodyTreeItem](32, func(a, b BodyTreeItem) bool { return a.blockNum < b.blockNum }),
 		br:              br,
 		blockBufferSize: blockBufferSize,
+		logger:          logger,
 	}
 	return bd
 }

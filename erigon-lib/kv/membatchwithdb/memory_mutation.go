@@ -11,16 +11,18 @@
    limitations under the License.
 */
 
-package memdb
+package membatchwithdb
 
 import (
 	"bytes"
 	"context"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -45,7 +47,7 @@ type MemoryMutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
-	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
+	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
@@ -519,4 +521,30 @@ func (m *MemoryMutation) ViewID() uint64 {
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
+}
+func (m *MemoryMutation) AggCtx() *state.AggregatorV3Context {
+	return m.db.(state.HasAggCtx).AggCtx()
+}
+
+func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
+	return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
+}
+
+func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+}
+func (m *MemoryMutation) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HistoryGet(name, k, ts)
+}
+
+func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }

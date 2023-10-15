@@ -184,14 +184,16 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 
-		//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-		//	return err
-		//}
-		//if dbg.MdbxLockInRam() {
-		//	if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
-		//		return err
-		//	}
-		//}
+		if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+			if err := casted.WarmupDB(false); err != nil {
+				return err
+			}
+			if dbg.MdbxLockInRam() {
+				if err := casted.LockDBInRam(); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	var blockNum, stageProgress uint64
@@ -746,7 +748,11 @@ Loop:
 							return err
 						}
 					}
-					u.UnwindTo(blockNum-1, header.Hash())
+					if errors.Is(err, consensus.ErrInvalidBlock) {
+						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+					} else {
+						u.UnwindTo(blockNum-1, ExecUnwind)
+					}
 					break Loop
 				}
 
@@ -781,14 +787,16 @@ Loop:
 					break
 				}
 
-				//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-				//	return err
-				//}
+				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+					if err := casted.WarmupDB(false); err != nil {
+						return err
+					}
+				}
 
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
-				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -826,9 +834,11 @@ Loop:
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							//if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-							//	return err
-							//}
+							if casted, ok := tx.(kv.CanWarmupDB); ok {
+								if err := casted.WarmupDB(false); err != nil {
+									return err
+								}
+							}
 							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
@@ -872,7 +882,7 @@ Loop:
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
 	if !dbg.DiscardCommitment() && b != nil {
-		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
 		}
@@ -906,7 +916,7 @@ Loop:
 }
 
 // applyTx is required only for debugging
-func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.AggregatorV3, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
@@ -919,7 +929,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 	}
 	/* uncomment it when need to debug state-root missmatch*/
 	/*
-		if err := agg.Flush(context.Background(), applyTx); err != nil {
+		if err := domains.Flush(context.Background(), applyTx); err != nil {
 			panic(err)
 		}
 		oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
@@ -949,7 +959,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-		u.UnwindTo(unwindTo, header.Hash())
+		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
 	return false, nil
 }
@@ -1610,7 +1620,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}).
 		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
+		Open(ctx)
 	if err != nil {
 		return err
 	}

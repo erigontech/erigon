@@ -61,63 +61,91 @@ func (b adapterHandler) Handle(r lg.Record) {
 
 	switch lvl {
 	case lg.Debug:
-		log.Info("[downloader] " + r.String())
+		str := r.String()
+		skip := strings.Contains(str, "completion change") || strings.Contains(str, "hashed piece") ||
+			strings.Contains(str, "set torrent=") ||
+			strings.Contains(str, "all initial dials failed") ||
+			strings.Contains(str, "local and remote peer ids are the same") ||
+			strings.Contains(str, "connection at") || strings.Contains(str, "don't want conns right now") ||
+			strings.Contains(str, "is mutually complete") ||
+			strings.Contains(str, "sending PEX message") || strings.Contains(str, "received pex message") ||
+			strings.Contains(str, "announce to") || strings.Contains(str, "announcing to") ||
+			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
+			strings.Contains(str, "inited with remoteAddr")
+		if skip {
+			break
+		}
+		log.Debug(str)
 	case lg.Info:
 		str := r.String()
-		if strings.Contains(str, "EOF") ||
-			strings.Contains(str, "spurious timer") ||
-			strings.Contains(str, "banning ip <nil>") { // suppress useless errors
+		skip := false //strings.Contains(str, "EOF")
+		//strings.Contains(str, "banning ip <nil>") ||
+		//strings.Contains(str, "spurious timer") { // suppress useless errors
+		if skip {
 			break
 		}
 
 		log.Info(str)
 	case lg.Warning:
 		str := r.String()
-		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "banned ip") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "requested chunk too long") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "reservation cancelled") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "received invalid reject") { // suppress useless errors
-			break
-		}
+		skip := false
 
+		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "banned ip") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "requested chunk too long") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "reservation cancelled") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "received invalid reject") { // suppress useless errors
+		//	break
+		//}
+
+		if skip {
+			break
+		}
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
-		if strings.Contains(str, "EOF") { // suppress useless errors
+		skip := false
+		//if strings.Contains(str, "EOF") { // suppress useless errors
+		//	break
+		//}
+
+		if skip {
 			break
 		}
-
 		log.Error(str)
 	case lg.Critical:
 		str := r.String()
-		if strings.Contains(str, "EOF") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "don't want conns") { // suppress useless errors
-			break
-		}
-		if strings.Contains(str, "torrent closed") { // suppress useless errors
-			break
-		}
+		skip := false
+		//if strings.Contains(str, "EOF") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "don't want conns") { // suppress useless errors
+		//	break
+		//}
+		//if strings.Contains(str, "torrent closed") { // suppress useless errors
+		//	break
+		//}
 
+		if skip {
+			break
+		}
 		log.Error(str)
 	default:
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())

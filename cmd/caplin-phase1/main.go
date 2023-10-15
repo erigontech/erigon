@@ -17,12 +17,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/freezer"
-	"github.com/ledgerwatch/erigon/cl/persistence"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -109,7 +106,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		fmt.Println(cfg.EngineAPIAddr)
 		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
@@ -125,13 +121,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	caplinDBPath := path.Join(cfg.DataDir, "caplin")
-	rawdb := persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, caplinDBPath)
-	beaconDB, sqlDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, rawdb, caplinDBPath, executionEngine)
-	if err != nil {
-		return err
-	}
-	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, sqlDB, rawdb, beaconDB, cfg.Dirs.Tmp, beacon.RouterConfiguration{
+	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon.RouterConfiguration{
 		Protocol:        cfg.BeaconProtocol,
 		Address:         cfg.BeaconAddr,
 		ReadTimeTimeout: cfg.BeaconApiReadTimeout,

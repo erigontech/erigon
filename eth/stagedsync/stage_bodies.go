@@ -196,7 +196,7 @@ func BodiesForward(
 			err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
 			if err != nil {
 				logger.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-				u.UnwindTo(blockHeight-1, header.Hash())
+				u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)))
 				return true, nil
 			}
 

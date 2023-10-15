@@ -381,6 +381,9 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 	if err != nil {
 		return err
 	}
+	if noFsync {
+		idxFilter.DisableFsync()
+	}
 	hasher := murmur3.New128WithSeed(*salt)
 
 	key := make([]byte, 0, 256)

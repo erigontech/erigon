@@ -21,9 +21,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -43,7 +41,7 @@ type validatePayloadFunc func(kv.RwTx, *types.Header, *types.RawBody, uint64, []
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
-	memoryDiff *memdb.MemoryDiff
+	memoryDiff *membatchwithdb.MemoryDiff
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
@@ -130,7 +128,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 }
 
 type HasDiff interface {
-	Diff() (*memdb.MemoryDiff, error)
+	Diff() (*membatchwithdb.MemoryDiff, error)
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
@@ -154,20 +152,20 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 
 	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
-		histV3, err := kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return "", [32]byte{}, nil, err
-		}
+		//histV3, err := kvcfg.HistoryV3.Enabled(tx)
+		//if err != nil {
+		//	return "", [32]byte{}, nil, err
+		//}
 		var extendingFork kv.RwTx
-		if histV3 {
-			m := state.NewSharedDomains(tx)
-			defer m.Close()
-			extendingFork = m
-		} else {
-			m := memdb.NewMemoryBatch(tx, fv.tmpDir)
-			defer m.Close()
-			extendingFork = m
-		}
+		//if histV3 {
+		//	m := state.NewSharedDomains(tx)
+		//	defer m.Close()
+		//	extendingFork = m
+		//} else {
+		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
+		defer m.Close()
+		extendingFork = m
+		//}
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
 			Accumulator: shards.NewAccumulator(),
@@ -248,19 +246,19 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return "", [32]byte{}, nil, err
-	}
+	//histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	//if err != nil {
+	//	return "", [32]byte{}, nil, err
+	//}
 	var batch kv.RwTx
-	if histV3 {
-		sd := state.NewSharedDomains(tx)
-		defer sd.Close()
-		batch = sd
-	} else {
-		batch = memdb.NewMemoryBatch(tx, fv.tmpDir)
-		defer batch.Rollback()
-	}
+	//if histV3 {
+	//	sd := state.NewSharedDomains(tx)
+	//	defer sd.Close()
+	//	batch = sd
+	//} else {
+	batch = membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
+	defer batch.Rollback()
+	//}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
 		Accumulator: shards.NewAccumulator(),
@@ -291,7 +289,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			validationError = err
 		} else {
-			criticalError = err
+			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
 			return
 		}
 	}

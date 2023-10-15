@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -149,7 +148,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
-	if err := checkChainName(dirs, chain); err != nil {
+	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
 	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
@@ -174,7 +173,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = runtime.NumCPU() * 4
+	cfg.ClientConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -184,6 +183,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
+	cfg.DownloadTorrentFilesFromWebseed = true // enable it only for standalone mode now. feature is not fully ready yet
 	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo)
 	if err != nil {
 		return err
@@ -374,14 +374,17 @@ func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error
 	return nil
 }
 
-func checkChainName(dirs datadir.Dirs, chainName string) error {
+func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	db := mdbx.NewMDBX(log.New()).
+	db, err := mdbx.NewMDBX(log.New()).
 		Path(dirs.Chaindata).Label(kv.ChainDB).
-		Flags(func(flags uint) uint { return flags | mdbx2.Accede }).
-		MustOpen()
+		Accede().
+		Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)

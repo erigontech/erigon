@@ -185,6 +185,10 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	a.recalcMaxTxNum()
 
+	if dbg.NoSync() {
+		a.DisableFsync()
+	}
+
 	return a, nil
 }
 
