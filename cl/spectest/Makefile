@@ -16,4 +16,4 @@ clean:
 	rm -rf tests
 
 mainnet:
-	go CGO_CFLAGS=-D__BLST_PORTABLE__ test -tags=spectest -run=/mainnet -failfast -v
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet -failfast -v
