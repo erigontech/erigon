@@ -18,60 +18,11 @@ package state
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"golang.org/x/exp/maps"
-
 	"github.com/ledgerwatch/erigon/common"
 )
-
-func BenchmarkCutOriginal2(b *testing.B) {
-	m := map[string]int{}
-	for i := 0; i < 100; i++ {
-		m[fmt.Sprintf("%d", i)] = i
-	}
-	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m := maps.Clone(m)
-			b.StartTimer()
-			maps.Clear(m)
-			b.StopTimer()
-		}
-	})
-	b.Run("2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m := maps.Clone(m)
-
-			b.StartTimer()
-			clear(m)
-			b.StopTimer()
-		}
-	})
-	m2 := map[libcommon.Hash]int{}
-	for i := 0; i < 100; i++ {
-		m2[libcommon.HexToHash(fmt.Sprintf("%d", i))] = i
-	}
-	b.Run("3", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2 := maps.Clone(m2)
-
-			b.StartTimer()
-			maps.Clear(m2)
-			b.StopTimer()
-		}
-	})
-	b.Run("4", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m2 := maps.Clone(m2)
-
-			b.StartTimer()
-			clear(m2)
-			b.StopTimer()
-		}
-	})
-}
 
 func BenchmarkCutOriginal(b *testing.B) {
 	value := libcommon.HexToHash("0x01")
