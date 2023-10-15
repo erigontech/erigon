@@ -38,7 +38,7 @@ type ForkChoiceStore struct {
 	equivocatingIndicies map[uint64]struct{}
 	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates *lru.Cache[checkpointComparable, *checkpointState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates map[checkpointComparable]*checkpointState // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages   map[uint64]*LatestMessage
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
@@ -67,10 +67,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		anchorRoot,
 		state2.Epoch(anchorState.BeaconState),
 	)
-	checkpointStates, err := lru.New[checkpointComparable, *checkpointState](allowedCachedStates)
-	if err != nil {
-		return nil, err
-	}
+
 	eth2Roots, err := lru.New[libcommon.Hash, libcommon.Hash](checkpointsPerCache)
 	if err != nil {
 		return nil, err
@@ -95,7 +92,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		forkGraph:                     fork_graph.New(anchorState, enabledPruning),
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
-		checkpointStates:              checkpointStates,
+		checkpointStates:              make(map[checkpointComparable]*checkpointState),
 		eth2Roots:                     eth2Roots,
 		engine:                        engine,
 		recorder:                      recorder,
