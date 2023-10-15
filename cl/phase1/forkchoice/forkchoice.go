@@ -20,7 +20,7 @@ type checkpointComparable string
 
 const (
 	checkpointsPerCache = 1024
-	allowedCachedStates = 4
+	allowedCachedStates = 16
 )
 
 type ForkChoiceStore struct {
