@@ -116,7 +116,7 @@ func (b *Blocks) Run(ctx *Context) error {
 	defer tx.Rollback()
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(tx, ctx, vv, true)
+		err := beaconDB.WriteBlock(ctx, tx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		egg.Go(func() error {
 			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
 			for {
-				blocks, err = rpcSource.GetRange(tx, ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				blocks, err = rpcSource.GetRange(ctx, tx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
 					log.Error("dl error", "err", err, "epoch", ii)
 				} else {
@@ -228,7 +228,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(tx, ctx, v.Data, true)
+				err := beaconDB.WriteBlock(ctx, tx, v.Data, true)
 				if err != nil {
 					return err
 				}

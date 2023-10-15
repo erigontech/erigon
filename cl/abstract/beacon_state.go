@@ -12,28 +12,7 @@ type BeaconState interface {
 	BeaconStateBasic
 	BeaconStateExtension
 	BeaconStateUpgradable
-	BeaconStateMinimal
-	BeaconStateMutator
-	BeaconStateSSZ
-
-	DebugPrint(prefix string)
 }
-
-type BeaconStateUpgradable interface {
-	UpgradeToAltair() error
-	UpgradeToBellatrix() error
-	UpgradeToCapella() error
-	UpgradeToDeneb() error
-}
-
-type BeaconStateSSZ interface {
-	BlockRoot() ([32]byte, error)
-	EncodeSSZ(buf []byte) ([]byte, error)
-	DecodeSSZ(buf []byte, version int) error
-	EncodingSizeSSZ() (size int)
-	HashSSZ() (out [32]byte, err error)
-}
-
 type BeaconStateExtension interface {
 	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error
 	InitiateValidatorExit(index uint64) error
@@ -53,6 +32,29 @@ type BeaconStateExtension interface {
 	ValidatorIndexByPubkey(key [48]byte) (uint64, bool)
 	PreviousStateRoot() common.Hash
 	SetPreviousStateRoot(root common.Hash)
+}
+
+type BeaconStateBasic interface {
+	BeaconStateMinimal
+	BeaconStateExtra
+	BeaconStateMutator
+	BeaconStateSSZ
+	DebugPrint(prefix string)
+}
+
+type BeaconStateUpgradable interface {
+	UpgradeToAltair() error
+	UpgradeToBellatrix() error
+	UpgradeToCapella() error
+	UpgradeToDeneb() error
+}
+
+type BeaconStateSSZ interface {
+	BlockRoot() ([32]byte, error)
+	EncodeSSZ(buf []byte) ([]byte, error)
+	DecodeSSZ(buf []byte, version int) error
+	EncodingSizeSSZ() (size int)
+	HashSSZ() (out [32]byte, err error)
 }
 
 type BeaconStateMutator interface {
@@ -122,7 +124,7 @@ type BeaconStateMutator interface {
 	ResetPreviousEpochAttestations()
 }
 
-type BeaconStateBasic interface {
+type BeaconStateExtra interface {
 	ValidatorLength() int
 	ValidatorBalance(index int) (uint64, error)
 	RandaoMixes() solid.HashVectorSSZ
