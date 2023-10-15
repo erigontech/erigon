@@ -23,10 +23,12 @@ type checkpointState struct {
 	randaoMixes  solid.HashVectorSSZ
 	shuffledSet  []uint64 // shuffled set of active validators
 	// validator data
-	balances   []uint64
-	publicKeys []byte // flattened public keys
-	actives    []byte
-	slasheds   []byte
+	balances []uint64
+	// These are flattened to save memory and anchor public keys are static and shared.
+	anchorPublicKeys []byte // flattened base public keys
+	publicKeys       []byte // flattened public keys
+	actives          []byte
+	slasheds         []byte
 
 	validatorSetSize int
 	// fork data
@@ -51,19 +53,23 @@ func readFromBitset(bitset []byte, i int) bool {
 	return (bitset[sliceIndex] & (1 << uint(bitIndex))) > 0
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKeys []byte, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
-	publicKeys := make([]byte, len(validatorSet)*length.Bytes48)
+	publicKeys := make([]byte, (len(validatorSet)-(len(anchorPublicKeys)/length.Bytes48))*length.Bytes48)
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
 	actives := make([]byte, bitsetSize)
 	slasheds := make([]byte, bitsetSize)
 	for i := range validatorSet {
-		copy(publicKeys[i*length.Bytes48:], validatorSet[i].PublicKeyBytes())
 		balances[i] = validatorSet[i].EffectiveBalance()
 		writeToBitset(actives, i, validatorSet[i].Active(epoch))
 		writeToBitset(slasheds, i, validatorSet[i].Slashed())
+	}
+	// Add the post-anchor public keys as surplus
+	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
+		pos := i - len(anchorPublicKeys)/length.Bytes48
+		copy(publicKeys[pos*length.Bytes48:], validatorSet[i].PublicKeyBytes())
 	}
 
 	mixes := solid.NewHashVector(randaoMixesLength)
@@ -74,6 +80,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 		beaconConfig:          beaconConfig,
 		randaoMixes:           mixes,
 		balances:              balances,
+		anchorPublicKeys:      anchorPublicKeys,
 		publicKeys:            publicKeys,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		fork:                  fork,
@@ -158,7 +165,12 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		pks = append(pks, c.publicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
+		if v < uint64(len(c.anchorPublicKeys)) {
+			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
+		} else {
+			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
+			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:])
+		}
 		return true
 	})
 

@@ -13,6 +13,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
 type checkpointComparable string
@@ -39,6 +40,7 @@ type ForkChoiceStore struct {
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates *lru.Cache[checkpointComparable, *checkpointState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages   map[uint64]*LatestMessage
+	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
 	mu        sync.Mutex
@@ -73,6 +75,14 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
+	anchorPublicKeys := make([]byte, anchorState.ValidatorLength()*length.Bytes48)
+	for idx := 0; idx < anchorState.ValidatorLength(); idx++ {
+		pk, err := anchorState.ValidatorPublicKey(idx)
+		if err != nil {
+			return nil, err
+		}
+		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
+	}
 
 	return &ForkChoiceStore{
 		ctx:                           ctx,
@@ -90,6 +100,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		engine:                        engine,
 		recorder:                      recorder,
 		operationsPool:                operationsPool,
+		anchorPublicKeys:              anchorPublicKeys,
 	}, nil
 }
 

@@ -96,7 +96,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		validators[idx] = v
 		return true
 	})
-	checkpointState := newCheckpointState(f.forkGraph.Config(), validators,
+	checkpointState := newCheckpointState(f.forkGraph.Config(), f.anchorPublicKeys, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
 	f.checkpointStates.Add(checkpointComparable(checkpoint), checkpointState)
