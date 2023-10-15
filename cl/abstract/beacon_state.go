@@ -13,6 +13,14 @@ type BeaconState interface {
 	BeaconStateExtension
 	BeaconStateUpgradable
 }
+
+type BeaconStateUpgradable interface {
+	UpgradeToAltair() error
+	UpgradeToBellatrix() error
+	UpgradeToCapella() error
+	UpgradeToDeneb() error
+}
+
 type BeaconStateExtension interface {
 	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error
 	InitiateValidatorExit(index uint64) error
@@ -39,14 +47,9 @@ type BeaconStateBasic interface {
 	BeaconStateExtra
 	BeaconStateMutator
 	BeaconStateSSZ
-	DebugPrint(prefix string)
-}
 
-type BeaconStateUpgradable interface {
-	UpgradeToAltair() error
-	UpgradeToBellatrix() error
-	UpgradeToCapella() error
-	UpgradeToDeneb() error
+	Clone() clonable.Clonable
+	DebugPrint(prefix string)
 }
 
 type BeaconStateSSZ interface {
@@ -186,8 +189,6 @@ type BeaconStateMinimal interface {
 	CurrentEpochAttestationsLength() int
 	PreviousEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation]
 	PreviousEpochAttestationsLength() int
-
-	Clone() clonable.Clonable
 }
 
 // TODO figure this out
