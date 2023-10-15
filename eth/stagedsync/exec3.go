@@ -184,14 +184,16 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 
-		//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-		//	return err
-		//}
-		//if dbg.MdbxLockInRam() {
-		//	if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
-		//		return err
-		//	}
-		//}
+		if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+			if err := casted.WarmupDB(false); err != nil {
+				return err
+			}
+			if dbg.MdbxLockInRam() {
+				if err := casted.LockDBInRam(); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	var blockNum, stageProgress uint64
@@ -785,9 +787,11 @@ Loop:
 					break
 				}
 
-				//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-				//	return err
-				//}
+				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+					if err := casted.WarmupDB(false); err != nil {
+						return err
+					}
+				}
 
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
@@ -830,9 +834,11 @@ Loop:
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							//if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-							//	return err
-							//}
+							if casted, ok := tx.(kv.CanWarmupDB); ok {
+								if err := casted.WarmupDB(false); err != nil {
+									return err
+								}
+							}
 							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}

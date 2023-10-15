@@ -533,9 +533,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Compute commitment")
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		//if err := tx.(*mdbx.MdbxTx).WarmupDB(false); err != nil {
-		//	return err
-		//}
+		if casted, ok := tx.(kv.CanWarmupDB); ok {
+			if err := casted.WarmupDB(false); err != nil {
+				return err
+			}
+		}
 		ac := agg.MakeContext()
 		defer ac.Close()
 		sd := libstate.NewSharedDomains(tx)
