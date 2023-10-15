@@ -173,6 +173,10 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
+func (r headerReader) BorSpan(spanId uint64) []byte {
+	return nil
+}
+
 type spanner struct {
 	*span.ChainSpanner
 	currentSpan span.Span
