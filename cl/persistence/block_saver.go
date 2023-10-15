@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"io"
 	"path"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -32,7 +33,7 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx *sql.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
@@ -65,7 +66,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(tx *sql.Tx, ctx context.Context,
 
 }
 
-func (b beaconChainDatabaseFilesystem) PurgeRange(tx *sql.Tx, ctx context.Context, from uint64, count uint64) error {
+func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx *sql.Tx, from uint64, count uint64) error {
 	if err := beacon_indicies.IterateBeaconIndicies(ctx, tx, from, from+count, func(slot uint64, beaconBlockRoot, _, _ libcommon.Hash, _ bool) bool {
 		b.rawDB.DeleteBlock(ctx, slot, beaconBlockRoot)
 		return true
@@ -80,7 +81,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(tx *sql.Tx, ctx context.Contex
 	return nil
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(tx *sql.Tx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx *sql.Tx, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err

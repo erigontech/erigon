@@ -29,7 +29,7 @@ func NewBeaconRpcSource(rpc *rpc.BeaconRpcP2P) *BeaconRpcSource {
 	}
 }
 
-func (b *BeaconRpcSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b *BeaconRpcSource) GetRange(ctx context.Context, _ *sql.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	if count == 0 {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func (b *BeaconRpcSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, 
 }
 
 // a noop for rpc source since we always return new data
-func (b *BeaconRpcSource) PurgeRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) error {
+func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ *sql.Tx, from uint64, count uint64) error {
 	return nil
 }
 
@@ -93,7 +93,7 @@ func (b *GossipSource) grabOrCreate(ctx context.Context, id uint64) chan *peers.
 	}
 	return ch
 }
-func (b *GossipSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b *GossipSource) GetRange(ctx context.Context, _ *sql.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	out := make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, count)
 	for i := from; i < from+count; i++ {
 		ch := b.grabOrCreate(ctx, i)
@@ -107,7 +107,7 @@ func (b *GossipSource) GetRange(_ *sql.Tx, ctx context.Context, from uint64, cou
 	return out, nil
 }
 
-func (b *GossipSource) PurgeRange(_ *sql.Tx, ctx context.Context, from uint64, count uint64) error {
+func (b *GossipSource) PurgeRange(ctx context.Context, _ *sql.Tx, from uint64, count uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	initSize := count

@@ -173,7 +173,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 		// Write block to database optimistically if we are very behind.
-		return cfg.beaconDB.WriteBlock(tx, ctx, block.Data, false)
+		return cfg.beaconDB.WriteBlock(ctx, tx, block.Data, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -278,7 +278,7 @@ func ConsensusClStages(ctx context.Context,
 				MainLoop:
 					for currentEpoch <= args.targetEpoch+1 {
 						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
-						blocks, err := rpcSource.GetRange(tx, ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
+						blocks, err := rpcSource.GetRange(ctx, tx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
@@ -353,7 +353,7 @@ func ConsensusClStages(ctx context.Context,
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
-							blocks, err := sourceFunc(tx, ctx, args.seenSlot+1, totalRequest)
+							blocks, err := sourceFunc(ctx, tx, args.seenSlot+1, totalRequest)
 							if err != nil {
 								errCh <- err
 								return
@@ -492,7 +492,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 					// try to get the current block
-					blocks, err := gossipSource.GetRange(tx, ctx, args.seenSlot, 1)
+					blocks, err := gossipSource.GetRange(ctx, tx, args.seenSlot, 1)
 					if err != nil {
 						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 							return nil
@@ -528,11 +528,11 @@ func ConsensusClStages(ctx context.Context,
 					}
 					defer tx.Rollback()
 					// clean up some old ranges
-					err = gossipSource.PurgeRange(tx, ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
+					err = gossipSource.PurgeRange(ctx, tx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
 					if err != nil {
 						return err
 					}
-					err = cfg.beaconDB.PurgeRange(tx, ctx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
+					err = cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
 					if err != nil {
 						return err
 					}
