@@ -148,7 +148,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
-	if err := checkChainName(dirs, chain); err != nil {
+	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
 	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
@@ -374,14 +374,19 @@ func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error
 	return nil
 }
 
-func checkChainName(dirs datadir.Dirs, chainName string) error {
+func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	db := mdbx.NewMDBX(log.New()).
+	fmt.Printf("[dbg] before chain db open")
+	db, err := mdbx.NewMDBX(log.New()).
 		Path(dirs.Chaindata).Label(kv.ChainDB).
 		Accede().
-		MustOpen()
+		Open(ctx)
+	fmt.Printf("[dbg] after chain db open")
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)
