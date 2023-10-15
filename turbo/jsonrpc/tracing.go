@@ -11,8 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -129,7 +127,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
-		txCtx := evmtypes.TxContext{
+		txCtx := state.TxContext{
 			TxHash:   txn.Hash(),
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice(),
@@ -320,8 +318,8 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		hash               common.Hash
 		replayTransactions types.Transactions
 		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
+		blockCtx           state.BlockContext
+		txCtx              state.TxContext
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
@@ -421,7 +419,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		baseFee.SetFromBig(parent.BaseFee)
 	}
 
-	blockCtx = evmtypes.BlockContext{
+	blockCtx = state.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     getHash,
@@ -462,7 +460,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(evm.IntraBlockState().(*state.IntraBlockState))
+		err = config.StateOverrides.Override(evm.IntraBlockState())
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -484,7 +482,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
-			ibs := evm.IntraBlockState().(*state.IntraBlockState)
+			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 

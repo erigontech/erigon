@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -502,7 +501,7 @@ type intraBlockExec struct {
 	blockHash common.Hash
 	blockNum  uint64
 	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
+	blockCtx  *state.BlockContext
 	rules     *chain.Rules
 	signer    *types.Signer
 	vmConfig  *vm.Config
@@ -519,7 +518,7 @@ func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.E
 		br:          br,
 		stateReader: stateReader,
 		tracer:      tracer,
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(state.BlockContext{}, state.TxContext{}, nil, chainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
 		ibs:         state.New(stateReader),
 	}

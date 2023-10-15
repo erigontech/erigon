@@ -25,8 +25,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -56,7 +54,7 @@ func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
 	var (
-		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
+		env      = vm.NewEVM(state.BlockContext{}, state.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
 		logger   = NewStructLogger(nil)
 		mem      = vm.NewMemory()
 		stack    = stack.New()

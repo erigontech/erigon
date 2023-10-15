@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -250,7 +249,7 @@ func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 		logger:      logger,
 		genesis:     genesis,
 		engine:      engine,
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(state.BlockContext{}, state.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
 	rw.ibs = state.New(rw.stateReader)

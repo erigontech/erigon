@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -102,11 +101,11 @@ func TestEIP2200(t *testing.T) {
 			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
 			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
-			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
-				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
+			vmctx := state.BlockContext{
+				CanTransfer: func(*state.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+				Transfer:    func(*state.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 			}
-			vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, Config{ExtraEips: []int{2200}})
+			vmenv := NewEVM(vmctx, state.TxContext{}, s, params.AllProtocolChanges, Config{ExtraEips: []int{2200}})
 
 			_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
@@ -153,16 +152,16 @@ func TestCreateGas(t *testing.T) {
 		s.SetCode(address, hexutil.MustDecode(tt.code))
 		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
 
-		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
-			Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
+		vmctx := state.BlockContext{
+			CanTransfer: func(*state.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+			Transfer:    func(*state.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 		}
 		config := Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
+		vmenv := NewEVM(vmctx, state.TxContext{}, s, params.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
 		_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)

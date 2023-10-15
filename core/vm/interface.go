@@ -22,8 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM
@@ -41,16 +40,16 @@ type CallContext interface {
 
 // VMInterface exposes the EVM interface for external callers.
 type VMInterface interface {
-	Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState)
+	Reset(txCtx state.TxContext, ibs *state.IntraBlockState)
 	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
 	Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
 	Cancel()
 	Config() Config
 	ChainConfig() *chain.Config
 	ChainRules() *chain.Rules
-	Context() evmtypes.BlockContext
-	IntraBlockState() evmtypes.IntraBlockState
-	TxContext() evmtypes.TxContext
+	Context() state.BlockContext
+	IntraBlockState() *state.IntraBlockState
+	TxContext() state.TxContext
 }
 
 // VMInterpreter exposes additional EVM methods for use in the interpreter.
