@@ -135,7 +135,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+			if err := cfg.db.WriteBlock(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
