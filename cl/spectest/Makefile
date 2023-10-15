@@ -16,7 +16,7 @@ clean:
 	rm -rf tests
 
 mainnet:
-	go test -tags=spectest -run=/mainnet -failfast -v
+	go -D__BLST_PORTABLE__ test -tags=spectest -run=/mainnet -failfast -v
 
 run:
-	go test -v
+	go -D__BLST_PORTABLE__ test -v
