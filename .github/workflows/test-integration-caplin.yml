@@ -1,0 +1,36 @@
+name: Consensus specification tests
+on:
+  push:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+  pull_request:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: test-integration-caplin
+        run: cd cl/spectest && make tests && make mainnet
