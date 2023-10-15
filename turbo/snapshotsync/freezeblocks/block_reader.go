@@ -1100,13 +1100,13 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	// Compute starting block of the span
-	var startBlock uint64
+	var endBlock uint64
 	if spanId > 0 {
-		startBlock = (spanId-1)*spanLength + zerothSpanEnd + 1
+		endBlock = (spanId)*spanLength + zerothSpanEnd
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
-	if startBlock >= r.FrozenBorBlocks() {
+	if endBlock >= r.FrozenBorBlocks() {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err

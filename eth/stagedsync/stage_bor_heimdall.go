@@ -220,10 +220,6 @@ func BorHeimdallForward(
 	// }
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
-	if !mine {
-		logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1)
-	}
-
 	var blockNum uint64
 	var fetchTime time.Duration
 	var eventRecords int
@@ -232,6 +228,15 @@ func BorHeimdallForward(
 	logTimer := time.NewTicker(30 * time.Second)
 	defer logTimer.Stop()
 
+	logger.Info("["+s.LogPrefix()+"] Processing spans...", "from", nextSpanId, "to", endSpanID)
+	for spanID := nextSpanId; spanID <= endSpanID; spanID++ {
+		if lastSpanId, err = fetchAndWriteSpans(ctx, spanID, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
+			return err
+		}
+	}
+	if !mine {
+		logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1, "to", headNumber)
+	}
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:
@@ -280,11 +285,6 @@ func BorHeimdallForward(
 					return err
 				}
 			}
-		}
-	}
-	for spanID := nextSpanId; spanID <= endSpanID; spanID++ {
-		if lastSpanId, err = fetchAndWriteSpans(ctx, spanID, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
-			return err
 		}
 	}
 
@@ -467,7 +467,7 @@ func fetchAndWriteSpans(
 	if err = tx.Put(kv.BorSpans, spanIDBytes[:], spanBytes); err != nil {
 		return 0, err
 	}
-	logger.Info(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanId)
+	logger.Debug(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanId)
 	return spanId, nil
 }
 
