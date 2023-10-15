@@ -76,8 +76,8 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 
 // filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
 func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointState, epoch uint64) []uint64 {
-	filtered := make([]uint64, 0, len(c.publicKeys))
-	for validatorIndex := range c.publicKeys {
+	filtered := make([]uint64, 0, c.validatorSetSize)
+	for validatorIndex := 0; validatorIndex < c.validatorSetSize; validatorIndex++ {
 		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}

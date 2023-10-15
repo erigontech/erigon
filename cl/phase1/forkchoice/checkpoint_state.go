@@ -8,6 +8,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -23,9 +24,11 @@ type checkpointState struct {
 	shuffledSet  []uint64 // shuffled set of active validators
 	// validator data
 	balances   []uint64
-	publicKeys []libcommon.Bytes48
+	publicKeys []byte // flattened public keys
 	actives    []byte
 	slasheds   []byte
+
+	validatorSetSize int
 	// fork data
 	genesisValidatorsRoot libcommon.Hash
 	fork                  *cltypes.Fork
@@ -50,14 +53,14 @@ func readFromBitset(bitset []byte, i int) bool {
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
-	publicKeys := make([]libcommon.Bytes48, len(validatorSet))
+	publicKeys := make([]byte, len(validatorSet)*length.Bytes48)
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
 	actives := make([]byte, bitsetSize)
 	slasheds := make([]byte, bitsetSize)
 	for i := range validatorSet {
-		publicKeys[i] = validatorSet[i].PublicKey()
+		copy(publicKeys[i*length.Bytes48:], validatorSet[i].PublicKeyBytes())
 		balances[i] = validatorSet[i].EffectiveBalance()
 		writeToBitset(actives, i, validatorSet[i].Active(epoch))
 		writeToBitset(slasheds, i, validatorSet[i].Slashed())
@@ -77,6 +80,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 		activeBalance:         activeBalance,
 		slasheds:              slasheds,
 		actives:               actives,
+		validatorSetSize:      len(validatorSet),
 
 		epoch: epoch,
 	}
@@ -117,7 +121,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 }
 
 func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
-	for i := range c.publicKeys {
+	for i := 0; i < c.validatorSetSize; i++ {
 		if !readFromBitset(c.actives, i) {
 			continue
 		}
@@ -154,8 +158,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		publicKey := c.publicKeys[v]
-		pks = append(pks, publicKey[:])
+		pks = append(pks, c.publicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
 		return true
 	})
 
