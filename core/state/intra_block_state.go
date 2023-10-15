@@ -22,16 +22,18 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
+
+var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
 
 type revision struct {
 	id           int
@@ -139,10 +141,10 @@ func (sdb *IntraBlockState) Reset() {
 		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	*/
 
-	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	clear(sdb.nilAccounts)
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[libcommon.Hash][]*types.Log)
+	clear(sdb.logs)
 	clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
