@@ -378,12 +378,10 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	fmt.Printf("[dbg] before chain db open")
 	db, err := mdbx.NewMDBX(log.New()).
 		Path(dirs.Chaindata).Label(kv.ChainDB).
 		Accede().
 		Open(ctx)
-	fmt.Printf("[dbg] after chain db open")
 	if err != nil {
 		return err
 	}
