@@ -161,6 +161,12 @@ type (
 	}
 )
 
+//type journalEntry2 interface {
+//	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
+//		nonceChange | storageChange | fakeStorageChange | codeChange |
+//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
+//}
+
 func (ch createObjectChange) revert(s *IntraBlockState) {
 	delete(s.stateObjects, *ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
