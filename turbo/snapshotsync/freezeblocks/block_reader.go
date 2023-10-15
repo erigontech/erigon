@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type RemoteBlockReader struct {
@@ -1129,7 +1128,6 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
 		}
 		if spanId < spanFrom {
-			log.Info("segment", "from", sn.ranges.from, "spanFrom", spanFrom, "spanId", spanId)
 			continue
 		}
 		var spanTo uint64
@@ -1137,7 +1135,6 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
 		}
 		if spanId >= spanTo {
-			log.Info("segment", "to", sn.ranges.to, "spanTo", spanTo, "spanId", spanId)
 			continue
 		}
 		if sn.idx.KeyCount() == 0 {

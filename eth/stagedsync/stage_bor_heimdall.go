@@ -210,14 +210,14 @@ func BorHeimdallForward(
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
-	// recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
-	// if err != nil {
-	// 	return err
-	// }
-	// signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
-	// if err != nil {
-	// 	return err
-	// }
+	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+	if err != nil {
+		return err
+	}
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	if err != nil {
+		return err
+	}
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	var blockNum uint64
@@ -275,9 +275,9 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		//if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
-		//	return fmt.Errorf("persistValidatorSets: %w", err)
-		//}
+		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+			return fmt.Errorf("persistValidatorSets: %w", err)
+		}
 		if !mine && header != nil {
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
 			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
