@@ -305,11 +305,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	opts.pageSize = uint64(in.PageSize)
 
 	//nolint
-	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
-	}
+	//if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
+	//}
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if opts.flags&mdbx.Readonly == 0 {
+	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
