@@ -76,8 +76,8 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 
 // filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
 func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointState, epoch uint64) []uint64 {
-	filtered := make([]uint64, 0, len(c.validators))
-	for validatorIndex := range c.validators {
+	filtered := make([]uint64, 0, len(c.publicKeys))
+	for validatorIndex := range c.publicKeys {
 		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}
@@ -98,14 +98,13 @@ func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, stat
 	if !has {
 		return 0
 	}
-	validators := state.validators
 	// Compute attestation score
 	var attestationScore uint64
 	for _, validatorIndex := range indicies {
 		if f.Ancestor(f.latestMessages[validatorIndex].Root, header.Slot) != root {
 			continue
 		}
-		attestationScore += validators[validatorIndex].balance
+		attestationScore += state.balances[validatorIndex]
 	}
 	if f.proposerBoostRoot == (libcommon.Hash{}) {
 		return attestationScore

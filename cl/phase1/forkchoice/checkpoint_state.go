@@ -16,21 +16,16 @@ import (
 
 const randaoMixesLength = 65536
 
-type checkpointValidator struct {
-	publicKey [48]byte
-	balance   uint64
-}
-
-// We only keep in memory a fraction of the beacon state
+// We only keep in memory a fraction of the beacon state when it comes to checkpoint.
 type checkpointState struct {
 	beaconConfig *clparams.BeaconChainConfig
 	randaoMixes  solid.HashVectorSSZ
 	shuffledSet  []uint64 // shuffled set of active validators
-	// public keys list
-	validators []*checkpointValidator
-	// active and slashed bitsets
-	actives  []byte
-	slasheds []byte
+	// validator data
+	balances   []uint64
+	publicKeys []libcommon.Bytes48
+	actives    []byte
+	slasheds   []byte
 	// fork data
 	genesisValidatorsRoot libcommon.Hash
 	fork                  *cltypes.Fork
@@ -55,16 +50,15 @@ func readFromBitset(bitset []byte, i int) bool {
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
-	validators := make([]*checkpointValidator, len(validatorSet))
+	publicKeys := make([]libcommon.Bytes48, len(validatorSet))
+	balances := make([]uint64, len(validatorSet))
 
-	bitsetSize := (len(validators) + 7) / 8
+	bitsetSize := (len(validatorSet) + 7) / 8
 	actives := make([]byte, bitsetSize)
 	slasheds := make([]byte, bitsetSize)
 	for i := range validatorSet {
-		validators[i] = &checkpointValidator{
-			publicKey: validatorSet[i].PublicKey(),
-			balance:   validatorSet[i].EffectiveBalance(),
-		}
+		publicKeys[i] = validatorSet[i].PublicKey()
+		balances[i] = validatorSet[i].EffectiveBalance()
 		writeToBitset(actives, i, validatorSet[i].Active(epoch))
 		writeToBitset(slasheds, i, validatorSet[i].Slashed())
 	}
@@ -76,7 +70,8 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 	c := &checkpointState{
 		beaconConfig:          beaconConfig,
 		randaoMixes:           mixes,
-		validators:            validators,
+		balances:              balances,
+		publicKeys:            publicKeys,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		fork:                  fork,
 		activeBalance:         activeBalance,
@@ -122,7 +117,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 }
 
 func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
-	for i := range c.validators {
+	for i := range c.publicKeys {
 		if !readFromBitset(c.actives, i) {
 			continue
 		}
@@ -159,7 +154,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		publicKey := c.validators[v].publicKey
+		publicKey := c.publicKeys[v]
 		pks = append(pks, publicKey[:])
 		return true
 	})
