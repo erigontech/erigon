@@ -32,9 +32,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
@@ -132,11 +132,11 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			var (
 				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 				origin, _ = signer.Sender(tx)
-				txContext = evmtypes.TxContext{
+				txContext = state.TxContext{
 					Origin:   origin,
 					GasPrice: tx.GetPrice(),
 				}
-				context = evmtypes.BlockContext{
+				context = state.BlockContext{
 					CanTransfer: core.CanTransfer,
 					Transfer:    core.Transfer,
 					Coinbase:    test.Context.Miner,
@@ -241,11 +241,11 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	origin, _ := signer.Sender(tx)
-	txContext := evmtypes.TxContext{
+	txContext := state.TxContext{
 		Origin:   origin,
 		GasPrice: tx.GetPrice(),
 	}
-	context := evmtypes.BlockContext{
+	context := state.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Coinbase:    test.Context.Miner,
@@ -301,11 +301,11 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	origin, _ := signer.Sender(tx)
-	txContext := evmtypes.TxContext{
+	txContext := state.TxContext{
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
-	context := evmtypes.BlockContext{
+	context := state.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Coinbase:    libcommon.Address{},

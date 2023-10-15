@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -76,7 +75,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		engine:      engine,
 		historyMode: atomic.Bool{},
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(state.BlockContext{}, state.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 
