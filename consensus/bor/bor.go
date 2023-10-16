@@ -743,7 +743,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		g.SetLimit(estimate.AlmostAllCPUs())
 		defer g.Wait()
 
-		batchSize := inmemorySignatures / 2
+		batchSize := 128 // must be < inmemorySignatures
 		initialHeaders := make([]*types.Header, 0, batchSize)
 
 		for i := uint64(1); i <= number; i++ {
