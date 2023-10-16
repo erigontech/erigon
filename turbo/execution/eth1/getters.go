@@ -294,3 +294,9 @@ func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceSafe(tx)),
 	}, nil
 }
+
+func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*execution.FrozenBlocksResponse, error) {
+	return &execution.FrozenBlocksResponse{
+		FrozenBlocks: e.blockReader.FrozenBlocks(),
+	}, nil
+}
