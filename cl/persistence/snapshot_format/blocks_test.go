@@ -59,7 +59,7 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 		}
 		var b bytes.Buffer
 		require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
-		blk2, err := snapshot_format.ReadBlockFromrSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
+		blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
 		require.NoError(t, err)
 		_ = blk2
 		hash1, err := blk.HashSSZ()
