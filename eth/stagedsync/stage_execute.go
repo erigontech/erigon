@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -666,6 +667,9 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	}
 	logpairs = append(logpairs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
+	if err := metrics.PrintRlimit(logger); err != nil {
+		panic(err)
+	}
 
 	return currentBlock, currentTx, currentTime
 }
