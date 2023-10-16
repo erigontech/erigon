@@ -251,23 +251,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 }
 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	switch name {
-	case kv.AccountsHistory:
-		v, ok, err = tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok || len(v) == 0 {
-			return v, ok, nil
-		}
-		return v, true, nil
-	case kv.StorageHistory:
-		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
-	case kv.CodeHistory:
-		return tx.aggCtx.ReadAccountCodeNoStateWithRecent(key, ts, tx.MdbxTx)
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
-	}
+	return tx.aggCtx.HistoryGet(name, key, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
