@@ -13,7 +13,6 @@ import (
 
 func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockReader) {
 	firstBlockInDB := br.(*freezeblocks.BlockReader).FrozenBlocks() + 1
-	fmt.Printf("firstBlockInDB: %d\n", firstBlockInDB)
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		panic(err)
