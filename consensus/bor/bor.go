@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -743,6 +744,15 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			header := chain.GetHeaderByNumber(i)
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
+				for _, h := range initialHeaders {
+					h := h
+					snap := snap
+					g := errgroup.Group{}
+					g.Go(func() error {
+						_, _ = ecrecover(h, snap.sigcache, snap.config)
+						return nil
+					})
+				}
 				snap, err = snap.apply(initialHeaders, c.logger)
 
 				if err != nil {
