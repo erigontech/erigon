@@ -17,15 +17,13 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/xsleonard/go-merkle"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -747,11 +745,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 				for _, h := range initialHeaders {
 					h := h
 					snap := snap
-					g := errgroup.Group{}
-					g.Go(func() error {
-						_, _ = ecrecover(h, snap.sigcache, snap.config)
-						return nil
-					})
+					go func() { _, _ = ecrecover(h, snap.sigcache, snap.config) }()
 				}
 				snap, err = snap.apply(initialHeaders, c.logger)
 
