@@ -644,6 +644,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 }
 
 func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint64, logEvery *time.Ticker) (snap *Snapshot, err error) {
+	fmt.Printf("frozenSnapshot\n")
 	c.logger.Info("Initializing frozen snapshots to", "number", number)
 	defer func() {
 		c.logger.Info("Done initializing frozen snapshots to", "number", number, "err", err)
@@ -664,6 +665,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("frozenSnapshot len=%d\n", len(validators))
 
 		// new snap shot
 		snap = NewSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)

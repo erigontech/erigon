@@ -2,6 +2,7 @@ package bor_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
@@ -174,7 +175,8 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 }
 
 func (r headerReader) BorSpan(spanId uint64) []byte {
-	return nil
+	b, _ := json.Marshal(&r.validator.heimdall.currentSpan)
+	return b
 }
 
 type spanner struct {
@@ -289,6 +291,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			},
 		}, logger)
 	}
+	fmt.Printf("len(heimdall.validatorSet)=%d\n", len(heimdall.validatorSet.Validators))
 
 	bor.Authorize(validatorAddress, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
@@ -314,6 +317,7 @@ func TestVerifyHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
+	fmt.Printf("len(v.heimdall.validatorSet)=%d\n", len(v.heimdall.validatorSet.Validators))
 
 	sealedBlocks, err := v.sealBlocks(chain.Blocks)
 
