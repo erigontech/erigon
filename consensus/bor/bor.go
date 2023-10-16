@@ -21,9 +21,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -736,15 +738,24 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 
 		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 
-		initialHeaders := make([]*types.Header, 0, 128)
+		g := errgroup.Group{}
+		g.SetLimit(estimate.AlmostAllCPUs())
+		defer g.Wait()
+
+		batchSize := inmemorySignatures / 2
+		initialHeaders := make([]*types.Header, 0, batchSize)
 
 		for i := uint64(1); i <= number; i++ {
 			header := chain.GetHeaderByNumber(i)
 			{
 				// `snap.apply` bottleneck - is recover of signer.
 				// to speedup: recover signer in background goroutines and save in `sigcache`
+				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 				snap := snap
-				go func() { _, _ = ecrecover(header, snap.sigcache, snap.config) }()
+				g.Go(func() error {
+					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					return nil
+				})
 			}
 
 			initialHeaders = append(initialHeaders, header)
