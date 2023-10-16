@@ -1725,8 +1725,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 		}
 		expectedBlockNum++
 
-		copy(key, k)
-		copy(key[8:], v)
+		key = append(append(key[:0], k...), v...)
 		dataRLP, err := tx.GetOne(kv.Headers, key)
 		if err != nil {
 			return false, err
