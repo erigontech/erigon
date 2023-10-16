@@ -1709,19 +1709,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 
 // DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
-	// data-integrity pre-checks:
-	// first header must exist
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		h := rawdb.ReadHeaderByNumber(tx, blockFrom)
-		if h == nil {
-			return fmt.Errorf("header missed in db: block_num=%d", blockFrom)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	fmt.Printf("[dbg] pre-checks passed\n")
-
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
