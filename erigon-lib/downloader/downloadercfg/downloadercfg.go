@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
@@ -47,14 +48,20 @@ const DefaultNetworkChunkSize = 256 * 1024
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
 	DownloadSlots int
-	WebSeedUrls   []*url.URL
-	WebSeedFiles  []string
-	Dirs          datadir.Dirs
+
+	WebSeedUrls                     []*url.URL
+	WebSeedFiles                    []string
+	DownloadTorrentFilesFromWebseed bool
+
+	Dirs datadir.Dirs
 }
 
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
+
+	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
+	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -97,9 +104,9 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}
 
 	// debug
-	//	torrentConfig.Debug = false
-	torrentConfig.Logger.WithFilterLevel(verbosity)
-	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
+	//torrentConfig.Debug = true
+	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
+	torrentConfig.Logger.SetHandlers(adapterHandler{})
 
 	if len(staticPeers) > 0 {
 		torrentConfig.NoDHT = false
@@ -150,7 +157,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 		webseedUrls = append(webseedUrls, uri)
 	}
-	localCfgFile := filepath.Join(dirs.DataDir, "webseeds.toml") // datadir/webseeds.toml allowed
+	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
 		webseedFiles = append(webseedFiles, localCfgFile)
 	}
