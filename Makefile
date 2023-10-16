@@ -140,22 +140,24 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-## test:                              run unit tests with a 100s timeout
-test:
+test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
+
+test-erigon-ext:
+	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
+
+## test:                              run unit tests with a 100s timeout
+test: test-erigon-lib
 	$(GOTEST) --timeout 10m
 
-test3:
-	@cd erigon-lib && $(MAKE) test
+test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
-test-integration:
-	@cd erigon-lib && $(MAKE) test
+test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
-test3-integration:
-	@cd erigon-lib && $(MAKE) test
+test3-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies
