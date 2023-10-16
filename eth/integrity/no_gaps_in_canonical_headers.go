@@ -24,15 +24,12 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockRe
 			err = fmt.Errorf("canonical marker not found: %d\n", i)
 			panic(err)
 		}
-		header := rawdb.ReadHeaderByNumber(tx, i)
+		header := rawdb.ReadHeader(tx, hash, i)
 		if header == nil {
 			err = fmt.Errorf("header not found: %d\n", i)
 			panic(err)
 		}
-		body, _, _, err := rawdb.ReadBodyByNumber(tx, i)
-		if err != nil {
-			panic(err)
-		}
+		body, _, _ := rawdb.ReadBody(tx, hash, i)
 		if body == nil {
 			err = fmt.Errorf("header not found: %d\n", i)
 			panic(err)
