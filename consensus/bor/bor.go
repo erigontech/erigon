@@ -742,11 +742,14 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			header := chain.GetHeaderByNumber(i)
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
+				// `snap.apply` bottleneck - is recover of signer.
+				// to speedup: recover signer in background goroutines and save in `sigcache`
 				for _, h := range initialHeaders {
 					h := h
 					snap := snap
 					go func() { _, _ = ecrecover(h, snap.sigcache, snap.config) }()
 				}
+
 				snap, err = snap.apply(initialHeaders, c.logger)
 
 				if err != nil {
