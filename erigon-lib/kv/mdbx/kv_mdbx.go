@@ -303,13 +303,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	opts.pageSize = uint64(in.PageSize)
-
-	//nolint
-	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
+	if opts.label == kv.ChainDB {
+		opts.log.Info("[db] chaindata", "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	}
+
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if opts.flags&mdbx.Readonly == 0 {
+	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -452,8 +452,8 @@ func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
 func (db *MdbxKV) openDBIs(buckets []string) error {
-	if db.ReadOnly() {
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
+	if db.ReadOnly() || db.Accede() {
+		return db.View(context.Background(), func(tx kv.Tx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
 					continue
@@ -463,25 +463,20 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 				}
 			}
 			return tx.Commit() // when open db as read-only, commit of this RO transaction is required
-		}); err != nil {
-			return err
-		}
-	} else {
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			for _, name := range buckets {
-				if db.buckets[name].IsDeprecated {
-					continue
-				}
-				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		for _, name := range buckets {
+			if db.buckets[name].IsDeprecated {
+				continue
+			}
+			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Close closes db
@@ -611,6 +606,7 @@ func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
 
+func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
 func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
@@ -660,9 +656,7 @@ func (tx *MdbxTx) CollectMetrics() {
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ListBuckets() ([]string, error) {
-	return tx.tx.ListDBI()
-}
+func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	// can't use db.env.View method - because it calls commit for read transactions - it conflicts with write transactions.
@@ -732,7 +726,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if !tx.db.ReadOnly() {
+	if !(tx.db.ReadOnly() || tx.db.Accede()) {
 		nativeFlags |= mdbx.Create
 	}
 
@@ -830,7 +824,7 @@ func (tx *MdbxTx) Commit() error {
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
-		return err
+		return fmt.Errorf("lable: %s, %w", tx.db.opts.label, err)
 	}
 
 	if tx.db.opts.label == kv.ChainDB {

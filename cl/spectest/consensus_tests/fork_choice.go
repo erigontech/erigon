@@ -66,7 +66,7 @@ func (f *ForkChoiceStep) GetValid() bool {
 	if f.Valid == nil {
 		return true
 	}
-	return false
+	return *f.Valid
 }
 func (f *ForkChoiceStep) GetAttestation() string {
 	if f.Attestation == nil {

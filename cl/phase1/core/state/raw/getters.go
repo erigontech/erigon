@@ -106,6 +106,13 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	return b.balances.Get(index), nil
 }
 
+func (b *BeaconState) ValidatorPublicKey(index int) (libcommon.Bytes48, error) {
+	if index >= b.balances.Length() {
+		return libcommon.Bytes48{}, ErrInvalidValidatorIndex
+	}
+	return b.validators.Get(index).PublicKey(), nil
+}
+
 func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {
 	if index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex

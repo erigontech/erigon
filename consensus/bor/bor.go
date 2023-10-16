@@ -17,9 +17,11 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -737,10 +739,25 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 
 		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 
-		initialHeaders := make([]*types.Header, 0, 128)
+		g := errgroup.Group{}
+		g.SetLimit(estimate.AlmostAllCPUs())
+		defer g.Wait()
+
+		batchSize := 128 // must be < inmemorySignatures
+		initialHeaders := make([]*types.Header, 0, batchSize)
 
 		for i := uint64(1); i <= number; i++ {
 			header := chain.GetHeaderByNumber(i)
+			{
+				// `snap.apply` bottleneck - is recover of signer.
+				// to speedup: recover signer in background goroutines and save in `sigcache`
+				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				snap := snap
+				g.Go(func() error {
+					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					return nil
+				})
+			}
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
 				snap, err = snap.apply(initialHeaders, c.logger)
@@ -869,7 +886,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		c.logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Trace("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -1428,7 +1445,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
 	}
 
-	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
+	c.logger.Debug("Span with given block number is not loaded", "fetching span", spanID)
 
 	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 	if err != nil {

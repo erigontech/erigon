@@ -645,14 +645,15 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b := &Block{header: r.Header}
 	b.uncles = r.Body.Uncles
 	b.withdrawals = r.Body.Withdrawals
-	txs := make([]Transaction, len(r.Body.Transactions))
 
+	txs := make([]Transaction, len(r.Body.Transactions))
 	for i, tx := range r.Body.Transactions {
 		var err error
 		if txs[i], err = DecodeTransaction(tx); err != nil {
 			return nil, err
 		}
 	}
+	b.transactions = txs
 
 	return b, nil
 }
@@ -1568,14 +1569,24 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
+
+	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	}
+
+	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
+	}
+
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+
 	if b.WithdrawalsHash() == nil {
 		if b.Withdrawals() != nil {
 			return errors.New("header missing WithdrawalsHash")
