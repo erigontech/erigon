@@ -1725,6 +1725,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	expectedBlockNum := blockFrom
 	key := make([]byte, 8+32)
 	from := hexutility.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1732,6 +1733,11 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 		if blockNum >= blockTo {
 			return false, nil
 		}
+		if expectedBlockNum != blockNum {
+			return false, fmt.Errorf("found gaps in kv.HeaderCanonical table: expected %d, found %d", expectedBlockNum, blockNum)
+		}
+		expectedBlockNum++
+
 		copy(key, k)
 		copy(key[8:], v)
 		dataRLP, err := tx.GetOne(kv.Headers, key)
