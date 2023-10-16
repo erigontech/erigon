@@ -18,6 +18,10 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockRe
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
+	if err := br.(*freezeblocks.BlockReader).Integrity(ctx); err != nil {
+		panic(err)
+	}
+
 	firstBlockInDB := br.(*freezeblocks.BlockReader).FrozenBlocks() + 1
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
