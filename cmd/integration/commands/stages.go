@@ -724,7 +724,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if integritySlow {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			log.Info("[integrity] no gaps in canonical headers")
-			integrity.NoGapsInCanonicalHeaders(tx, ctx)
+			integrity.NoGapsInCanonicalHeaders(tx, ctx, br)
 			return nil
 		}); err != nil {
 			return err

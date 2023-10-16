@@ -7,14 +7,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context) {
+func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockReader) {
+	a := br.(*freezeblocks.BlockReader).FrozenBlocks()
+	fmt.Printf("a: %d\n", a)
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		panic(err)
 	}
-	for i := uint64(0); i < lastBlockNum; i++ {
+	for i := uint64(a); i < lastBlockNum; i++ {
 		header := rawdb.ReadHeaderByNumber(tx, i)
 		if header == nil {
 			err = fmt.Errorf("header not found: %d\n", i)
