@@ -978,6 +978,9 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	if err != nil {
 		return nil, err
 	}
+	if b == nil {
+		return nil, nil
+	}
 	for _, txn := range b.Transactions() {
 		_ = txn.Hash()
 	}
