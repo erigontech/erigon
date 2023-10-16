@@ -12,13 +12,13 @@ import (
 )
 
 func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockReader) {
-	a := br.(*freezeblocks.BlockReader).FrozenBlocks()
-	fmt.Printf("a: %d\n", a)
+	firstBlockInDB := br.(*freezeblocks.BlockReader).FrozenBlocks() + 1
+	fmt.Printf("firstBlockInDB: %d\n", firstBlockInDB)
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		panic(err)
 	}
-	for i := uint64(a); i < lastBlockNum; i++ {
+	for i := firstBlockInDB; i < lastBlockNum; i++ {
 		header := rawdb.ReadHeaderByNumber(tx, i)
 		if header == nil {
 			err = fmt.Errorf("header not found: %d\n", i)
