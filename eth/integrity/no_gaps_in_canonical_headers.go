@@ -45,7 +45,7 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockRe
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", i)
+			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", fmt.Sprintf("%dK/%dK", i/1000, lastBlockNum/1000))
 		default:
 		}
 	}
