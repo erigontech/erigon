@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -136,6 +137,9 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
 
+	if len(headers) > 100 {
+		fmt.Printf("dbg: len(headers): %d\n", len(headers))
+	}
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
