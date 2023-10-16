@@ -303,6 +303,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	opts.pageSize = uint64(in.PageSize)
+	if opts.label == kv.ChainDB {
+		opts.log.Info("[db] chaindata", "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+	}
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()

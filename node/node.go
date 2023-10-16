@@ -342,7 +342,6 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.PageSize(config.MdbxPageSize.Bytes())
 			}
 			if config.MdbxDBSizeLimit > 0 {
-				log.Info("[db] chaindata", "sizeLimit", config.MdbxDBSizeLimit.String())
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
 			}
 			if config.MdbxGrowthStep > 0 {
