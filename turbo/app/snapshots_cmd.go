@@ -112,7 +112,6 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
-				fmt.Printf("a: %s\n", cliCtx.String(utils.DataDirFlag.Name))
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
