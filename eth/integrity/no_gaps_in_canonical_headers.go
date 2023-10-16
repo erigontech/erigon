@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -10,14 +11,19 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockReader) {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
 	firstBlockInDB := br.(*freezeblocks.BlockReader).FrozenBlocks() + 1
 	lastBlockNum, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		panic(err)
 	}
+
 	for i := firstBlockInDB; i < lastBlockNum; i++ {
 		hash, err := rawdb.ReadCanonicalHash(tx, i)
 		if hash == (common.Hash{}) {
@@ -38,6 +44,8 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.BlockRe
 		select {
 		case <-ctx.Done():
 			return
+		case <-logEvery.C:
+			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", i)
 		default:
 		}
 	}
