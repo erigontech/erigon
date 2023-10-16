@@ -1099,7 +1099,7 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 		if err := r.ensureHeaderNumber(seg.ranges.from, seg); err != nil {
 			return err
 		}
-		if err := r.ensureHeaderNumber(seg.ranges.to, seg); err != nil {
+		if err := r.ensureHeaderNumber(seg.ranges.to-1, seg); err != nil {
 			return err
 		}
 	}
