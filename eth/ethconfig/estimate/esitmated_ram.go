@@ -3,6 +3,7 @@ package estimate
 import (
 	"os"
 	"runtime"
+	"runtime/debug"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -37,6 +38,10 @@ func totalMemory() uint64 {
 
 	if cgroupsMemLimit, ok := cgroupsMemoryLimit(); ok {
 		mem = cmp.Min(mem, cgroupsMemLimit)
+	}
+
+	if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
+		mem = cmp.Min(mem, uint64(goMemLimit))
 	}
 
 	return mem

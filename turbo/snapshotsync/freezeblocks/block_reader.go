@@ -1148,3 +1148,33 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	}
 	return nil, fmt.Errorf("span %d not found (snapshots)", spanId)
 }
+
+// ---- Data Integrity part ----
+
+func (r *BlockReader) ensureHeaderNumber(n uint64, seg *HeaderSegment) error {
+	h, _, err := r.headerFromSnapshot(n, seg, nil)
+	if err != nil {
+		return err
+	}
+	if h == nil {
+		return fmt.Errorf("ensureHeaderNumber: not found header: %d", n)
+	}
+	if h.Number.Uint64() != n {
+		return fmt.Errorf("ensureHeaderNumber: requested header: %d, got: %d", n, h.Number.Uint64())
+	}
+	return nil
+}
+
+func (r *BlockReader) Integrity(ctx context.Context) error {
+	view := r.sn.View()
+	defer view.Close()
+	for _, seg := range view.Headers() {
+		if err := r.ensureHeaderNumber(seg.ranges.from, seg); err != nil {
+			return err
+		}
+		if err := r.ensureHeaderNumber(seg.ranges.to-1, seg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
