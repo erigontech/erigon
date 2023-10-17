@@ -449,13 +449,14 @@ func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace 
 func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.rs.domains.LatestAccount(address[:])
+	addr := address.Bytes()
+	enc, err := r.rs.domains.LatestAccount(addr)
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[string(kv.AccountsDomain)].Push(string(address[:]), enc)
+		r.readLists[string(kv.AccountsDomain)].Push(string(addr), enc)
 	}
 	if len(enc) == 0 {
 		if r.trace {
@@ -474,7 +475,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, _ uint64, key *common.Hash) ([]byte, error) {
+func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	var composite [20 + 32]byte
 	copy(composite[:], address[:])
 	copy(composite[20:], key.Bytes())
@@ -495,14 +496,15 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, _ uint64, key
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, _ uint64, _ common.Hash) ([]byte, error) {
-	enc, err := r.rs.domains.LatestCode(address[:])
+func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	addr := address.Bytes()
+	enc, err := r.rs.domains.LatestCode(addr)
 	if err != nil {
 		return nil, err
 	}
 
 	if !r.discardReadList {
-		r.readLists[string(kv.CodeDomain)].Push(string(address[:]), enc)
+		r.readLists[string(kv.CodeDomain)].Push(string(addr), enc)
 	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
@@ -510,15 +512,16 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, _ uint64, _ comm
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, _ uint64, _ common.Hash) (int, error) {
-	enc, err := r.rs.domains.LatestCode(address[:])
+func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	addr := address.Bytes()
+	enc, err := r.rs.domains.LatestCode(addr)
 	if err != nil {
 		return 0, err
 	}
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
+		r.readLists[libstate.CodeSizeTableFake].Push(string(addr), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {

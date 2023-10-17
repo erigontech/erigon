@@ -799,7 +799,7 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	return math2.MaxUint64
 }
-func (ac *AggregatorV3Context) CanUnwindDomainsTo() uint64 { return ac.maxTxNumInFiles(false) + 1 }
+func (ac *AggregatorV3Context) CanUnwindDomainsTo() uint64 { return ac.maxTxNumInFiles(false) }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
