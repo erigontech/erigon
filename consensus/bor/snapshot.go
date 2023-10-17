@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -242,9 +241,6 @@ func (s *Snapshot) Difficulty(signer common.Address) uint64 {
 	}
 
 	validators := s.ValidatorSet.Validators
-	if s.ValidatorSet.GetProposer() == nil {
-		fmt.Printf("nil proposer\n")
-	}
 	proposer := s.ValidatorSet.GetProposer().Address
 	totalValidators := len(validators)
 
