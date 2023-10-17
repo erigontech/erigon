@@ -3,9 +3,8 @@ package persistence
 import (
 	"context"
 	"database/sql"
-	"testing"
-
 	_ "embed"
+	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -30,6 +29,10 @@ func newMockEngine() execution_client.ExecutionEngine {
 }
 
 func (m *mockEngine) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
+	panic("unimplemented")
+}
+
+func (m *mockEngine) FrozenBlocks() uint64 {
 	panic("unimplemented")
 }
 

@@ -1078,6 +1078,8 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
+// ---- Data Integrity part ----
+
 func (r *BlockReader) ensureHeaderNumber(n uint64, seg *HeaderSegment) error {
 	h, _, err := r.headerFromSnapshot(n, seg, nil)
 	if err != nil {
