@@ -778,8 +778,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 ) {
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		al := sdb.accessList
-		sdb.accessList.Reset()
+		al := newAccessList()
+		sdb.accessList = al
+
+		//sdb.accessList.Reset()
 
 		al.AddAddress(sender)
 		if dst != nil {
