@@ -250,8 +250,8 @@ type Bor struct {
 	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
-	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	Recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	Signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
@@ -394,8 +394,8 @@ func New(
 		config:                 borConfig,
 		DB:                     db,
 		blockReader:            blockReader,
-		recents:                recents,
-		signatures:             signatures,
+		Recents:                recents,
+		Signatures:             signatures,
 		spanner:                spanner,
 		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
@@ -462,8 +462,8 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
-		recents:     recents,
-		signatures:  signatures,
+		Recents:     recents,
+		Signatures:  signatures,
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
@@ -487,7 +487,7 @@ func (c *Bor) HeaderProgress(p HeaderProgress) {
 // This is thread-safe (only access the header and config (which is never updated),
 // as well as signatures, which are lru.ARCCache, which is thread-safe)
 func (c *Bor) Author(header *types.Header) (libcommon.Address, error) {
-	return ecrecover(header, c.signatures, c.config)
+	return ecrecover(header, c.Signatures, c.config)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -668,7 +668,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		}
 
 		// new snap shot
-		snap = NewSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
+		snap = NewSnapshot(c.config, c.Signatures, 0, hash, validators, c.logger)
 
 		if err = snap.Store(c.DB); err != nil {
 			return nil, err
@@ -732,14 +732,14 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	//nolint:govet
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
+		if s, ok := c.Recents.Get(hash); ok {
 			snap = s
 			break
 		}
 
 		// If an on-disk snapshot can be found, use that
 		if number%snapshotPersistInterval == 0 {
-			if s, err := LoadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
+			if s, err := LoadSnapshot(c.config, c.Signatures, c.DB, hash); err == nil {
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
@@ -814,7 +814,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		return nil, err
 	}
 
-	c.recents.Add(snap.Hash, snap)
+	c.Recents.Add(snap.Hash, snap)
 
 	// If we've generated a new persistent snapshot, save to disk
 	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
@@ -859,7 +859,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		return errUnknownBlock
 	}
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures, c.config)
+	signer, err := ecrecover(header, c.Signatures, c.config)
 	if err != nil {
 		return err
 	}

@@ -54,6 +54,8 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
+	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
 func StageBorHeimdallCfg(
@@ -65,6 +67,8 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
+	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
@@ -76,6 +80,8 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
+		recents:          recents,
+		signatures:       signatures,
 	}
 }
 
