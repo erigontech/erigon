@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -37,7 +38,7 @@ type TxTask struct {
 	Tx              types.Transaction
 	GetHashFn       func(n uint64) libcommon.Hash
 	TxAsMessage     types.Message
-	EvmBlockContext BlockContext
+	EvmBlockContext evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that tx instead of state reader
 

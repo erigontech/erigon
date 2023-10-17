@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -42,7 +43,7 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func blockHeaderOverride(blockCtx *state.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
+func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
 	if blockOverride.BlockNumber != nil {
 		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
 	}
@@ -73,8 +74,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		hash               common.Hash
 		replayTransactions types.Transactions
 		evm                *vm.EVM
-		blockCtx           state.BlockContext
-		txCtx              state.TxContext
+		blockCtx           evmtypes.BlockContext
+		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
@@ -158,7 +159,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		baseFee.SetFromBig(parent.BaseFee)
 	}
 
-	blockCtx = state.BlockContext{
+	blockCtx = evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     getHash,
@@ -229,7 +230,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState())
+		err = stateOverride.Override((evm.IntraBlockState()).(*state.IntraBlockState))
 		if err != nil {
 			return nil, err
 		}

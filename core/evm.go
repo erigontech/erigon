@@ -21,7 +21,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/state"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -29,10 +28,11 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) state.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
@@ -54,13 +54,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		prevRandDao = &header.MixDigest
 	}
 
-	var transferFunc state.TransferFunc
+	var transferFunc evmtypes.TransferFunc
 	if engine != nil && engine.Type() == chain.BorConsensus {
 		transferFunc = BorTransfer
 	} else {
 		transferFunc = Transfer
 	}
-	return state.BlockContext{
+	return evmtypes.BlockContext{
 		CanTransfer:   CanTransfer,
 		Transfer:      transferFunc,
 		GetHash:       blockHashFunc,
@@ -76,8 +76,8 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
-func NewEVMTxContext(msg Message) state.TxContext {
-	return state.TxContext{
+func NewEVMTxContext(msg Message) evmtypes.TxContext {
+	return evmtypes.TxContext{
 		Origin:     msg.From(),
 		GasPrice:   msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
@@ -120,12 +120,12 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db *state.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
+func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
 	return !db.GetBalance(addr).Lt(amount)
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db *state.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	if !bailout {
 		db.SubBalance(sender, amount)
 	}
@@ -133,7 +133,7 @@ func Transfer(db *state.IntraBlockState, sender, recipient libcommon.Address, am
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db *state.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	// get inputs before
 	input1 := db.GetBalance(sender).Clone()
 	input2 := db.GetBalance(recipient).Clone()

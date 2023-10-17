@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -109,7 +110,7 @@ func init() {
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
@@ -208,7 +209,7 @@ func TestSAR(t *testing.T) {
 
 func TestAddMod(t *testing.T) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
@@ -295,7 +296,7 @@ func TestJsonTestcases(t *testing.T) {
 
 func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
@@ -529,7 +530,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 
 func TestOpMstore(t *testing.T) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -553,7 +554,7 @@ func TestOpMstore(t *testing.T) {
 
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -575,7 +576,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 func TestOpTstore(t *testing.T) {
 	var (
 		state          = state.New(nil)
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, state, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -613,7 +614,7 @@ func TestOpTstore(t *testing.T) {
 
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
-		env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -786,7 +787,7 @@ func TestOpMCopy(t *testing.T) {
 		},
 	} {
 		var (
-			env            = NewEVM(state.BlockContext{}, state.TxContext{}, nil, params.TestChainConfig, Config{})
+			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 			stack          = stack.New()
 			pc             = uint64(0)
 			evmInterpreter = NewEVMInterpreter(env, env.Config())

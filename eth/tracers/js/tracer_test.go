@@ -30,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -55,12 +56,12 @@ func (*dummyStatedb) GetRefund() uint64                              { return 13
 func (*dummyStatedb) GetBalance(addr libcommon.Address) *uint256.Int { return &uint256.Int{} }
 
 type vmContext struct {
-	blockCtx state.BlockContext
-	txCtx    state.TxContext
+	blockCtx evmtypes.BlockContext
+	txCtx    evmtypes.TxContext
 }
 
 func testCtx() *vmContext {
-	return &vmContext{blockCtx: state.BlockContext{BlockNumber: 1}, txCtx: state.TxContext{GasPrice: uint256.NewInt(100000)}}
+	return &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 }
 
 func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
@@ -183,7 +184,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(state.BlockContext{BlockNumber: 1}, state.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	scope := &vm.ScopeContext{
 		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
@@ -207,7 +208,7 @@ func TestNoStepExec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := vm.NewEVM(state.BlockContext{BlockNumber: 1}, state.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 		tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
 		tracer.CaptureEnd(nil, 0, nil)
 		ret, err := tracer.GetResult()
@@ -236,13 +237,13 @@ func TestIsPrecompile(t *testing.T) {
 	chaincfg.ByzantiumBlock = big.NewInt(100)
 	chaincfg.IstanbulBlock = big.NewInt(200)
 	chaincfg.BerlinBlock = big.NewInt(300)
-	txCtx := state.TxContext{GasPrice: uint256.NewInt(100000)}
+	txCtx := evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}
 	tracer, err := newJsTracer("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blockCtx := state.BlockContext{BlockNumber: 150}
+	blockCtx := evmtypes.BlockContext{BlockNumber: 150}
 	res, err := runTrace(tracer, &vmContext{blockCtx, txCtx}, chaincfg, nil)
 	if err != nil {
 		t.Error(err)
@@ -252,7 +253,7 @@ func TestIsPrecompile(t *testing.T) {
 	}
 
 	tracer, _ = newJsTracer("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", nil, nil)
-	blockCtx = state.BlockContext{BlockNumber: 250}
+	blockCtx = evmtypes.BlockContext{BlockNumber: 250}
 	res, err = runTrace(tracer, &vmContext{blockCtx, txCtx}, chaincfg, nil)
 	if err != nil {
 		t.Error(err)

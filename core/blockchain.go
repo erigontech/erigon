@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -223,11 +224,11 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
-	var txContext state.TxContext
+	var txContext evmtypes.TxContext
 	var author *libcommon.Address
 	if isBor {
 		author = &header.Coinbase
-		txContext = state.TxContext{}
+		txContext = evmtypes.TxContext{}
 	} else {
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
