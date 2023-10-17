@@ -13,7 +13,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -53,7 +52,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	noopWriter := state.NewNoopWriter()
 
@@ -791,7 +790,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if header.ExcessBlobGas == nil {
 			log.Warn("excess blob gas not set when trying to marshal blob tx")
 		} else {
-			blobGasPrice, err := misc.GetBlobGasPrice(*header.ExcessBlobGas)
+			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
 			if err != nil {
 				log.Error(err.Error())
 			}

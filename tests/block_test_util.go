@@ -120,7 +120,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
 	defer m.Close()
 

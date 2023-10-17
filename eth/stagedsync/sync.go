@@ -16,7 +16,7 @@ import (
 type Sync struct {
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
-	badBlock        libcommon.Hash
+	unwindReason    UnwindReason
 
 	stages       []*Stage
 	unwindOrder  []*Stage
@@ -38,7 +38,7 @@ func (s *Sync) Len() int                 { return len(s.stages) }
 func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
-	return &UnwindState{id, unwindPoint, currentProgress, libcommon.Hash{}, s}
+	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s}
 }
 
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB) (*PruneState, error) {
@@ -106,10 +106,15 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *Sync) UnwindTo(unwindPoint uint64, badBlock libcommon.Hash) {
-	s.logger.Debug("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
+func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
+	if reason.Block != nil {
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
+	} else {
+		s.logger.Debug("UnwindTo", "block", unwindPoint)
+	}
+
 	s.unwindPoint = &unwindPoint
-	s.badBlock = badBlock
+	s.unwindReason = reason
 }
 
 func (s *Sync) IsDone() bool {
@@ -205,7 +210,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	}
 	s.prevUnwindPoint = s.unwindPoint
 	s.unwindPoint = nil
-	s.badBlock = libcommon.Hash{}
+	s.unwindReason = UnwindReason{}
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return err
 	}
@@ -229,10 +234,10 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
-			if s.badBlock != (libcommon.Hash{}) {
+			if s.unwindReason.IsBadBlock() {
 				badBlockUnwind = true
 			}
-			s.badBlock = libcommon.Hash{}
+			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
@@ -292,10 +297,10 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
-			if s.badBlock != (libcommon.Hash{}) {
+			if s.unwindReason.IsBadBlock() {
 				badBlockUnwind = true
 			}
-			s.badBlock = libcommon.Hash{}
+			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
@@ -448,7 +453,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 	}
 
 	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
-	unwind.BadBlock = s.badBlock
+	unwind.Reason = s.unwindReason
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
 		return nil

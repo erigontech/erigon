@@ -72,10 +72,34 @@ func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
 	return progress, err
 }
 
+type UnwindReason struct {
+	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
+	// them as bad - as they may get replayed then deselected
+	Block *libcommon.Hash
+	// If unwind is caused by a bad block, this error is not empty
+	Err error
+}
+
+func (u UnwindReason) IsBadBlock() bool {
+	return u.Err != nil
+}
+
+var StagedUnwind = UnwindReason{nil, nil}
+var ExecUnwind = UnwindReason{nil, nil}
+var ForkChoice = UnwindReason{nil, nil}
+
+func BadBlock(badBlock libcommon.Hash, err error) UnwindReason {
+	return UnwindReason{&badBlock, err}
+}
+
+func ForkReset(badBlock libcommon.Hash) UnwindReason {
+	return UnwindReason{&badBlock, nil}
+}
+
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(unwindPoint uint64, badBlock libcommon.Hash)
+	UnwindTo(unwindPoint uint64, reason UnwindReason)
 }
 
 // UnwindState contains the information about unwind.
@@ -84,9 +108,8 @@ type UnwindState struct {
 	// UnwindPoint is the block to unwind to.
 	UnwindPoint        uint64
 	CurrentBlockNumber uint64
-	// If unwind is caused by a bad block, this hash is not empty
-	BadBlock libcommon.Hash
-	state    *Sync
+	Reason             UnwindReason
+	state              *Sync
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }

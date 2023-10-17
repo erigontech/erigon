@@ -264,7 +264,7 @@ Loop:
 		}
 
 		if to > s.BlockNumber {
-			u.UnwindTo(minBlockNum-1, minBlockHash)
+			u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr))
 		}
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{

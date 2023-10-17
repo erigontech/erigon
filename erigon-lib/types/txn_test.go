@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -261,7 +262,8 @@ func TestBlobTxParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTx, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	assert.Equal(t, len(wrapperRlp), int(fatTx.Size))
+	wrapperLenWithEnvelope := rlp.ListPrefixLen(len(wrapperRlp)) + len(wrapperRlp)
+	assert.Equal(t, wrapperLenWithEnvelope, int(fatTx.Size))
 	assert.Equal(t, wrapperRlp, fatTx.Rlp)
 	assert.Equal(t, BlobTxType, fatTx.Type)
 

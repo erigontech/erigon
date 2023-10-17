@@ -318,7 +318,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 
 	newDb, err := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
-	}).Open()
+	}).Open(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(newDb.Close)
 

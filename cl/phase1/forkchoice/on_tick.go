@@ -22,6 +22,7 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 	if currentSlot <= previousSlot {
 		return
 	}
+	f.headHash = libcommon.Hash{}
 	// If this is a new slot, reset store.proposer_boost_root
 	f.proposerBoostRoot = libcommon.Hash{}
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {

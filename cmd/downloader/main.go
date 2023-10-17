@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -380,7 +379,7 @@ func checkChainName(dirs datadir.Dirs, chainName string) error {
 	}
 	db := mdbx.NewMDBX(log.New()).
 		Path(dirs.Chaindata).Label(kv.ChainDB).
-		Flags(func(flags uint) uint { return flags | mdbx2.Accede }).
+		Accede().
 		MustOpen()
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
