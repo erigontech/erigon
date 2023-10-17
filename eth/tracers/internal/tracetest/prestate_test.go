@@ -26,13 +26,13 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -99,11 +99,11 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			var (
 				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 				origin, _ = signer.Sender(tx)
-				txContext = state.TxContext{
+				txContext = evmtypes.TxContext{
 					Origin:   origin,
 					GasPrice: tx.GetFeeCap(),
 				}
-				context = state.BlockContext{
+				context = evmtypes.BlockContext{
 					CanTransfer: core.CanTransfer,
 					Transfer:    core.Transfer,
 					Coinbase:    test.Context.Miner,

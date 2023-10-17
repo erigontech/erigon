@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"
@@ -14,7 +14,7 @@ import (
 
 func TestInterpreterReadonly(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		env := NewEVM(state.BlockContext{}, state.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
 		isEVMSliceTest := rapid.SliceOfN(rapid.Bool(), 1, -1).Draw(t, "tevm")
 		readOnlySliceTest := rapid.SliceOfN(rapid.Bool(), len(isEVMSliceTest), len(isEVMSliceTest)).Draw(t, "readonly")
@@ -269,7 +269,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 			t.Run(testcase.testName+evmsTestcase.suffix, func(t *testing.T) {
 				readonlySliceTest := testcase.readonlySliceTest
 
-				env := NewEVM(state.BlockContext{}, state.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
 				readonliesGot := make([]*readOnlyState, len(testcase.readonlySliceTest))
 				isEVMGot := make([]bool, len(evmsTestcase.emvs))

@@ -18,17 +18,17 @@ package runtime
 
 import (
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 func NewEnv(cfg *Config) *vm.EVM {
-	txContext := state.TxContext{
+	txContext := evmtypes.TxContext{
 		Origin:   cfg.Origin,
 		GasPrice: cfg.GasPrice,
 	}
 
-	blockContext := state.BlockContext{
+	blockContext := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     cfg.GetHashFn,

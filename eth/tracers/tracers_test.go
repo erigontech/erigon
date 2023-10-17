@@ -26,9 +26,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
@@ -66,12 +66,12 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
 	origin, _ := signer.Sender(txn)
-	txContext := state.TxContext{
+	txContext := evmtypes.TxContext{
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
 	excessBlobGas := uint64(50000)
-	context := state.BlockContext{
+	context := evmtypes.BlockContext{
 		CanTransfer:   core.CanTransfer,
 		Transfer:      core.Transfer,
 		Coinbase:      libcommon.Address{},

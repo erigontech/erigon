@@ -20,9 +20,9 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core/state"
 
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -112,7 +112,7 @@ func (al accessList) accessList() types2.AccessList {
 type AccessListTracer struct {
 	excl               map[libcommon.Address]struct{} // Set of account to exclude from the list
 	list               accessList                     // Set of accounts and storage slots touched
-	state              *state.IntraBlockState         // State for nonce calculation of created contracts
+	state              evmtypes.IntraBlockState       // State for nonce calculation of created contracts
 	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during tx execution
 	usedBeforeCreation map[libcommon.Address]struct{} // Set of all contract addresses first used before creation
 }
@@ -122,7 +122,7 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
-func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
+func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
 	excl := make(map[libcommon.Address]struct{})
 	if exclude != nil {
 		excl = exclude
