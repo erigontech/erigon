@@ -542,17 +542,22 @@ var writeListPool = sync.Pool{
 }
 
 func newWriteList() map[string]*libstate.KvList {
-	return writeListPool.Get().(map[string]*libstate.KvList)
+	v := writeListPool.Get().(map[string]*libstate.KvList)
+	for _, tbl := range v {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
+	return v
+	//return writeListPool.Get().(map[string]*libstate.KvList)
 }
 func returnWriteList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
-	for _, tbl := range v {
-		clear(tbl.Keys)
-		clear(tbl.Vals)
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
+	//for _, tbl := range v {
+	//	clear(tbl.Keys)
+	//	clear(tbl.Vals)
+	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	//}
 	writeListPool.Put(v)
 }
 
@@ -568,16 +573,21 @@ var readListPool = sync.Pool{
 }
 
 func newReadList() map[string]*libstate.KvList {
-	return readListPool.Get().(map[string]*libstate.KvList)
+	v := readListPool.Get().(map[string]*libstate.KvList)
+	for _, tbl := range v {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
+	return v
+	//return readListPool.Get().(map[string]*libstate.KvList)
 }
 func returnReadList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
-	for _, tbl := range v {
-		clear(tbl.Keys)
-		clear(tbl.Vals)
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
+	//for _, tbl := range v {
+	//	clear(tbl.Keys)
+	//	clear(tbl.Vals)
+	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	//}
 	readListPool.Put(v)
 }

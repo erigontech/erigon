@@ -47,7 +47,8 @@ func newJournal() *journal {
 }
 func (j *journal) Reset() {
 	j.entries = j.entries[:0]
-	clear(j.dirties)
+	j.dirties = make(map[libcommon.Address]int, len(j.dirties)/2)
+	//clear(j.dirties)
 }
 
 // append inserts a new modification entry to the end of the change journal.
