@@ -16,9 +16,9 @@ Commit hash:
 
 Erigon Command (with flags/config):
 
-Concensus Layer:
+Consensus Layer:
 
-Concensus Layer Command (with flags/config):
+Consensus Layer Command (with flags/config):
 
 Chain/Network: 
 
