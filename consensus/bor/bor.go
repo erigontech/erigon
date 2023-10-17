@@ -1051,6 +1051,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 	headerNumber := header.Number.Uint64()
 
+	if len(withdrawals) > 0 {
+		return nil, nil, errors.New("Bor does not support withdrawals")
+	}
+
+	if header.WithdrawalsHash != nil {
+		return nil, nil, fmt.Errorf("Bor does not support withdrawalHash", "number", headerNumber)
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
@@ -1108,6 +1116,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
+
+	if len(withdrawals) > 0 {
+		return nil, nil, nil, errors.New("Bor does not support withdrawals")
+	}
+
+	if header.WithdrawalsHash != nil {
+		return nil, nil, nil, errors.New("Bor does not support withdrawalHash")
+	}
 
 	headerNumber := header.Number.Uint64()
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
