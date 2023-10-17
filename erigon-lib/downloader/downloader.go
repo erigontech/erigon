@@ -610,7 +610,6 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	db, err = mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
-		SyncPeriod(15 * time.Second).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
 		Path(dbDir).

@@ -96,3 +96,7 @@ func (cc *ExecutionClientDirect) GetBodiesByRange(start, count uint64) ([]*types
 func (cc *ExecutionClientDirect) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
 	return cc.chainRW.GetBodiesByHases(hashes), nil
 }
+
+func (cc *ExecutionClientDirect) FrozenBlocks() uint64 {
+	return cc.chainRW.FrozenBlocks()
+}
