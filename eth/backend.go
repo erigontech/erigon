@@ -859,9 +859,21 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
-			s.logger.Error(err.Error())
-			return
+		if config.SilkwormEnabled && httpRpcCfg.Enabled {
+			go func() {
+				<-ctx.Done()
+				s.silkworm.StopRpcDaemon()
+			}()
+			err = s.silkworm.StartRpcDaemon(chainKv)
+			if err != nil {
+				s.logger.Error(err.Error())
+				return
+			}
+		} else {
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
+				s.logger.Error(err.Error())
+				return
+			}
 		}
 	}()
 
