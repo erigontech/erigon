@@ -3,6 +3,7 @@ package caplin1
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path"
 	"time"
@@ -107,10 +108,10 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		return true
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
-
+	fmt.Println("A")
 	{ // start ticking forkChoice
 		go func() {
-			tickInterval := time.NewTicker(2 * time.Millisecond)
+			tickInterval := time.NewTicker(50 * time.Millisecond)
 			for {
 				select {
 				case <-tickInterval.C:

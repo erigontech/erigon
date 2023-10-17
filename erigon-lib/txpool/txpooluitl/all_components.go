@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
@@ -104,7 +103,6 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	opts := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
-		Flags(func(f uint) uint { return f ^ mdbx2.Durable }).
 		WriteMergeThreshold(3 * 8192).
 		PageSize(uint64(16 * datasize.KB)).
 		GrowthStep(16 * datasize.MB).

@@ -33,6 +33,10 @@ func (m *mockEngine) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.H
 	panic("unimplemented")
 }
 
+func (m *mockEngine) FrozenBlocks() uint64 {
+	panic("unimplemented")
+}
+
 func (m *mockEngine) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (bool, error) {
 	panic("unimplemented")
 }

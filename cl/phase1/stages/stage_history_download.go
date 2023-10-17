@@ -56,33 +56,12 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 	}
 }
 
-func waitForExecutionEngineToBeReady(ctx context.Context, engine execution_client.ExecutionEngine) error {
-	if engine == nil {
-		return nil
-	}
-	checkInterval := time.NewTicker(200 * time.Millisecond)
-	for {
-		select {
-		case <-checkInterval.C:
-			ready, err := engine.Ready()
-			if err != nil {
-				return err
-			}
-			if ready {
-				return nil
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
-	if err := waitForExecutionEngineToBeReady(ctx, cfg.engine); err != nil {
-		return err
-	}
+	// if err := waitForExecutionEngineToBeReady(ctx, cfg.engine); err != nil {
+	// 	return err
+	// }
 	blockRoot := cfg.startingRoot
 	destinationSlot := uint64(0)
 	currentSlot := cfg.startingSlot
@@ -90,16 +69,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		destinationSlot = currentSlot - cfg.dbCfg.PruneDepth
 	}
 
-	executionBlocksCollector := etl.NewCollector("SpawnStageHistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	executionBlocksCollector := etl.NewCollector("HistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionBlocksCollector.Close()
 	// Start the procedure
-	logger.Info("Downloading History", "from", currentSlot)
+	logger.Info("Starting downloading History", "from", currentSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidHash := false
+	foundLatestEth1ValidBlock := false
 	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
-		foundLatestEth1ValidHash = true // skip this if we are not using an engine supporting direct insertion
+		foundLatestEth1ValidBlock = true // skip this if we are not using an engine supporting direct insertion
 	}
 
 	var currEth1Progress atomic.Int64
@@ -114,7 +93,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
-		if !foundLatestEth1ValidHash {
+
+		slot := blk.Block.Slot
+		if destinationSlot <= blk.Block.Slot {
+			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+				return false, err
+			}
+		}
+		if !foundLatestEth1ValidBlock {
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
@@ -125,21 +111,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
+			if currEth1Progress.Load()%100 == 0 {
+				return false, nil
+			}
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidHash = len(bodyChainHeader) > 0
+			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
 
-		slot := blk.Block.Slot
-		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
-				return false, err
-			}
-		}
-		return slot <= destinationSlot && foundLatestEth1ValidHash, nil
+		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -150,6 +133,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		for {
 			select {
 			case <-logInterval.C:
+				if cfg.engine.SupportInsertion() {
+					if ready, err := cfg.engine.Ready(); !ready {
+						if err != nil {
+							log.Warn("could not log progress", "err", err)
+						}
+						continue
+					}
+
+				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				speed := float64(prevProgress-currProgress) / float64(logIntervalTime/time.Second)
@@ -186,6 +178,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	blockBatch := []*types.Block{}
 	blockBatchMaxSize := 1000
+
+	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
 	if err := executionBlocksCollector.Load(tx2, kv.Headers, func(k, vComp []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if cfg.engine == nil || !cfg.engine.SupportInsertion() {
