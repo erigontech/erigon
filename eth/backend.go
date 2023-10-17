@@ -861,7 +861,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	go func() {
 		if config.SilkwormEnabled && httpRpcCfg.Enabled {
 			go func() {
-				<- ctx.Done()
+				<-ctx.Done()
 				s.silkworm.StopRpcDaemon()
 			}()
 			err = s.silkworm.StartRpcDaemon(chainKv)
