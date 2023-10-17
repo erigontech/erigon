@@ -15,6 +15,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -960,7 +961,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		// protect from too far unwind
-		unwindTo = max(unwindTo, applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsTo())
+		unwindTo = cmp.Max(unwindTo, applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsTo())
 		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
 	return false, nil

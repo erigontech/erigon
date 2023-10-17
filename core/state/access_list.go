@@ -32,11 +32,11 @@ func (al *accessList) ContainsAddress(address common.Address) bool {
 }
 
 // Reset
-func (al *accessList) Reset() {
-	clear(al.addresses)
-	clear(al.slots)
-	al.slots = al.slots[:0]
-}
+//func (al *accessList) Reset() {
+//	clear(al.addresses)
+//	clear(al.slots)
+//	al.slots = al.slots[:0]
+//}
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.

@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"golang.org/x/exp/maps"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -37,9 +38,9 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	clear(bd.deliveriesH)
-	clear(bd.requests)
-	clear(bd.peerMap)
+	maps.Clear(bd.deliveriesH)
+	maps.Clear(bd.requests)
+	maps.Clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
 	headHash, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
