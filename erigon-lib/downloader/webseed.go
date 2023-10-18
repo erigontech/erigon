@@ -3,7 +3,6 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -201,24 +200,14 @@ func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url
 	return response, nil
 }
 func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.WebSeedsFromProvider, error) {
-	var bucketName = "erigon-v3-snapshots-" + d.chainName + "-webseed"
-	//v1:base64(accID:accessKeyID:accessKeySecret)
+	//v1:bucketName:accID:accessKeyID:accessKeySecret
 	l := strings.Split(token, ":")
-	if len(l) != 2 {
+	if len(l) != 5 {
 		return nil, fmt.Errorf("token has invalid format, exepcing 'v1:tokenInBase64'")
 	}
-	version, tokenInBase64 := strings.TrimSpace(l[0]), strings.TrimSpace(l[1])
+	version, bucketName, accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2]), strings.TrimSpace(l[3]), strings.TrimSpace(l[4])
 	if version != "v1" {
 		return nil, fmt.Errorf("not supported version: %s", version)
-	}
-	rawDecodedText, err := base64.StdEncoding.DecodeString(tokenInBase64)
-	if err != nil {
-		return nil, err
-	}
-	l = strings.Split(string(rawDecodedText), ":")
-	accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2])
-	if len(l) != 3 {
-		return nil, fmt.Errorf("token has invalid format, exepcing 'accountId:accessKeyId:accessKeySecret'")
 	}
 	var fileName = "webseeds.toml"
 
