@@ -67,9 +67,8 @@ func OpenCaplinDatabase(ctx context.Context,
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration) error {
-	caplinDBPath := path.Join(dirs.CaplinIndexing, "db")
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, caplinDBPath)
-	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinHistory, engine)
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine)
 	if err != nil {
 		return err
 	}
@@ -101,10 +100,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		return true
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
-
 	{ // start ticking forkChoice
 		go func() {
-			tickInterval := time.NewTicker(2 * time.Millisecond)
+			tickInterval := time.NewTicker(50 * time.Millisecond)
 			for {
 				select {
 				case <-tickInterval.C:

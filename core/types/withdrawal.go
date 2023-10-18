@@ -22,11 +22,8 @@ import (
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -40,11 +37,6 @@ type Withdrawal struct {
 	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
 	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
-}
-
-func (obj *Withdrawal) Equal(other *Withdrawal) bool {
-	return obj.Index == other.Index && obj.Validator == other.Validator &&
-		obj.Address == other.Address && obj.Amount == other.Amount
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -82,34 +74,6 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	}
 
 	return rlp.EncodeInt(obj.Amount, w, b[:])
-}
-
-func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	buf = append(buf, ssz.Uint64SSZ(obj.Index)...)
-	buf = append(buf, ssz.Uint64SSZ(obj.Validator)...)
-	buf = append(buf, obj.Address[:]...)
-	buf = append(buf, ssz.Uint64SSZ(obj.Amount)...)
-	return buf, nil
-}
-
-func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < obj.EncodingSizeSSZ() {
-		return fmt.Errorf("[Withdrawal] err: %s", ssz.ErrLowBufferSize)
-	}
-	obj.Index = ssz.UnmarshalUint64SSZ(buf)
-	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
-	copy(obj.Address[:], buf[16:])
-	obj.Amount = ssz.UnmarshalUint64SSZ(buf[36:])
-	return nil
-}
-
-func (obj *Withdrawal) EncodingSizeSSZ() int {
-	// Validator Index (8 bytes) + Index (8 bytes) + Amount (8 bytes) + address length
-	return 24 + length.Addr
-}
-
-func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
-	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address[:], obj.Amount)
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
