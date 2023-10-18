@@ -315,7 +315,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // minutes on mainnet.  The current limit has been chosen arbitrarily as
 // 'useful' without likely being overly computationally intense.  This parameter
 // could possibly be made configurable in the future if needed.
-var maxGetProofRewindBlockCount uint64 = 1_000
 
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
@@ -353,8 +352,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	rl := trie.NewRetainList(0)
 	var loader *trie.FlatDBTrieLoader
 	if blockNr < latestBlock {
-		if latestBlock-blockNr > maxGetProofRewindBlockCount {
-			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
+		if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
+			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
 		}
 		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp)
 		defer batch.Rollback()
