@@ -21,7 +21,6 @@ import (
 	"math/big"
 	"sort"
 	"strconv"
-	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
@@ -458,12 +457,12 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	JaipurBlock                *big.Int                  `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
-	DelhiBlock                 *big.Int                  `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
-	IndoreBlock                *big.Int                  `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
-	ShanghaiBlock              *big.Int                  `json:"shanghaiBlock"`              // Shanghai switch block (nil = no fork, 0 = already in agra)
-	StateSyncConfirmationDelay map[string]uint64         `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
-	BurntContract              map[string]common.Address `json:"burntContract"`              // Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
+	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
+	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
+	ShanghaiBlock              *big.Int          `json:"shanghaiBlock"`              // Shanghai switch block (nil = no fork, 0 = already in agra)
+	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
+	BurntContract              map[string]string `json:"burntContract"`              // governance contract where the token will be sent to and burnt in london fork
 
 	sprints sprints
 }
@@ -537,36 +536,15 @@ func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return c.calcConfig(c.BackupMultiplier, number)
+	return calcConfig(c.BackupMultiplier, number)
 }
 
-func (c *BorConfig) CalculateBurntContractAddress(number uint64) common.Address {
-	var previousBlock atomic.Pointer[uint64]
-	var previousAddress, result common.Address
-
-	for block, address := range c.BurntContract {
-		currentBlock, _ := strconv.ParseUint(block, 10, 64)
-
-		if previousBlock.Load() == nil {
-			previousBlock.Store(&currentBlock)
-			previousAddress = address
-		}
-
-		if number >= currentBlock {
-			result = address
-			previousBlock.Store(&currentBlock)
-			previousAddress = address
-			continue
-		}
-
-		return previousAddress
-	}
-
-	return result
+func (c *BorConfig) CalculateBurntContract(number uint64) string {
+	return calcConfig(c.BurntContract, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return c.calcConfig(c.Period, number)
+	return calcConfig(c.Period, number)
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
@@ -589,15 +567,23 @@ func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
 
-func (c *BorConfig) calcConfig(field map[string]uint64, number uint64) uint64 {
-	keys := sortMapKeys(field)
+func calcConfig[T uint64 | string](field map[string]T, number uint64) T {
+	keys := make([]string, 0, len(field))
+	for k := range field {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
 	for i := 0; i < len(keys)-1; i++ {
 		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
 		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-		if number > valUint && number < valUintNext {
+
+		if number >= valUint && number < valUintNext {
 			return field[keys[i]]
 		}
 	}
+
 	return field[keys[len(keys)-1]]
 }
 
