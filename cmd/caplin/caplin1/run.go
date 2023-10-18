@@ -37,7 +37,6 @@ func OpenCaplinDatabase(ctx context.Context,
 	engine execution_client.ExecutionEngine,
 ) (persistence.BeaconChainDatabase, kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
-	os.Remove(dataDirIndexer)
 	os.MkdirAll(dbPath, 0700)
 
 	db := mdbx.MustOpen(dataDirIndexer)
