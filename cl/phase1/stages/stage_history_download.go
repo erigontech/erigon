@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -33,14 +32,14 @@ type StageHistoryReconstructionCfg struct {
 	startingSlot uint64
 	tmpdir       string
 	db           persistence.BeaconChainDatabase
-	indiciesDB   *sql.DB
+	indiciesDB   kv.RwDB
 	engine       execution_client.ExecutionEngine
 	logger       log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB *sql.DB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:   genesisCfg,
 		beaconCfg:    beaconCfg,
@@ -83,7 +82,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
-	tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return err
 	}

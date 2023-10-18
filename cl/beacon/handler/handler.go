@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"database/sql"
 	"net/http"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -17,14 +17,14 @@ type ApiHandler struct {
 	mux chi.Router
 
 	blockSource     persistence.RawBeaconBlockChain
-	indiciesDB      *sql.DB
+	indiciesDB      kv.RoDB
 	genesisCfg      *clparams.GenesisConfig
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB *sql.DB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool}
 }
 
