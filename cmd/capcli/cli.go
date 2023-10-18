@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -13,7 +14,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
+	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
@@ -30,6 +35,8 @@ var CLI struct {
 
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
+
+	Chain Chain `cmd:"" help:"download the entire chain from reqresp network"`
 }
 
 type chainCfg struct {
@@ -317,4 +324,63 @@ func (m *Migrate) Run(ctx *Context) error {
 		}
 	}
 	return nil
+}
+
+type Chain struct {
+	chainCfg
+	withSentinel
+	outputFolder
+}
+
+func (c *Chain) Run(ctx *Context) error {
+	s, err := c.withSentinel.connectSentinel()
+	if err != nil {
+		return err
+	}
+
+	genesisConfig, _, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	aferoFS, err := openFs(c.Datadir, "caplin/beacon")
+	if err != nil {
+		return err
+	}
+
+	db := mdbx.MustOpen("caplin/db")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, clparams.GetCheckpointSyncEndpoint(networkType))
+	if err != nil {
+		return err
+	}
+
+	bRoot, err := bs.BlockRoot()
+	if err != nil {
+		return err
+	}
+
+	err = beacon.SetStatus(
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisEpoch,
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisSlot)
+	if err != nil {
+		return err
+	}
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
+	cfg := stages.StageHistoryReconstruction(downloader, beaconDB, db, nil, genesisConfig, beaconConfig, db_config.DatabaseConfiguration{
+		PruneDepth: math.MaxUint64,
+	}, bRoot, bs.Slot(), "/tmp", log.Root())
+	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }

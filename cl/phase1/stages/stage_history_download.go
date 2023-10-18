@@ -132,7 +132,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		for {
 			select {
 			case <-logInterval.C:
-				if cfg.engine.SupportInsertion() {
+				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(); !ready {
 						if err != nil {
 							log.Warn("could not log progress", "err", err)
