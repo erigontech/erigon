@@ -1,3 +1,6 @@
+# DEPRECATED
+> :warning: **WARNING** This repo has been deprecated in favour of the upstrean repo that support Polygon PoS natively and stable to use now.
+
 # Erigon
 
 This repository is a fork of the Erigon repository (https://github.com/ledgerwatch/erigon). Our long term plan is to use and support upstream Erigon. We decided, in consultation with the Erigon team, to create a short term fork that we can test for stability and maintain. This is a short-to-medium-term mitigation strategy because Erigon is going through a period of rapid changes that will likely be breaking and not backward compatible.
