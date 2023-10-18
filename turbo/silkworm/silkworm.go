@@ -29,24 +29,25 @@ package silkworm
 extern "C" {
 #endif
 
+typedef struct MDBX_env MDBX_env;
 typedef struct MDBX_txn MDBX_txn;
 
-#define SILKWORM_OK                  0
-#define SILKWORM_INTERNAL_ERROR      1
-#define SILKWORM_UNKNOWN_ERROR       2
-#define SILKWORM_INVALID_HANDLE      3
-#define SILKWORM_INVALID_PATH        4
-#define SILKWORM_INVALID_SNAPSHOT    5
-#define SILKWORM_INVALID_MDBX_TXN    6
+#define SILKWORM_OK 0
+#define SILKWORM_INTERNAL_ERROR 1
+#define SILKWORM_UNKNOWN_ERROR 2
+#define SILKWORM_INVALID_HANDLE 3
+#define SILKWORM_INVALID_PATH 4
+#define SILKWORM_INVALID_SNAPSHOT 5
+#define SILKWORM_INVALID_MDBX_TXN 6
 #define SILKWORM_INVALID_BLOCK_RANGE 7
-#define SILKWORM_BLOCK_NOT_FOUND     8
-#define SILKWORM_UNKNOWN_CHAIN_ID    9
-#define SILKWORM_MDBX_ERROR          10
-#define SILKWORM_INVALID_BLOCK       11
-#define SILKWORM_DECODING_ERROR      12
-#define SILKWORM_TOO_MANY_INSTANCES  13
-#define SILKWORM_INSTANCE_NOT_FOUND  14
-#define SILKWORM_TERMINATION_SIGNAL  15
+#define SILKWORM_BLOCK_NOT_FOUND 8
+#define SILKWORM_UNKNOWN_CHAIN_ID 9
+#define SILKWORM_MDBX_ERROR 10
+#define SILKWORM_INVALID_BLOCK 11
+#define SILKWORM_DECODING_ERROR 12
+#define SILKWORM_TOO_MANY_INSTANCES 13
+#define SILKWORM_INSTANCE_NOT_FOUND 14
+#define SILKWORM_TERMINATION_SIGNAL 15
 
 typedef struct SilkwormHandle SilkwormHandle;
 
@@ -82,6 +83,10 @@ struct SilkwormChainSnapshot {
 
 SILKWORM_EXPORT int silkworm_add_snapshot(SilkwormHandle* handle, struct SilkwormChainSnapshot* snapshot) SILKWORM_NOEXCEPT;
 
+SILKWORM_EXPORT int silkworm_start_rpcdaemon(SilkwormHandle* handle, MDBX_env* env) SILKWORM_NOEXCEPT;
+
+SILKWORM_EXPORT int silkworm_stop_rpcdaemon(SilkwormHandle* handle) SILKWORM_NOEXCEPT;
+
 SILKWORM_EXPORT int silkworm_execute_blocks(
     SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block, uint64_t max_block,
     uint64_t batch_size, bool write_change_sets, bool write_receipts, bool write_call_traces,
@@ -109,6 +114,18 @@ typedef int (*silkworm_add_snapshot_func)(SilkwormHandle* handle, struct Silkwor
 
 int call_silkworm_add_snapshot_func(void* func_ptr, SilkwormHandle* handle, struct SilkwormChainSnapshot* snapshot) {
     return ((silkworm_add_snapshot_func)func_ptr)(handle, snapshot);
+}
+
+typedef int (*silkworm_start_rpcdaemon_func)(SilkwormHandle* handle, MDBX_env* env);
+
+int call_silkworm_start_rpcdaemon_func(void* func_ptr, SilkwormHandle* handle, MDBX_env* env) {
+    return ((silkworm_start_rpcdaemon_func)func_ptr)(handle, env);
+}
+
+typedef int (*silkworm_stop_rpcdaemon_func)(SilkwormHandle* handle);
+
+int call_silkworm_stop_rpcdaemon_func(void* func_ptr, SilkwormHandle* handle) {
+    return ((silkworm_stop_rpcdaemon_func)func_ptr)(handle);
 }
 
 typedef int (*silkworm_execute_blocks_func)(SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block,
@@ -163,12 +180,14 @@ const (
 var ErrInterrupted = errors.New("interrupted")
 
 type Silkworm struct {
-	dllHandle     unsafe.Pointer
-	instance      *C.SilkwormHandle
-	initFunc      unsafe.Pointer
-	finiFunc      unsafe.Pointer
-	addSnapshot   unsafe.Pointer
-	executeBlocks unsafe.Pointer
+	dllHandle      unsafe.Pointer
+	instance       *C.SilkwormHandle
+	initFunc       unsafe.Pointer
+	finiFunc       unsafe.Pointer
+	addSnapshot    unsafe.Pointer
+	startRpcDaemon unsafe.Pointer
+	stopRpcDaemon  unsafe.Pointer
+	executeBlocks  unsafe.Pointer
 }
 
 func New(dllPath string) (*Silkworm, error) {
@@ -189,17 +208,27 @@ func New(dllPath string) (*Silkworm, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load silkworm function silkworm_add_snapshot: %w", err)
 	}
+	startRpcDaemon, err := LoadFunction(dllHandle, "silkworm_start_rpcdaemon")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load silkworm function silkworm_start_rpcdaemon: %w", err)
+	}
+	stopRpcDaemon, err := LoadFunction(dllHandle, "silkworm_stop_rpcdaemon")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load silkworm function silkworm_stop_rpcdaemon: %w", err)
+	}
 	executeBlocks, err := LoadFunction(dllHandle, "silkworm_execute_blocks")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load silkworm function silkworm_execute_blocks: %w", err)
 	}
 
 	silkworm := &Silkworm{
-		dllHandle:     dllHandle,
-		initFunc:      initFunc,
-		finiFunc:      finiFunc,
-		addSnapshot:   addSnapshot,
-		executeBlocks: executeBlocks,
+		dllHandle:      dllHandle,
+		initFunc:       initFunc,
+		finiFunc:       finiFunc,
+		addSnapshot:    addSnapshot,
+		startRpcDaemon: startRpcDaemon,
+		stopRpcDaemon:  stopRpcDaemon,
+		executeBlocks:  executeBlocks,
 	}
 	status := C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance) //nolint:gocritic
 	if status == SILKWORM_OK {
@@ -283,6 +312,25 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 		return nil
 	}
 	return fmt.Errorf("silkworm_add_snapshot error %d", status)
+}
+
+func (s *Silkworm) StartRpcDaemon(db kv.RoDB) error {
+	cEnv := (*C.MDBX_env)(db.CHandle())
+	status := C.call_silkworm_start_rpcdaemon_func(s.startRpcDaemon, s.instance, cEnv)
+	// Handle successful execution
+	if status == SILKWORM_OK {
+		return nil
+	}
+	return fmt.Errorf("silkworm_start_rpcdaemon error %d", status)
+}
+
+func (s *Silkworm) StopRpcDaemon() error {
+	status := C.call_silkworm_stop_rpcdaemon_func(s.stopRpcDaemon, s.instance)
+	// Handle successful execution
+	if status == SILKWORM_OK {
+		return nil
+	}
+	return fmt.Errorf("silkworm_stop_rpcdaemon error %d", status)
 }
 
 func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (lastExecutedBlock uint64, err error) {
