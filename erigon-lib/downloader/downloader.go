@@ -102,7 +102,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed},
+		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, chainName: cfg.ChainName},
 		logger:            logger,
 		verbosity:         verbosity,
 	}
@@ -119,7 +119,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedS3Tokens, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)

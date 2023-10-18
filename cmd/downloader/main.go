@@ -168,7 +168,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseeds)
+	webseedsList := append(common.CliString2Array(webseeds), snapcfg.KnownWebseeds[chain]...)
+	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain)
 	if err != nil {
 		return err
 	}
