@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -1456,12 +1455,12 @@ func keyIsBefore(k1, k2 []byte) bool {
 func UnmarshalTrieNodeTyped(v []byte) (hasState, hasTree, hasHash uint16, hashes []libcommon.Hash, rootHash libcommon.Hash) {
 	hasState, hasTree, hasHash, v = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
 	if bits.OnesCount16(hasHash)+1 == len(v)/length2.Hash {
-		rootHash.SetBytes(common.CopyBytes(v[:32]))
+		rootHash.SetBytes(libcommon.CopyBytes(v[:32]))
 		v = v[32:]
 	}
 	hashes = make([]libcommon.Hash, len(v)/length2.Hash)
 	for i := 0; i < len(hashes); i++ {
-		hashes[i].SetBytes(common.CopyBytes(v[i*length2.Hash : (i+1)*length2.Hash]))
+		hashes[i].SetBytes(libcommon.CopyBytes(v[i*length2.Hash : (i+1)*length2.Hash]))
 	}
 	return
 }
@@ -1510,11 +1509,11 @@ func CastTrieNodeValue(hashes, rootHash []byte) []libcommon.Hash {
 	to := make([]libcommon.Hash, len(hashes)/length2.Hash+len(rootHash)/length2.Hash)
 	i := 0
 	if len(rootHash) > 0 {
-		to[0].SetBytes(common.CopyBytes(rootHash))
+		to[0].SetBytes(libcommon.CopyBytes(rootHash))
 		i++
 	}
 	for j := 0; j < len(hashes)/length2.Hash; j++ {
-		to[i].SetBytes(common.CopyBytes(hashes[j*length2.Hash : (j+1)*length2.Hash]))
+		to[i].SetBytes(libcommon.CopyBytes(hashes[j*length2.Hash : (j+1)*length2.Hash]))
 		i++
 	}
 	return to

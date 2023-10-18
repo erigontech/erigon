@@ -193,7 +193,7 @@ func writeIndex(blocknum uint64, changes *historyv2.ChangeSet, bucket string, ch
 			if _, err = chunk.WriteTo(buf); err != nil {
 				return err
 			}
-			return changeDb.Put(bucket, chunkKey, common.CopyBytes(buf.Bytes()))
+			return changeDb.Put(bucket, chunkKey, libcommon.CopyBytes(buf.Bytes()))
 		}); err != nil {
 			return err
 		}

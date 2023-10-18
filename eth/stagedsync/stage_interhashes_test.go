@@ -91,7 +91,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	accountTrieA := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
-		accountTrieA[string(k)] = common.CopyBytes(v)
+		accountTrieA[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -118,7 +118,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	storageTrie := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrie[string(k)] = common.CopyBytes(v)
+		storageTrie[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -157,7 +157,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	accountTrieB := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
-		accountTrieB[string(k)] = common.CopyBytes(v)
+		accountTrieB[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -276,7 +276,7 @@ func TestStorageDeletion(t *testing.T) {
 
 	storageTrieA := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrieA[string(k)] = common.CopyBytes(v)
+		storageTrieA[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -307,7 +307,7 @@ func TestStorageDeletion(t *testing.T) {
 
 	storageTrieB := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrieB[string(k)] = common.CopyBytes(v)
+		storageTrieB[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)

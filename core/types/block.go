@@ -1494,7 +1494,7 @@ func (b *Block) ParentHash() libcommon.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() libcommon.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() libcommon.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() libcommon.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte               { return common.CopyBytes(b.header.Extra) }
+func (b *Block) Extra() []byte               { return libcommon.CopyBytes(b.header.Extra) }
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
 		return nil

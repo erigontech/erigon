@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
-	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -161,7 +160,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 		headerHash := libcommon.BytesToHash(k[8:])
 		if notifyToHash == headerHash {
-			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
 
 		return libcommon.Stopped(ctx.Done())

@@ -365,7 +365,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
+				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
@@ -532,11 +532,11 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 		}
 		if len(k) > length.Addr {
-			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
 				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
 				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}

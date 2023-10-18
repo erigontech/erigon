@@ -377,7 +377,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block2.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +393,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -424,7 +424,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	for _, addr := range addrs {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -555,7 +555,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	copy(startKey[:length.Addr], addr1.Bytes())
 
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block2.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -569,7 +569,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		Changes: make([]historyv2.Change, 0),
 	}
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -597,7 +597,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4.Changes = block4.Changes[:0]
 	for _, addr := range []libcommon.Address{addr1, addr2} {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block4.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -617,7 +617,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		Changes: make([]historyv2.Change, 0),
 	}
 	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -641,7 +641,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6.Changes = block6.Changes[:0]
 	for _, addr := range []libcommon.Address{addr1, addr2} {
 		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			err := block6.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -730,7 +730,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	})
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block2.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -762,7 +762,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block4.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -794,7 +794,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 
 	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		innerErr := block6.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
@@ -923,7 +923,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		}
 
 		if err := WalkAsOfAccounts(tx, libcommon.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
-			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
+			innerErr := obtained.Add(libcommon.CopyBytes(k), libcommon.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
 			}
@@ -1057,7 +1057,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 		for _, addr := range addrs {
 			if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-				if innerErr := obtained.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v)); innerErr != nil {
+				if innerErr := obtained.Add(append(libcommon.CopyBytes(kAddr), kLoc...), libcommon.CopyBytes(v)); innerErr != nil {
 					t.Fatal(innerErr)
 				}
 				return true, nil

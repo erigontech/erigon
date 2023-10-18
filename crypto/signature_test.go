@@ -19,10 +19,10 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 )

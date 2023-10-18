@@ -421,7 +421,7 @@ func iterateOverCode(chaindata string) error {
 		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[libcommon.BytesToHash(k)] = common.CopyBytes(v)
+				hashes[libcommon.BytesToHash(k)] = libcommon.CopyBytes(v)
 			}
 			return nil
 		}); err != nil {

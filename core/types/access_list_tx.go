@@ -30,7 +30,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -52,7 +51,7 @@ func (tx AccessListTx) copy() *AccessListTx {
 				},
 				Nonce: tx.Nonce,
 				To:    tx.To, // TODO: copy pointed-to address
-				Data:  common.CopyBytes(tx.Data),
+				Data:  libcommon.CopyBytes(tx.Data),
 				Gas:   tx.Gas,
 				// These are copied below.
 				Value: new(uint256.Int),
