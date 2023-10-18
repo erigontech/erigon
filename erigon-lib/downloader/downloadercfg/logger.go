@@ -139,15 +139,24 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//if strings.Contains(str, "don't want conns") { // suppress useless errors
 		//	break
 		//}
-		//if strings.Contains(str, "torrent closed") { // suppress useless errors
-		//	break
-		//}
+		if strings.Contains(str, "torrent closed") { // suppress useless errors
+			break
+		}
 
 		if skip {
 			break
 		}
 		log.Error(str)
 	default:
+		str := r.String()
+		skip := false
+		if strings.Contains(str, "unhandled response status") { // suppress useless errors
+			break
+		}
+		if skip {
+			break
+		}
+
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
 }

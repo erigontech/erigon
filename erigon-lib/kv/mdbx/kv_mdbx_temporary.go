@@ -19,6 +19,7 @@ package mdbx
 import (
 	"context"
 	"os"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -81,4 +82,8 @@ func (t *TemporaryMdbx) PageSize() uint64 {
 func (t *TemporaryMdbx) Close() {
 	t.db.Close()
 	os.RemoveAll(t.path)
+}
+
+func (t *TemporaryMdbx) CHandle() unsafe.Pointer {
+	panic("CHandle not implemented")
 }
