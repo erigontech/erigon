@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/erigontech/mdbx-go v0.35.0
 	github.com/ledgerwatch/erigon-lib v1.0.0
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231018031852-9839f2f11373
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -192,6 +191,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231018064259-ab85858d9783 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
