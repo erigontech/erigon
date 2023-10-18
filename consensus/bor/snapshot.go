@@ -146,7 +146,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			delete(snap.Recents, number-sprintLen)
 		}
 		// Resolve the authorization key and check against signers
-		signer, err := ecrecover(header, s.sigcache, s.config)
+		signer, err := Ecrecover(header, s.sigcache, s.config)
 
 		if err != nil {
 			return nil, err

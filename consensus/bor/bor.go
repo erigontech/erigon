@@ -146,7 +146,7 @@ var (
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
+func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
@@ -487,7 +487,7 @@ func (c *Bor) HeaderProgress(p HeaderProgress) {
 // This is thread-safe (only access the header and config (which is never updated),
 // as well as signatures, which are lru.ARCCache, which is thread-safe)
 func (c *Bor) Author(header *types.Header) (libcommon.Address, error) {
-	return ecrecover(header, c.Signatures, c.config)
+	return Ecrecover(header, c.Signatures, c.config)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -691,7 +691,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 				snap := snap
 				g.Go(func() error {
-					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					_, _ = Ecrecover(header, snap.sigcache, snap.config)
 					return nil
 				})
 			}
@@ -859,7 +859,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		return errUnknownBlock
 	}
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.Signatures, c.config)
+	signer, err := Ecrecover(header, c.Signatures, c.config)
 	if err != nil {
 		return err
 	}

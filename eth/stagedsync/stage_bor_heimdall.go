@@ -27,11 +27,13 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -577,10 +579,24 @@ func PersistValidatorSets(
 				return fmt.Errorf("snap.Store (0): %w", err)
 			}
 			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
-			initialHeaders := make([]*types.Header, 0, 128)
+			g := errgroup.Group{}
+			g.SetLimit(estimate.AlmostAllCPUs())
+			defer g.Wait()
+
+			batchSize := 128 // must be < inmemorySignatures
+			initialHeaders := make([]*types.Header, 0, batchSize)
 			parentHeader := zeroHeader
 			for i := uint64(1); i <= blockNum; i++ {
 				header := chain.GetHeaderByNumber(i)
+				{
+					// `snap.apply` bottleneck - is recover of signer.
+					// to speedup: recover signer in background goroutines and save in `sigcache`
+					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+					g.Go(func() error {
+						_, _ = bor.Ecrecover(header, signatures, config)
+						return nil
+					})
+				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
