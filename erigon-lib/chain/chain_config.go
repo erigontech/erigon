@@ -199,7 +199,7 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
-// IsBorShanghai returns whether num is either equal to the Gray Glacier (EIP-5133) fork block or greater.
+// IsBorShanghai returns whether num is either equal to the BorShanghai fork block or greater.
 func (c *Config) IsBorShanghai(num uint64) bool {
 	if c == nil || c.Bor == nil {
 		return false
