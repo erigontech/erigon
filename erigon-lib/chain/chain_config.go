@@ -198,12 +198,12 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
-// IsBorShanghai returns whether num is either equal to the BorShanghai fork block or greater.
-func (c *Config) IsBorShanghai(num uint64) bool {
+// IsAgra returns whether num is either equal to the Agra fork block or greater.
+func (c *Config) IsAgra(num uint64) bool {
 	if c == nil || c.Bor == nil {
 		return false
 	}
-	return isForked(c.Bor.ShanghaiBlock, num)
+	return isForked(c.Bor.AgraBlock, num)
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
@@ -460,7 +460,7 @@ type BorConfig struct {
 	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
 	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
 	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
-	ShanghaiBlock              *big.Int          `json:"shanghaiBlock"`              // Shanghai switch block (nil = no fork, 0 = already in agra)
+	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already in agra)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 	BurntContract              map[string]string `json:"burntContract"`              // governance contract where the token will be sent to and burnt in london fork
 
@@ -559,8 +559,8 @@ func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
 }
 
-func (c *BorConfig) IsShanghai(number uint64) bool {
-	return isForked(c.ShanghaiBlock, number)
+func (c *BorConfig) IsAgra(number uint64) bool {
+	return isForked(c.AgraBlock, number)
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
@@ -650,11 +650,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                           *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                 bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul           bool
-	IsBerlin, IsLondon, IsShanghai, IsBorShanghai, IsCancun, IsPrague bool
-	IsEip1559FeeCollector, IsAura                                     bool
+	ChainID                                                    *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon          bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul    bool
+	IsBerlin, IsLondon, IsShanghai, IsAgra, IsCancun, IsPrague bool
+	IsEip1559FeeCollector, IsAura                              bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -676,7 +676,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
 		IsShanghai:            c.IsShanghai(time),
-		IsBorShanghai:         c.IsBorShanghai(num),
+		IsAgra:                c.IsAgra(num),
 		IsCancun:              c.IsCancun(time),
 		IsPrague:              c.IsPrague(time),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),

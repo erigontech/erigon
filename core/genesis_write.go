@@ -513,7 +513,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsShanghai(g.Number) {
+	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsAgra(g.Number) {
 		withdrawals = []*types.Withdrawal{}
 	}
 

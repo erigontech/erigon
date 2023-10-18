@@ -219,8 +219,8 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
-	borShanghaiBlock        atomic.Pointer[uint64]
-	isPostBorShanghai       atomic.Bool
+	AgraBlock               atomic.Pointer[uint64]
+	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	maxBlobsPerBlock        uint64
@@ -610,7 +610,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		return false, 0, nil // Too early
 	}
 
-	isShanghai := p.isShanghai() || p.isBorShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	best := p.pending.best
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
@@ -730,7 +730,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
 }
 
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai() || p.isBorShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	if isShanghai {
 		if txn.DataLen > fixedgas.MaxInitCodeSize {
 			return txpoolcfg.InitCodeTooLarge
@@ -885,16 +885,16 @@ func (p *TxPool) isShanghai() bool {
 	return activated
 }
 
-func (p *TxPool) isBorShanghai() bool {
+func (p *TxPool) isAgra() bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostBorShanghai.Load()
+	set := p.isPostAgra.Load()
 	if set {
 		return true
 	}
-	if p.borShanghaiBlock.Load() == nil {
+	if p.AgraBlock.Load() == nil {
 		return false
 	}
-	shanghaiBlock := *p.borShanghaiBlock.Load()
+	shanghaiBlock := *p.AgraBlock.Load()
 
 	// a zero here means Shanghai is always active
 	if shanghaiBlock == 0 {
