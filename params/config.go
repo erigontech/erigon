@@ -59,13 +59,13 @@ var (
 	BorDevnetGenesisHash           = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash              = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash              = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-	GnosisDencun0DevnetGenesisHash = libcommon.HexToHash("0x15b49fa96ab5cd1ffe6e76ed93c56fc6e4d5a38ece4eb6e8416873263a18f186")
+	GnosisDencun0DevnetGenesisHash = libcommon.HexToHash("0x59055365d8dba222b2c6c037a064cc9be9fc1726bf0ce779a16e792531c2ffe5")
 )
 
 var (
 	GnosisGenesisStateRoot       = libcommon.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 	ChiadoGenesisStateRoot       = libcommon.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
-	GnosisDencun0DevnetStateRoot = libcommon.HexToHash("0xe989527b3e44a1521ad2cdcfa8800b14d839f38a6c3c8b0adab647ea16a8adf9")
+	GnosisDencun0DevnetStateRoot = libcommon.HexToHash("0xfd6db11ed8ad0fac40e5e9b218d2b1304725c7d07c3f3571dad6c60a13e1d858")
 )
 
 var (
