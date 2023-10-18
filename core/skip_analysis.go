@@ -20,8 +20,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-
-	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 )
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
