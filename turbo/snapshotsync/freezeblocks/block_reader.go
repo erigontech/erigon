@@ -1140,7 +1140,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx.KeyCount() == 0 {
 			continue
 		}
-		offset := sn.idx.OrdinalLookup(spanId)
+		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
