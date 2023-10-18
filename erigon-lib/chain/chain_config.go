@@ -455,14 +455,13 @@ type BorConfig struct {
 	ValidatorContract     string            `json:"validatorContract"`     // Validator set contract
 	StateReceiverContract string            `json:"stateReceiverContract"` // State receiver contract
 
-	OverrideStateSyncRecords    map[string]int         `json:"overrideStateSyncRecords"` // override state records count
-	BlockAlloc                  map[string]interface{} `json:"blockAlloc"`
-	Eip1559FeeCollectorPostAgra common.Address         `json:"eip1559FeeCollector,omitempty"` // (Optional) Address where burnt EIP-1559 fees go to
+	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
+	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
 	JaipurBlock                *big.Int                  `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
 	DelhiBlock                 *big.Int                  `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
 	IndoreBlock                *big.Int                  `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
-	ShanghaiBlock              *big.Int                  `json:"shanghaiBlock`               // Shanghai switch block (nil = no fork, 0 = already in agra)
+	ShanghaiBlock              *big.Int                  `json:"shanghaiBlock"`              // Shanghai switch block (nil = no fork, 0 = already in agra)
 	StateSyncConfirmationDelay map[string]uint64         `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 	BurntContract              map[string]common.Address `json:"burntContract"`              // Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
