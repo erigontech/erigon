@@ -383,6 +383,9 @@ func runPeer(
 		if err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
 		}
+
+		peerInfo.peer.BytesTransfered += int(msg.Size)
+
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
@@ -1036,6 +1039,15 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 	}
 
 	return &reply, nil
+}
+
+func (ss *GrpcServer) DiagnosticsPeersData() []*p2p.PeerInfo {
+	if ss.P2pServer == nil {
+		return []*p2p.PeerInfo{}
+	}
+
+	peers := ss.P2pServer.PeersInfo()
+	return peers
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {

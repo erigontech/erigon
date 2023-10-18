@@ -1,9 +1,7 @@
 package diagnostics
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -65,8 +63,8 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 	if diag, ok := node.Backend().Sentinel().(peers.PeerStatisticsGetter); ok {
 		statisticsArray = diag.GetPeersStatistics()
 	} else {
-		err := errors.New("Sentinel does not support peer statistics")
-		return nil, err
+		//err := errors.New("Sentinel does not support peer statistics")
+		return []*PeerResponse{}, nil
 	}
 
 	peers := make([]*PeerResponse, 0, len(statisticsArray))
@@ -98,30 +96,36 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 }
 
 func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
-	reply, err := node.Backend().Peers(context.Background())
 
-	if err != nil {
-		return nil, err
-	}
+	reply := node.Backend().DiagnosticsPeersData()
 
-	peers := make([]*PeerResponse, 0, len(reply.Peers))
+	peers := make([]*PeerResponse, 0, len(reply))
 
-	for _, rpcPeer := range reply.Peers {
+	for _, rpcPeer := range reply {
+		var bin = 0
+		var bout = 0
+
+		if rpcPeer.Network.Inbound {
+			bin = rpcPeer.BytesTransfered
+		} else {
+			bout = rpcPeer.BytesTransfered
+		}
+
 		peer := PeerResponse{
-			ENR:      rpcPeer.Enr,
+			ENR:      rpcPeer.ENR,
 			Enode:    rpcPeer.Enode,
-			ID:       rpcPeer.Id,
+			ID:       rpcPeer.ID,
 			Name:     rpcPeer.Name,
-			BytesIn:  0,
-			BytesOut: 0,
+			BytesIn:  bin,
+			BytesOut: bout,
 			Type:     "Sentry",
 			Caps:     rpcPeer.Caps,
 			Network: PeerNetworkInfo{
-				LocalAddress:  rpcPeer.ConnLocalAddr,
-				RemoteAddress: rpcPeer.ConnRemoteAddr,
-				Inbound:       rpcPeer.ConnIsInbound,
-				Trusted:       rpcPeer.ConnIsTrusted,
-				Static:        rpcPeer.ConnIsStatic,
+				LocalAddress:  rpcPeer.Network.LocalAddress,
+				RemoteAddress: rpcPeer.Network.RemoteAddress,
+				Inbound:       rpcPeer.Network.Inbound,
+				Trusted:       rpcPeer.Network.Trusted,
+				Static:        rpcPeer.Network.Static,
 			},
 			Protocols: nil,
 		}

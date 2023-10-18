@@ -1182,6 +1182,16 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	return &reply, nil
 }
 
+func (s *Ethereum) DiagnosticsPeersData() []*p2p.PeerInfo {
+	var reply []*p2p.PeerInfo
+	for _, sentryServer := range s.sentryServers {
+		peers := sentryServer.DiagnosticsPeersData()
+		reply = append(reply, peers...)
+	}
+
+	return reply
+}
+
 func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
 		_, err := sentryClient.AddPeer(ctx, &proto_sentry.AddPeerRequest{Url: req.Url})
