@@ -40,7 +40,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// This is a replica of `(h *Header) GetValidatorBytes` function
+// the following 2 functions are replica for the test
+// This is a replica of `bor.GetValidatorBytes` function
 // This was needed because currently, `IsParallelUniverse` will always return false.
 func GetValidatorBytesTest(h *Header) []byte {
 	if len(h.Extra) < ExtraVanityLength+ExtraSealLength {
@@ -48,13 +49,38 @@ func GetValidatorBytesTest(h *Header) []byte {
 		return nil
 	}
 
-	var blockExtraData BlockExtraData
+	var blockExtraData BlockExtraDataTest
 	if err := rlp.DecodeBytes(h.Extra[ExtraVanityLength:len(h.Extra)-ExtraSealLength], &blockExtraData); err != nil {
 		log.Error("error while decoding block extra data", "err", err)
 		return nil
 	}
 
 	return blockExtraData.ValidatorBytes
+}
+
+func GetTxDependencyTest(b *Block) [][]uint64 {
+	if len(b.header.Extra) < ExtraVanityLength+ExtraSealLength {
+		log.Error("length of extra less is than vanity and seal")
+		return nil
+	}
+
+	var blockExtraData BlockExtraDataTest
+	if err := rlp.DecodeBytes(b.header.Extra[ExtraVanityLength:len(b.header.Extra)-ExtraSealLength], &blockExtraData); err != nil {
+		log.Error("error while decoding block extra data", "err", err)
+		return nil
+	}
+
+	return blockExtraData.TxDependency
+}
+
+type BlockExtraDataTest struct {
+	// Validator bytes of bor
+	ValidatorBytes []byte
+
+	// length of TxDependency          ->   n (n = number of transactions in the block)
+	// length of TxDependency[i]       ->   k (k = a whole number)
+	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
+	TxDependency [][]uint64
 }
 
 func TestTxDependencyBlockDecoding(t *testing.T) {
@@ -79,7 +105,7 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	check("Time", block.Time(), uint64(1426516743))
 
 	validatorBytes := GetValidatorBytesTest(block.header)
-	txDependency := block.GetTxDependency()
+	txDependency := GetTxDependencyTest(&block)
 
 	check("validatorBytes", validatorBytes, []byte("val set"))
 	check("txDependency", txDependency, [][]uint64{{2, 1}, {1, 0}})

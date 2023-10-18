@@ -539,7 +539,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprint(number))
 
 	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
-	signersBytes := len(header.GetValidatorBytes(c.config))
+	signersBytes := len(GetValidatorBytes(header, c.config))
 	if !isSprintEnd && signersBytes != 0 {
 		return errExtraValidators
 	}
@@ -945,7 +945,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 				tempValidatorBytes = append(tempValidatorBytes, validator.HeaderBytes()...)
 			}
 
-			blockExtraData := &types.BlockExtraData{
+			blockExtraData := &BlockExtraData{
 				ValidatorBytes: tempValidatorBytes,
 				TxDependency:   nil,
 			}
@@ -963,7 +963,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 			}
 		}
 	} else if c.config.IsParallelUniverse(header.Number.Uint64()) {
-		blockExtraData := &types.BlockExtraData{
+		blockExtraData := &BlockExtraData{
 			ValidatorBytes: nil,
 			TxDependency:   nil,
 		}
@@ -1606,4 +1606,55 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 func isSprintStart(number, sprint uint64) bool {
 	return number%sprint == 0
+}
+
+// In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
+type BlockExtraData struct {
+	// Validator bytes of bor
+	ValidatorBytes []byte
+
+	// length of TxDependency          ->   n (n = number of transactions in the block)
+	// length of TxDependency[i]       ->   k (k = a whole number)
+	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
+	TxDependency [][]uint64
+}
+
+// Returns the Block-STM Transaction Dependency from the block header
+func GetTxDependency(b *types.Block) [][]uint64 {
+	tempExtra := b.Extra()
+
+	if len(tempExtra) < types.ExtraVanityLength+types.ExtraSealLength {
+		log.Error("length of extra less is than vanity and seal")
+		return nil
+	}
+
+	var blockExtraData BlockExtraData
+
+	if err := rlp.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
+		log.Error("error while decoding block extra data", "err", err)
+		return nil
+	}
+
+	return blockExtraData.TxDependency
+}
+
+func GetValidatorBytes(h *types.Header, config *chain.BorConfig) []byte {
+	tempExtra := h.Extra
+
+	if !config.IsParallelUniverse(h.Number.Uint64()) {
+		return tempExtra[types.ExtraVanityLength : len(tempExtra)-types.ExtraSealLength]
+	}
+
+	if len(tempExtra) < types.ExtraVanityLength+types.ExtraSealLength {
+		log.Error("length of extra less is than vanity and seal")
+		return nil
+	}
+
+	var blockExtraData BlockExtraData
+	if err := rlp.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
+		log.Error("error while decoding block extra data", "err", err)
+		return nil
+	}
+
+	return blockExtraData.ValidatorBytes
 }
