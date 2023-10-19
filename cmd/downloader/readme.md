@@ -166,6 +166,8 @@ webseed.toml format:
 "v1-003000-003500-bodies.seg" = "https://your-url.com/v1-003000-003500-bodies.seg?signature=123"
 ```
 
+---------------
+
 ## E3
 
 Git branch `e35`. Just start erigon as you usually do.
