@@ -123,9 +123,9 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 
-	// if err := sd.Flush(ctx, rwTx); err != nil {
-	// 	return err
-	// }
+	if err := sd.Flush(ctx, rwTx); err != nil {
+		return err
+	}
 
 	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
@@ -153,7 +153,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	}
 	sd.ClearRam(true)
 
-	// TODO what if unwinded to the middle of block? It should cause one more unwind until block beginning or end is not found.
 	_, err := sd.SeekCommitment(ctx, rwTx, 0, txUnwindTo)
 	return err
 }

@@ -1459,14 +1459,12 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	dc.StartWrites()
-	defer dc.FinishWrites()
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}
 
-		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txFrom, rwTx)
+		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txFrom-1, rwTx)
 		if err != nil {
 			return fmt.Errorf("unwind key %s %x: %w", d.filenameBase, k, err)
 		}
@@ -1525,15 +1523,12 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
-	if err := dc.Rotate().Flush(ctx, rwTx); err != nil {
-		return fmt.Errorf("unwind flush failed: %w", err)
-	}
-
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
+	// dc flush and start/finish is managed by sharedDomains
 	return nil
 }
 

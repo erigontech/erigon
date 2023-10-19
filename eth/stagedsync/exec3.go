@@ -773,7 +773,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 			//	return err
 			//} else if !ok {
 			//	break Loop
@@ -932,12 +932,11 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root missmatch
+	/* uncomment it when need to debug state-root mismatch
 	if err := doms.Flush(context.Background(), applyTx); err != nil {
 		panic(err)
 	}
-	core.GenerateTrace = true
-	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true, false)
 	if err != nil {
 		panic(err)
 	}

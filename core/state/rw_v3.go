@@ -124,13 +124,13 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 			}
 		case kv.CodeDomain:
 			for i, key := range list.Keys {
-				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], txTask.StoragePrevs[key]); err != nil {
+				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], txTask.CodePrevs[key]); err != nil {
 					return err
 				}
 			}
 		case kv.StorageDomain:
 			for k, key := range list.Keys {
-				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], txTask.CodePrevs[key]); err != nil {
+				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], txTask.StoragePrevs[key]); err != nil {
 					return err
 				}
 			}

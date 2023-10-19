@@ -611,7 +611,7 @@ func TestHisory_Unwind(t *testing.T) {
 		defer hctx.Close()
 
 		hctx.StartWrites()
-		// defer hctx.FinishWrites()
+		defer hctx.FinishWrites()
 
 		unwindKeys := make([][]byte, 8)
 		for i := 0; i < len(unwindKeys); i++ {
@@ -657,12 +657,12 @@ func TestHisory_Unwind(t *testing.T) {
 			// 	require.NoError(err)
 			// 	fmt.Printf("txN=%d\n", txN)
 			// }
-			rec, err := ic.unwindKey(unwindKeys[i], 32, tx)
+			rec, needDel, err := ic.ifUnwindKey(unwindKeys[i], 32, tx)
 			require.NoError(err)
-			for _, r := range rec {
-				fmt.Printf("txn %d v=%x|%d\n", r.TxNum, r.Value, binary.BigEndian.Uint64(r.Value))
+			require.True(needDel)
+			if rec != nil {
+				fmt.Printf("txn %d v=%x|prev %x\n", rec.TxNum, rec.Value, rec.PValue)
 			}
-			fmt.Printf("%x records %d\n", unwindKeys[i], len(rec))
 		}
 
 		// it, err := ic.HistoryRange(2, 200, order.Asc, -1, tx)
@@ -682,7 +682,6 @@ func TestHisory_Unwind(t *testing.T) {
 		// 		fmt.Printf("count k=%s, v=%d\n", k, v)
 		// 	}
 		// }
-
 	}
 	t.Run("small_values", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)

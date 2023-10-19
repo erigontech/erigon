@@ -1049,6 +1049,11 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		if err != nil {
 			return nil, false, err
 		}
+		if txn < toTxNum {
+			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
+			//fmt.Printf("seen %x @tx %d\n", key, txn)
+			continue
+		}
 		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
 		if err != nil {
 			return nil, false, err
@@ -1056,12 +1061,7 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		if !ok {
 			break
 		}
-		fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
-		if txn < toTxNum {
-			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
-			//fmt.Printf("seen %x @tx %d\n", key, txn)
-			continue
-		}
+		//fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
 
 		if txn == toTxNum {
 			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
@@ -1072,46 +1072,38 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		}
 	}
 
-	v, ok, err := hc.GetNoStateWithRecent(key, tnums[0].TxNum, roTx)
-	if err != nil {
-		return nil, false, err
+	if tnums[0].TxNum != math.MaxUint64 {
+		v, ok, err := hc.GetNoStateWithRecent(key, tnums[0].TxNum, roTx)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			tnums[0].TxNum = math.MaxUint64
+		} else {
+			tnums[0].Value = common.Copy(v)
+		}
 	}
-	if !ok {
-		tnums[0].TxNum = math.MaxUint64
-	} else {
-		tnums[0].Value = common.Copy(v)
-	}
-	if tnums[1] != nil {
-		if tnums[0].TxNum != math.MaxUint64 {
+
+	if tnums[0].TxNum != math.MaxUint64 {
+		if tnums[1] != nil {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
+			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
 			return toRestore, true, nil
 		}
-		//if tnums[2] != nil {
-		//	toRestore = &HistoryRecord{TxNum: tnums[1].TxNum, Value: tnums[2].Value}
-		//	return toRestore, true, nil
-		//}
-		//if len(tnums[1].Value) == 0 {
-		//	return nil, true, nil
-		//}
-		fmt.Printf("toRestore NONE [1] %x @%d ->[%x]\n", key, tnums[0].TxNum, v)
-		//return nil, false, nil
+		if tnums[2] != nil {
+			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
+			//fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
+			return toRestore, true, nil
+		}
+		//fmt.Printf("toRestore %x @%d [0] %x\n", key, toRestore.TxNum, toRestore.Value)
+		// actual value is in domain and no need to delete
+		return nil, false, nil
 	}
-	//if tnums[2] != nil {
-	//	if tnums[0].TxNum != math.MaxUint64 {
-	//		toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
-	//		fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
-	//		return toRestore, true, nil
-	//	}
-	//
-	//	//toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[0].Value}
-	//	//fmt.Printf("toRestore %x @%d [2] %x\n", key, toRestore.TxNum, toRestore.Value)
-	//	//fmt.Printf("toRestore %x @%d NONE [2]\n", key, tnums[0].TxNum)
-	//	return toRestore, false, nil
-	//}
-	fmt.Printf("toRestore NONE %x @%d ->%x\n", key, tnums[0].TxNum, tnums[0].Value)
+	//fmt.Printf("toRestore NONE %x @%d ->%x [1] %+v [2] %+v\n", key, tnums[0].TxNum, tnums[0].Value, tnums[1], tnums[2])
 	return nil, true, nil
 }
 
+// deprecated
 // returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
 func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
 	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
