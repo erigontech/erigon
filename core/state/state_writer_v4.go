@@ -2,10 +2,9 @@ package state
 
 import (
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -45,13 +44,17 @@ func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation ui
 }
 
 func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
+	//sd := w.tx.(*state.SharedDomains)
+	//if err = sd.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
+	//	return err
+	//}
 	sd := w.tx.(*state.SharedDomains)
-	if err = sd.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
-		return err
-	}
-	if err = w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-		return err
-	}
+	return sd.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		return w.tx.DomainPut(kv.StorageDomain, k, nil, nil, v)
+	})
+	//if err = w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	//	return err
+	//}
 	return nil
 }
 func (w *WriterV4) WriteChangeSets() error { return nil }

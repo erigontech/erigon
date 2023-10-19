@@ -419,7 +419,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
-	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 		return nil
