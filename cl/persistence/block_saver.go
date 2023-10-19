@@ -33,7 +33,7 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
