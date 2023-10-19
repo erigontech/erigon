@@ -3,12 +3,12 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 
@@ -28,7 +28,6 @@ type ConsensusClientCliCfg struct {
 	GenesisCfg            *clparams.GenesisConfig
 	BeaconCfg             *clparams.BeaconChainConfig
 	NetworkCfg            *clparams.NetworkConfig
-	BeaconDataCfg         *rawdb.BeaconDataConfig
 	Port                  uint   `json:"port"`
 	Addr                  string `json:"address"`
 	ServerAddr            string `json:"server_addr"`
@@ -131,7 +130,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
-	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
 		cfg.NetworkCfg.BootNodes = common2.CliString2Array(ctx.String(flags.BootnodesFlag.Name))

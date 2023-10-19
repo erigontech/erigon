@@ -2,20 +2,28 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"math"
+	"strings"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
+
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
+	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"strings"
-	"time"
 
 	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -30,6 +38,8 @@ var CLI struct {
 
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
+
+	Chain Chain `cmd:"" help:"download the entire chain from reqresp network"`
 }
 
 type chainCfg struct {
@@ -103,13 +113,13 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 
-	sqlDB, err := sql.Open("sqlite", "caplin/db")
+	db := mdbx.MustOpen("caplin/db")
 	if err != nil {
 		return err
 	}
-	defer sqlDB.Close()
+	defer db.Close()
 
-	tx, err := sqlDB.Begin()
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -150,12 +160,8 @@ func (b *Epochs) Run(cctx *Context) error {
 	if err != nil {
 		return err
 	}
-	sqlDB, err := sql.Open("sqlite", "caplin/db")
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
-	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 	rpcSource := persistence2.NewBeaconRpcSource(beacon)
@@ -207,7 +213,13 @@ func (b *Epochs) Run(cctx *Context) error {
 
 	egg.SetLimit(b.Concurrency)
 
-	tx, err := sqlDB.Begin()
+	db := mdbx.MustOpen("caplin/db")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -315,4 +327,63 @@ func (m *Migrate) Run(ctx *Context) error {
 		}
 	}
 	return nil
+}
+
+type Chain struct {
+	chainCfg
+	withSentinel
+	outputFolder
+}
+
+func (c *Chain) Run(ctx *Context) error {
+	s, err := c.withSentinel.connectSentinel()
+	if err != nil {
+		return err
+	}
+
+	genesisConfig, _, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	aferoFS, err := openFs(c.Datadir, "caplin/beacon")
+	if err != nil {
+		return err
+	}
+
+	db := mdbx.MustOpen("caplin/db")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+
+	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, clparams.GetCheckpointSyncEndpoint(networkType))
+	if err != nil {
+		return err
+	}
+
+	bRoot, err := bs.BlockRoot()
+	if err != nil {
+		return err
+	}
+
+	err = beacon.SetStatus(
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisEpoch,
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisSlot)
+	if err != nil {
+		return err
+	}
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
+	cfg := stages.StageHistoryReconstruction(downloader, beaconDB, db, nil, genesisConfig, beaconConfig, db_config.DatabaseConfiguration{
+		PruneDepth: math.MaxUint64,
+	}, bRoot, bs.Slot(), "/tmp", log.Root())
+	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }

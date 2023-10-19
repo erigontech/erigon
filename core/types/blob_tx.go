@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/rlp"
@@ -102,12 +102,8 @@ func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, b
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
-	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
-	if blobHashesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(blobHashesLen)))
-	}
-	payloadSize += blobHashesLen
+	payloadSize += rlp2.ListPrefixLen(blobHashesLen) + blobHashesLen
 	return
 }
 
@@ -202,12 +198,8 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 
 func (stx BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
-	envelopeSize := payloadSize
-	if payloadSize >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
-	}
 	// size of struct prefix and TxType
-	envelopeSize += 2
+	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {

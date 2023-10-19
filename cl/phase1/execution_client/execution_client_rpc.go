@@ -224,3 +224,7 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(hashes []libcommon.Hash) ([]*typ
 	}
 	return ret, nil
 }
+
+func (cc *ExecutionClientRpc) FrozenBlocks() uint64 {
+	panic("unimplemented")
+}
