@@ -313,8 +313,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // assumes that if more than 100_000 blocks are skipped, that the entire trie
 // should be re-computed. Re-computing the entire trie will currently take ~15
 // minutes on mainnet.  The current limit has been chosen arbitrarily as
-// 'useful' without likely being overly computationally intense.  This parameter
-// could possibly be made configurable in the future if needed.
+// 'useful' without likely being overly computationally intense.
 
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.

@@ -481,6 +481,10 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
 	}
+	// Careful! Because we must rewind the hash state
+	// and re-compute the state trie, the further back in time the request, the more
+	// computationally intensive the operation becomes.
+	// The current default has been chosen arbitrarily as 'useful' without likely being overly computationally intense.
 	RpcMaxGetProofRewindBlockCount = cli.IntFlag{
 		Name:  "rpc.maxgetproofrewindblockcount.limit",
 		Usage: "Max GetProof rewind block count",
