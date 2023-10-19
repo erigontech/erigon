@@ -841,32 +841,28 @@ func (sdb *IntraBlockState) ValidateKnownAccounts(knownAccounts types2.KnownAcco
 			return fmt.Errorf("error reading account data at: %v", address)
 		}
 
+		if tempAccount == nil {
+			return fmt.Errorf("Storage Trie is nil for: %v", address)
+		}
+
 		// check if the value is hex string or an object
 		switch {
 		case condition.IsSingle():
-			if tempAccount != nil {
-				if *condition.StorageRootHash != tempAccount.Root {
-					return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", address, condition.StorageRootHash, tempAccount.Root)
-				}
-			} else {
-				return fmt.Errorf("Storage Trie is nil for: %v", address)
+			if *condition.StorageRootHash != tempAccount.Root {
+				return fmt.Errorf("invalid root hash for: %v root hash: %v actual root hash: %v", address, condition.StorageRootHash, tempAccount.Root)
 			}
 		case condition.IsStorage():
-			if tempAccount != nil {
-				for slot, value := range condition.StorageSlotHashes {
-					slot := slot
-					tempByte, err := sdb.stateReader.ReadAccountStorage(address, tempAccount.Incarnation, &slot)
-					if err != nil {
-						return fmt.Errorf("error reading account storage at: %v slot: %v", address, slot)
-					}
-
-					actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
-					if value != actualValue {
-						return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", address, slot, value, actualValue)
-					}
+			for slot, value := range condition.StorageSlotHashes {
+				slot := slot
+				tempByte, err := sdb.stateReader.ReadAccountStorage(address, tempAccount.Incarnation, &slot)
+				if err != nil {
+					return fmt.Errorf("error reading account storage at: %v slot: %v", address, slot)
 				}
-			} else {
-				return fmt.Errorf("Storage Trie is nil for: %v", address)
+
+				actualValue := libcommon.BytesToHash(common.LeftPadBytes(tempByte, 32))
+				if value != actualValue {
+					return fmt.Errorf("invalid slot value at address: %v slot: %v value: %v actual value: %v", address, slot, value, actualValue)
+				}
 			}
 		default:
 			return fmt.Errorf("impossible to validate known accounts: %v", address)
