@@ -1371,9 +1371,6 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1682,9 +1679,6 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds

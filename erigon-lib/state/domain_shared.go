@@ -994,3 +994,15 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		panic(domain)
 	}
 }
+
+func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	if domain != kv.StorageDomain {
+		return fmt.Errorf("DomainDelPrefix: not supported")
+	}
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		return sd.DomainDel(kv.StorageDomain, k, nil, v)
+	}); err != nil {
+		return err
+	}
+	return nil
+}

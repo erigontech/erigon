@@ -1558,6 +1558,16 @@ func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
 
 	return h, nil
 }
+func CalcRootTrace(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
+	loader := NewFlatDBTrieLoader(logPrefix, NewRetainList(0), nil, nil, true)
+
+	h, err := loader.CalcTrieRoot(tx, nil)
+	if err != nil {
+		return EmptyRoot, err
+	}
+
+	return h, nil
+}
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
