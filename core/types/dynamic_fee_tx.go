@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -117,8 +117,13 @@ func (tx DynamicFeeTransaction) GetAccessList() types2.AccessList {
 
 func (tx DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
+	envelopeSize := payloadSize
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	}
+	envelopeSize += 2
+	return envelopeSize
 }
 
 func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
@@ -148,10 +153,26 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			payloadSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
+		}
+		payloadSize += len(tx.Data)
+	}
 	// size of AccessList
+	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
-	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
+	if accessListLen >= 56 {
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
+	}
+	payloadSize += accessListLen
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -275,8 +296,12 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 
 func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	}
 	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopeSize += 2
 	var b [33]byte
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -78,6 +77,8 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
+	var structLength uint
+
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {
 		balanceBytes = a.Balance.ByteLen()
@@ -85,11 +86,17 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
-	structLength := balanceBytes + nonceBytes + 2
+	structLength += uint(balanceBytes + nonceBytes + 2)
 
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
-	return uint(rlp2.ListPrefixLen(structLength) + structLength)
+	if structLength < 56 {
+		return 1 + structLength
+	}
+
+	lengthBytes := libcommon.BitLenToByteLen(bits.Len(structLength))
+
+	return uint(1+lengthBytes) + structLength
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {
