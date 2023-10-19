@@ -554,11 +554,3 @@ func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
-
-func (tx *AccessListTx) PutOptions(options *types2.TransactionConditions) {
-	tx.TransactionConditions = options
-}
-
-func (tx *AccessListTx) GetOptions() *types2.TransactionConditions {
-	return tx.TransactionConditions
-}

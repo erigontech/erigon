@@ -473,14 +473,6 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 	return addr, nil
 }
 
-func (tx *DynamicFeeTransaction) PutOptions(options *types2.TransactionConditions) {
-	tx.TransactionConditions = options
-}
-
-func (tx *DynamicFeeTransaction) GetOptions() *types2.TransactionConditions {
-	return tx.TransactionConditions
-}
-
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{

@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -257,6 +256,32 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	return true, nil
 }
 
+func ValidateTransactionConditions(tc *types2.TransactionConditions, header *types.Header, ibs *state.IntraBlockState, lengthCheckFlag bool) error {
+	// check block number range
+	if _, err := types2.BigIntIsWithinRange(header.Number, tc.BlockNumberMin, tc.BlockNumberMax); err != nil {
+		return &types2.TransactionConditionsValidationError{Message: "out of block range. err: " + err.Error()}
+	}
+
+	// check timestamp range
+	if _, err := types2.Uint64IsWithinRange(&header.Time, tc.TimestampMin, tc.TimestampMax); err != nil {
+		return &types2.TransactionConditionsValidationError{Message: "out of time range. err: " + err.Error()}
+	}
+
+	// check knownAccounts
+	if err := ibs.ValidateKnownAccounts(tc.KnownAccountStorageConditions); err != nil {
+		return &types2.KnownAccountsLimitExceededError{Message: "limit exceeded. err: number of slots/accounts in KnownAccountStorageConditions exceeds the limit of 1000"}
+	}
+
+	if lengthCheckFlag {
+		// check knownAccounts length (number of slots/accounts) should be less than 1000
+		if tc.KnownAccountStorageConditions.CountStorageEntries() >= 1000 {
+			return &types2.KnownAccountsLimitExceededError{Message: "limit exceeded. err: number of slots/accounts in KnownAccountStorageConditions exceeds the limit of 1000"}
+		}
+	}
+
+	return nil
+}
+
 // SendRawTransactionConditional will add the signed transaction to the transaction pool.
 // The sender/bundler is responsible for signing the transaction
 func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx hexutility.Bytes, options types2.TransactionConditions) (common.Hash, error) {
@@ -289,12 +314,13 @@ func (api *BorImpl) SendRawTransactionConditional(ctx context.Context, encodedTx
 
 	currentState := state.New(readerTemp)
 
-	if err := stagedsync.ValidateTransactionConditions(&options, currentHeader, currentState, true); err != nil {
+	if err := ValidateTransactionConditions(&options, currentHeader, currentState, true); err != nil {
 		return common.Hash{}, err
 	}
 
+	// TODO
 	// put options data in Tx, to use it later while block building
-	txn.PutOptions(&options)
+	// txn.PutOptions(&options)
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
