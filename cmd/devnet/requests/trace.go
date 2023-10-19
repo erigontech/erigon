@@ -3,10 +3,10 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
@@ -46,8 +46,8 @@ type TraceCallAction struct {
 }
 
 type CallResult struct {
-	GasUsed hexutil.Big       `json:"gasUsed"`
-	Output  hexutility.Bytes  `json:"output"`
+	GasUsed hexutil.Big      `json:"gasUsed"`
+	Output  hexutility.Bytes `json:"output"`
 	Address libcommon.Address `json:"address"`
 	Code    hexutility.Bytes  `json:"code"`
 }

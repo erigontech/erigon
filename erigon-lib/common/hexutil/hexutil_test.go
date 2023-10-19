@@ -1,23 +1,8 @@
-// Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
-//
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
 package hexutil
 
 import (
-	"bytes"
+	"fmt"
+	"github.com/stretchr/testify/require"
 	"math/big"
 	"testing"
 )
@@ -40,14 +25,13 @@ var (
 		{[]byte{0}, "0x00"},
 		{[]byte{0, 0, 1, 2}, "0x00000102"},
 	}
-
 	encodeBigTests = []marshalTest{
-		{referenceBig("0"), "0x0"},
-		{referenceBig("1"), "0x1"},
-		{referenceBig("ff"), "0xff"},
-		{referenceBig("112233445566778899aabbccddeeff"), "0x112233445566778899aabbccddeeff"},
-		{referenceBig("80a7f2c1bcc396c00"), "0x80a7f2c1bcc396c00"},
-		{referenceBig("-80a7f2c1bcc396c00"), "-0x80a7f2c1bcc396c00"},
+		{bigFromString("0"), "0x0"},
+		{bigFromString("1"), "0x1"},
+		{bigFromString("ff"), "0xff"},
+		{bigFromString("112233445566778899aabbccddeeff"), "0x112233445566778899aabbccddeeff"},
+		{bigFromString("80a7f2c1bcc396c00"), "0x80a7f2c1bcc396c00"},
+		{bigFromString("-80a7f2c1bcc396c00"), "-0x80a7f2c1bcc396c00"},
 	}
 
 	encodeUint64Tests = []marshalTest{
@@ -105,15 +89,15 @@ var (
 		{input: `0xfffffffff`, want: big.NewInt(0xfffffffff)},
 		{
 			input: `0x112233445566778899aabbccddeeff`,
-			want:  referenceBig("112233445566778899aabbccddeeff"),
+			want:  bigFromString("112233445566778899aabbccddeeff"),
 		},
 		{
 			input: `0xffffffffffffffffffffffffffffffffffff`,
-			want:  referenceBig("ffffffffffffffffffffffffffffffffffff"),
+			want:  bigFromString("ffffffffffffffffffffffffffffffffffff"),
 		},
 		{
 			input: `0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff`,
-			want:  referenceBig("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+			want:  bigFromString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
 		},
 	}
 
@@ -137,58 +121,55 @@ var (
 )
 
 func TestDecode(t *testing.T) {
-	for _, test := range decodeBytesTests {
-		dec, err := Decode(test.input)
-		if !checkError(t, test.input, err, test.wantErr) {
-			continue
-		}
-		if !bytes.Equal(test.want.([]byte), dec) {
-			t.Errorf("input %s: value mismatch: got %x, want %x", test.input, dec, test.want)
-			continue
-		}
+	for idx, test := range decodeBytesTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			dec, err := Decode(test.input)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want, dec)
+			}
+		})
 	}
 }
 
 func TestEncodeBig(t *testing.T) {
-	for _, test := range encodeBigTests {
-		enc := EncodeBig(test.input.(*big.Int))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
+	for idx, test := range encodeBigTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			enc := EncodeBig(test.input.(*big.Int))
+			require.EqualValues(t, test.want, enc)
+		})
 	}
 }
 
 func TestDecodeBig(t *testing.T) {
-	for _, test := range decodeBigTests {
-		dec, err := DecodeBig(test.input)
-		if !checkError(t, test.input, err, test.wantErr) {
-			continue
-		}
-		if dec.Cmp(test.want.(*big.Int)) != 0 {
-			t.Errorf("input %s: value mismatch: got %x, want %x", test.input, dec, test.want)
-			continue
-		}
+	for idx, test := range decodeBigTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			dec, err := DecodeBig(test.input)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want.(*big.Int).String(), dec.String())
+			}
+		})
 	}
 }
 
 func TestEncodeUint64(t *testing.T) {
-	for _, test := range encodeUint64Tests {
-		enc := EncodeUint64(test.input.(uint64))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
+	for idx, test := range encodeUint64Tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			enc := EncodeUint64(test.input.(uint64))
+			require.EqualValues(t, test.want, enc)
+		})
 	}
 }
 
 func TestDecodeUint64(t *testing.T) {
-	for _, test := range decodeUint64Tests {
-		dec, err := DecodeUint64(test.input)
-		if !checkError(t, test.input, err, test.wantErr) {
-			continue
-		}
-		if dec != test.want.(uint64) {
-			t.Errorf("input %s: value mismatch: got %x, want %x", test.input, dec, test.want)
-			continue
-		}
+	for idx, test := range decodeUint64Tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			dec, err := DecodeUint64(test.input)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want, dec)
+			}
+		})
 	}
 }

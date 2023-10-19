@@ -3,12 +3,12 @@ package consensus_tests
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
+	spectest2 "github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,7 @@ import (
 type TransitionCore struct {
 }
 
-func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
 	var meta struct {
 		PostFork   string `yaml:"post_fork"`
 		ForkEpoch  uint64 `yaml:"fork_epoch"`
@@ -24,12 +24,12 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 
 		ForkBlock *uint64 `yaml:"fork_block,omitempty"`
 	}
-	if err := spectest.ReadMeta(root, "meta.yaml", &meta); err != nil {
+	if err := spectest2.ReadMeta(root, "meta.yaml", &meta); err != nil {
 		return err
 	}
-	startState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
+	startState, err := spectest2.ReadBeaconState(root, c.Version()-1, spectest2.PreSsz)
 	require.NoError(t, err)
-	stopState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	stopState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
 	require.NoError(t, err)
 	switch c.Version() {
 	case clparams.AltairVersion:
@@ -44,14 +44,14 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 	startSlot := startState.Slot()
 	blockIndex := 0
 	for {
-		testSlot, err := spectest.ReadBlockSlot(root, blockIndex)
+		testSlot, err := spectest2.ReadBlockSlot(root, blockIndex)
 		require.NoError(t, err)
 		var block *cltypes.SignedBeaconBlock
 		if testSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch >= meta.ForkEpoch {
-			block, err = spectest.ReadBlock(root, c.Version(), blockIndex)
+			block, err = spectest2.ReadBlock(root, c.Version(), blockIndex)
 			require.NoError(t, err)
 		} else {
-			block, err = spectest.ReadBlock(root, c.Version()-1, blockIndex)
+			block, err = spectest2.ReadBlock(root, c.Version()-1, blockIndex)
 			require.NoError(t, err)
 		}
 

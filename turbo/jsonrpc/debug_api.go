@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -357,9 +357,9 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big      `json:"balance"`
-	Nonce    hexutil.Uint64   `json:"nonce"`
-	Code     hexutility.Bytes `json:"code"`
+	Balance hexutil.Big      `json:"balance"`
+	Nonce   hexutil.Uint64   `json:"nonce"`
+	Code    hexutility.Bytes `json:"code"`
 	CodeHash common.Hash      `json:"codeHash"`
 }
 

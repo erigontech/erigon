@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"time"
 
@@ -14,8 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
@@ -779,7 +779,7 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	}
 	if c.k[c.lvl] == nil {
 		c.cur = nil
-		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+		c.SkipState = c.SkipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 		return nil, nil, false, nil
 	}
 	ok, err := c._consume()
@@ -880,7 +880,7 @@ func (c *AccTrieCursor) _nextSiblingOfParentInMem() bool {
 }
 
 func (c *AccTrieCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	ok := dbutils2.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
@@ -977,7 +977,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+			c.SkipState = c.SkipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
@@ -1100,7 +1100,7 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		return []byte{}, nil, false, err
 	}
 	if c.k[c.lvl] == nil {
-		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+		c.skipState = c.skipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 		c.cur = nil
 		return nil, nil, false, nil
 	}
@@ -1256,7 +1256,7 @@ func (c *StorageTrieCursor) _nextSiblingOfParentInMem() bool {
 }
 
 func (c *StorageTrieCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	ok := dbutils2.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
@@ -1286,7 +1286,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
+			c.skipState = c.skipState && !dbutils2.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
@@ -1373,7 +1373,7 @@ func isDenseSequence(prev []byte, next []byte) bool {
 	if len(prev) == 0 && len(next) == 0 {
 		return false
 	}
-	ok := dbutils.NextNibblesSubtree(prev, &isSequenceBuf)
+	ok := dbutils2.NextNibblesSubtree(prev, &isSequenceBuf)
 	if len(prev) > 0 && !ok {
 		return true
 	}
@@ -1395,7 +1395,7 @@ var isSequenceBuf = make([]byte, 256)
 
 func firstNotCoveredPrefix(prev, prefix, buf []byte) ([]byte, bool) {
 	if len(prev) > 0 {
-		if !dbutils.NextNibblesSubtree(prev, &buf) {
+		if !dbutils2.NextNibblesSubtree(prev, &buf) {
 			return buf, true
 		}
 	} else {
@@ -1487,7 +1487,7 @@ func MarshalTrieNodeTyped(hasState, hasTree, hasHash uint16, h []libcommon.Hash,
 }
 
 func StorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
-	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
+	return dbutils2.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
 }
 
 func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte, buf []byte) []byte {

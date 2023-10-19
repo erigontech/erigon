@@ -3,14 +3,13 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net/http"
 	"os"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // BenchTraceCallMany compares response of Erigon with Geth

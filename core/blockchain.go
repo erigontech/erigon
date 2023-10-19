@@ -19,6 +19,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 

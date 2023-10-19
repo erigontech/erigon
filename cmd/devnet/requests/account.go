@@ -2,11 +2,11 @@ package requests
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -18,12 +18,12 @@ type DebugAccountAt struct {
 // AccountResult is the result struct for GetProof
 type AccountResult struct {
 	Address      libcommon.Address `json:"address"`
-	AccountProof []string          `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
-	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Code         hexutility.Bytes  `json:"code"`
-	Nonce        hexutil.Uint64    `json:"nonce"`
-	StorageHash  libcommon.Hash    `json:"storageHash"`
+	AccountProof []string         `json:"accountProof"`
+	Balance      *hexutil.Big     `json:"balance"`
+	CodeHash     libcommon.Hash   `json:"codeHash"`
+	Code         hexutility.Bytes `json:"code"`
+	Nonce        hexutil.Uint64   `json:"nonce"`
+	StorageHash  libcommon.Hash   `json:"storageHash"`
 	StorageProof []StorageResult   `json:"storageProof"`
 }
 

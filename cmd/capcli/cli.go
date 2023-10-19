@@ -4,21 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
-	"time"
-
-	"github.com/jedib0t/go-pretty/v6/progress"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"strings"
+	"time"
+
+	"github.com/jedib0t/go-pretty/v6/progress"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
@@ -114,7 +114,7 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 	for _, vv := range resp {
 		err := beaconDB.WriteBlock(ctx, tx, vv, true)
 		if err != nil {
@@ -155,10 +155,10 @@ func (b *Epochs) Run(cctx *Context) error {
 		return err
 	}
 	defer sqlDB.Close()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	rpcSource := persistence.NewBeaconRpcSource(beacon)
+	rpcSource := persistence2.NewBeaconRpcSource(beacon)
 
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,

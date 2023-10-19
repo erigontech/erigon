@@ -2,11 +2,11 @@ package rpctest
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
@@ -37,11 +37,11 @@ type EthBalance struct {
 type EthTransaction struct {
 	From     libcommon.Address  `json:"from"`
 	To       *libcommon.Address `json:"to"` // Pointer because it might be missing
-	Hash     string             `json:"hash"`
-	Gas      hexutil.Big        `json:"gas"`
-	GasPrice hexutil.Big        `json:"gasPrice"`
-	Input    hexutility.Bytes   `json:"input"`
-	Value    hexutil.Big        `json:"value"`
+	Hash     string           `json:"hash"`
+	Gas      hexutil.Big      `json:"gas"`
+	GasPrice hexutil.Big      `json:"gasPrice"`
+	Input    hexutility.Bytes `json:"input"`
+	Value    hexutil.Big      `json:"value"`
 }
 
 type EthSendRawTransaction struct {
@@ -55,8 +55,8 @@ type EthTxPool struct {
 }
 
 type EthBlockByNumberResult struct {
-	Difficulty   hexutil.Big       `json:"difficulty"`
-	Miner        libcommon.Address `json:"miner"`
+	Difficulty hexutil.Big       `json:"difficulty"`
+	Miner      libcommon.Address `json:"miner"`
 	Transactions []EthTransaction  `json:"transactions"`
 	TxRoot       libcommon.Hash    `json:"transactionsRoot"`
 	Hash         libcommon.Hash    `json:"hash"`
@@ -126,8 +126,8 @@ type TraceCallAction struct {
 }
 
 type TraceCallTraceResult struct {
-	GasUsed hexutil.Big       `json:"gasUsed"`
-	Output  hexutility.Bytes  `json:"output"`
+	GasUsed hexutil.Big      `json:"gasUsed"`
+	Output  hexutility.Bytes `json:"output"`
 	Address libcommon.Address `json:"address"`
 	Code    hexutility.Bytes  `json:"code"`
 }
@@ -244,11 +244,11 @@ type EthGetLogs struct {
 // AccountResult is the result struct for GetProof
 type AccountResult struct {
 	Address      libcommon.Address `json:"address"`
-	AccountProof []string          `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
-	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Nonce        hexutil.Uint64    `json:"nonce"`
-	StorageHash  libcommon.Hash    `json:"storageHash"`
+	AccountProof []string       `json:"accountProof"`
+	Balance      *hexutil.Big   `json:"balance"`
+	CodeHash     libcommon.Hash `json:"codeHash"`
+	Nonce        hexutil.Uint64 `json:"nonce"`
+	StorageHash  libcommon.Hash `json:"storageHash"`
 	StorageProof []StorageResult   `json:"storageProof"`
 }
 type StorageResult struct {

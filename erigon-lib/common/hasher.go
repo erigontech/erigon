@@ -4,7 +4,6 @@ import (
 	"hash"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -33,19 +32,19 @@ func NewHasher() *Hasher {
 }
 func ReturnHasherToPool(h *Hasher) { hashersPool.Put(h) }
 
-func HashData(data []byte) (libcommon.Hash, error) {
+func HashData(data []byte) (Hash, error) {
 	h := NewHasher()
 	defer ReturnHasherToPool(h)
 
 	_, err := h.Sha.Write(data)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return Hash{}, err
 	}
 
-	var buf libcommon.Hash
+	var buf Hash
 	_, err = h.Sha.Read(buf[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return Hash{}, err
 	}
 	return buf, nil
 }

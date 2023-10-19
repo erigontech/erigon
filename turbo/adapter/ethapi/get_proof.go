@@ -2,11 +2,11 @@ package ethapi
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -14,11 +14,11 @@ import (
 // Result structs for GetProof
 type AccountResult struct {
 	Address      libcommon.Address `json:"address"`
-	AccountProof []string          `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
-	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Nonce        hexutil.Uint64    `json:"nonce"`
-	StorageHash  libcommon.Hash    `json:"storageHash"`
+	AccountProof []string       `json:"accountProof"`
+	Balance      *hexutil.Big   `json:"balance"`
+	CodeHash     libcommon.Hash `json:"codeHash"`
+	Nonce        hexutil.Uint64 `json:"nonce"`
+	StorageHash  libcommon.Hash `json:"storageHash"`
 	StorageProof []StorageResult   `json:"storageProof"`
 }
 type StorageResult struct {

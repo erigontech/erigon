@@ -3,10 +3,10 @@ package trie
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/stretchr/testify/assert"
 )
 

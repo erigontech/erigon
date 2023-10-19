@@ -2,22 +2,22 @@ package consensus_tests
 
 import (
 	"fmt"
+	spectest2 "github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"os"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+var ForksFork = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
 
-	preState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
+	preState, err := spectest2.ReadBeaconState(root, c.Version()-1, spectest2.PreSsz)
 	require.NoError(t, err)
 
-	postState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	postState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
 	expectedError := os.IsNotExist(err)
 	if !expectedError {
 		require.NoError(t, err)
@@ -32,7 +32,7 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 	case clparams.CapellaVersion:
 		err = preState.UpgradeToDeneb()
 	default:
-		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
+		err = spectest2.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
 	if expectedError {
 		assert.Error(t, err)

@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/rand"
 	"reflect"
 	"sort"
@@ -19,8 +20,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -681,7 +680,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 
@@ -829,7 +828,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 
@@ -964,7 +963,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
 		addrs[i] = libcommon.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
+		addrHash, _ := libcommon.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 	key := libcommon.Hash{123}

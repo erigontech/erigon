@@ -3,10 +3,9 @@ package dbutils
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestPlainParseStoragePrefix(t *testing.T) {
@@ -36,7 +35,7 @@ func TestPlainParseCompositeStorageKey(t *testing.T) {
 }
 
 func TestParseStoragePrefix(t *testing.T) {
-	expectedAddrHash, _ := common.HashData(libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
+	expectedAddrHash, _ := libcommon.HashData(libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
 	expectedIncarnation := uint64(999000999)
 
 	prefix := GenerateStoragePrefix(expectedAddrHash[:], expectedIncarnation)

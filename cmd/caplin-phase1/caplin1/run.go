@@ -3,15 +3,12 @@ package caplin1
 import (
 	"context"
 	"database/sql"
-	"os"
-	"path"
-	"time"
-
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/freezer"
-	"github.com/ledgerwatch/erigon/cl/persistence"
+	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -20,22 +17,24 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/rpc"
+	"os"
+	"path"
+	"time"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
-	rawBeaconChain persistence.RawBeaconBlockChain,
+	rawBeaconChain persistence2.RawBeaconBlockChain,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
-) (persistence.BeaconChainDatabase, *sql.DB, error) {
+) (persistence2.BeaconChainDatabase, *sql.DB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
 	os.Remove(dataDirIndexer)
 	os.MkdirAll(dbPath, 0700)
@@ -67,14 +66,14 @@ func OpenCaplinDatabase(ctx context.Context,
 			db.Close() // close sql database here
 		}()
 	}
-	return persistence.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
+	return persistence2.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
-	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration) error {
+	caplinFreezer freezer2.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration) error {
 	caplinDBPath := path.Join(dirs.CaplinIndexing, "db")
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, caplinDBPath)
+	rawDB := persistence2.AferoRawBeaconBlockChainFromOsPath(beaconConfig, caplinDBPath)
 	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinHistory, engine)
 	if err != nil {
 		return err
@@ -87,7 +86,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	logger := log.New("app", "caplin")
 
 	if caplinFreezer != nil {
-		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
+		if err := freezer2.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
 			return err
 		}
 	}

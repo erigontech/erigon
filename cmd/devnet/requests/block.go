@@ -2,11 +2,11 @@ package requests
 
 import (
 	"encoding/json"
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -24,7 +24,7 @@ func (bn BlockNumber) Uint64() uint64 {
 }
 
 func AsBlockNumber(n *big.Int) BlockNumber {
-	return BlockNumber(hexutil.EncodeBig(n))
+	return BlockNumber(hexutil2.EncodeBig(n))
 }
 
 var BlockNumbers = struct {
@@ -72,11 +72,11 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 
 type EthGetTransactionCount struct {
 	CommonResponse
-	Result hexutil.Uint64 `json:"result"`
+	Result hexutil2.Uint64 `json:"result"`
 }
 
 func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
-	var result hexutil.Uint64
+	var result hexutil2.Uint64
 
 	if err := reqGen.callCli(&result, Methods.ETHBlockNumber); err != nil {
 		return 0, err

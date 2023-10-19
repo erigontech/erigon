@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -475,7 +475,7 @@ func (api *OtterscanAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, 
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/ledgerwatch/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["totalDifficulty"] = (*hexutil.Big)(td)
+	response["totalDifficulty"] = (*hexutil2.Big)(td)
 	response["transactionCount"] = b.Transactions().Len()
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -511,10 +511,10 @@ func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chai
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
+	ret.BlockReward = hexutil2.EncodeBig(minerReward.ToBig())
+	ret.Issuance = hexutil2.EncodeBig(issuance.ToBig())
 	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
+	ret.UncleReward = hexutil2.EncodeBig(issuance.ToBig())
 	return ret, nil
 }
 

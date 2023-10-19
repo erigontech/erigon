@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -420,8 +420,8 @@ func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
 	Accesslist *types2.AccessList `json:"accessList"`
-	Error      string             `json:"error,omitempty"`
-	GasUsed    hexutil.Uint64     `json:"gasUsed"`
+	Error   string         `json:"error,omitempty"`
+	GasUsed hexutil.Uint64 `json:"gasUsed"`
 }
 
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.

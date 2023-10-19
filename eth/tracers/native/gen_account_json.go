@@ -4,12 +4,11 @@ package native
 
 import (
 	"encoding/json"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 var _ = (*accountMarshaling)(nil)
@@ -17,8 +16,8 @@ var _ = (*accountMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (a account) MarshalJSON() ([]byte, error) {
 	type account struct {
-		Balance *hexutil.Big                      `json:"balance,omitempty"`
-		Code    hexutility.Bytes                  `json:"code,omitempty"`
+		Balance *hexutil.Big     `json:"balance,omitempty"`
+		Code    hexutility.Bytes `json:"code,omitempty"`
 		Nonce   uint64                            `json:"nonce,omitempty"`
 		Storage map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
 	}
@@ -33,8 +32,8 @@ func (a account) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (a *account) UnmarshalJSON(input []byte) error {
 	type account struct {
-		Balance *hexutil.Big                      `json:"balance,omitempty"`
-		Code    *hexutility.Bytes                 `json:"code,omitempty"`
+		Balance *hexutil.Big      `json:"balance,omitempty"`
+		Code    *hexutility.Bytes `json:"code,omitempty"`
 		Nonce   *uint64                           `json:"nonce,omitempty"`
 		Storage map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
 	}

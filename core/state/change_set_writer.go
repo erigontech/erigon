@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -9,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 

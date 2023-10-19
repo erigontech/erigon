@@ -12,9 +12,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
-
-	"github.com/prysmaticlabs/go-bitfield"
 )
 
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool

@@ -1,6 +1,7 @@
 package consensus_tests
 
 import (
+	spectest2 "github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"os"
 	"testing"
@@ -9,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,12 +24,12 @@ func NewEpochProcessing(fn func(s abstract.BeaconState) error) *EpochProcessing 
 	}
 }
 
-func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
+func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
+	testState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PreSsz)
 	require.NoError(t, err)
 
 	var expectedError bool
-	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	expectedState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
 	if os.IsNotExist(err) {
 		expectedError = true
 		err = nil
