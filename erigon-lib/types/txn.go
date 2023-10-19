@@ -100,7 +100,7 @@ type TxSlot struct {
 	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Creation       bool     // Set to true if "To" field of the transaction is not set
 	Type           byte     // Transaction type
-	Size           uint32   // Size of the payload, always including the envelope for typed transactions
+	Size           uint32   // Size of the payload
 
 	// EIP-4844: Shard Blob Transactions
 	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
@@ -287,12 +287,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 
 	slot.Size = uint32(p - pos)
-	if !legacy && !hasEnvelope {
-		// Normalize the size so that it accounts for the envelope bytes
-		// See https://github.com/ledgerwatch/erigon/issues/8456
-		slot.Size = uint32(rlp.ListPrefixLen(int(slot.Size))) + slot.Size
-	}
-
 	return p, err
 }
 
