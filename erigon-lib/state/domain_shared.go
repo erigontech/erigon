@@ -633,7 +633,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 			continue
 		}
 		if trace {
-			//fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
+			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 
 		if err = sd.updateCommitmentData(prefix, merged, stated); err != nil {
