@@ -173,7 +173,6 @@ Golang 1.21
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 Git branch `e35`, erigon flag required `--experimental.history.v3`
 
-
 E3 changes from E2:
 
 - ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
@@ -188,7 +187,6 @@ E3 changes from E2:
   MADVISE_NORMAL - and it showing better performance on our benchmarks.
 - datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
   enough.
--
 
 ### E3 datadir structure
 
@@ -226,3 +224,13 @@ datadir
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```
+
+### E3 public test goals
+
+- to gather RPC-usability feedback:
+    - E3 doesn't store receipts, using totally different indices, etc...
+    - It may behave different on warious stress-tests
+- to gather datadadir-usability feedback
+- discover bad data
+    - re-gen of snapshts takes much time, better fix data-bugs in-advance
+
