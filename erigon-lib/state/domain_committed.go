@@ -207,7 +207,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			return true
 		})
 		if clear {
-			t.tree.Clear(false)
+			t.tree.Clear(true)
 		}
 		return plainKeys, updates
 	default:
@@ -488,7 +488,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 func (d *DomainCommitted) Close() {
 	d.Domain.Close()
 	d.updates.keys = nil
-	d.updates.tree.Clear(false)
+	d.updates.tree.Clear(true)
 }
 
 // Evaluates commitment for processed state.
