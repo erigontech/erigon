@@ -35,8 +35,13 @@ func OpenCaplinDatabase(ctx context.Context,
 	rawBeaconChain persistence.RawBeaconBlockChain,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
+	wipeout bool,
 ) (persistence.BeaconChainDatabase, kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
+	if wipeout {
+		os.RemoveAll(dataDirIndexer)
+	}
+
 	os.MkdirAll(dbPath, 0700)
 
 	db := mdbx.MustOpen(dataDirIndexer)
@@ -67,7 +72,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration) error {
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine)
+	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine, true)
 	if err != nil {
 		return err
 	}
