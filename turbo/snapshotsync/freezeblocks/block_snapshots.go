@@ -1004,7 +1004,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
-	for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+	for _, t := range snaptype.BorSnapshotTypes {
 		for _, segment := range segments {
 			if segment.T != t {
 				continue
@@ -1082,7 +1082,7 @@ MainLoop:
 		if f.From == f.To {
 			continue
 		}
-		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+		for _, t := range snaptype.BorSnapshotTypes {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.From, f.To, t))
 			if !dir2.FileExist(p) {
 				continue MainLoop

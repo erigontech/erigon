@@ -49,6 +49,17 @@ func FileExist(path string) bool {
 	return true
 }
 
+func FileNonZero(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil && os.IsNotExist(err) {
+		return false
+	}
+	if !fi.Mode().IsRegular() {
+		return false
+	}
+	return fi.Size() > 0
+}
+
 // nolint
 func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)

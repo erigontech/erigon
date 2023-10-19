@@ -35,6 +35,7 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
+	loopBreakCheck  func(int) bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
@@ -43,8 +44,12 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	chanConfig chain.Config,
 	blockReader services.FullBlockReader,
 	historyV3 bool,
-	blockWriter *blockio.BlockWriter) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, blockReader: blockReader, historyV3: historyV3, blockWriter: blockWriter}
+	blockWriter *blockio.BlockWriter,
+	loopBreakCheck func(int) bool) BodiesCfg {
+	return BodiesCfg{
+		db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
+		timeout: timeout, chanConfig: chanConfig, blockReader: blockReader,
+		historyV3: historyV3, blockWriter: blockWriter, loopBreakCheck: loopBreakCheck}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -221,6 +226,10 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
+
+			if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(i)) {
+				return true, nil
+			}
 		}
 
 		d5 += time.Since(start)

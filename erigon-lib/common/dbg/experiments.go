@@ -276,8 +276,57 @@ func StopAfterReconst() bool {
 		v, _ := os.LookupEnv("STOP_AFTER_RECONSTITUTE")
 		if v == "true" {
 			stopAfterReconst = true
-			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", writeMap)
+			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", stopAfterReconst)
 		}
 	})
 	return stopAfterReconst
+}
+
+var (
+	stageSyncLimit     int
+	stageSyncLimitOnce sync.Once
+)
+
+func StageSyncLimit() int {
+	stageSyncLimitOnce.Do(func() {
+		v, _ := os.LookupEnv("STAGE_SYNC_LIMIT")
+		if i, _ := strconv.ParseInt(v, 10, 64); i > 0 {
+			stageSyncLimit = int(i)
+			log.Info("[Experiment]", "STAGE_SYNC_LIMIT", stageSyncLimit)
+		}
+	})
+	return stageSyncLimit
+}
+
+var (
+	breakAfterStage     string
+	breakAfterStageFlag sync.Once
+)
+
+func BreakAfterStage() string {
+	f := func() {
+		v, _ := os.LookupEnv("BREAK_AFTER_STAGE") // see names in eth/stagedsync/stages/stages.go
+		if v != "" {
+			breakAfterStage = v
+			log.Info("[Experiment]", "BREAK_AFTER_STAGE", breakAfterStage)
+		}
+	}
+	breakAfterStageFlag.Do(f)
+	return breakAfterStage
+}
+
+var (
+	uploadSnapshotsFlag bool
+	uploadSnapshots     sync.Once
+)
+
+func UploadSnapshots() bool {
+	uploadSnapshots.Do(func() {
+		v, _ := os.LookupEnv("UPLOAD_SNAPSHOTS")
+		if v == "true" {
+			uploadSnapshotsFlag = true
+			log.Info("[Experiment]", "UPLOAD_SNAPSHOTS", uploadSnapshotsFlag)
+		}
+	})
+	return uploadSnapshotsFlag
 }

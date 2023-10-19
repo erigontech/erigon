@@ -648,6 +648,68 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 	return res, missingSnapshots, nil
 }
 
+// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+// removal of intermediate segments after a merge operation
+func removeSpanOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
+	list, err := snaptype.Segments(dir)
+
+	if err != nil {
+		return
+	}
+
+	var toDel []string
+	var l []snaptype.FileInfo
+
+	for _, f := range list {
+		if f.T != snaptype.BorSpans {
+			continue
+		}
+		l = append(l, f)
+	}
+
+	// added overhead to make sure we don't delete in the
+	// current 500k block segment
+	if max > 500_001 {
+		max -= 500_001
+	}
+
+	for _, f := range l {
+		if max < f.From {
+			continue
+		}
+
+		for _, a := range active {
+			if a.T != snaptype.BorSpans {
+				continue
+			}
+
+			if f.From < a.From {
+				continue
+			}
+
+			if f.From == a.From {
+				if f.To < a.To {
+					toDel = append(toDel, f.Path)
+				}
+
+				break
+			}
+
+			if f.From < a.To {
+				toDel = append(toDel, f.Path)
+				break
+			}
+		}
+	}
+
+	for _, f := range toDel {
+		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+	}
+}
+
 func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
 	existingFiles, missingSnapshots, err := BorSegments(s.dir)
 	if err != nil {
@@ -925,6 +987,11 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	if err != nil {
 		return err
 	}
+
+	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+	// removal of intermediate segments after a merge operation
+	removeSpanOverlaps(s.dir, files, s.BlocksAvailable())
+
 	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
@@ -1136,7 +1203,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			return err
 		}
 
-		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+		for _, t := range snaptype.BorSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
@@ -1160,7 +1227,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			m.notifier.OnNewSnapshot()
 			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
 		}
-		for _, t := range []snaptype.Type{snaptype.BorEvents} {
+		for _, t := range snaptype.BorSnapshotTypes {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}

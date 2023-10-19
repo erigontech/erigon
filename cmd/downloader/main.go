@@ -265,11 +265,12 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	res := map[string]string{}
 	torrents, err := downloader.AllTorrentSpecs(dirs)
 	if err != nil {
 		return err
 	}
+
+	res := map[string]string{}
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
 		if strings.HasPrefix(t.DisplayName, "history/commitment") {

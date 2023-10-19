@@ -43,7 +43,7 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				continue
 			}
 			if r.Bor {
-				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+				for _, t := range snaptype.BorSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})

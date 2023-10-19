@@ -49,7 +49,7 @@ type HeadersCfg struct {
 	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
 
-	loopBreakCheck func() bool
+	loopBreakCheck func(int) bool
 }
 
 func StageHeadersCfg(
@@ -67,7 +67,7 @@ func StageHeadersCfg(
 	tmpdir string,
 	notifications *shards.Notifications,
 	forkValidator *engine_helpers.ForkValidator,
-	loopBreakCheck func() bool) HeadersCfg {
+	loopBreakCheck func(int) bool) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -128,7 +128,6 @@ func HeadersPOW(
 	useExternalTx bool,
 	logger log.Logger,
 ) error {
-	var headerProgress uint64
 	var err error
 
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
@@ -137,11 +136,11 @@ func HeadersPOW(
 	cfg.hd.SetPOSSync(false)
 	cfg.hd.SetFetchingNew(true)
 	defer cfg.hd.SetFetchingNew(false)
-	headerProgress = cfg.hd.Progress()
+	startProgress := cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 	if err != nil {
 		return err
 	}
@@ -149,7 +148,7 @@ func HeadersPOW(
 	defer logEvery.Stop()
 	if hash == (libcommon.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader, logger); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
 		if !useExternalTx {
@@ -165,21 +164,21 @@ func HeadersPOW(
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
+	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
 
-	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
+	localTd, err := rawdb.ReadTd(tx, hash, startProgress)
 	if err != nil {
 		return err
 	}
 	if localTd == nil {
-		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
+		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
 	var noProgressCounter uint = 0
-	prevProgress := headerProgress
+	prevProgress := startProgress
 	var wasProgress bool
 	var lastSkeletonTime time.Time
 	var peer [64]byte
@@ -187,12 +186,12 @@ func HeadersPOW(
 Loop:
 	for !stopped {
 
-		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
+		transitionedToPoS, err := rawdb.Transitioned(tx, startProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
 		if transitionedToPoS {
-			if err := s.Update(tx, headerProgress); err != nil {
+			if err := s.Update(tx, startProgress); err != nil {
 				return err
 			}
 			break
@@ -253,7 +252,7 @@ Loop:
 			}
 		}
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck() {
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(cfg.hd.Progress()-startProgress)) {
 			break
 		}
 

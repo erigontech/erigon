@@ -39,6 +39,7 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
+	loopBreakCheck   func(int) bool
 }
 
 func StageBorHeimdallCfg(
@@ -49,6 +50,7 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
+	loopBreakCheck func(int) bool,
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
@@ -59,6 +61,7 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
+		loopBreakCheck:   loopBreakCheck,
 	}
 }
 
@@ -226,6 +229,11 @@ func BorHeimdallForward(
 				return err
 			}
 		}
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+			break
+		}
+
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {

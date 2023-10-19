@@ -269,6 +269,11 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			return libcommon.ErrStopped
 		}
 
+		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
+			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
+			break
+		}
+
 		s.NextStage()
 	}
 
@@ -335,6 +340,11 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
 			return libcommon.ErrStopped
+		}
+
+		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
+			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
+			break
 		}
 
 		s.NextStage()

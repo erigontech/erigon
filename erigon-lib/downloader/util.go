@@ -148,11 +148,11 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 	}
 
 	fPath := filepath.Join(root, fName)
-	if dir2.FileExist(fPath + ".torrent") {
-		return
+	if dir2.FileNonZero(fPath + ".torrent") {
+		return fPath + ".torrent", nil
 	}
 	if !dir2.FileExist(fPath) {
-		return
+		return "", os.ErrNotExist
 	}
 
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
@@ -275,7 +275,7 @@ func AllTorrentSpecs(dirs datadir.Dirs) (res []*torrent.TorrentSpec, err error) 
 		return nil, err
 	}
 	for _, fPath := range files {
-		a, err := loadTorrent(fPath)
+		a, err := LoadTorrent(fPath)
 		if err != nil {
 			return nil, err
 		}
@@ -284,7 +284,7 @@ func AllTorrentSpecs(dirs datadir.Dirs) (res []*torrent.TorrentSpec, err error) 
 	return res, nil
 }
 
-func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
+func LoadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	mi, err := metainfo.LoadFromFile(torrentFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadFromFile: %w, file=%s", err, torrentFilePath)

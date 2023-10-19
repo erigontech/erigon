@@ -87,6 +87,8 @@ func (it IdxType) String() string { return string(it) }
 
 var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
+var BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )

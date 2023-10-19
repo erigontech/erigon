@@ -39,7 +39,7 @@ func DefaultStages(ctx context.Context,
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
+				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx, logger)
 			},
 		},
 		{
@@ -263,7 +263,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
+				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx, logger)
 			},
 		},
 		{
