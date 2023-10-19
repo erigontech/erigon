@@ -393,7 +393,6 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 		if w.trace {
 			fmt.Printf("V3 code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)
 		}
-		//w.writeLists[kv.PlainContractCode].Push(addr, code)
 	}
 	return nil
 }
@@ -419,6 +418,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
+	//seems don't need delete code here - tests starting fail
 	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
