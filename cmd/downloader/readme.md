@@ -168,9 +168,12 @@ webseed.toml format:
 
 ## E3
 
-Git branch `e35`. Just start erigon as you usually do. 
+Git branch `e35`. Just start erigon as you usually do.
+
 RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bit later.
+
 Golang 1.21
+
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
 ### E3 changes from E2:
