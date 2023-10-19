@@ -111,8 +111,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 	return count
 }
 
-const AssertReads = false
-
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
@@ -120,26 +118,19 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
-				//if AssertReads {
-				//	original := txTask.AccountDels[key]
-				//	var originalBytes []byte
-				//	if original != nil {
-				//		originalBytes = accounts.SerialiseV3(original)
-				//	}
-				//}
-				if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], txTask.AccountPrevs[key]); err != nil {
 					return err
 				}
 			}
 		case kv.CodeDomain:
 			for i, key := range list.Keys {
-				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], txTask.StoragePrevs[key]); err != nil {
 					return err
 				}
 			}
 		case kv.StorageDomain:
 			for k, key := range list.Keys {
-				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], nil); err != nil {
+				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], txTask.CodePrevs[key]); err != nil {
 					return err
 				}
 			}
@@ -152,9 +143,13 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0, err := domains.LatestAccount(addrBytes)
-		if err != nil {
-			return err
+		enc0, ok := txTask.AccountPrevs[addr.String()]
+		if !ok {
+			var err error
+			enc0, err = domains.LatestAccount(addrBytes)
+			if err != nil {
+				return err
+			}
 		}
 		acc.Reset()
 		if len(enc0) > 0 {
@@ -333,7 +328,7 @@ type StateWriterBufferedV3 struct {
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
-	codePrevs    map[string]uint64
+	codePrevs    map[string][]byte
 
 	tx kv.Tx
 }
@@ -342,7 +337,11 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs: rs,
 		//trace:      true,
-		writeLists: newWriteList(),
+		writeLists:   newWriteList(),
+		accountPrevs: make(map[string][]byte),
+		accountDels:  make(map[string]*accounts.Account),
+		storagePrevs: make(map[string][]byte),
+		codePrevs:    make(map[string][]byte),
 	}
 }
 
@@ -353,23 +352,24 @@ func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 
 func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	w.accountPrevs = nil
-	w.accountDels = nil
-	w.storagePrevs = nil
-	w.codePrevs = nil
+	w.accountPrevs = make(map[string][]byte)
+	w.accountDels = make(map[string]*accounts.Account)
+	w.storagePrevs = make(map[string][]byte)
+	w.codePrevs = make(map[string][]byte)
 }
 
 func (w *StateWriterBufferedV3) WriteSet() map[string]*libstate.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
+	w.accountPrevs[string(address[:])] = accounts.SerialiseV3(original)
 
 	if w.trace {
 		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -385,6 +385,13 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 		}
 		//w.writeLists[kv.PlainContractCode].Push(addr, code)
 	}
+	if incarnation > 0 {
+		prev, err := w.rs.domains.LatestCode(address[:])
+		if err != nil {
+			log.Error("UpdateAccountCode: read latest code", "addr", address.String(), "err", err)
+		}
+		w.codePrevs[string(address[:])] = prev
+	}
 	return nil
 }
 
@@ -393,6 +400,7 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	if w.trace {
 		fmt.Printf("V3 account [%x] deleted\n", address.Bytes())
 	}
+	w.accountDels[string(address[:])] = original
 	return nil
 }
 
@@ -405,6 +413,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	if w.trace {
 		fmt.Printf("V3 storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
 	}
+	w.storagePrevs[compositeS] = original.Bytes()
 	return nil
 }
 

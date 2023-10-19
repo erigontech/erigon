@@ -48,7 +48,7 @@ type TxTask struct {
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
-	CodePrevs          map[string]uint64
+	CodePrevs          map[string][]byte
 	Error              error
 	Logs               []*types.Log
 	TraceFroms         map[libcommon.Address]struct{}

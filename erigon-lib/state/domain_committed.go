@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
@@ -32,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
-	"golang.org/x/crypto/sha3"
 )
 
 // Defines how to evaluate commitments

@@ -1029,14 +1029,15 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 }
 
 type HistoryRecord struct {
-	TxNum uint64
-	Value []byte
+	TxNum  uint64
+	Value  []byte
+	PValue []byte
 }
 
-func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needRestoring, needDeleting bool, err error) {
+func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
 	it, err := hc.IdxRange(key, 0, int(toTxNum+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
 	if err != nil {
-		return nil, false, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
+		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
 
 	tnums := [3]*HistoryRecord{
@@ -1046,22 +1047,21 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 	for it.HasNext() {
 		txn, err := it.Next()
 		if err != nil {
-			return nil, false, false, err
+			return nil, false, err
 		}
-		if txn < toTxNum {
-			tnums[0].TxNum = txn
-			// fmt.Printf("seen %x @tx %d\n", key, txn)
-			continue
-		}
-
 		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
 		if err != nil {
-			return nil, false, false, err
+			return nil, false, err
 		}
 		if !ok {
 			break
 		}
-		// fmt.Printf("found %x %d ->%t %x\n", key, txn, ok, v)
+		fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
+		if txn < toTxNum {
+			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
+			//fmt.Printf("seen %x @tx %d\n", key, txn)
+			continue
+		}
 
 		if txn == toTxNum {
 			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
@@ -1071,19 +1071,45 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 			break
 		}
 	}
+
+	v, ok, err := hc.GetNoStateWithRecent(key, tnums[0].TxNum, roTx)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		tnums[0].TxNum = math.MaxUint64
+	} else {
+		tnums[0].Value = common.Copy(v)
+	}
 	if tnums[1] != nil {
 		if tnums[0].TxNum != math.MaxUint64 {
-			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value}
-			return toRestore, true, true, nil
+			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
+			return toRestore, true, nil
 		}
-		return nil, false, true, nil
+		//if tnums[2] != nil {
+		//	toRestore = &HistoryRecord{TxNum: tnums[1].TxNum, Value: tnums[2].Value}
+		//	return toRestore, true, nil
+		//}
+		//if len(tnums[1].Value) == 0 {
+		//	return nil, true, nil
+		//}
+		fmt.Printf("toRestore NONE [1] %x @%d ->[%x]\n", key, tnums[0].TxNum, v)
+		//return nil, false, nil
 	}
-	//if tnums[0].TxNum != math.MaxUint64 && tnums[2] != nil {
-	//	toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value}
-	//	fmt.Printf("toRestore %x %d ->%t %x\n", key, toRestore.TxNum, true, toRestore.Value)
-	//	return toRestore, true, true, nil
+	//if tnums[2] != nil {
+	//	if tnums[0].TxNum != math.MaxUint64 {
+	//		toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
+	//		fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
+	//		return toRestore, true, nil
+	//	}
+	//
+	//	//toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[0].Value}
+	//	//fmt.Printf("toRestore %x @%d [2] %x\n", key, toRestore.TxNum, toRestore.Value)
+	//	//fmt.Printf("toRestore %x @%d NONE [2]\n", key, tnums[0].TxNum)
+	//	return toRestore, false, nil
 	//}
-	return nil, false, true, nil
+	fmt.Printf("toRestore NONE %x @%d ->%x\n", key, tnums[0].TxNum, tnums[0].Value)
+	return nil, true, nil
 }
 
 // returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
@@ -1104,7 +1130,7 @@ func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx
 			return nil, err
 		}
 		// if bytes.Equal(key, common.FromHex("1079")) {
-		// 	fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, truncate(fmt.Sprintf("%x", v), 80))
+		fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, fmt.Sprintf("%x", v))
 		// }
 		if !ok {
 			continue

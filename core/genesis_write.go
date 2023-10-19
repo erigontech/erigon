@@ -27,13 +27,13 @@ import (
 	"math/big"
 	"sync"
 
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+
+	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -202,6 +202,8 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if histV3 {
 		domains = state2.NewSharedDomains(tx)
 		defer domains.Close()
+		domains.StartWrites()
+		domains.SetTxNum(ctx, 0)
 		stateWriter = state.NewWriterV4(domains)
 	} else {
 		for addr, account := range g.Alloc {
@@ -226,19 +228,17 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
+		rh, err := domains.ComputeCommitment(ctx, tx.(*temporal.Tx).Agg().EndTxNumMinimax() == 0, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !bytes.Equal(rh, block.Root().Bytes()) {
+			fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
+		}
 		if err := domains.Flush(ctx, tx); err != nil {
 			return nil, nil, err
 		}
-		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
-		if !hasSnap {
-			rh, err := domains.ComputeCommitment(ctx, true, false)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !bytes.Equal(rh, block.Root().Bytes()) {
-				fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
-			}
-		}
+		domains.FinishWrites()
 	} else {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
@@ -251,6 +251,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 	return block, statedb, nil
 }
+
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

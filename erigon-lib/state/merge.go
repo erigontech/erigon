@@ -516,11 +516,11 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 	}
 
 	closeItem := true
-	var comp ArchiveWriter
+	var kvWriter ArchiveWriter
 	defer func() {
 		if closeItem {
-			if comp != nil {
-				comp.Close()
+			if kvWriter != nil {
+				kvWriter.Close()
 			}
 			if indexIn != nil {
 				indexIn.closeFilesAndRemove()
@@ -556,14 +556,14 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 
 	fromStep, toStep := r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep
 	kvFilePath := d.kvFilePath(fromStep, toStep)
-	compr, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
+	kvFile, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 	}
 
-	comp = NewArchiveWriter(compr, d.compression)
+	kvWriter = NewArchiveWriter(kvFile, d.compression)
 	if d.noFsync {
-		comp.DisableFsync()
+		kvWriter.DisableFsync()
 	}
 	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
 	defer ps.Delete(p)
@@ -609,10 +609,10 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 		deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
 		if !deleted {
 			if keyBuf != nil {
-				if err = comp.AddWord(keyBuf); err != nil {
+				if err = kvWriter.AddWord(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				if err = comp.AddWord(valBuf); err != nil {
+				if err = kvWriter.AddWord(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
 			}
@@ -621,18 +621,18 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 		}
 	}
 	if keyBuf != nil {
-		if err = comp.AddWord(keyBuf); err != nil {
+		if err = kvWriter.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		if err = comp.AddWord(valBuf); err != nil {
+		if err = kvWriter.AddWord(valBuf); err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	if err = comp.Compress(); err != nil {
+	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
-	comp.Close()
-	comp = nil
+	kvWriter.Close()
+	kvWriter = nil
 	ps.Delete(p)
 
 	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
@@ -641,18 +641,16 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
-	if !UseBpsTree {
-		idxPath := d.kvAccessorFilePath(fromStep, toStep)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-	}
-
 	if UseBpsTree {
 		btPath := d.kvBtFilePath(fromStep, toStep)
 		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+	} else {
+		idxPath := d.kvAccessorFilePath(fromStep, toStep)
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
 

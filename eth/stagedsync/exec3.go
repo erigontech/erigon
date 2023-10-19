@@ -788,7 +788,7 @@ Loop:
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
-				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -875,7 +875,7 @@ Loop:
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
 	if !dbg.DiscardCommitment() && b != nil {
-		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
 		}
@@ -909,7 +909,7 @@ Loop:
 }
 
 // applyTx is required only for debugging
-func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.AggregatorV3, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
@@ -920,25 +920,25 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root missmatch*/
-	/*
-		if err := agg.Flush(context.Background(), applyTx); err != nil {
-			panic(err)
-		}
-		oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-		if err != nil {
-			panic(err)
-		}
-		if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-			if oldAlogNonIncrementalHahs != header.Root {
-				log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-			} else {
-				log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is NOT correct): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-			}
+	/* uncomment it when need to debug state-root missmatch
+	if err := doms.Flush(context.Background(), applyTx); err != nil {
+		panic(err)
+	}
+	core.GenerateTrace = true
+	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+	if err != nil {
+		panic(err)
+	}
+	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+		if oldAlogNonIncrementalHahs != header.Root {
+			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		}
-	*/
+	} else {
+		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+	}
+	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")

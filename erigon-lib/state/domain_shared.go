@@ -582,7 +582,7 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
-	if txNum%sd.Account.aggregationStep == 0 { //
+	if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)

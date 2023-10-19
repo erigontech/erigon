@@ -520,12 +520,11 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 	defer tx.Rollback()
 
 	for i := 0; i < 32; i++ {
-		toRest, needRestore, needDelete, err := hc.ifUnwindKey(common.Append(key, loc), uint64(i), tx)
-		fmt.Printf("i=%d tx %d toRest=%v, needRestore=%v, needDelete=%v\n", i, i, toRest, needRestore, needDelete)
+		toRest, needDelete, err := hc.ifUnwindKey(common.Append(key, loc), uint64(i), tx)
+		fmt.Printf("i=%d tx %d toRest=%v, needDelete=%v\n", i, i, toRest, needDelete)
 		require.NoError(t, err)
 		if i > 1 {
 			require.NotNil(t, toRest)
-			require.True(t, needRestore)
 			require.True(t, needDelete)
 			if 0 == (i&i - 1) {
 				require.Equal(t, uint64(i>>1), toRest.TxNum)
@@ -533,7 +532,6 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 			}
 		} else {
 			require.Nil(t, toRest)
-			require.False(t, needRestore)
 			require.True(t, needDelete)
 		}
 	}
@@ -566,36 +564,32 @@ func TestHistory_IfUnwindKey(t *testing.T) {
 
 	// Test case 1: key not found
 	toTxNum := uint64(0)
-	toRestore, needRestoring, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
+	toRestore, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
 	require.NoError(t, err)
 	require.Nil(t, toRestore)
-	require.False(t, needRestoring)
 	require.True(t, needDeleting)
 
 	// Test case 2: key found, but no value at toTxNum
 	toTxNum = 6
-	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
 	require.NoError(t, err)
 	require.Nil(t, toRestore)
-	require.False(t, needRestoring)
 	require.True(t, needDeleting)
 
 	// Test case 3: key found, value at toTxNum, no value after toTxNum
 	toTxNum = 3
-	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
 	require.NoError(t, err)
 	require.NotNil(t, toRestore)
-	require.True(t, needRestoring)
 	require.True(t, needDeleting)
 	require.Equal(t, uint64(2), toRestore.TxNum)
 	require.Equal(t, []byte("value_2"), toRestore.Value)
 
 	// Test case 4: key found, value at toTxNum, value after toTxNum
 	toTxNum = 2
-	toRestore, needRestoring, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
 	require.NoError(t, err)
 	require.NotNil(t, toRestore)
-	require.True(t, needRestoring)
 	require.True(t, needDeleting)
 	require.Equal(t, uint64(1), toRestore.TxNum)
 	require.Equal(t, []byte("value_1"), toRestore.Value)
