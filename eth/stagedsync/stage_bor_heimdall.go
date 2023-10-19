@@ -236,7 +236,9 @@ func BorHeimdallForward(
 	logTimer := time.NewTicker(30 * time.Second)
 	defer logTimer.Stop()
 
-	logger.Info("["+s.LogPrefix()+"] Processing spans...", "from", nextSpanId, "to", endSpanID)
+	if endSpanID >= nextSpanId {
+		logger.Info("["+s.LogPrefix()+"] Processing spans...", "from", nextSpanId, "to", endSpanID)
+	}
 	for spanID := nextSpanId; spanID <= endSpanID; spanID++ {
 		if lastSpanId, err = fetchAndWriteSpans(ctx, spanID, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 			return err
