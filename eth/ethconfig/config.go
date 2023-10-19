@@ -255,6 +255,7 @@ type Config struct {
 	SilkwormPath      string
 	SilkwormExecution bool
 	SilkwormRpcDaemon bool
+	SilkwormSentry    bool
 }
 
 type Sync struct {

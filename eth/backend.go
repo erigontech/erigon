@@ -204,6 +204,7 @@ type Ethereum struct {
 
 	silkworm                 *silkworm.Silkworm
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
+	silkwormSentryService    *silkworm.SentryService
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -342,6 +343,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
+	if config.SilkwormPath != "" {
+		backend.silkworm, err = silkworm.New(config.SilkwormPath, config.Dirs.DataDir)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
@@ -351,6 +359,40 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			sentries = append(sentries, sentryClient)
 		}
+	} else if config.SilkwormSentry {
+		apiPort := 53774
+		apiAddr := fmt.Sprintf("127.0.0.1:%d", apiPort)
+		p2pConfig := stack.Config().P2P
+
+		collectNodeURLs := func(nodes []*enode.Node) []string {
+			var urls []string
+			for _, n := range nodes {
+				urls = append(urls, n.URLv4())
+			}
+			return urls
+		}
+
+		settings := silkworm.SentrySettings{
+			ClientId:    p2pConfig.Name,
+			ApiPort:     apiPort,
+			Port:        p2pConfig.ListenPort(),
+			Nat:         p2pConfig.NATSpec,
+			NetworkId:   config.NetworkID,
+			NodeKey:     crypto.FromECDSA(p2pConfig.PrivateKey),
+			StaticPeers: collectNodeURLs(p2pConfig.StaticNodes),
+			Bootnodes:   collectNodeURLs(p2pConfig.BootstrapNodes),
+			NoDiscover:  p2pConfig.NoDiscovery,
+			MaxPeers:    p2pConfig.MaxPeers,
+		}
+
+		silkwormSentryService := backend.silkworm.NewSentryService(settings)
+		backend.silkwormSentryService = &silkwormSentryService
+
+		sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, apiAddr)
+		if err != nil {
+			return nil, err
+		}
+		sentries = append(sentries, sentryClient)
 	} else {
 		var readNodeInfo = func() *eth.NodeInfo {
 			var res *eth.NodeInfo
@@ -480,13 +522,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
-
-	if config.SilkwormPath != "" {
-		backend.silkworm, err = silkworm.New(config.SilkwormPath)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -1266,6 +1301,11 @@ func (s *Ethereum) Start() error {
 			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
 		}
 	}
+	if s.silkwormSentryService != nil {
+		if err := s.silkwormSentryService.Start(); err != nil {
+			s.logger.Error("silkworm.SentryStart error", "err", err)
+		}
+	}
 
 	return nil
 }
@@ -1315,6 +1355,11 @@ func (s *Ethereum) Stop() error {
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Stop(); err != nil {
 			s.logger.Error("silkworm.StopRpcDaemon error", "err", err)
+		}
+	}
+	if s.silkwormSentryService != nil {
+		if err := s.silkwormSentryService.Stop(); err != nil {
+			s.logger.Error("silkworm.SentryStop error", "err", err)
 		}
 	}
 	if s.silkworm != nil {

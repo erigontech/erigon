@@ -849,6 +849,10 @@ var (
 		Name:  "silkworm.rpcd",
 		Usage: "Enable embedded Silkworm RPC daemon",
 	}
+	SilkwormSentryFlag = cli.BoolFlag{
+		Name:  "silkworm.sentry",
+		Usage: "Enable embedded Silkworm Sentry service",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1039,6 +1043,7 @@ func NewP2PConfig(
 		return nil, fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 	cfg.NAT = natif
+	cfg.NATSpec = natSetting
 	return cfg, nil
 }
 
@@ -1087,11 +1092,13 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 // setNAT creates a port mapper from command line flags.
 func setNAT(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(NATFlag.Name) {
-		natif, err := nat.Parse(ctx.String(NATFlag.Name))
+		natSetting := ctx.String(NATFlag.Name)
+		natif, err := nat.Parse(natSetting)
 		if err != nil {
 			Fatalf("Option %s: %v", NATFlag.Name, err)
 		}
 		cfg.NAT = natif
+		cfg.NATSpec = natSetting
 	}
 }
 
@@ -1472,6 +1479,7 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	}
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
+	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was
