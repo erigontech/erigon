@@ -78,7 +78,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Debug(str)
 	case lg.Info:
 		str := r.String()
-		skip := false //strings.Contains(str, "EOF")
+		skip := strings.Contains(str, "EOF")
 		//strings.Contains(str, "banning ip <nil>") ||
 		//strings.Contains(str, "spurious timer") { // suppress useless errors
 		if skip {
@@ -88,8 +88,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Info(str)
 	case lg.Warning:
 		str := r.String()
-		skip := false
-
+		skip := strings.Contains(str, "EOF")
 		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 		//	break
 		//}
