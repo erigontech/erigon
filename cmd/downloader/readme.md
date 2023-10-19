@@ -175,6 +175,7 @@ Git branch `e35`, erigon flag required `--experimental.history.v3`
 
 ### E3 changes from E2:
 
+- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
 - ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
   stage_trace_index
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
