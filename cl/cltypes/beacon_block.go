@@ -72,6 +72,23 @@ func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBeaconBl
 	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg)}
 }
 
+func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := s.Block.Body.HashSSZ()
+	if err != nil {
+		panic(err)
+	}
+	return &SignedBeaconBlockHeader{
+		Signature: s.Signature,
+		Header: &BeaconBlockHeader{
+			Slot:          s.Block.Slot,
+			ProposerIndex: s.Block.ProposerIndex,
+			ParentRoot:    s.Block.ParentRoot,
+			Root:          s.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		},
+	}
+}
+
 func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
 	return &BeaconBlock{Body: NewBeaconBody(beaconCfg)}
 }

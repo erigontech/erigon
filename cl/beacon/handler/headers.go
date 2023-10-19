@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -30,8 +30,8 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 		httpStatus = http.StatusBadRequest
 		return
 	}
-	var tx *sql.Tx
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var tx kv.Tx
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -54,8 +54,6 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersBySlot(ctx, tx, *req.Slot)
 	} else if req.ParentRoot != nil {
 		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersByParentRoot(ctx, tx, *req.ParentRoot)
-	} else {
-		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersByParentRootAndSlot(ctx, tx, *req.ParentRoot, *req.Slot)
 	}
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
@@ -88,7 +86,7 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 
 func (a *ApiHandler) getHeader(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	ctx := r.Context()
-	tx, err2 := a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err2 := a.indiciesDB.BeginRo(ctx)
 	if err2 != nil {
 		httpStatus = http.StatusInternalServerError
 		err = err2

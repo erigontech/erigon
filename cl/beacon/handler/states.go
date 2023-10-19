@@ -2,18 +2,18 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (a *ApiHandler) rootFromStateId(ctx context.Context, tx *sql.Tx, stateId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+func (a *ApiHandler) rootFromStateId(ctx context.Context, tx kv.Tx, stateId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
 	var blockRoot libcommon.Hash
 	switch {
 	case stateId.head():
@@ -26,7 +26,7 @@ func (a *ApiHandler) rootFromStateId(ctx context.Context, tx *sql.Tx, stateId *s
 	case stateId.justified():
 		blockRoot = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
 	case stateId.genesis():
-		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, 0)
+		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
@@ -34,7 +34,7 @@ func (a *ApiHandler) rootFromStateId(ctx context.Context, tx *sql.Tx, stateId *s
 			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("genesis block not found")
 		}
 	case stateId.getSlot() != nil:
-		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, *stateId.getSlot())
+		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.getSlot())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
@@ -70,7 +70,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 
 func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx        *sql.Tx
+		tx        kv.Tx
 		blockId   *segmentID
 		root      libcommon.Hash
 		blkHeader *cltypes.SignedBeaconBlockHeader
@@ -78,7 +78,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -123,7 +123,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 
 func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx        *sql.Tx
+		tx        kv.Tx
 		blockId   *segmentID
 		root      libcommon.Hash
 		blkHeader *cltypes.SignedBeaconBlockHeader
@@ -132,7 +132,7 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, v
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
