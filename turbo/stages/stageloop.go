@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -17,27 +16,26 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -268,7 +266,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	blockReader := h.blockReader
 	// -- send notifications START
 	//TODO: can this 2 headers be 1
-	var headHeader, currentHeder *types.Header
+	var headHeader, currentHeader *types.Header
 
 	// Update sentry status for peers to see our sync status
 	var headTd *big.Int
@@ -285,7 +283,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 		return err
 	}
 	headHeader = rawdb.ReadHeader(tx, headHash, head)
-	currentHeder = rawdb.ReadCurrentHeader(tx)
+	currentHeader = rawdb.ReadCurrentHeader(tx)
 	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
 	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
 		finalizedBlock = *fb
@@ -312,25 +310,23 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			return nil
 		}
 	}
-	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
+	if notifications != nil && notifications.Accumulator != nil && currentHeader != nil {
 
-		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeder)
-		if currentHeder.Number.Uint64() == 0 {
-			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
+		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
+		if currentHeader.Number.Uint64() == 0 {
+			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
-		var pendingBlobFee uint64 = params.MinBlobGasPrice
-		excessBlobGas := misc.CalcExcessBlobGas(currentHeder)
-		if currentHeder.ExcessBlobGas != nil {
-			f, err := misc.GetBlobGasPrice(excessBlobGas)
+		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
+		if currentHeader.ExcessBlobGas != nil {
+			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)
+			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas)
 			if err != nil {
 				return err
 			}
-			if f != nil && f.Cmp(uint256.NewInt(1)) >= 0 {
-				pendingBlobFee = f.Uint64()
-			}
+			pendingBlobFee = f.Uint64()
 		}
 
-		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeder.GasLimit, finalizedBlock)
+		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END
 	return nil
@@ -349,20 +345,20 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	}
 	defer tx.Rollback()
 
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
+	//histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	//if err != nil {
+	//	return err
+	//}
 	var miningBatch kv.RwTx
-	if histV3 {
-		sd := state.NewSharedDomains(tx)
-		defer sd.Close()
-		miningBatch = sd
-	} else {
-		mb := memdb.NewMemoryBatch(tx, tmpDir)
-		defer mb.Rollback()
-		miningBatch = mb
-	}
+	//if histV3 {
+	//	sd := state.NewSharedDomains(tx)
+	//	defer sd.Close()
+	//	miningBatch = sd
+	//} else {
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir)
+	defer mb.Rollback()
+	miningBatch = mb
+	//}
 
 	if err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
 		return err
@@ -371,7 +367,49 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, engine consensus.Engine, batch kv.RwTx, blockWriter *blockio.BlockWriter, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader consensus.ChainReader, currentHeader *types.Header, currentBody *types.RawBody, histV3 bool) error {
+	currentHeight := currentHeader.Number.Uint64()
+	currentHash := currentHeader.Hash()
+	if chainReader != nil {
+		if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
+			log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
+			return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
+		}
+		if err := engine.VerifyUncles(chainReader, currentHeader, currentBody.Uncles); err != nil {
+			log.Warn("Unlcles Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
+			return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
+		}
+	}
+	// Prepare memory state for block execution
+	if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+		return err
+	}
+	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
+		return err
+	}
+	var ok bool
+	var err error
+	if ok, err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+		return err
+	}
+	if histV3 && ok {
+		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
+			return err
+		}
+	}
+	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(batch, stages.Bodies, currentHeight); err != nil {
+		return err
+	}
+	return nil
+}
+
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, batch kv.RwTx, blockWriter *blockio.BlockWriter, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, histV3 bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -381,7 +419,7 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-		stateSync.UnwindTo(unwindPoint, libcommon.Hash{})
+		stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind)
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}
@@ -393,30 +431,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	for i := range headersChain {
 		currentHeader := headersChain[i]
 		currentBody := bodiesChain[i]
-		currentHeight := headersChain[i].Number.Uint64()
-		currentHash := headersChain[i].Hash()
-		if chainReader != nil {
-			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
-				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
-			}
-		}
 
-		// Prepare memory state for block execution
-		if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
-			return err
-		}
-		if currentBody != nil {
-			Bd.AddToPrefetch(currentHeader, currentBody)
-		}
-
-		if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
-			return err
-		}
-		if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
-			return err
-		}
-		if err = stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
+		if err := addAndVerifyBlockStep(batch, engine, chainReader, currentHeader, currentBody, histV3); err != nil {
 			return err
 		}
 		// Run state sync
@@ -429,29 +445,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	if header == nil {
 		return nil
 	}
-	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
-		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
-	}
-
-	// Setup
-	height := header.Number.Uint64()
-	hash := header.Hash()
 	// Prepare memory state for block execution
-	if err = rawdb.WriteHeader(batch, header); err != nil {
+	if err := addAndVerifyBlockStep(batch, engine, chainReader, header, body, histV3); err != nil {
 		return err
-	}
-	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
-		return err
-	}
-	if err := rawdb.WriteHeadHeaderHash(batch, hash); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
-		return err
-	}
-	if body != nil {
-		Bd.AddToPrefetch(header, body)
 	}
 	// Run state sync
 	if err = stateSync.RunNoInterrupt(nil, batch, false /* firstCycle */); err != nil {

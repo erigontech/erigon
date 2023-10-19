@@ -336,7 +336,7 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata).Readonly(), false, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -500,6 +500,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageSnapshots)
 
 	withConfig(cmdStageHeaders)
+	withIntegrityChecks(cmdStageHeaders)
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withReset(cmdStageHeaders)
@@ -720,6 +721,17 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
+	if integritySlow {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			log.Info("[integrity] no gaps in canonical headers")
+			integrity.NoGapsInCanonicalHeaders(tx, ctx, br)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if !(unwind > 0 || reset) {
 		logger.Error("This command only works with --unwind or --reset options")
 		return nil
@@ -727,6 +739,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
+			if casted, ok := tx.(kv.CanWarmupDB); ok {
+				if err := casted.WarmupDB(false); err != nil {
+					return err
+				}
+			}
+
 			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
@@ -1578,7 +1596,7 @@ func newDomains(ctx context.Context, db kv.RwDB, logger log.Logger) (consensus.E
 	cfg.Snapshot = allSn.Cfg()
 
 	blockReader, _ := blocksIO(db, logger)
-	engine, _ := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	engine, _ := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 	return engine, cfg, allSn, agg
 }
 
@@ -1615,7 +1633,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	cfg.Snapshot = allSn.Cfg()
 
 	blockReader, blockWriter := blocksIO(db, logger)
-	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
@@ -1706,7 +1724,7 @@ func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	})
 }
 
-func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.IHeimdallClient) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.IHeimdallClient) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1728,6 +1746,6 @@ func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, blockReader 
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger), heimdallClient
 }

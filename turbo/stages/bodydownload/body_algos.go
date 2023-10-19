@@ -11,15 +11,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
-
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"golang.org/x/exp/maps"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -203,12 +201,12 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 	if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
 		if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
-			log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
+			bd.logger.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
 		} else if parent != nil {
 			td := new(big.Int).Add(header.Difficulty, parent)
 			go blockPropagator(context.Background(), header, body, td)
 		} else {
-			log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
+			bd.logger.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 		}
 	}
 
@@ -280,16 +278,16 @@ Loop:
 		}
 
 		if delivery.txs == nil {
-			log.Warn("nil transactions delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+			bd.logger.Warn("nil transactions delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
 		if delivery.uncles == nil {
-			log.Warn("nil uncles delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+			bd.logger.Warn("nil uncles delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
 		if delivery.withdrawals == nil {
-			log.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+			bd.logger.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
 		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil {
-			log.Debug("delivery body processing has been skipped due to nil tx|data")
+			bd.logger.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
 

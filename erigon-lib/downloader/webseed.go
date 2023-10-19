@@ -12,6 +12,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
@@ -25,30 +30,47 @@ import (
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
 // it allows download .torrent files and data files from trusted url's (for example: S3 signed url)
 type WebSeeds struct {
-	lock        sync.Mutex
-	byFileName  snaptype.WebSeedUrls // HTTP urls of data files
-	torrentUrls snaptype.TorrentUrls // HTTP urls of .torrent files
+	lock sync.Mutex
 
+	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
+	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
+	downloadTorrentFile bool
+
+	chainName string
 	logger    log.Logger
 	verbosity log.Lvl
 }
 
-func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
-	d.downloadWebseedTomlFromProviders(ctx, urls, files)
+func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
+	d.downloadWebseedTomlFromProviders(ctx, s3tokens, urls, files)
 	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
-func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, providers []*url.URL, diskProviders []string) {
-	list := make([]snaptype.WebSeedsFromProvider, 0, len(providers)+len(diskProviders))
-	for _, webSeedProviderURL := range providers {
+func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
+	log.Debug("[snapshots] webseed providers", "http", len(httpProviders), "s3", len(s3Providers), "disk", len(diskProviders))
+	list := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
+	for _, webSeedProviderURL := range httpProviders {
 		select {
 		case <-ctx.Done():
 			break
 		default:
 		}
-		response, err := d.callWebSeedsProvider(ctx, webSeedProviderURL)
+		response, err := d.callHttpProvider(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
-			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
+			d.logger.Debug("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", webSeedProviderURL.EscapedPath())
+			continue
+		}
+		list = append(list, response)
+	}
+	for _, webSeedProviderURL := range s3Providers {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+		response, err := d.callS3Provider(ctx, webSeedProviderURL)
+		if err != nil { // don't fail on error
+			d.logger.Debug("[snapshots] downloadWebseedTomlFromProviders", "err", err, "url", "s3")
 			continue
 		}
 		list = append(list, response)
@@ -58,7 +80,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 		response, err := d.readWebSeedsFile(webSeedFile)
 		if err != nil { // don't fail on error
 			_, fileName := filepath.Split(webSeedFile)
-			d.logger.Warn("[snapshots] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
+			d.logger.Debug("[snapshots] downloadWebseedTomlFromProviders", "err", err, "file", fileName)
 			continue
 		}
 		if len(diskProviders) > 0 {
@@ -91,28 +113,45 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, provide
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
 func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
+	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
+	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
+	//  - maybe need download new files if --snap.stop=true
+	if !d.downloadTorrentFile {
+		return
+	}
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	urlsByName := d.TorrentUrls()
+	//TODO:
+	// - what to do if node already synced?
 	for name, tUrls := range urlsByName {
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
 		}
 		addedNew++
+		if strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent") {
+			_, fName := filepath.Split(name)
+			if strings.HasPrefix(fName, "commitment") {
+				d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
+				continue
+			}
+		}
+		name := name
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
-				res, err := d.callTorrentUrlProvider(ctx, url)
+				res, err := d.callTorrentHttpProvider(ctx, url)
 				if err != nil {
-					d.logger.Warn("[downloader] callTorrentUrlProvider", "err", err)
+					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
 					continue
 				}
+				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
-					d.logger.Warn("[downloader] saveTorrent", "err", err)
+					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
 				}
 				return nil
@@ -121,10 +160,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		})
 	}
 	if err := e.Wait(); err != nil {
-		d.logger.Warn("[downloader] webseed discover", "err", err)
-	}
-	if addedNew > 0 {
-		d.logger.Debug("[snapshots] downloaded .torrent from webseed", "amount", addedNew)
+		d.logger.Debug("[snapshots] webseed discover", "err", err)
 	}
 }
 
@@ -146,7 +182,7 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	v, ok := d.byFileName[name]
 	return v, ok
 }
-func (d *WebSeeds) callWebSeedsProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
+func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	request, err := http.NewRequest(http.MethodGet, webSeedProviderUrl.String(), nil)
 	if err != nil {
 		return nil, err
@@ -163,7 +199,53 @@ func (d *WebSeeds) callWebSeedsProvider(ctx context.Context, webSeedProviderUrl 
 	}
 	return response, nil
 }
-func (d *WebSeeds) callTorrentUrlProvider(ctx context.Context, url *url.URL) ([]byte, error) {
+func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.WebSeedsFromProvider, error) {
+	//v1:bucketName:accID:accessKeyID:accessKeySecret
+	l := strings.Split(token, ":")
+	if len(l) != 5 {
+		return nil, fmt.Errorf("token has invalid format, exepcing 'v1:tokenInBase64'")
+	}
+	version, bucketName, accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2]), strings.TrimSpace(l[3]), strings.TrimSpace(l[4])
+	if version != "v1" {
+		return nil, fmt.Errorf("not supported version: %s", version)
+	}
+	var fileName = "webseeds.toml"
+
+	r2Resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			URL: fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountId),
+		}, nil
+	})
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithEndpointResolverWithOptions(r2Resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyId, accessKeySecret, "")),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	client := s3.NewFromConfig(cfg)
+	//  {
+	//  	"ChecksumAlgorithm": null,
+	//  	"ETag": "\"eb2b891dc67b81755d2b726d9110af16\"",
+	//  	"Key": "ferriswasm.png",
+	//  	"LastModified": "2022-05-18T17:20:21.67Z",
+	//  	"Owner": null,
+	//  	"Size": 87671,
+	//  	"StorageClass": "STANDARD"
+	//  }
+	resp, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: &bucketName, Key: &fileName})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	response := snaptype.WebSeedsFromProvider{}
+	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
 	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err

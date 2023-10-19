@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type Node struct {

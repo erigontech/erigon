@@ -185,6 +185,10 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	a.recalcMaxTxNum()
 
+	if dbg.NoSync() {
+		a.DisableFsync()
+	}
+
 	return a, nil
 }
 
@@ -799,6 +803,7 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	return math2.MaxUint64
 }
+func (ac *AggregatorV3Context) CanUnwindDomainsTo() uint64 { return ac.maxTxNumInFiles(false) }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
@@ -1389,27 +1394,28 @@ func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs,
 
 // -- range end
 
-func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	return ac.account.hc.GetNoStateWithRecent(addr, txNum, tx)
-}
-
-func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
+func (ac *AggregatorV3Context) HistoryGet(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+	switch name {
+	case kv.AccountsHistory:
+		v, ok, err = ac.account.hc.GetNoStateWithRecent(key, ts, tx)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok || len(v) == 0 {
+			return v, ok, nil
+		}
+		return v, true, nil
+	case kv.StorageHistory:
+		return ac.storage.hc.GetNoStateWithRecent(key, ts, tx)
+	case kv.CodeHistory:
+		return ac.code.hc.GetNoStateWithRecent(key, ts, tx)
+	case kv.CommitmentHistory:
+		return ac.code.hc.GetNoStateWithRecent(key, ts, tx)
+	default:
+		panic(fmt.Sprintf("unexpected: %s", name))
 	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.hc.GetNoStateWithRecent(ac.keyBuf, txNum, tx)
-}
-func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	return ac.storage.hc.GetNoStateWithRecent(key, txNum, tx)
 }
 
-func (ac *AggregatorV3Context) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	return ac.code.hc.GetNoStateWithRecent(addr, txNum, tx)
-}
 func (ac *AggregatorV3Context) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.account.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }

@@ -24,7 +24,7 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		hr.ttx = ttx
 	} else {
-		panic("why")
+		panic(fmt.Sprintf("type %T didn't satisfy interface", tx))
 	}
 }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }

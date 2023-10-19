@@ -388,16 +388,29 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
+			var err error
 			if histV3 {
-				if err := domains.Flush(ctx, tx); err != nil {
+				//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
+				//if err = domains.Flush(ctx, tx); err != nil {
+				//	return nil, nil, err
+				//}
+				//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
+
+				stateRoot, err := domains.ComputeCommitment(ctx, false, false)
+				if err != nil {
+					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				}
+				if err = domains.Flush(ctx, tx); err != nil {
 					return nil, nil, err
 				}
+				if err != nil {
+					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				}
+				b.header.Root = libcommon.BytesToHash(stateRoot)
+			} else {
+				b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, false)
 			}
-			var err error
-			b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3)
-			if err != nil {
-				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-			}
+			_ = err
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
@@ -455,7 +468,7 @@ func hashKeyAndAddIncarnation(k []byte, h *common.Hasher) (newK []byte, err erro
 	return newK, nil
 }
 
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRoot libcommon.Hash, err error) {
+func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
@@ -520,6 +533,10 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 
 		}
 
+		if trace {
+			root, err := trie.CalcRootTrace("GenerateChain", tx)
+			return root, err
+		}
 		root, err := trie.CalcRoot("GenerateChain", tx)
 		return root, err
 
@@ -617,7 +634,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	}
 
 	if chainConfig.IsCancun(header.Time) {
-		excessBlobGas := misc.CalcExcessBlobGas(parent)
+		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent)
 		header.ExcessBlobGas = &excessBlobGas
 		header.BlobGasUsed = new(uint64)
 	}

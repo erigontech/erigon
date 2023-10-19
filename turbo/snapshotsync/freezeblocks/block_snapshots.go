@@ -19,6 +19,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -45,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
@@ -230,7 +230,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
+		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash.Close()
 		sn.IdxTxnHash = nil
@@ -242,7 +242,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash2BlockNum.FileName())
+		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
 		sn.IdxTxnHash2BlockNum.Close()
 		sn.IdxTxnHash2BlockNum = nil
@@ -1203,11 +1203,11 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	if curBlockNum <= params.FullImmutabilityThreshold {
+	if curBlockNum <= (params.FullImmutabilityThreshold / 2) {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
+	return canRetire(blockFrom, curBlockNum-(params.FullImmutabilityThreshold/2))
 }
 
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
@@ -1540,7 +1540,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
@@ -1551,7 +1551,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
@@ -1563,7 +1563,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		// If index was created before the segment file, it needs to be ignored (and rebuilt)
 		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
 		idx.Close()
@@ -1712,6 +1712,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	expectedBlockNum := blockFrom
 	key := make([]byte, 8+32)
 	from := hexutility.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1719,8 +1720,12 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 		if blockNum >= blockTo {
 			return false, nil
 		}
-		copy(key, k)
-		copy(key[8:], v)
+		if expectedBlockNum != blockNum {
+			return false, fmt.Errorf("found gaps in kv.HeaderCanonical table: expected %d, found %d", expectedBlockNum, blockNum)
+		}
+		expectedBlockNum++
+
+		key = append(append(key[:0], k...), v...)
 		dataRLP, err := tx.GetOne(kv.Headers, key)
 		if err != nil {
 			return false, err

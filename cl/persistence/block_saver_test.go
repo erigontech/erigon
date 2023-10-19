@@ -2,16 +2,15 @@ package persistence
 
 import (
 	"context"
-	"database/sql"
+	_ "embed"
 	"testing"
 
-	_ "embed"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -30,6 +29,10 @@ func newMockEngine() execution_client.ExecutionEngine {
 }
 
 func (m *mockEngine) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
+	panic("unimplemented")
+}
+
+func (m *mockEngine) FrozenBlocks() uint64 {
 	panic("unimplemented")
 }
 
@@ -94,26 +97,9 @@ func getTestBlock() *cltypes.SignedBeaconBlock {
 	return bcBlock
 }
 
-func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, execution_client.ExecutionEngine) {
+func setupStore(t *testing.T, full bool) (BeaconChainDatabase, kv.RwDB, execution_client.ExecutionEngine) {
 	// Open an in-memory SQLite database for testing
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-
-	// Start a transaction for testing
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Failed to start transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	// Call ApplyMigrations with the test transaction
-	err = sql_migrations.ApplyMigrations(context.Background(), tx)
-	if err != nil {
-		t.Fatalf("ApplyMigrations failed: %v", err)
-	}
-	tx.Commit()
+	db := memdb.NewTestDB(t)
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 	engine := newMockEngine()
@@ -124,7 +110,7 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 	store, db, _ := setupStore(t, true)
 	defer db.Close()
 
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
 	ctx := context.Background()

@@ -371,6 +371,17 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 	w.accountPrevs[string(address[:])] = accounts.SerialiseV3(original)
 
+	if original.Incarnation > account.Incarnation {
+		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+		err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
 	if w.trace {
 		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	}
@@ -383,7 +394,6 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 		if w.trace {
 			fmt.Printf("V3 code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)
 		}
-		//w.writeLists[kv.PlainContractCode].Push(addr, code)
 	}
 	if incarnation > 0 {
 		prev, err := w.rs.domains.LatestCode(address[:])
@@ -401,6 +411,7 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		fmt.Printf("V3 account [%x] deleted\n", address.Bytes())
 	}
 	w.accountDels[string(address[:])] = original
+	//w.accountPrevs[string(address[:])] = accounts.SerialiseV3(original)
 	return nil
 }
 
@@ -418,6 +429,8 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
+	//seems don't need delete code here - tests starting fail
+	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 		return nil
@@ -559,11 +572,17 @@ func newWriteList() map[string]*libstate.KvList {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
+	//return writeListPool.Get().(map[string]*libstate.KvList)
 }
 func returnWriteList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
+	//for _, tbl := range v {
+	//	clear(tbl.Keys)
+	//	clear(tbl.Vals)
+	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	//}
 	writeListPool.Put(v)
 }
 
@@ -584,10 +603,16 @@ func newReadList() map[string]*libstate.KvList {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
+	//return readListPool.Get().(map[string]*libstate.KvList)
 }
 func returnReadList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
+	//for _, tbl := range v {
+	//	clear(tbl.Keys)
+	//	clear(tbl.Vals)
+	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	//}
 	readListPool.Put(v)
 }

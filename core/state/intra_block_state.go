@@ -22,16 +22,18 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
+
+var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
 
 type revision struct {
 	id           int
@@ -130,6 +132,15 @@ func (sdb *IntraBlockState) Reset() {
 	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
 	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
 	//}
+
+	/*
+		sdb.nilAccounts = make(map[libcommon.Address]struct{})
+		sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+		sdb.logs = make(map[libcommon.Hash][]*types.Log)
+		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	*/
+
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
 	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
@@ -769,6 +780,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 		// Clear out any leftover from previous executions
 		al := newAccessList()
 		sdb.accessList = al
+
+		//sdb.accessList.Reset()
 
 		al.AddAddress(sender)
 		if dst != nil {

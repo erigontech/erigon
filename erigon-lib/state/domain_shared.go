@@ -54,7 +54,7 @@ type SharedDomains struct {
 
 	txNum    atomic.Uint64
 	blockNum atomic.Uint64
-	estSize  atomic.Uint64
+	estSize  int
 	trace    bool
 	//muMaps   sync.RWMutex
 	walLock sync.RWMutex
@@ -113,12 +113,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) SetInvertedIndices(tracesTo, tracesFrom, logAddrs, logTopics *InvertedIndex) {
-	sd.TracesTo = tracesTo
-	sd.TracesFrom = tracesFrom
-	sd.LogAddrs = logAddrs
-	sd.LogTopics = logTopics
-}
+func (sd *SharedDomains) AggCtx() *AggregatorV3Context { return sd.aggCtx }
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
@@ -225,48 +220,44 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	}
 
 	sd.storage = btree2.NewMap[string, []byte](128)
-	sd.estSize.Store(0)
+	sd.estSize = 0
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
 	// disable mutex - becuse work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	sd.puts(table, key, val)
-	//sd.muMaps.Unlock()
-}
-
-func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
 	switch table {
 	case kv.AccountsDomain:
 		if old, ok := sd.account[key]; ok {
-			sd.estSize.Add(uint64(len(val) - len(old)))
+			sd.estSize += len(val) - len(old)
 		} else {
-			sd.estSize.Add(uint64(len(key) + len(val)))
+			sd.estSize += len(key) + len(val)
 		}
 		sd.account[key] = val
 	case kv.CodeDomain:
 		if old, ok := sd.code[key]; ok {
-			sd.estSize.Add(uint64(len(val) - len(old)))
+			sd.estSize += len(val) - len(old)
 		} else {
-			sd.estSize.Add(uint64(len(key) + len(val)))
+			sd.estSize += len(key) + len(val)
 		}
 		sd.code[key] = val
 	case kv.StorageDomain:
 		if old, ok := sd.storage.Set(key, val); ok {
-			sd.estSize.Add(uint64(len(val) - len(old)))
+			sd.estSize += len(val) - len(old)
 		} else {
-			sd.estSize.Add(uint64(len(key) + len(val)))
+			sd.estSize += len(key) + len(val)
 		}
 	case kv.CommitmentDomain:
 		if old, ok := sd.commitment[key]; ok {
-			sd.estSize.Add(uint64(len(val) - len(old)))
+			sd.estSize += len(val) - len(old)
 		} else {
-			sd.estSize.Add(uint64(len(key) + len(val)))
+			sd.estSize += len(key) + len(val)
 		}
 		sd.commitment[key] = val
 	default:
 		panic(fmt.Errorf("sharedDomains put to invalid table %s", table))
 	}
+	//sd.muMaps.Unlock()
 }
 
 // Get returns cached value by key. Cache is invalidated when associated WAL is flushed
@@ -296,7 +287,9 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
-	return sd.estSize.Load() * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+	//sd.muMaps.RLock()
+	//defer sd.muMaps.RUnlock()
+	return uint64(sd.estSize) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
@@ -1014,4 +1007,16 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	default:
 		panic(domain)
 	}
+}
+
+func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	if domain != kv.StorageDomain {
+		return fmt.Errorf("DomainDelPrefix: not supported")
+	}
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		return sd.DomainDel(kv.StorageDomain, k, nil, v)
+	}); err != nil {
+		return err
+	}
+	return nil
 }

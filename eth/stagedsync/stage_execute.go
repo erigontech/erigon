@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -321,10 +322,16 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 	return
 }
 
+var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
+
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	domains := libstate.NewSharedDomains(tx)
 	defer domains.Close()
 	rs := state.NewStateV3(domains, logger)
+
+	if u.UnwindPoint < tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo() {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo())
+	}
 
 	domains.StartWrites()
 	defer domains.FinishWrites()
@@ -483,7 +490,8 @@ Loop:
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
-		if cfg.silkworm != nil {
+		_, is_memory_mutation := tx.(*membatchwithdb.MemoryMutation)
+		if cfg.silkworm != nil && !is_memory_mutation {
 			blockNum, err = cfg.silkworm.ExecuteBlocks(tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
 		} else {
 			err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, logger)
@@ -514,9 +522,9 @@ Loop:
 				}
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
-				u.UnwindTo(blockNum-1, blockHash /* badBlock */)
+				u.UnwindTo(blockNum-1, BadBlock(blockHash, err))
 			} else {
-				u.UnwindTo(blockNum-1, libcommon.Hash{} /* badBlock */)
+				u.UnwindTo(blockNum-1, ExecUnwind)
 			}
 			break Loop
 		}

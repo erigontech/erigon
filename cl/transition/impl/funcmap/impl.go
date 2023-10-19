@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var _ machine.Interface = (*Impl)(nil)
@@ -15,7 +14,7 @@ type Impl struct {
 	FnVerifyTransition                        func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
 	FnProcessSlots                            func(s abstract.BeaconState, slot uint64) error
 	FnProcessBlockHeader                      func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
-	FnProcessWithdrawals                      func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error
+	FnProcessWithdrawals                      func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	FnProcessExecutionPayload                 func(s abstract.BeaconState, payload *cltypes.Eth1Block) error
 	FnProcessRandao                           func(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	FnProcessEth1Data                         func(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
@@ -41,7 +40,7 @@ func (i Impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBl
 	return i.FnProcessBlockHeader(s, block)
 }
 
-func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error {
+func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	return i.FnProcessWithdrawals(s, withdrawals)
 }
 

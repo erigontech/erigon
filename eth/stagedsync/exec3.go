@@ -18,6 +18,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -184,14 +186,16 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 
-		//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-		//	return err
-		//}
-		//if dbg.MdbxLockInRam() {
-		//	if err := applyTx.(*temporal.Tx).MdbxTx.LockDBInRam(); err != nil {
-		//		return err
-		//	}
-		//}
+		if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+			if err := casted.WarmupDB(false); err != nil {
+				return err
+			}
+			if dbg.MdbxLockInRam() {
+				if err := casted.LockDBInRam(); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	var blockNum, stageProgress uint64
@@ -746,7 +750,11 @@ Loop:
 							return err
 						}
 					}
-					u.UnwindTo(blockNum-1, header.Hash())
+					if errors.Is(err, consensus.ErrInvalidBlock) {
+						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+					} else {
+						u.UnwindTo(blockNum-1, ExecUnwind)
+					}
 					break Loop
 				}
 
@@ -781,9 +789,11 @@ Loop:
 					break
 				}
 
-				//if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-				//	return err
-				//}
+				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+					if err := casted.WarmupDB(false); err != nil {
+						return err
+					}
+				}
 
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
@@ -829,9 +839,11 @@ Loop:
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							//if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-							//	return err
-							//}
+							if casted, ok := tx.(kv.CanWarmupDB); ok {
+								if err := casted.WarmupDB(false); err != nil {
+									return err
+								}
+							}
 							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
@@ -949,10 +961,11 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
 		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-		u.UnwindTo(unwindTo, header.Hash())
+		// protect from too far unwind
+		unwindTo = cmp.Max(unwindTo, applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsTo())
+		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
 	return false, nil
 }
@@ -968,6 +981,9 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if b == nil {
+		return nil, nil
 	}
 	for _, txn := range b.Transactions() {
 		_ = txn.Hash()
@@ -1613,7 +1629,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}).
 		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
+		Open(ctx)
 	if err != nil {
 		return err
 	}

@@ -256,6 +256,9 @@ type RoDB interface {
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
 	PageSize() uint64
+
+	// Pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
+	CHandle() unsafe.Pointer
 }
 
 // RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
@@ -572,4 +575,10 @@ type TemporalPutDel interface {
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte) error
+	DomainDelPrefix(domain Domain, prefix []byte) error
+}
+
+type CanWarmupDB interface {
+	WarmupDB(force bool) error
+	LockDBInRam() error
 }

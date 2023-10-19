@@ -17,17 +17,21 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
@@ -39,9 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/borfinality"
-	"github.com/ledgerwatch/erigon/eth/borfinality/flags"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -269,6 +270,7 @@ type Bor struct {
 	closeCh             chan struct{} // Channel to signal the background processes to exit
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
+	headerProgress      HeaderProgress
 }
 
 type signer struct {
@@ -442,12 +444,22 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 // This is used by the rpcdaemon which needs read only access to the provided data services
-func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	// get bor config
+	borConfig := chainConfig.Bor
+
+	// Set any missing consensus parameters to their defaults
+	if borConfig != nil && borConfig.CalculateSprint(0) == 0 {
+		borConfig.Sprint = defaultSprintLength
+	}
+
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	return &Bor{
+		chainConfig: chainConfig,
+		config:      borConfig,
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
@@ -462,6 +474,14 @@ func NewRo(db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 // Type returns underlying consensus engine
 func (c *Bor) Type() chain.ConsensusName {
 	return chain.BorConsensus
+}
+
+type HeaderProgress interface {
+	Progress() uint64
+}
+
+func (c *Bor) HeaderProgress(p HeaderProgress) {
+	c.headerProgress = p
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
@@ -718,14 +738,28 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 
 		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 
-		initialHeaders := make([]*types.Header, 0, 128)
+		g := errgroup.Group{}
+		g.SetLimit(estimate.AlmostAllCPUs())
+		defer g.Wait()
+
+		batchSize := 128 // must be < inmemorySignatures
+		initialHeaders := make([]*types.Header, 0, batchSize)
 
 		for i := uint64(1); i <= number; i++ {
 			header := chain.GetHeaderByNumber(i)
+			{
+				// `snap.apply` bottleneck - is recover of signer.
+				// to speedup: recover signer in background goroutines and save in `sigcache`
+				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				snap := snap
+				g.Go(func() error {
+					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					return nil
+				})
+			}
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
 				snap, err = snap.apply(initialHeaders, c.logger)
-
 				if err != nil {
 					return nil, err
 				}
@@ -850,7 +884,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		c.logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Trace("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -1168,9 +1202,15 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
+	delay := time.Until(time.Unix(int64(header.Time), 0))
 	// wiggle was already accounted for in header.Time, this is just for logging
 	wiggle := time.Duration(successionNumber) * time.Duration(c.config.CalculateBackupMultiplier(number)) * time.Second
+
+	// temp for testing
+	if wiggle > 0 {
+		wiggle = 500 * time.Millisecond
+	}
+	// temp for testing
 
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeBor, BorRLP(header, c.config))
@@ -1179,15 +1219,21 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
-	// Wait until sealing is terminated or delay timeout.
-	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
-
 	go func() {
+		// Wait until sealing is terminated or delay timeout.
+		c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
+
 		select {
 		case <-stop:
-			c.logger.Info("Discarding sealing operation for block", "number", number)
+			c.logger.Info("Stopped sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
+
+			if c.headerProgress != nil && c.headerProgress.Progress() >= number {
+				c.logger.Info("Discarding sealing operation for block", "number", number)
+				return
+			}
+
 			if wiggle > 0 {
 				c.logger.Info(
 					"Sealed out-of-turn",
@@ -1302,7 +1348,7 @@ func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
 func (c *Bor) Start(chainDB kv.RwDB) {
 	if flags.Milestone {
 		whitelist.RegisterService(c.DB)
-		borfinality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
+		finality.Whitelist(c.HeimdallClient, c.DB, chainDB, c.blockReader, c.logger,
 			FinalityAPIFunc(func(start uint64, end uint64) (string, error) {
 				ctx := context.Background()
 				tx, err := chainDB.BeginRo(ctx)
@@ -1397,7 +1443,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
 	}
 
-	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
+	c.logger.Debug("Span with given block number is not loaded", "fetching span", spanID)
 
 	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 	if err != nil {

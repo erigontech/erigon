@@ -16,7 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -448,8 +451,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
-
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
+
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
@@ -459,13 +462,25 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	{
-		//TODO: remove it before release!
-		agg.KeepStepsInDB(0)
-		db.Update(ctx, func(tx kv.RwTx) error {
-			return tx.(*mdbx.MdbxTx).LockDBInRam()
-		})
+
+	var cc *chain.Config
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = rawdb.ReadChainConfig(tx, genesisHash)
+		return err
+	}); err != nil {
+		return err
 	}
+
+	db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
+	if err != nil {
+		return err
+	}
+
+	//agg.KeepStepsInDB(0)
 
 	db.View(ctx, func(tx kv.Tx) error {
 		blockSnapshots.LogStat()
@@ -518,8 +533,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Compute commitment")
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.(*mdbx.MdbxTx).WarmupDB(false); err != nil {
-			return err
+		if casted, ok := tx.(kv.CanWarmupDB); ok {
+			if err := casted.WarmupDB(false); err != nil {
+				return err
+			}
 		}
 		ac := agg.MakeContext()
 		defer ac.Close()

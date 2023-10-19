@@ -47,6 +47,23 @@ type Link struct {
 	peerId      [64]byte
 }
 
+func (link *Link) ClearChildren() {
+	for child := link.fChild; child != nil; child, child.next = child.next, nil {
+	}
+}
+
+func (parentLink *Link) RemoveChild(link *Link) {
+	var prevChild *Link
+	for child := parentLink.fChild; child != nil && child != link; child = child.next {
+		prevChild = child
+	}
+	if prevChild == nil {
+		parentLink.fChild = link.next
+	} else {
+		prevChild.next = link.next
+	}
+}
+
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
 // In other instances, it is used to limit number of links of corresponding type (persistent and non-persistent) in memory
 type LinkQueue []*Link
@@ -110,6 +127,18 @@ type Anchor struct {
 	blockHeight   uint64
 	nextRetryTime time.Time // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
 	timeouts      int       // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+}
+
+func (anchor *Anchor) RemoveChild(link *Link) {
+	var prevChild *Link
+	for child := anchor.fLink; child != nil && child != link; child = child.next {
+		prevChild = child
+	}
+	if prevChild == nil {
+		anchor.fLink = link.next
+	} else {
+		prevChild.next = link.next
+	}
 }
 
 type ChainSegmentHeader struct {
@@ -224,6 +253,8 @@ type Stats struct {
 	SkeletonReqMaxBlock uint64
 	RespMinBlock        uint64
 	RespMaxBlock        uint64
+	InvalidHeaders      int
+	RejectedBadHeaders  int
 }
 
 type HeaderDownload struct {

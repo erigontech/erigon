@@ -48,6 +48,7 @@ func newJournal() *journal {
 func (j *journal) Reset() {
 	j.entries = j.entries[:0]
 	j.dirties = make(map[libcommon.Address]int, len(j.dirties)/2)
+	//clear(j.dirties)
 }
 
 // append inserts a new modification entry to the end of the change journal.
@@ -160,6 +161,12 @@ type (
 		prevalue uint256.Int
 	}
 )
+
+//type journalEntry2 interface {
+//	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
+//		nonceChange | storageChange | fakeStorageChange | codeChange |
+//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
+//}
 
 func (ch createObjectChange) revert(s *IntraBlockState) {
 	delete(s.stateObjects, *ch.account)

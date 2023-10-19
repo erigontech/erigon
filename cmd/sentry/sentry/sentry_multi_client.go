@@ -306,7 +306,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader)
+	bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 
 	cs := &MultiClient{
 		nodeName:                          nodeName,
@@ -585,13 +585,11 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
 
-	// This is a hack to make us work with erigon 2.48 peers that have --sentry.drop-useless-peers
-	// If we reply with an empty list, we're going to be considered useless and kicked.
-	// Once enough of erigon nodes are updated in the network past this commit, this check should be removed,
-	// because it is totally acceptable to return an empty list.
-	if len(headers) == 0 {
-		return nil
-	}
+	// Even if we get empty headers list from db, we'll respond with that. Nodes
+	// running on erigon 2.48 with --sentry.drop-useless-peers will kick us out
+	// because of certain checks. But, nodes post that will not kick us out. This
+	// is useful as currently with no response, we're anyways getting kicked due
+	// to request timeout and EOF.
 
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          query.RequestId,
