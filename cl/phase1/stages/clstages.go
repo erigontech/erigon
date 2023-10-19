@@ -339,7 +339,12 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
-					sources := []persistence.BlockSource{gossipSource, rpcSource}
+					sources := []persistence.BlockSource{gossipSource}
+
+					// if we are more than one block behind, we request the rpc source as well
+					if totalRequest > 2 {
+						sources = append(sources, rpcSource)
+					}
 					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()

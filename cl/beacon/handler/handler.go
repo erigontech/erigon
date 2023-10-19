@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
