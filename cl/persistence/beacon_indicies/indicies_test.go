@@ -2,54 +2,51 @@ package beacon_indicies
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestDB(t *testing.T) *sql.DB {
+func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
-	require.NoError(t, err)
+	db := memdb.NewTestDB(t)
 	return db
 }
 
 func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
-
-	sql_migrations.ApplyMigrations(context.Background(), tx)
 
 	// Mock a block
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	block.Block.Slot = 56
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, GenerateBlockIndicies(context.Background(), tx, block, false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	retrievedSlot, err := ReadBlockSlotByBlockRoot(context.Background(), tx, blockRoot)
+	retrievedSlot, err := ReadBlockSlotByBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, block.Block.Slot, *retrievedSlot)
 
-	canonicalRoot, err := ReadCanonicalBlockRoot(context.Background(), tx, *retrievedSlot)
+	canonicalRoot, err := ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash{}, canonicalRoot)
 
 	err = MarkRootCanonical(context.Background(), tx, *retrievedSlot, blockRoot)
 	require.NoError(t, err)
 
-	canonicalRoot, err = ReadCanonicalBlockRoot(context.Background(), tx, *retrievedSlot)
+	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(blockRoot), canonicalRoot)
 }
@@ -57,10 +54,8 @@ func TestWriteBlockRoot(t *testing.T) {
 func TestReadParentBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
-
-	sql_migrations.ApplyMigrations(context.Background(), tx)
 
 	mockParentRoot := libcommon.Hash{1}
 	// Mock a block
@@ -69,7 +64,7 @@ func TestReadParentBlockRoot(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, GenerateBlockIndicies(context.Background(), tx, block, false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
@@ -83,10 +78,8 @@ func TestReadParentBlockRoot(t *testing.T) {
 func TestTruncateCanonicalChain(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
-
-	sql_migrations.ApplyMigrations(context.Background(), tx)
 
 	mockParentRoot := libcommon.Hash{1}
 	// Mock a block
@@ -95,19 +88,19 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, GenerateBlockIndicies(context.Background(), tx, block, true))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), true))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	canonicalRoot, err := ReadCanonicalBlockRoot(context.Background(), tx, block.Block.Slot)
+	canonicalRoot, err := ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(blockRoot), canonicalRoot)
 
 	require.NoError(t, TruncateCanonicalChain(context.Background(), tx, 0))
 
-	canonicalRoot, err = ReadCanonicalBlockRoot(context.Background(), tx, block.Block.Slot)
+	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
 	require.Equal(t, canonicalRoot, libcommon.Hash{})
 }
@@ -115,10 +108,8 @@ func TestTruncateCanonicalChain(t *testing.T) {
 func TestReadBeaconBlockHeader(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
-
-	sql_migrations.ApplyMigrations(context.Background(), tx)
 
 	mockParentRoot := libcommon.Hash{1}
 	mockSignature := [96]byte{23}
@@ -132,7 +123,7 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	canonical := true
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, GenerateBlockIndicies(context.Background(), tx, block, canonical))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), canonical))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
