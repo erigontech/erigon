@@ -27,12 +27,10 @@ import (
 	"math/big"
 	"sync"
 
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -226,18 +224,15 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
-		if err := domains.Flush(ctx, tx); err != nil {
+		rh, err := domains.ComputeCommitment(ctx, true, false)
+		if err != nil {
 			return nil, nil, err
 		}
-		hasSnap := tx.(*temporal.Tx).Agg().EndTxNumMinimax() != 0
-		if !hasSnap {
-			rh, err := domains.ComputeCommitment(ctx, true, false)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !bytes.Equal(rh, block.Root().Bytes()) {
-				fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
-			}
+		if !bytes.Equal(rh, block.Root().Bytes()) {
+			return nil, nil, fmt.Errorf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
+		}
+		if err := domains.Flush(ctx, tx); err != nil {
+			return nil, nil, err
 		}
 	} else {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {

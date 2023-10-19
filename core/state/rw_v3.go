@@ -370,6 +370,16 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
+	if original.Incarnation > account.Incarnation {
+		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+		err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
 
 	if w.trace {
 		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -409,6 +419,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
+	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 		return nil

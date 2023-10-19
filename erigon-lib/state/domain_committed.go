@@ -207,7 +207,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			return true
 		})
 		if clear {
-			t.tree.Clear(true)
+			t.tree.Clear(false)
 		}
 		return plainKeys, updates
 	default:
@@ -488,7 +488,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 func (d *DomainCommitted) Close() {
 	d.Domain.Close()
 	d.updates.keys = nil
-	d.updates.tree.Clear(true)
+	d.updates.tree.Clear(false)
 }
 
 // Evaluates commitment for processed state.
@@ -501,7 +501,6 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 
 	touchedKeys, updates := d.updates.List(true)
 	mxCommitmentKeys.Add(len(touchedKeys))
-
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, nil, err

@@ -1303,6 +1303,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			if err := hph.accountFn(plainKey, stagedCell); err != nil {
 				return nil, nil, fmt.Errorf("accountFn for key %x failed: %w", plainKey, err)
 			}
+
 			if !stagedCell.Delete {
 				cell := hph.updateCell(plainKey, hashedKey)
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)

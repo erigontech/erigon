@@ -575,6 +575,7 @@ type TemporalPutDel interface {
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte) error
+	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 
 type CanWarmupDB interface {

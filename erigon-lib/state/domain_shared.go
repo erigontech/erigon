@@ -468,6 +468,9 @@ func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []b
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
 	addrS := string(addr)
 	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
+	if bytes.Equal(prevCode, code) {
+		return nil
+	}
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.aggCtx.code.DeleteWithPrev(addr, nil, prevCode)
@@ -633,7 +636,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 			continue
 		}
 		if trace {
-			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
+			//fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 
 		if err = sd.updateCommitmentData(prefix, merged, stated); err != nil {
@@ -954,9 +957,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	case kv.StorageDomain:
 		return sd.writeAccountStorage(k1, k2, val, prevVal)
 	case kv.CodeDomain:
-		if bytes.Equal(prevVal, val) {
-			return nil
-		}
 		return sd.updateAccountCode(k1, val, prevVal)
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(k1, val, prevVal)
@@ -984,13 +984,22 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	case kv.StorageDomain:
 		return sd.writeAccountStorage(k1, k2, nil, prevVal)
 	case kv.CodeDomain:
-		if bytes.Equal(prevVal, nil) {
-			return nil
-		}
 		return sd.updateAccountCode(k1, nil, prevVal)
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(k1, nil, prevVal)
 	default:
 		panic(domain)
 	}
+}
+
+func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	if domain != kv.StorageDomain {
+		return fmt.Errorf("DomainDelPrefix: not supported")
+	}
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		return sd.DomainDel(kv.StorageDomain, k, nil, v)
+	}); err != nil {
+		return err
+	}
+	return nil
 }
