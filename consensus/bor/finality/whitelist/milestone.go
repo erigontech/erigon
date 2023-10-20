@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type milestone struct {
