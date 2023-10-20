@@ -178,8 +178,6 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	P2PEnabled bool
-
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
 

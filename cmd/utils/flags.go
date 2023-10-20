@@ -1576,7 +1576,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setSilkworm(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
