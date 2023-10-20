@@ -32,7 +32,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState, justificationState.epoch)
 	for {
 		// Filter out current head children.
-		unfilteredChildren := f.forkGraph.GetChildren(f.headHash)
+		unfilteredChildren := f.children(f.headHash)
 		children := []libcommon.Hash{}
 		for _, child := range unfilteredChildren {
 			if _, ok := blocks[child]; ok {
@@ -133,7 +133,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	if !has {
 		return false
 	}
-	children := f.forkGraph.GetChildren(blockRoot)
+	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
 		isAnyViable := false
@@ -156,7 +156,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 		return false
 	}
 
-	genesisEpoch := f.forkGraph.Config().GenesisEpoch
+	genesisEpoch := f.beaconCfg.GenesisEpoch
 	if (f.justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(f.justifiedCheckpoint)) &&
 		(f.finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(f.finalizedCheckpoint)) {
 		blocks[blockRoot] = header

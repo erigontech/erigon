@@ -29,7 +29,7 @@ func TestForkGraph(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph := New(anchorState, false)
+	graph := NewForkGraphOnlyMemory(anchorState, false)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)
@@ -46,5 +46,4 @@ func TestForkGraph(t *testing.T) {
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, PreValidated)
-	graph.removeOldData()
 }

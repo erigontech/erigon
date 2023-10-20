@@ -153,7 +153,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), false)
+	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig))
 	require.NoError(t, err)
 
 	var steps []ForkChoiceStep

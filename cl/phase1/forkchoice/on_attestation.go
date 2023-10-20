@@ -139,8 +139,8 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(attestation *sol
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	// Use GENESIS_EPOCH for previous when genesis to avoid underflow
 	previousEpoch := currentEpoch - 1
-	if currentEpoch <= f.forkGraph.Config().GenesisEpoch {
-		previousEpoch = f.forkGraph.Config().GenesisEpoch
+	if currentEpoch <= f.beaconCfg.GenesisEpoch {
+		previousEpoch = f.beaconCfg.GenesisEpoch
 	}
 	if target.Epoch() == currentEpoch || target.Epoch() == previousEpoch {
 		return nil
