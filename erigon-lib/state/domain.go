@@ -669,9 +669,9 @@ func (d *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
 }
 
 func (dc *DomainContext) SetTxNum(v uint64) {
+	dc.setTxNumOnce = true
 	dc.hc.SetTxNum(v)
-
-	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(dc.hc.ic.txNum / dc.d.aggregationStep))
+	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(v / dc.d.aggregationStep))
 }
 
 func (dc *DomainContext) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
@@ -755,10 +755,18 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	if d.discard {
 		return nil
 	}
+	if !d.dc.setTxNumOnce {
+		panic("you forgot to call SetTxNum")
+	}
 
 	kl := len(key1) + len(key2)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
+	//binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
+	if (d.dc.hc.ic.txNum / d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
+		panic(fmt.Sprintf("assert: %d != %d", d.dc.hc.ic.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.dc.stepBytes[:])))
+	}
+
 	//stepbb := [8]byte{}
 	//binary.BigEndian.PutUint64(stepbb[:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
 	//if !bytes.Equal(d.dc.stepBytes[:], stepbb[:]) {
@@ -877,9 +885,10 @@ type DomainContext struct {
 
 	wal *domainWAL
 
-	stepBytes [8]byte  // current inverted step representation
-	keyBuf    [60]byte // 52b key and 8b for inverted step
-	valKeyBuf [60]byte // 52b key and 8b for inverted step
+	setTxNumOnce bool
+	stepBytes    [8]byte  // current inverted step representation
+	keyBuf       [60]byte // 52b key and 8b for inverted step
+	valKeyBuf    [60]byte // 52b key and 8b for inverted step
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
