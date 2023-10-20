@@ -612,6 +612,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
+		PageSize(uint64(8 * datasize.KB)).
 		Path(dbDir).
 		Open(ctx)
 	if err != nil {
