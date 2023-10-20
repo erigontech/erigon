@@ -1434,7 +1434,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, f func(step uint64, k, v []byte) error) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64, f func(step uint64, k, v []byte) error) error {
 	d := dc.d
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1475,7 +1475,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 			continue
 		}
 
-		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txFrom-1, rwTx)
+		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txNumUnindTo-1, rwTx)
 		if err != nil {
 			return fmt.Errorf("unwind key %s %x: %w", d.filenameBase, k, err)
 		}
@@ -1536,8 +1536,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
+		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
 	}
 	// dc flush and start/finish is managed by sharedDomains
 	return nil

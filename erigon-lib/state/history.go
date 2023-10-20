@@ -1034,8 +1034,8 @@ type HistoryRecord struct {
 	PValue []byte
 }
 
-func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, 0, int(toTxNum+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
+func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
+	it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
@@ -1049,7 +1049,7 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		if err != nil {
 			return nil, false, err
 		}
-		if txn < toTxNum {
+		if txn < txNumUnindTo {
 			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
 			//fmt.Printf("seen %x @tx %d\n", key, txn)
 			continue
@@ -1063,10 +1063,10 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (t
 		}
 		//fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
 
-		if txn == toTxNum {
+		if txn == txNumUnindTo {
 			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
 		}
-		if txn > toTxNum {
+		if txn > txNumUnindTo {
 			tnums[2] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
 			break
 		}
