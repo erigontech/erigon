@@ -203,7 +203,7 @@ func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.W
 	//v1:bucketName:accID:accessKeyID:accessKeySecret
 	l := strings.Split(token, ":")
 	if len(l) != 5 {
-		return nil, fmt.Errorf("token has invalid format, exepcing 'v1:tokenInBase64'")
+		return nil, fmt.Errorf("[snapshots] webseed token has invalid format. expeting 5 parts, found %d", len(l))
 	}
 	version, bucketName, accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2]), strings.TrimSpace(l[3]), strings.TrimSpace(l[4])
 	if version != "v1" {
