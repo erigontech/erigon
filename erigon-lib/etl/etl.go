@@ -88,7 +88,7 @@ func Transform(
 	if args.BufferSize > 0 {
 		bufferSize = datasize.ByteSize(args.BufferSize)
 	}
-	buffer := getBufferByType(args.BufferType, bufferSize)
+	buffer := getBufferByType(args.BufferType, bufferSize, nil)
 	collector := NewCollector(logPrefix, tmpdir, buffer, logger)
 	defer collector.Close()
 
