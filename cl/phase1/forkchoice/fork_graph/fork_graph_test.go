@@ -2,9 +2,11 @@ package fork_graph
 
 import (
 	_ "embed"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -21,7 +23,7 @@ var block2 []byte
 //go:embed test_data/anchor_state.ssz_snappy
 var anchor []byte
 
-func TestForkGraph(t *testing.T) {
+func TestForkGraphInMem(t *testing.T) {
 	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig),
 		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
@@ -29,7 +31,7 @@ func TestForkGraph(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph := NewForkGraphOnlyMemory(anchorState, false)
+	graph := NewForkGraphOnlyMemory(anchorState)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)
@@ -39,6 +41,34 @@ func TestForkGraph(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, status, InvalidBlock)
 	// Save current state hash
+	_, status, err = graph.AddChainSegment(blockB, true)
+	require.NoError(t, err)
+	require.Equal(t, status, Success)
+	// Try again with same should yield success
+	_, status, err = graph.AddChainSegment(blockB, true)
+	require.NoError(t, err)
+	require.Equal(t, status, PreValidated)
+}
+
+func TestForkGraphInDisk(t *testing.T) {
+	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig),
+		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(blockA, block1, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graph := NewForkGraphDisk(anchorState, afero.NewMemMapFs())
+	_, status, err := graph.AddChainSegment(blockA, true)
+	require.NoError(t, err)
+	require.Equal(t, status, Success)
+	// Now make blockC a bad block
+	blockC.Block.ProposerIndex = 81214459 // some invalid thing
+	_, status, err = graph.AddChainSegment(blockC, true)
+	require.Error(t, err)
+	require.Equal(t, status, InvalidBlock)
+	// Save current state hash
+	fmt.Println("ASADCS")
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)

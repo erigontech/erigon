@@ -32,21 +32,20 @@ import (
 // registered services, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
-	DataDir          string
-	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
-	Chaindata        string
-	Tmp              string
-	Snap             string
-	SnapIdx          string
-	SnapHistory      string
-	SnapDomain       string
-	SnapAccessors    string
-	Downloader       string
-	TxPool           string
-	Nodes            string
-	CaplinForkchoice string
-	CaplinHistory    string
-	CaplinIndexing   string
+	DataDir         string
+	RelativeDataDir string // like dataDir, but without filepath.Abs() resolution
+	Chaindata       string
+	Tmp             string
+	Snap            string
+	SnapIdx         string
+	SnapHistory     string
+	SnapDomain      string
+	SnapAccessors   string
+	Downloader      string
+	TxPool          string
+	Nodes           string
+	CaplinHistory   string
+	CaplinIndexing  string
 }
 
 func New(datadir string) Dirs {
@@ -61,26 +60,25 @@ func New(datadir string) Dirs {
 	}
 
 	dirs := Dirs{
-		RelativeDataDir:  relativeDataDir,
-		DataDir:          datadir,
-		Chaindata:        filepath.Join(datadir, "chaindata"),
-		Tmp:              filepath.Join(datadir, "temp"),
-		Snap:             filepath.Join(datadir, "snapshots"),
-		SnapIdx:          filepath.Join(datadir, "snapshots", "idx"),
-		SnapHistory:      filepath.Join(datadir, "snapshots", "history"),
-		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
-		Downloader:       filepath.Join(datadir, "downloader"),
-		TxPool:           filepath.Join(datadir, "txpool"),
-		Nodes:            filepath.Join(datadir, "nodes"),
-		CaplinHistory:    filepath.Join(datadir, "caplin/history"),
-		CaplinIndexing:   filepath.Join(datadir, "caplin/indexing"),
-		CaplinForkchoice: filepath.Join(datadir, "caplin/forkchoice"),
+		RelativeDataDir: relativeDataDir,
+		DataDir:         datadir,
+		Chaindata:       filepath.Join(datadir, "chaindata"),
+		Tmp:             filepath.Join(datadir, "temp"),
+		Snap:            filepath.Join(datadir, "snapshots"),
+		SnapIdx:         filepath.Join(datadir, "snapshots", "idx"),
+		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
+		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
+		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
+		Downloader:      filepath.Join(datadir, "downloader"),
+		TxPool:          filepath.Join(datadir, "txpool"),
+		Nodes:           filepath.Join(datadir, "nodes"),
+		CaplinHistory:   filepath.Join(datadir, "caplin/history"),
+		CaplinIndexing:  filepath.Join(datadir, "caplin/indexing"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinHistory, dirs.CaplinIndexing, dirs.CaplinForkchoice)
+		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinHistory, dirs.CaplinIndexing)
 	return dirs
 }
 

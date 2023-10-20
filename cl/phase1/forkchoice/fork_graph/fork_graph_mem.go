@@ -113,7 +113,7 @@ func (f *forkGraphOnlyMemory) AddChainSegment(signedBlock *cltypes.SignedBeaconB
 		return nil, InvalidBlock, nil
 	}
 
-	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, false)
+	newState, didLongRecconnection, err := f.getState(block.ParentRoot, false)
 	if err != nil {
 		return nil, InvalidBlock, err
 	}
@@ -174,7 +174,11 @@ func (f *forkGraphOnlyMemory) getBlock(blockRoot libcommon.Hash) (*cltypes.Signe
 	return obj, has
 }
 
-func (f *forkGraphOnlyMemory) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, bool, error) {
+func (f *forkGraphOnlyMemory) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	bs, _, err := f.getState(blockRoot, alwaysCopy)
+	return bs, err
+}
+func (f *forkGraphOnlyMemory) getState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, bool, error) {
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.

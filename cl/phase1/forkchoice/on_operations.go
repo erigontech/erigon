@@ -29,7 +29,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
@@ -97,7 +97,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
@@ -167,7 +167,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
