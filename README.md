@@ -55,7 +55,7 @@ System Requirements
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 600GB (January 2023).
+* Gnosis Chain Archive: 600GB (October 2023).
 
 * Polygon Mainnet Archive: 5TB. (April 2022). `--prune.*.older 15768000`: 5.1Tb (Sept 2023). Polygon Mumbai Archive: 1TB. (April 2022).
 
