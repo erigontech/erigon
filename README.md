@@ -630,6 +630,11 @@ UID/GID (1000).
 More details
 in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-filesystem-owner-matching-problem)
 
+### How to run public RPC api
+
+- `--txpool.nolocals=true`
+- don't add `admin` in `--http.api` list
+
 ### Run RaspberyPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
