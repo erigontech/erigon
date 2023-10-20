@@ -306,7 +306,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-
+	domains.SetTxNum(ctx, 0)
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
 	var (
