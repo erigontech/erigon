@@ -198,6 +198,14 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
+// IsAgra returns whether num is either equal to the Agra fork block or greater.
+func (c *Config) IsAgra(num uint64) bool {
+	if c == nil || c.Bor == nil {
+		return false
+	}
+	return isForked(c.Bor.AgraBlock, num)
+}
+
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -449,11 +457,12 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	JaipurBlock *big.Int `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
-	DelhiBlock  *big.Int `json:"delhiBlock"`  // Delhi switch block (nil = no fork, 0 = already on delhi)
-	IndoreBlock *big.Int `json:"indoreBlock"` // Indore switch block (nil = no fork, 0 = already on indore)
-
+	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
+	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
+	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already in agra)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
+	BurntContract              map[string]string `json:"burntContract"`              // governance contract where the token will be sent to and burnt in london fork
 
 	sprints sprints
 }
@@ -527,11 +536,15 @@ func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return c.calcConfig(c.BackupMultiplier, number)
+	return calcConfig(c.BackupMultiplier, number)
+}
+
+func (c *BorConfig) CalculateBurntContract(number uint64) string {
+	return calcConfig(c.BurntContract, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return c.calcConfig(c.Period, number)
+	return calcConfig(c.Period, number)
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
@@ -546,19 +559,31 @@ func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
 }
 
+func (c *BorConfig) IsAgra(number uint64) bool {
+	return isForked(c.AgraBlock, number)
+}
+
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
 
-func (c *BorConfig) calcConfig(field map[string]uint64, number uint64) uint64 {
-	keys := sortMapKeys(field)
+func calcConfig[T uint64 | string](field map[string]T, number uint64) T {
+	keys := make([]string, 0, len(field))
+	for k := range field {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
 	for i := 0; i < len(keys)-1; i++ {
 		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
 		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-		if number > valUint && number < valUintNext {
+
+		if number >= valUint && number < valUintNext {
 			return field[keys[i]]
 		}
 	}
+
 	return field[keys[len(keys)-1]]
 }
 
@@ -625,11 +650,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsEip1559FeeCollector, IsAura                           bool
+	ChainID                                                    *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon          bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul    bool
+	IsBerlin, IsLondon, IsShanghai, IsAgra, IsCancun, IsPrague bool
+	IsEip1559FeeCollector, IsAura                              bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -651,6 +676,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
 		IsShanghai:            c.IsShanghai(time),
+		IsAgra:                c.IsAgra(num),
 		IsCancun:              c.IsCancun(time),
 		IsPrague:              c.IsPrague(time),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),

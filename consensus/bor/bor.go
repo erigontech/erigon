@@ -139,6 +139,9 @@ var (
 	errUnknownValidators = errors.New("unknown validators")
 
 	errUnknownSnapshot = errors.New("unknown snapshot")
+
+	errWithdrawalNotSupported     = errors.New("withdrawal not supported")
+	errWithdrawalHashNotSupported = errors.New("withdrawal hash not supported")
 )
 
 // SignerFn is a signer callback function to request a header to be signed by a
@@ -991,6 +994,17 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 	headerNumber := header.Number.Uint64()
 
+	if withdrawals != nil {
+		// withdrawals != nil not required because withdrawals are not used
+		log.Warn("Bor does not support withdrawals", "number", headerNumber)
+	}
+
+	if header.WithdrawalsHash != nil {
+		header.WithdrawalsHash = nil
+
+		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
@@ -1050,6 +1064,19 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	// stateSyncData := []*types.StateSyncData{}
 
 	headerNumber := header.Number.Uint64()
+
+	if withdrawals != nil {
+		withdrawals = nil
+
+		log.Warn("Bor does not support withdrawals", "number", headerNumber)
+	}
+
+	if header.WithdrawalsHash != nil {
+		header.WithdrawalsHash = nil
+
+		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
