@@ -338,6 +338,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.headers, root)
 		f.fs.Remove(getBeaconStateFilename(root))
 	}
-	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot, "longRecconection")
+	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
 }

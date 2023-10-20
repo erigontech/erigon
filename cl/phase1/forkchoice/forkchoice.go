@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -69,7 +70,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, tmpdir string) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		finalizedCheckpoint:           anchorCheckpoint.Copy(),
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     fork_graph.NewForkGraphOnlyMemory(anchorState),
+		forkGraph:                     fork_graph.NewForkGraphDisk(anchorState, afero.NewBasePathFs(afero.NewOsFs(), tmpdir)),
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              make(map[checkpointComparable]*checkpointState),

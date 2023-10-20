@@ -90,7 +90,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 	pool := pool.NewOperationsPool(beaconConfig)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, dirs.Tmp)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
