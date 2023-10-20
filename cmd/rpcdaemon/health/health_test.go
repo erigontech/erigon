@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -41,9 +42,9 @@ func (e *ethApiStub) Syncing(_ context.Context) (interface{}, error) {
 
 func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 	cases := []struct {
-		headers        []string
-		netApiResponse hexutil.Uint
-		netApiError    error
+		headers             []string
+		netApiResponse      hexutil.Uint
+		netApiError         error
 		ethApiBlockResult   map[string]interface{}
 		ethApiBlockError    error
 		ethApiSyncingResult interface{}
@@ -403,9 +404,9 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 
 func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 	cases := []struct {
-		body           string
-		netApiResponse hexutil.Uint
-		netApiError    error
+		body               string
+		netApiResponse     hexutil.Uint
+		netApiError        error
 		ethApiBlockResult  map[string]interface{}
 		ethApiBlockError   error
 		expectedStatusCode int
