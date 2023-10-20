@@ -477,7 +477,7 @@ func TestClique(t *testing.T) {
 					chainX.Headers[k] = b.Header()
 				}
 				chainX.TopBlock = batches[j][len(batches[j])-1]
-				if err = m.InsertChain(chainX, nil); err != nil {
+				if err = m.InsertChain(chainX); err != nil {
 					t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 					failed = true
 					break
@@ -493,7 +493,7 @@ func TestClique(t *testing.T) {
 				chainX.Headers[k] = b.Header()
 			}
 			chainX.TopBlock = batches[len(batches)-1][len(batches[len(batches)-1])-1]
-			err = m.InsertChain(chainX, nil)
+			err = m.InsertChain(chainX)
 			if tt.failure != nil && err == nil {
 				t.Errorf("test %d: expected failure", i)
 			}

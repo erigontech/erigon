@@ -9,11 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/borfinality"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -58,7 +58,8 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			if whitelist.GetWhitelistingService() != nil {
 				num := borfinality.GetFinalizedBlockNumber(tx)
 				if num == 0 {
-					return 0, libcommon.Hash{}, false, errors.New("no finalized block")
+					// nolint
+					return 0, libcommon.Hash{}, false, errors.New("No finalized block")
 				}
 
 				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()

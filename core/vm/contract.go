@@ -46,7 +46,7 @@ type Contract struct {
 	// needs to be initialised to that of the caller's caller.
 	CallerAddress libcommon.Address
 	caller        ContractRef
-	self          ContractRef
+	self          libcommon.Address
 	jumpdests     map[libcommon.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
 	analysis      []uint64                    // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
@@ -61,8 +61,8 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
-	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
+func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
+	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: addr}
 
 	if parent, ok := caller.(*Contract); ok {
 		// Reuse JUMPDEST analysis from parent context if available.
@@ -176,7 +176,7 @@ func (c *Contract) UseGas(gas uint64) (ok bool) {
 
 // Address returns the contracts address
 func (c *Contract) Address() libcommon.Address {
-	return c.self.Address()
+	return c.self
 }
 
 // Value returns the contract's value (sent to it from it's caller)

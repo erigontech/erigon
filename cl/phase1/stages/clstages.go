@@ -2,13 +2,13 @@ package stages
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -36,7 +36,7 @@ type Cfg struct {
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
-	indiciesDB      *sql.DB
+	indiciesDB      kv.RwDB
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
 }
@@ -46,6 +46,8 @@ type Args struct {
 
 	targetEpoch, seenEpoch uint64
 	targetSlot, seenSlot   uint64
+
+	downloadedHistory bool
 }
 
 func ClStagesCfg(
@@ -57,7 +59,7 @@ func ClStagesCfg(
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
-	indiciesDB *sql.DB,
+	indiciesDB kv.RwDB,
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 ) *Cfg {
@@ -93,11 +95,11 @@ const (
 	minPeersForDownload = uint64(4)
 )
 
-func MetaCatchingUp(args Args, hasDownloaded bool) StageName {
+func MetaCatchingUp(args Args) StageName {
 	if args.peers < minPeersForDownload {
 		return WaitForPeers
 	}
-	if !hasDownloaded {
+	if !args.downloadedHistory {
 		return DownloadHistoricalBlocks
 	}
 	if args.seenEpoch < args.targetEpoch {
@@ -162,7 +164,7 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
-	processBlock := func(tx *sql.Tx, block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
+	processBlock := func(tx kv.RwTx, block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
 			cfg.rpc.BanPeer(block.Peer)
@@ -188,6 +190,7 @@ func ConsensusClStages(ctx context.Context,
 				log.Error("failed to get sentinel peer count", "err", err)
 				args.peers = 0
 			}
+			args.downloadedHistory = downloaded
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -199,7 +202,7 @@ func ConsensusClStages(ctx context.Context,
 			WaitForPeers: {
 				Description: `wait for enough peers. This is also a safe stage to go to when unsure of what stage to use`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return CatchUpBlocks
@@ -232,7 +235,7 @@ func ConsensusClStages(ctx context.Context,
 			DownloadHistoricalBlocks: {
 				Description: "Download historical blocks",
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return CatchUpBlocks
@@ -256,7 +259,7 @@ func ConsensusClStages(ctx context.Context,
 			CatchUpEpochs: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return CatchUpBlocks
@@ -266,7 +269,7 @@ func ConsensusClStages(ctx context.Context,
 					currentEpoch := args.seenEpoch
 					blockBatch := []*types.Block{}
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
-					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -321,7 +324,7 @@ func ConsensusClStages(ctx context.Context,
 			CatchUpBlocks: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return ForkChoice
@@ -340,7 +343,7 @@ func ConsensusClStages(ctx context.Context,
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()
 
-					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -378,7 +381,7 @@ func ConsensusClStages(ctx context.Context,
 				Description: `fork choice stage. We will send all fork choise things here
 			also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return ListenForForks
@@ -415,7 +418,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -427,7 +430,7 @@ func ConsensusClStages(ctx context.Context,
 
 					currentRoot := headRoot
 					currentSlot := headSlot
-					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
+					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 					if err != nil {
 						return err
 					}
@@ -439,14 +442,14 @@ func ConsensusClStages(ctx context.Context,
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
-						if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(ctx, tx, currentRoot); err != nil {
+						if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
 							return err
 						}
 						if newFoundSlot == nil {
 							break
 						}
 						currentSlot = *newFoundSlot
-						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, currentSlot)
+						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 						if err != nil {
 							return err
 						}
@@ -466,7 +469,7 @@ func ConsensusClStages(ctx context.Context,
 					defer func() {
 						shouldForkChoiceSinceReorg = false
 					}()
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					if shouldForkChoiceSinceReorg {
@@ -482,7 +485,7 @@ func ConsensusClStages(ctx context.Context,
 					waitDur := slotTime.Sub(time.Now())
 					ctx, cn := context.WithTimeout(ctx, waitDur)
 					defer cn()
-					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -512,13 +515,13 @@ func ConsensusClStages(ctx context.Context,
 			CleanupAndPruning: {
 				Description: `cleanup and pruning is done here`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args, downloaded); x != "" {
+					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
 					return SleepForSlot
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -532,7 +535,6 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
-					//TODO: probably can clear old superepoch in fs here as well!
 					return tx.Commit()
 				},
 			},

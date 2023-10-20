@@ -118,7 +118,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain, nil); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}

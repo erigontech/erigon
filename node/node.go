@@ -234,7 +234,7 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		return err
 	}
 	for retry := 0; ; retry++ {
-		l, locked, err := datadir.Flock(n.config.Dirs)
+		l, locked, err := datadir.TryFlock(n.config.Dirs)
 		if err != nil {
 			return err
 		}
@@ -295,7 +295,7 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
+func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"
@@ -303,7 +303,7 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 		name = "txpool"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("Expected a consensus name")
+			return nil, fmt.Errorf("expected a consensus name")
 		}
 	default:
 		name = "test"
@@ -324,8 +324,9 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(log.Root()).
+		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
+			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 
 		if readonly {
@@ -359,10 +360,9 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, name string, readonly 
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 		default:
-			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 
-		return opts.Open()
+		return opts.Open(ctx)
 	}
 	var err error
 	db, err = openFunc(false)

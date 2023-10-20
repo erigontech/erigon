@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unsafe"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -255,6 +256,9 @@ type RoDB interface {
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
 	PageSize() uint64
+
+	// Pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
+	CHandle() unsafe.Pointer
 }
 
 // RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
@@ -302,8 +306,6 @@ type StatelessReadTx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	ReadSequence(table string) (uint64, error)
-
-	BucketSize(table string) (uint64, error)
 }
 
 type StatelessWriteTx interface {
@@ -337,6 +339,16 @@ type StatelessWriteTx interface {
 type StatelessRwTx interface {
 	StatelessReadTx
 	StatelessWriteTx
+}
+
+// PendingMutations in-memory storage of changes
+// Later they can either be flushed to the database or abandon
+type PendingMutations interface {
+	StatelessRwTx
+	// Flush all in-memory data into `tx`
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	BatchSize() int
 }
 
 // Tx
@@ -393,6 +405,10 @@ type Tx interface {
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+
+	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
+	CHandle() unsafe.Pointer
+	BucketSize(table string) (uint64, error)
 }
 
 // RwTx

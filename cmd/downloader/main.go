@@ -11,23 +11,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,6 +35,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/p2p/nat"
@@ -146,7 +145,10 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := checkChainName(dirs, chain); err != nil {
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
 	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
@@ -166,7 +168,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseeds)
+
+	webseedsList := common.CliString2Array(webseeds)
+	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+		webseedsList = append(webseedsList, known...)
+	}
+	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain)
 	if err != nil {
 		return err
 	}
@@ -181,7 +188,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	cfg.DownloadTorrentFilesFromWebseed = true // enable it only for standalone mode now. feature is not fully ready yet
+	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
@@ -243,6 +251,10 @@ var printTorrentHashes = &cobra.Command{
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
 		files, err := downloader.AllTorrentPaths(dirs)
@@ -367,11 +379,17 @@ func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error
 	return nil
 }
 
-func checkChainName(dirs datadir.Dirs, chainName string) error {
+func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
 	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
 		return nil
 	}
-	db := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Label(kv.ChainDB).MustOpen()
+	db, err := mdbx.NewMDBX(log.New()).
+		Path(dirs.Chaindata).Label(kv.ChainDB).
+		Accede().
+		Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc := tool.ChainConfig(tx)

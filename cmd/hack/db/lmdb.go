@@ -577,7 +577,7 @@ func generate6(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.(kv.BucketMigrator).ClearBucket("t"); err != nil {
+	if err := tx.ClearBucket("t"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -607,14 +607,14 @@ func generate7(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 }
 
 func dropT1(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.(kv.BucketMigrator).ClearBucket("t1"); err != nil {
+	if err := tx.ClearBucket("t1"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
-	if err := tx.(kv.BucketMigrator).ClearBucket("t2"); err != nil {
+	if err := tx.ClearBucket("t2"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -624,7 +624,7 @@ func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 func generate8(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
+		if err := tx.CreateBucket(k); err != nil {
 			return false, err
 		}
 	}
@@ -656,7 +656,7 @@ func generate9(tx kv.RwTx, entries int) error {
 func dropAll(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(kv.BucketMigrator).DropBucket(k); err != nil {
+		if err := tx.DropBucket(k); err != nil {
 			return false, err
 		}
 	}
@@ -779,7 +779,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	var db kv.RwDB
 	db, err = kv2.NewMDBX(logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
-	}).Open()
+	}).Open(context.Background())
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}

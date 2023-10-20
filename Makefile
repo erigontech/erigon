@@ -42,8 +42,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 19 ]; then \
-		echo "minimum required Golang version is 1.19"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 20 ]; then \
+		echo "minimum required Golang version is 1.20"; \
 		exit 1 ;\
 	fi
 
@@ -106,6 +106,7 @@ erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
+COMMANDS += capcli
 COMMANDS += downloader
 COMMANDS += hack
 COMMANDS += integration
@@ -119,7 +120,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
-COMMANDS += caplin-phase1
+COMMANDS += caplin
 COMMANDS += caplin-regression
 
 
@@ -143,20 +144,20 @@ db-tools:
 ## test:                              run unit tests with a 100s timeout
 test:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 100s
+	$(GOTEST) --timeout 10m
 
 test3:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
+	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
+	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
 test3-integration:
 	@cd erigon-lib && $(MAKE) test
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
+	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

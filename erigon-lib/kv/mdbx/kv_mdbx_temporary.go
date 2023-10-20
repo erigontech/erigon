@@ -19,6 +19,7 @@ package mdbx
 import (
 	"context"
 	"os"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -29,13 +30,13 @@ type TemporaryMdbx struct {
 	path string
 }
 
-func NewTemporaryMdbx(tempdir string) (kv.RwDB, error) {
+func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 	path, err := os.MkdirTemp(tempdir, "mdbx-temp")
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := Open(path, log.Root(), false)
+	db, err := NewMDBX(log.New()).Label(kv.InMem).Path(path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
@@ -81,4 +82,8 @@ func (t *TemporaryMdbx) PageSize() uint64 {
 func (t *TemporaryMdbx) Close() {
 	t.db.Close()
 	os.RemoveAll(t.path)
+}
+
+func (t *TemporaryMdbx) CHandle() unsafe.Pointer {
+	panic("CHandle not implemented")
 }

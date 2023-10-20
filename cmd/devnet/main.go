@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
@@ -56,6 +56,18 @@ var (
 		Name:  "scenarios",
 		Usage: "Scenarios to be run on the devnet chain",
 		Value: "dynamic-tx-node-0",
+	}
+
+	BaseRpcHostFlag = cli.StringFlag{
+		Name:  "rpc.host",
+		Usage: "The host of the base RPC service",
+		Value: "localhost",
+	}
+
+	BaseRpcPortFlag = cli.IntFlag{
+		Name:  "rpc.port",
+		Usage: "The port of the base RPC service",
+		Value: 8545,
 	}
 
 	WithoutHeimdallFlag = cli.BoolFlag{
@@ -139,6 +151,8 @@ func main() {
 		&DataDirFlag,
 		&ChainFlag,
 		&ScenariosFlag,
+		&BaseRpcHostFlag,
+		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
 		&HeimdallgRPCAddressFlag,
@@ -305,6 +319,8 @@ func action(ctx *cli.Context) error {
 func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chain := ctx.String(ChainFlag.Name)
+	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)
+	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
 
 	faucetSource := accounts.NewAccount("faucet-source")
 
@@ -318,8 +334,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8545,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					//Snapshots:          true,
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -375,8 +391,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8545,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					BorStateSyncDelay:  5 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
@@ -399,6 +415,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
+						/*args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								HeimdallGRpc:     heimdallGrpc,
+							},
+							AccountSlots: 200,
+						},*/
 						args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
@@ -414,8 +438,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					Logger:             logger,
 					BasePort:           30403,
 					BasePrivateApiAddr: "localhost:10190",
-					BaseRPCHost:        "localhost",
-					BaseRPCPort:        8645,
+					BaseRPCHost:        baseRpcHost,
+					BaseRPCPort:        baseRpcPort,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
@@ -449,8 +473,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 				Chain:              networkname.DevChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCHost:        "localhost",
-				BaseRPCPort:        8545,
+				BaseRPCHost:        baseRpcHost,
+				BaseRPCPort:        baseRpcPort,
 				Alloc: types.GenesisAlloc{
 					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 				},

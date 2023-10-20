@@ -13,7 +13,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -38,6 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+const PendingBlockNumber int64 = -2
+
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
@@ -51,7 +52,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	noopWriter := state.NewNoopWriter()
 
@@ -249,7 +250,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 // getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
 func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
-	return blockNum.IsInt64() && blockNum.Int64() >= -2
+	return blockNum.IsInt64() && blockNum.Int64() >= PendingBlockNumber
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -626,23 +627,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-
-	if !ok && cc.Bor == nil {
-		return nil, nil
-	}
-
-	// if not ok and cc.Bor != nil then we might have a bor transaction.
-	// Note that Private API returns 0 if transaction is not found.
-	if !ok || blockNum == 0 {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && cc.Bor != nil {
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
-			return nil, nil
-		}
+	}
 
-		blockNum = *blockNumPtr
+	if !ok {
+		return nil, nil
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -664,19 +658,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var borTx types.Transaction
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
-			return nil, nil
+			borTx = types.NewBorTransaction()
 		}
 	}
-
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
 			return nil, err
@@ -797,7 +790,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if header.ExcessBlobGas == nil {
 			log.Warn("excess blob gas not set when trying to marshal blob tx")
 		} else {
-			blobGasPrice, err := misc.GetBlobGasPrice(*header.ExcessBlobGas)
+			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
 			if err != nil {
 				log.Error(err.Error())
 			}

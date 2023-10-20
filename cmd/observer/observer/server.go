@@ -33,7 +33,7 @@ type Server struct {
 	logger log.Logger
 }
 
-func NewServer(flags CommandFlags, logger log.Logger) (*Server, error) {
+func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Server, error) {
 	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth66")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -42,7 +42,7 @@ func NewServer(flags CommandFlags, logger log.Logger) (*Server, error) {
 		return nil, err
 	}
 
-	localNode, err := makeLocalNode(nodeDBPath, privateKey, flags.Chain, logger)
+	localNode, err := makeLocalNode(ctx, nodeDBPath, privateKey, flags.Chain, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +84,8 @@ func NewServer(flags CommandFlags, logger log.Logger) (*Server, error) {
 	return &instance, nil
 }
 
-func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(nodeDBPath, "")
+func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
+	db, err := enode.OpenDB(ctx, nodeDBPath, "")
 	if err != nil {
 		return nil, err
 	}

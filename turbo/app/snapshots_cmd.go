@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -220,8 +221,7 @@ func doRam(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	runtime.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	before := m.Alloc
 	logger.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	decompressor, err := compress.NewDecompressor(f)
@@ -229,7 +229,7 @@ func doRam(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	runtime.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	logger.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
 	return nil
 }

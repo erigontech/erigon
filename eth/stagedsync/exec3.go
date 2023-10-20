@@ -650,7 +650,7 @@ Loop:
 							return err
 						}
 					}
-					u.UnwindTo(blockNum-1, header.Hash())
+					u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
 					break Loop
 				}
 
@@ -1392,7 +1392,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}).
 		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
+		Open(ctx)
 	if err != nil {
 		return err
 	}

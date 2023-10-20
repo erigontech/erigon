@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/tests/bor/helper"
 	"github.com/ledgerwatch/log/v3"
 
@@ -67,7 +67,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(&genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(context.Background(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}

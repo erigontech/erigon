@@ -17,6 +17,7 @@
 package enode
 
 import (
+	"context"
 	"math/rand"
 	"net"
 	"testing"
@@ -28,7 +29,7 @@ import (
 )
 
 func newLocalNodeForTesting(tmpDir string, logger log.Logger) (*LocalNode, *DB) {
-	db, err := OpenDB("", tmpDir)
+	db, err := OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -18,10 +20,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
@@ -271,7 +271,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 		t.Fatal(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain, nil); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 

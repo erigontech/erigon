@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -66,6 +67,12 @@ type Config struct {
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
+
+	// Optional EIP-4844 parameters
+	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
+	MaxBlobGasPerBlock         *uint64 `json:"maxBlobGasPerBlock,omitempty"`
+	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
+	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
@@ -203,6 +210,38 @@ func (c *Config) IsPrague(time uint64) bool {
 
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
+}
+
+func (c *Config) GetMinBlobGasPrice() uint64 {
+	if c.MinBlobGasPrice != nil {
+		return *c.MinBlobGasPrice
+	}
+	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
+}
+
+func (c *Config) GetMaxBlobGasPerBlock() uint64 {
+	if c.MaxBlobGasPerBlock != nil {
+		return *c.MaxBlobGasPerBlock
+	}
+	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
+}
+
+func (c *Config) GetTargetBlobGasPerBlock() uint64 {
+	if c.TargetBlobGasPerBlock != nil {
+		return *c.TargetBlobGasPerBlock
+	}
+	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
+}
+
+func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
+	if c.BlobGasPriceUpdateFraction != nil {
+		return *c.BlobGasPriceUpdateFraction
+	}
+	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
+}
+
+func (c *Config) GetMaxBlobsPerBlock() uint64 {
+	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -410,11 +449,10 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	CalcuttaBlock *big.Int `json:"calcuttaBlock"` // Calcutta switch block (nil = no fork, 0 = already on calcutta)
-	JaipurBlock   *big.Int `json:"jaipurBlock"`   // Jaipur switch block (nil = no fork, 0 = already on jaipur)
-	DelhiBlock    *big.Int `json:"delhiBlock"`    // Delhi switch block (nil = no fork, 0 = already on delhi)
+	JaipurBlock *big.Int `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	DelhiBlock  *big.Int `json:"delhiBlock"`  // Delhi switch block (nil = no fork, 0 = already on delhi)
+	IndoreBlock *big.Int `json:"indoreBlock"` // Indore switch block (nil = no fork, 0 = already on indore)
 
-	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -502,14 +540,6 @@ func (c *BorConfig) IsJaipur(number uint64) bool {
 
 func (c *BorConfig) IsDelhi(number uint64) bool {
 	return isForked(c.DelhiBlock, number)
-}
-
-func (c *BorConfig) IsCalcutta(number uint64) bool {
-	return isForked(c.CalcuttaBlock, number)
-}
-
-func (c *BorConfig) IsOnCalcutta(number *big.Int) bool {
-	return numEqual(c.CalcuttaBlock, number)
 }
 
 func (c *BorConfig) IsIndore(number uint64) bool {
