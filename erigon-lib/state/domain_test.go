@@ -1167,9 +1167,9 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 		loc = make([]byte, 32)
 		rnd.Read(loc)
 		rnd.Read(value)
-		// if i%5 == 0 {
-		// 	d.SetTxNum(uint64(i))
-		// }
+		if i%5 == 0 {
+			dc.SetTxNum(uint64(i))
+		}
 
 		if i == 0 || i == 15 {
 			loc = nil
