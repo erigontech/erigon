@@ -6,8 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
-	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/exp/slices"
 )
@@ -133,4 +134,26 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 	}
 
 	return newCfg(result)
+}
+
+var KnownWebseeds = map[string][]string{
+	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
+	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
+	networkname.GoerliChainName:     webseedsParse(webseed.Goerli),
+	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
+	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
+	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
+	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+}
+
+func webseedsParse(in []byte) (res []string) {
+	a := map[string]string{}
+	if err := toml.Unmarshal(in, &a); err != nil {
+		panic(err)
+	}
+	for _, l := range a {
+		res = append(res, l)
+	}
+	slices.Sort(res)
+	return res
 }

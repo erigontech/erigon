@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai-CALL-sufficient_gas-opcode_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -123,7 +123,7 @@
     },
     "001-fork=Shanghai-CALL-insufficient_gas-opcode_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -243,7 +243,7 @@
     },
     "002-fork=Shanghai-CALLCODE-sufficient_gas-opcode_callcode": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -365,7 +365,7 @@
     },
     "003-fork=Shanghai-CALLCODE-insufficient_gas-opcode_callcode": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -485,7 +485,7 @@
     },
     "004-fork=Shanghai-DELEGATECALL-sufficient_gas-opcode_delegatecall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -607,7 +607,7 @@
     },
     "005-fork=Shanghai-DELEGATECALL-insufficient_gas-opcode_delegatecall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -727,7 +727,7 @@
     },
     "006-fork=Shanghai-STATICCALL-sufficient_gas-opcode_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -849,7 +849,7 @@
     },
     "007-fork=Shanghai-STATICCALL-insufficient_gas-opcode_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -969,7 +969,7 @@
     },
     "008-fork=Cancun-CALL-sufficient_gas-opcode_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1111,7 +1111,7 @@
     },
     "009-fork=Cancun-CALL-insufficient_gas-opcode_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1251,7 +1251,7 @@
     },
     "010-fork=Cancun-CALLCODE-sufficient_gas-opcode_callcode": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1393,7 +1393,7 @@
     },
     "011-fork=Cancun-CALLCODE-insufficient_gas-opcode_callcode": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1533,7 +1533,7 @@
     },
     "012-fork=Cancun-DELEGATECALL-sufficient_gas-opcode_delegatecall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1675,7 +1675,7 @@
     },
     "013-fork=Cancun-DELEGATECALL-insufficient_gas-opcode_delegatecall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1815,7 +1815,7 @@
     },
     "014-fork=Cancun-STATICCALL-sufficient_gas-opcode_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1957,7 +1957,7 @@
     },
     "015-fork=Cancun-STATICCALL-insufficient_gas-opcode_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },

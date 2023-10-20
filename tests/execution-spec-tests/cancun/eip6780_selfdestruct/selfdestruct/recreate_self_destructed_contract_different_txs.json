@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_other_address-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -167,7 +167,7 @@
     },
     "001-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_to_self-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -317,7 +317,7 @@
     },
     "002-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_other_address-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -489,7 +489,7 @@
     },
     "003-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_to_self-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -661,7 +661,7 @@
     },
     "004-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_other_address-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -847,7 +847,7 @@
     },
     "005-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_to_self-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1033,7 +1033,7 @@
     },
     "006-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_other_address-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1225,7 +1225,7 @@
     },
     "007-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_to_self-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },

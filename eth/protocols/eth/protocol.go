@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -250,12 +250,8 @@ type NewBlockPacket struct {
 func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize := 0
 	// size of Block
-	encodingSize++
 	blockLen := nbp.Block.EncodingSize()
-	if blockLen >= 56 {
-		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(blockLen)))
-	}
-	encodingSize += blockLen
+	encodingSize += rlp2.ListPrefixLen(blockLen) + blockLen
 	// size of TD
 	encodingSize++
 	var tdBitLen, tdLen int
