@@ -1245,6 +1245,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 
 		values[hex.EncodeToString(key)] = common.Copy(value)
 
+		dc.SetTxNum(uint64(i))
 		err := dc.PutWithPrev(key, nil, value, nil)
 		require.NoError(t, err)
 	}
