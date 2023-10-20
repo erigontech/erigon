@@ -402,6 +402,44 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
 	return v, nil
 }
 
+func (sd *SharedDomains) cursorBranchFn() (func(pref []byte) ([]byte, error), error) {
+	iter, err := sd.aggCtx.commitment.DomainRangeLatest(sd.roTx, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
+	prevKey := make([]byte, 0)
+	return func(pref []byte) ([]byte, error) {
+		if bytes.Compare(pref, prevKey) < 0 {
+			fmt.Printf("cursorBranchFn: pref %x prevKey %x\n", pref, prevKey)
+			return sd.branchFn(pref)
+		}
+		for iter.HasNext() {
+			k, v, err := iter.Next()
+			if err != nil {
+				return nil, err
+			}
+			cmp := bytes.Compare(pref, k)
+			if cmp == 0 {
+				prevKey = k
+				if len(v) == 0 {
+					return nil, nil
+				}
+				// skip touchmap
+				return v[2:], nil
+			}
+			if cmp < 0 {
+				iter, err = sd.aggCtx.commitment.DomainRangeLatest(sd.roTx, nil, nil, -1)
+				if err != nil {
+					return nil, fmt.Errorf("resetting iterator: %w", err)
+				}
+				return sd.branchFn(pref)
+			}
+		}
+		fmt.Printf("cursorBranchFn: pref %x prevKey %x NOT FOUND\n", pref, prevKey)
+		return sd.branchFn(pref)
+	}, nil
+}
+
 func (sd *SharedDomains) branchFn(pref []byte) ([]byte, error) {
 	v, err := sd.LatestCommitment(pref)
 	if err != nil {
@@ -607,6 +645,12 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
+
+	cursorBranchFn, err := sd.cursorBranchFn()
+	if err != nil {
+		return nil, err
+	}
+	sd.Commitment.ResetFns(cursorBranchFn, sd.accountFn, sd.storageFn)
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
