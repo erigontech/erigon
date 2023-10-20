@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
@@ -59,11 +59,10 @@ func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) 
 }
 
 func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
-	var statisticsArray = make(map[string]*peers.PeerStatistics)
-	if diag, ok := node.Backend().Sentinel().(peers.PeerStatisticsGetter); ok {
+	var statisticsArray = make(map[string]*diagnostics.PeerStatistics)
+	if diag, ok := node.Backend().Sentinel().(diagnostics.PeerStatisticsGetter); ok {
 		statisticsArray = diag.GetPeersStatistics()
 	} else {
-		//err := errors.New("Sentinel does not support peer statistics")
 		return []*PeerResponse{}, nil
 	}
 

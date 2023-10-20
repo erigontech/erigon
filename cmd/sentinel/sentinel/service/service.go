@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/diagnostics"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -31,7 +32,7 @@ type SentinelServer struct {
 	mu     sync.RWMutex
 	logger log.Logger
 
-	peerStatistics map[string]*peers.PeerStatistics
+	peerStatistics map[string]*diagnostics.PeerStatistics
 }
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
@@ -40,7 +41,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 		ctx:            ctx,
 		gossipNotifier: newGossipNotifier(),
 		logger:         logger,
-		peerStatistics: make(map[string]*peers.PeerStatistics),
+		peerStatistics: make(map[string]*diagnostics.PeerStatistics),
 	}
 }
 
@@ -83,7 +84,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	if found {
 		s.peerStatistics[msg.GetPeer().Pid].BytesOut += uint64(len(compressedData))
 	} else {
-		s.peerStatistics[msg.GetPeer().Pid] = &peers.PeerStatistics{
+		s.peerStatistics[msg.GetPeer().Pid] = &diagnostics.PeerStatistics{
 			BytesIn:  0,
 			BytesOut: uint64(len(compressedData)),
 		}
@@ -293,7 +294,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	if found {
 		s.peerStatistics[string(textPid)].BytesIn += uint64(len(data))
 	} else {
-		s.peerStatistics[string(textPid)] = &peers.PeerStatistics{
+		s.peerStatistics[string(textPid)] = &diagnostics.PeerStatistics{
 			BytesIn:  uint64(len(data)),
 			BytesOut: 0,
 		}
@@ -319,8 +320,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	return nil
 }
 
-func (s *SentinelServer) GetPeersStatistics() map[string]*peers.PeerStatistics {
-	stats := make(map[string]*peers.PeerStatistics)
+func (s *SentinelServer) GetPeersStatistics() map[string]*diagnostics.PeerStatistics {
+	stats := make(map[string]*diagnostics.PeerStatistics)
 	for k, v := range s.peerStatistics {
 		stats[k] = v
 		delete(s.peerStatistics, k)
