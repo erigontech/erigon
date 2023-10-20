@@ -32,6 +32,7 @@
     "stateSyncConfirmationDelay": {
       "44934656": 128
     },
+    "burntContract": {},
     "validatorContract": "0x0000000000000000000000000000000000001000",
     "stateReceiverContract": "0x0000000000000000000000000000000000001001",
     "overrideStateSyncRecords": {
