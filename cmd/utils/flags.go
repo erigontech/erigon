@@ -838,8 +838,16 @@ var (
 
 	SilkwormPathFlag = cli.StringFlag{
 		Name:  "silkworm.path",
-		Usage: "Path to the silkworm_api library (enables embedded Silkworm execution)",
+		Usage: "Path to the Silkworm library",
 		Value: "",
+	}
+	SilkwormExecutionFlag = cli.BoolFlag{
+		Name:  "silkworm.exec",
+		Usage: "Enable Silkworm block execution",
+	}
+	SilkwormRpcDaemonFlag = cli.BoolFlag{
+		Name:  "silkworm.rpcd",
+		Usage: "Enable embedded Silkworm RPC daemon",
 	}
 )
 
@@ -1459,10 +1467,11 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormEnabled = ctx.IsSet(SilkwormPathFlag.Name)
-	if cfg.SilkwormEnabled {
-		cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
+	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
+	if ctx.IsSet(SilkwormExecutionFlag.Name) {
+		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	}
+	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was

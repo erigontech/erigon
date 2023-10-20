@@ -481,7 +481,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
-	if config.SilkwormEnabled {
+	if config.SilkwormPath != "" {
 		backend.silkworm, err = silkworm.New(config.SilkwormPath)
 		if err != nil {
 			return nil, err
@@ -866,7 +866,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 
-	if config.SilkwormEnabled && httpRpcCfg.Enabled {
+	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		silkwormRPCDaemonService := s.silkworm.NewRpcDaemonService(chainKv)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
@@ -1317,7 +1317,7 @@ func (s *Ethereum) Stop() error {
 			s.logger.Error("silkworm.StopRpcDaemon error", "err", err)
 		}
 	}
-	if s.config.SilkwormEnabled {
+	if s.silkworm != nil {
 		s.silkworm.Close()
 	}
 

@@ -102,7 +102,8 @@ var Defaults = Config{
 		Produce:    true,
 	},
 
-	SilkwormEnabled: false,
+	// applies if SilkwormPath is set
+	SilkwormExecution: true,
 }
 
 func init() {
@@ -251,8 +252,9 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormEnabled bool
-	SilkwormPath    string
+	SilkwormPath      string
+	SilkwormExecution bool
+	SilkwormRpcDaemon bool
 }
 
 type Sync struct {

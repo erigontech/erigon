@@ -165,6 +165,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.OtsSearchMaxCapFlag,
 
 	&utils.SilkwormPathFlag,
+	&utils.SilkwormExecutionFlag,
+	&utils.SilkwormRpcDaemonFlag,
 
 	&utils.TrustedSetupFile,
 }
