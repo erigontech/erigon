@@ -32,6 +32,30 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
+func (b beaconChainDatabaseFilesystem) GetBlock(tx kv.Tx, ctx context.Context, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if blockRoot == (libcommon.Hash{}) {
+		return nil, nil
+	}
+
+	r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	block := cltypes.NewSignedBeaconBlock(b.cfg)
+	version := b.cfg.GetCurrentStateVersion(slot / b.cfg.SlotsPerEpoch)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, version); err != nil {
+		return nil, err
+	}
+
+	return &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block}, nil
+}
+
 func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)

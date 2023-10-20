@@ -29,6 +29,10 @@ func NewBeaconRpcSource(rpc *rpc.BeaconRpcP2P) *BeaconRpcSource {
 	}
 }
 
+func (*BeaconRpcSource) GetBlock(tx kv.Tx, ctx context.Context, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	panic("unimplemented")
+}
+
 func (b *BeaconRpcSource) GetRange(_ kv.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	if count == 0 {
 		return nil, nil
@@ -58,6 +62,10 @@ type GossipSource struct {
 
 	mu     sync.Mutex
 	blocks *btree.Map[uint64, chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]]
+}
+
+func (*GossipSource) GetBlock(tx kv.Tx, ctx context.Context, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	panic("unimplemented")
 }
 
 func NewGossipSource(ctx context.Context, gossip *network.GossipManager) *GossipSource {
