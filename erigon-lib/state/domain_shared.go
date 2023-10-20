@@ -604,6 +604,7 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
+	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
