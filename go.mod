@@ -26,7 +26,7 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/consensys/gnark-crypto v0.12.1
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
-	github.com/crate-crypto/go-kzg-4844 v0.3.0
+	github.com/crate-crypto/go-kzg-4844 v0.6.1-0.20231019121413-3621cc59f0c7
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.3.1
@@ -189,7 +189,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231018092740-2cf0f5394484 // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231019214918-3eb2303a41f3 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
