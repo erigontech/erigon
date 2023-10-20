@@ -40,7 +40,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -894,11 +893,11 @@ func (p *TxPool) isAgra() bool {
 	if p.AgraBlock.Load() == nil {
 		return false
 	}
-	shanghaiBlock := *p.AgraBlock.Load()
+	agraBlock := *p.AgraBlock.Load()
 
 	// a zero here means Shanghai is always active
-	if shanghaiBlock == 0 {
-		p.isPostShanghai.Swap(true)
+	if agraBlock == 0 {
+		p.isPostAgra.Swap(true)
 		return true
 	}
 
@@ -908,10 +907,13 @@ func (p *TxPool) isAgra() bool {
 	}
 	tx.Rollback()
 
-	now := *rawdb.ReadCurrentBlockNumber(tx)
-	activated := now >= shanghaiBlock
+	now, err := chain.CurrentBlockNumber(tx)
+	if err != nil {
+		return false
+	}
+	activated := *now >= agraBlock
 	if activated {
-		p.isPostShanghai.Swap(true)
+		p.isPostAgra.Swap(true)
 	}
 	return activated
 }

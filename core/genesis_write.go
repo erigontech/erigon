@@ -514,7 +514,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	}
 
 	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsAgra(g.Number) {
-		withdrawals = []*types.Withdrawal{}
+		withdrawals = nil
 	}
 
 	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {

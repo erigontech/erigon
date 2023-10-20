@@ -1054,12 +1054,15 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 	headerNumber := header.Number.Uint64()
 
-	if len(withdrawals) > 0 {
-		return nil, nil, errWithdrawalNotSupported
+	if withdrawals != nil {
+		// withdrawals != nil not required because withdrawals are not used
+		log.Warn("Bor does not support withdrawals", "number", headerNumber)
 	}
 
 	if header.WithdrawalsHash != nil {
-		return nil, nil, errWithdrawalHashNotSupported
+		header.WithdrawalsHash = nil
+
+		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
@@ -1120,15 +1123,20 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
-	if len(withdrawals) > 0 {
-		return nil, nil, nil, errWithdrawalNotSupported
+	headerNumber := header.Number.Uint64()
+
+	if withdrawals != nil {
+		withdrawals = nil
+
+		log.Warn("Bor does not support withdrawals", "number", headerNumber)
 	}
 
 	if header.WithdrawalsHash != nil {
-		return nil, nil, nil, errWithdrawalHashNotSupported
+		header.WithdrawalsHash = nil
+
+		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
 	}
 
-	headerNumber := header.Number.Uint64()
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
