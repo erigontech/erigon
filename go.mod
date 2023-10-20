@@ -26,7 +26,7 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/consensys/gnark-crypto v0.12.1
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
-	github.com/crate-crypto/go-kzg-4844 v0.3.0
+	github.com/crate-crypto/go-kzg-4844 v0.6.1-0.20231019121413-3621cc59f0c7
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.3.1
