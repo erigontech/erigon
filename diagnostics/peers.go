@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/diagnostics"
+	diagnint "github.com/ledgerwatch/erigon-lib/gointerfaces/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
@@ -59,39 +59,38 @@ func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) 
 }
 
 func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
-	var statisticsArray = make(map[string]*diagnostics.PeerStatistics)
-	if diag, ok := node.Backend().Sentinel().(diagnostics.PeerStatisticsGetter); ok {
-		statisticsArray = diag.GetPeersStatistics()
+	if diag, ok := node.Backend().Sentinel().(diagnint.PeerStatisticsGetter); ok {
+
+		statisticsArray := diag.GetPeersStatistics()
+		peers := make([]*PeerResponse, 0, len(statisticsArray))
+
+		for key, value := range statisticsArray {
+			peer := PeerResponse{
+				ENR:      "",
+				Enode:    "",
+				ID:       key,
+				Name:     "",
+				BytesIn:  int(value.BytesIn),
+				BytesOut: int(value.BytesOut),
+				Type:     "Sentinel",
+				Caps:     []string{},
+				Network: PeerNetworkInfo{
+					LocalAddress:  "",
+					RemoteAddress: "",
+					Inbound:       false,
+					Trusted:       false,
+					Static:        false,
+				},
+				Protocols: nil,
+			}
+
+			peers = append(peers, &peer)
+		}
+
+		return peers, nil
 	} else {
 		return []*PeerResponse{}, nil
 	}
-
-	peers := make([]*PeerResponse, 0, len(statisticsArray))
-
-	for key, value := range statisticsArray {
-		peer := PeerResponse{
-			ENR:      "",
-			Enode:    "",
-			ID:       key,
-			Name:     "",
-			BytesIn:  int(value.BytesIn),
-			BytesOut: int(value.BytesOut),
-			Type:     "Sentinel",
-			Caps:     []string{},
-			Network: PeerNetworkInfo{
-				LocalAddress:  "",
-				RemoteAddress: "",
-				Inbound:       false,
-				Trusted:       false,
-				Static:        false,
-			},
-			Protocols: nil,
-		}
-
-		peers = append(peers, &peer)
-	}
-
-	return peers, nil
 }
 
 func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
