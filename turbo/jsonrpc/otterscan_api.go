@@ -8,8 +8,6 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -465,7 +463,7 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	return results[:totalBlocksTraced], hasMore, nil
 }
 
-func (api *OtterscanAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
@@ -497,7 +495,7 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
+func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return internalIssuance{}, nil
@@ -518,12 +516,7 @@ func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chai
 	return ret, nil
 }
 
-func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config) (uint64, error) {
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
-	if err != nil {
-		return 0, fmt.Errorf("getReceipts error: %v", err)
-	}
-
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint64, error) {
 	fees := uint64(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
@@ -575,7 +568,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, true)
+	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, true)
 	if err != nil {
 		return nil, err
 	}
