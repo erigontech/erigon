@@ -110,6 +110,9 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
 	sd.StartWrites()
+	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
+		panic(err)
+	}
 	return sd
 }
 
@@ -153,11 +156,13 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	}
 	sd.ClearRam(true)
 
-	_, err := sd.SeekCommitment(ctx, rwTx, 0, txUnwindTo)
+	_, err := sd.SeekCommitment(ctx, rwTx)
 	return err
 }
 
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx, fromTx, toTx uint64) (txsFromBlockBeginning uint64, err error) {
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
+	fromTx := uint64(0)
+	toTx := uint64(math2.MaxUint64)
 	bn, txn, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
 	if err != nil {
 		return 0, err

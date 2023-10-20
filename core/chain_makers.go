@@ -24,8 +24,6 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/math"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -331,7 +329,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	if histV3 {
 		domains = state2.NewSharedDomains(tx)
 		defer domains.Close()
-		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+		_, err := domains.SeekCommitment(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
