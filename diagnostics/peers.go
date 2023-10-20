@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	diagnint "github.com/ledgerwatch/erigon-lib/gointerfaces/diagnostics"
+	diagnint "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
