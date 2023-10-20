@@ -11,11 +11,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
@@ -370,6 +372,12 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, bs.Slot())
+	}); err != nil {
+		return err
+	}
+
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
 		beaconConfig.GenesisEpoch,
@@ -406,6 +414,11 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	var to uint64
+	db.View(ctx, func(tx kv.Tx) (err error) {
+		to, err = beacon_indicies.ReadHighestFinalized(tx)
+		return
+	})
 
-	return snapshot_format.DumpBeaconBlocks(ctx, db, beaconDB, 0, 0, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+	return snapshot_format.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
 }
