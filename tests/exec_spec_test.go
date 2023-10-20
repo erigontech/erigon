@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
@@ -21,6 +20,10 @@ func TestExecutionSpec(t *testing.T) {
 	bt := new(testMatcher)
 
 	dir := filepath.Join(".", "execution-spec-tests")
+
+	// TODO(yperbasis): re-enable when execution-spec-tests are updated for the official trusted setup
+	// See https://github.com/ethereum/execution-spec-tests/pull/336
+	bt.skipLoad(`^cancun/eip4844_blobs/point_evaluation_precompile/`)
 
 	checkStateRoot := true
 

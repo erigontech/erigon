@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/metrics"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type milestone struct {
@@ -61,9 +60,9 @@ func (m *milestone) IsValidChain(currentHeader uint64, chain []*types.Header) bo
 	var isValid bool = false
 	defer func() {
 		if isValid {
-			MilestoneChainMeter.Add(1)
+			MilestoneChainMeter.Inc()
 		} else {
-			MilestoneChainMeter.Add(-1)
+			MilestoneChainMeter.Dec()
 		}
 	}()
 

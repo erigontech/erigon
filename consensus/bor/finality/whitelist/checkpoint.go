@@ -34,9 +34,9 @@ func (w *checkpoint) IsValidChain(currentHeader uint64, chain []*types.Header) b
 	res := w.finality.IsValidChain(currentHeader, chain)
 
 	if res {
-		CheckpointChainMeter.Add(1)
+		CheckpointChainMeter.Inc()
 	} else {
-		CheckpointPeerMeter.Add(-1)
+		CheckpointPeerMeter.Dec()
 	}
 
 	return res
