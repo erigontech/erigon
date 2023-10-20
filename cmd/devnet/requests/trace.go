@@ -46,8 +46,8 @@ type TraceCallAction struct {
 }
 
 type CallResult struct {
-	GasUsed hexutil.Big      `json:"gasUsed"`
-	Output  hexutility.Bytes `json:"output"`
+	GasUsed hexutil.Big       `json:"gasUsed"`
+	Output  hexutility.Bytes  `json:"output"`
 	Address libcommon.Address `json:"address"`
 	Code    hexutility.Bytes  `json:"code"`
 }

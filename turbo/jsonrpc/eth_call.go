@@ -420,8 +420,8 @@ func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
 	Accesslist *types2.AccessList `json:"accessList"`
-	Error   string         `json:"error,omitempty"`
-	GasUsed hexutil.Uint64 `json:"gasUsed"`
+	Error      string             `json:"error,omitempty"`
+	GasUsed    hexutil.Uint64     `json:"gasUsed"`
 }
 
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.

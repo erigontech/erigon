@@ -62,9 +62,9 @@ type TraceAction struct {
 	SelfDestructed string           `json:"address,omitempty"`
 	Balance        string           `json:"balance,omitempty"`
 	CallType       string           `json:"callType,omitempty"`
-	From common.Address   `json:"from"`
-	Gas  hexutil.Big      `json:"gas"`
-	Init hexutility.Bytes `json:"init,omitempty"`
+	From           common.Address   `json:"from"`
+	Gas            hexutil.Big      `json:"gas"`
+	Init           hexutility.Bytes `json:"init,omitempty"`
 	Input          hexutility.Bytes `json:"input,omitempty"`
 	RefundAddress  string           `json:"refundAddress,omitempty"`
 	To             string           `json:"to,omitempty"`
@@ -95,8 +95,8 @@ type SuicideTraceAction struct {
 
 type RewardTraceAction struct {
 	Author     common.Address `json:"author"`
-	RewardType string      `json:"rewardType"`
-	Value      hexutil.Big `json:"value,omitempty"`
+	RewardType string         `json:"rewardType"`
+	Value      hexutil.Big    `json:"value,omitempty"`
 }
 
 type CreateTraceResult struct {

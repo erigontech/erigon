@@ -357,9 +357,9 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 }
 
 type AccountResult struct {
-	Balance hexutil.Big      `json:"balance"`
-	Nonce   hexutil.Uint64   `json:"nonce"`
-	Code    hexutility.Bytes `json:"code"`
+	Balance  hexutil.Big      `json:"balance"`
+	Nonce    hexutil.Uint64   `json:"nonce"`
+	Code     hexutility.Bytes `json:"code"`
 	CodeHash common.Hash      `json:"codeHash"`
 }
 
