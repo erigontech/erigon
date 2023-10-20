@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
