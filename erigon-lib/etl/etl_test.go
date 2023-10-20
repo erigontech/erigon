@@ -618,3 +618,30 @@ func TestOldest(t *testing.T) {
 		return nil
 	}, TransformArgs{}))
 }
+
+func TestSortable(t *testing.T) {
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), log.New())
+	defer collector.Close()
+	require := require.New(t)
+	require.NoError(collector.Collect([]byte{1}, []byte{1}))
+	require.NoError(collector.Collect([]byte{1}, []byte{2}))
+	require.NoError(collector.Collect([]byte{1}, []byte{3}))
+	require.NoError(collector.Collect([]byte{1}, []byte{4}))
+	require.NoError(collector.Collect([]byte{1}, []byte{5}))
+	require.NoError(collector.Collect([]byte{1}, []byte{6}))
+	require.NoError(collector.Collect([]byte{1}, []byte{7}))
+	require.NoError(collector.Collect([]byte{2}, []byte{1}))
+	require.NoError(collector.Collect([]byte{2}, []byte{20}))
+	require.NoError(collector.Collect([]byte{2}, nil))
+
+	keys, vals := [][]byte{}, [][]byte{}
+	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		keys = append(keys, k)
+		vals = append(vals, v)
+		return nil
+	}, TransformArgs{}))
+
+	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
+	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
+
+}
