@@ -246,7 +246,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
-	dom2 := NewSharedDomains(WrapTxWithCtx(tx, ac2))
+	dom2 := NewSharedDomains(WrapTxWithCtx(rwTx, ac2))
 	defer dom2.Close()
 
 	_, err = dom2.SeekCommitment(ctx, rwTx, 0, 1<<63-1)
