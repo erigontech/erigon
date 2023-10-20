@@ -117,7 +117,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	} else {
 		fullBuf := c.buf
 		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
+		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()), c.buf)
 
 		doFsync := !c.autoClean /* is critical collector */
 		var err error
@@ -149,6 +149,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if c.autoClean {
 		defer c.Close()
 	}
+	args.BufferType = c.bufType
 
 	if !c.allFlushed {
 		if e := c.flushBuffer(true); e != nil {
@@ -181,25 +182,12 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	defer logEvery.Stop()
 
 	i := 0
-	var prevK []byte
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-
-		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
-		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
-		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if c.bufType == SortableOldestAppearedBuffer {
-			if bytes.Equal(prevK, k) {
-				return nil
-			} else {
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(k)
-			}
-		}
 
 		select {
 		default:
@@ -249,7 +237,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -278,7 +266,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -297,6 +285,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
+	var prevK, prevV []byte
+
 	// Main loading loop
 	for h.Len() > 0 {
 		if err := common.Stopped(args.Quit); err != nil {
@@ -305,16 +295,65 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 		element := heapPop(h)
 		provider := providers[element.TimeIdx]
-		err := loadFunc(element.Key, element.Value)
-		if err != nil {
-			return err
+
+		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
+		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
+		// property, but files may overlap. files are sorted, just skip repeated keys here
+		if args.BufferType == SortableOldestAppearedBuffer {
+			if !bytes.Equal(prevK, element.Key) {
+				if err = loadFunc(element.Key, element.Value); err != nil {
+					return err
+				}
+				// Need to copy k because the underlying space will be re-used for the next key
+				prevK = common.Copy(element.Key)
+			}
+		} else if args.BufferType == SortableAppendBuffer {
+			if !bytes.Equal(prevK, element.Key) {
+				if prevK != nil {
+					if err = loadFunc(prevK, prevV); err != nil {
+						return err
+					}
+				}
+				// Need to copy k because the underlying space will be re-used for the next key
+				prevK = common.Copy(element.Key)
+				prevV = common.Copy(element.Value)
+			} else {
+				prevV = append(prevV, element.Value...)
+			}
+		} else if args.BufferType == SortableMergeBuffer {
+			if !bytes.Equal(prevK, element.Key) {
+				if prevK != nil {
+					if err = loadFunc(prevK, prevV); err != nil {
+						return err
+					}
+				}
+				// Need to copy k because the underlying space will be re-used for the next key
+				prevK = common.Copy(element.Key)
+				prevV = common.Copy(element.Value)
+			} else {
+				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
+			}
+		} else {
+			if err = loadFunc(element.Key, element.Value); err != nil {
+				return err
+			}
 		}
+
 		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
 		}
 	}
+
+	if args.BufferType == SortableAppendBuffer {
+		if prevK != nil {
+			if err = loadFunc(prevK, prevV); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

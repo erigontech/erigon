@@ -72,11 +72,11 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 		w := bufio.NewWriterSize(bufferFile, BufIOSize)
 		defer w.Flush() //nolint:errcheck
 
+		_, fName := filepath.Split(bufferFile.Name())
 		if err = b.Write(w); err != nil {
 			return fmt.Errorf("error writing entries to disk: %w", err)
 		}
-		_, fName := filepath.Split(bufferFile.Name())
-		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer", logPrefix), "file", fName)
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
 		return nil
 	})
 
