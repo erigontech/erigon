@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/btree"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -192,7 +193,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			plainKeys[i] = []byte(key)
 			i++
 		}
-		// slices.SortFunc(plainKeys, func(i, j []byte) int { return bytes.Compare(i, j) })
+		slices.SortFunc(plainKeys, func(i, j []byte) int { return bytes.Compare(i, j) })
 		if clear {
 			t.keys = make(map[string]struct{}, len(t.keys)/8)
 		}
