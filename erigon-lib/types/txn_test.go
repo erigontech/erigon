@@ -29,7 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -195,7 +194,10 @@ func TestBlobTxParsing(t *testing.T) {
 	bodyRlp := hexutility.MustDecodeHex(bodyRlpHex)
 
 	hasEnvelope := true
-	bodyEnvelope := hexutility.MustDecodeHex("b9012b03")
+	bodyEnvelopePrefix := hexutility.MustDecodeHex("b9012b")
+	var bodyEnvelope []byte
+	bodyEnvelope = append(bodyEnvelope, bodyEnvelopePrefix...)
+	bodyEnvelope = append(bodyEnvelope, BlobTxType)
 	bodyEnvelope = append(bodyEnvelope, bodyRlp...)
 
 	ctx := NewTxParseContext(*uint256.NewInt(5))
@@ -209,7 +211,7 @@ func TestBlobTxParsing(t *testing.T) {
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTx, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
-	assert.Equal(t, len(bodyEnvelope), int(thinTx.Size))
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTx.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTx.Rlp)
 	assert.Equal(t, BlobTxType, thinTx.Type)
 	assert.Equal(t, 2, len(thinTx.BlobHashes))
@@ -262,8 +264,7 @@ func TestBlobTxParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTx, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	wrapperLenWithEnvelope := rlp.ListPrefixLen(len(wrapperRlp)) + len(wrapperRlp)
-	assert.Equal(t, wrapperLenWithEnvelope, int(fatTx.Size))
+	assert.Equal(t, len(wrapperRlp), int(fatTx.Size))
 	assert.Equal(t, wrapperRlp, fatTx.Rlp)
 	assert.Equal(t, BlobTxType, fatTx.Type)
 

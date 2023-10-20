@@ -62,7 +62,7 @@ func InitKZGCtx() {
 			var err error
 			// Initialize context to match the configurations that the
 			// specs are using.
-			gokzgCtx, err = gokzg4844.NewContext4096Insecure1337()
+			gokzgCtx, err = gokzg4844.NewContext4096Secure()
 			if err != nil {
 				panic(fmt.Sprintf("could not create context, err : %v", err))
 			}
