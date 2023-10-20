@@ -13,8 +13,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -418,9 +419,9 @@ func (sd *SharedDomains) cursorBranchFn() (func(pref []byte) ([]byte, error), er
 			if err != nil {
 				return nil, err
 			}
+			prevKey = k
 			cmp := bytes.Compare(pref, k)
 			if cmp == 0 {
-				prevKey = k
 				if len(v) == 0 {
 					return nil, nil
 				}
@@ -846,6 +847,7 @@ func (sd *SharedDomains) Close() {
 	sd.LogTopics = nil
 	sd.TracesFrom = nil
 	sd.TracesTo = nil
+	sd.aggCtx = nil
 }
 
 // StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
@@ -909,6 +911,10 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
+
+	if sd.aggCtx == nil {
+		return
+	}
 
 	sd.aggCtx.account.FinishWrites()
 	sd.aggCtx.storage.FinishWrites()
