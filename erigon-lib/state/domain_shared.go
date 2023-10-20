@@ -647,12 +647,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 
-	cursorBranchFn, err := sd.cursorBranchFn()
-	if err != nil {
-		return nil, err
-	}
-	sd.Commitment.ResetFns(cursorBranchFn, sd.accountFn, sd.storageFn)
-
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
 	if err != nil {
