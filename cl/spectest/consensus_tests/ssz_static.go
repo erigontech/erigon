@@ -1,7 +1,7 @@
 package consensus_tests
 
 import (
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -29,8 +29,8 @@ type Root struct {
 const rootsFile = "roots.yaml"
 const serializedFile = "serialized.ssz_snappy"
 
-func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest2.Handler {
-	return spectest2.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest2.TestCase) (err error) {
+func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.Handler {
+	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) (err error) {
 		rootBytes, err := fs.ReadFile(fsroot, rootsFile)
 		require.NoError(t, err)
 		root := Root{}

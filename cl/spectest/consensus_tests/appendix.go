@@ -5,20 +5,20 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 )
 
-var TestFormats = spectest2.Appendix{}
+var TestFormats = spectest.Appendix{}
 
 func init() {
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
-		With("aggregate", spectest2.UnimplementedHandler).
-		With("eth_aggregate_pubkeys", spectest2.UnimplementedHandler).
-		With("eth_fast_aggregate_verify", spectest2.UnimplementedHandler).
-		With("fast_aggregate_verify", spectest2.UnimplementedHandler).
-		With("sign", spectest2.UnimplementedHandler).
-		With("verify", spectest2.UnimplementedHandler)
+		With("aggregate", spectest.UnimplementedHandler).
+		With("eth_aggregate_pubkeys", spectest.UnimplementedHandler).
+		With("eth_fast_aggregate_verify", spectest.UnimplementedHandler).
+		With("fast_aggregate_verify", spectest.UnimplementedHandler).
+		With("sign", spectest.UnimplementedHandler).
+		With("verify", spectest.UnimplementedHandler)
 	TestFormats.Add("epoch_processing").
 		With("effective_balance_updates", effectiveBalancesUpdateTest).
 		With("eth1_data_reset", eth1DataResetTest).
@@ -42,12 +42,12 @@ func init() {
 	TestFormats.Add("fork").
 		With("fork", ForksFork)
 	TestFormats.Add("genesis").
-		With("validity", spectest2.UnimplementedHandler).
-		With("initialization", spectest2.UnimplementedHandler)
+		With("validity", spectest.UnimplementedHandler).
+		With("initialization", spectest.UnimplementedHandler)
 	TestFormats.Add("kzg").
-		With("", spectest2.UnimplementedHandler)
+		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("light_client").
-		With("", spectest2.UnimplementedHandler)
+		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("operations").
 		WithFn("attestation", operationAttestationHandler).
 		WithFn("attester_slashing", operationAttesterSlashingHandler).
@@ -70,9 +70,9 @@ func init() {
 	TestFormats.Add("shuffling").
 		With("core", &ShufflingCore{})
 	TestFormats.Add("ssz_generic").
-		With("", spectest2.UnimplementedHandler)
+		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("sync").
-		With("", spectest2.UnimplementedHandler)
+		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
 

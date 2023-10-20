@@ -2,7 +2,7 @@ package consensus_tests
 
 import (
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"os"
 	"testing"
@@ -12,16 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var SanitySlots = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
+var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	// TODO: this is unused, why?
 	var slots int
-	err = spectest2.ReadMeta(root, "slots.yaml", &slots)
+	err = spectest.ReadMeta(root, "slots.yaml", &slots)
 	require.NoError(t, err)
 
-	testState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PreSsz)
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
 
-	expectedState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	require.NoError(t, err)
 
 	err = c.Machine.ProcessSlots(testState, expectedState.Slot())
@@ -37,7 +37,7 @@ var SanitySlots = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	return nil
 })
 
-var SanityBlocks = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
+var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
 		Description            string `yaml:"description"`
 		BlsSetting             int    `yaml:"bls_settings"`
@@ -45,21 +45,21 @@ var SanityBlocks = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c specte
 		BlocksCount            int    `yaml:"blocks_count"`
 	}
 
-	err = spectest2.ReadMeta(root, "meta.yaml", &meta)
+	err = spectest.ReadMeta(root, "meta.yaml", &meta)
 	require.NoError(t, err)
 
-	testState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PreSsz)
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
 
 	var expectedError bool
-	expectedState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	if os.IsNotExist(err) {
 		expectedError = true
 	} else {
 		require.NoError(t, err)
 	}
 
-	blocks, err := spectest2.ReadBlocks(root, c.Version())
+	blocks, err := spectest.ReadBlocks(root, c.Version())
 	require.NoError(t, err)
 
 	var block *cltypes.SignedBeaconBlock

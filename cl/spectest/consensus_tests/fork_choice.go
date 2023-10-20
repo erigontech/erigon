@@ -3,7 +3,7 @@ package consensus_tests
 import (
 	"context"
 	"fmt"
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -143,21 +143,21 @@ func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 	return &ForkChoice{}
 }
 
-func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
-	anchorBlock, err := spectest2.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
+func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
 
 	// TODO: what to do with anchor block ?
 	_ = anchorBlock
 
-	anchorState, err := spectest2.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
+	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
 	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), false)
 	require.NoError(t, err)
 
 	var steps []ForkChoiceStep
-	err = spectest2.ReadYml(root, "steps.yaml", &steps)
+	err = spectest.ReadYml(root, "steps.yaml", &steps)
 	require.NoError(t, err)
 
 	for stepIdx, step := range steps {
@@ -168,7 +168,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err er
 			return nil
 		case "on_attester_slashing":
 			data := &cltypes.AttesterSlashing{}
-			err := spectest2.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
+			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttesterSlashing(data, false)
 			if step.GetValid() {
@@ -180,7 +180,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err er
 			return nil
 		case "on_block":
 			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
-			err := spectest2.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
+			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnBlock(blk, true, true)
 			if step.GetValid() {
@@ -190,7 +190,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err er
 			}
 		case "attestation":
 			att := &solid.Attestation{}
-			err := spectest2.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
+			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttestation(att, false)
 			if step.GetValid() {

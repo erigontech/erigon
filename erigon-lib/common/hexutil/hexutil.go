@@ -173,6 +173,8 @@ func decodeNibble(in byte) uint64 {
 	}
 }
 
+// ignore these errors to keep compatiblity with go ethereum
+// nolint:errorlint
 func mapError(err error) error {
 	if err, ok := err.(*strconv.NumError); ok {
 		switch err.Err {

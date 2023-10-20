@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func checkError(t *testing.T, input string, got, want error) {
+	t.Helper()
 	if want == nil {
 		require.NoErrorf(t, got, "input %s", input)
 		return

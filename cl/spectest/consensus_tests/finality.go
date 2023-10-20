@@ -3,7 +3,7 @@ package consensus_tests
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -11,15 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var FinalityFinality = spectest2.HandlerFunc(func(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
+var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 
-	testState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PreSsz)
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
 
-	expectedState, err := spectest2.ReadBeaconState(root, c.Version(), spectest2.PostSsz)
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	require.NoError(t, err)
 
-	blocks, err := spectest2.ReadBlocks(root, c.Version())
+	blocks, err := spectest.ReadBlocks(root, c.Version())
 	if err != nil {
 		return err
 	}

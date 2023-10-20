@@ -124,7 +124,7 @@ func (s *Set) GetOrCreateHistogram(name string, help ...string) prometheus.Histo
 		metric, err := NewHistogram(name, help...)
 
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 		}
 
 		nmNew := &namedMetric{
@@ -205,7 +205,7 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) prometheus.Counter
 		metric, err := NewCounter(name, help...)
 
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 		}
 
 		nmNew := &namedMetric{
@@ -289,7 +289,7 @@ func (s *Set) GetOrCreateGauge(name string, help ...string) prometheus.Gauge {
 		metric, err := NewGauge(name, help...)
 
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 		}
 
 		nmNew := &namedMetric{
@@ -380,7 +380,7 @@ func (s *Set) GetOrCreateGaugeFunc(name string, f func() float64, help ...string
 		metric, err := NewGaugeFunc(name, f, help...)
 
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 		}
 
 		nmNew := &namedMetric{
@@ -498,7 +498,7 @@ func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles
 		metric, err := NewSummary(name, window, quantiles, help...)
 
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 		}
 
 		nmNew := &namedMetric{
@@ -524,7 +524,7 @@ func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles
 
 func (s *Set) registerMetric(name string, m prometheus.Metric) {
 	if _, _, err := parseMetric(name); err != nil {
-		panic(fmt.Errorf("BUG: invalid metric name %q: %s", name, err))
+		panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
 	}
 	s.mu.Lock()
 	// defer will unlock in case of panic

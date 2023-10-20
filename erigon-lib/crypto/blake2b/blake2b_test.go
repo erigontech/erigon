@@ -8,14 +8,17 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
 	"hash"
 	"io"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestHashes(t *testing.T) {
+	t.Helper()
 	defer func(sse4, avx, avx2 bool) {
 		useSSE4, useAVX, useAVX2 = sse4, avx, avx2
 	}(useSSE4, useAVX, useAVX2)
@@ -40,6 +43,7 @@ func TestHashes(t *testing.T) {
 }
 
 func TestHashes2X(t *testing.T) {
+	t.Helper()
 	defer func(sse4, avx, avx2 bool) {
 		useSSE4, useAVX, useAVX2 = sse4, avx, avx2
 	}(useSSE4, useAVX, useAVX2)
@@ -116,6 +120,7 @@ func TestMarshal(t *testing.T) {
 }
 
 func testHashes(t *testing.T) {
+	t.Helper()
 	key, _ := hex.DecodeString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
 
 	input := make([]byte, 255)
@@ -149,6 +154,7 @@ func testHashes(t *testing.T) {
 }
 
 func testHashes2X(t *testing.T) {
+	t.Helper()
 	key, _ := hex.DecodeString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
 
 	input := make([]byte, 256)
@@ -171,7 +177,7 @@ func testHashes2X(t *testing.T) {
 		if _, err := h.Read(sum); err != nil {
 			t.Fatalf("#%d (single write): error from Read: %v", i, err)
 		}
-		if n, err := h.Read(sum); n != 0 || err != io.EOF {
+		if n, err := h.Read(sum); n != 0 || errors.Is(err, io.EOF) {
 			t.Fatalf("#%d (single write): Read did not return (0, io.EOF) after exhaustion, got (%v, %v)", i, n, err)
 		}
 		if gotHex := fmt.Sprintf("%x", sum); gotHex != expectedHex {
@@ -300,6 +306,7 @@ func TestSelfTest(t *testing.T) {
 // Benchmarks
 
 func benchmarkSum(b *testing.B, size int, sse4, avx, avx2 bool) {
+	b.Helper()
 	// Enable the correct set of instructions
 	defer func(sse4, avx, avx2 bool) {
 		useSSE4, useAVX, useAVX2 = sse4, avx, avx2
@@ -315,6 +322,7 @@ func benchmarkSum(b *testing.B, size int, sse4, avx, avx2 bool) {
 }
 
 func benchmarkWrite(b *testing.B, size int, sse4, avx, avx2 bool) {
+	b.Helper()
 	// Enable the correct set of instructions
 	defer func(sse4, avx, avx2 bool) {
 		useSSE4, useAVX, useAVX2 = sse4, avx, avx2

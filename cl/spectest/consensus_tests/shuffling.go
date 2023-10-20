@@ -1,7 +1,7 @@
 package consensus_tests
 
 import (
-	spectest2 "github.com/ledgerwatch/erigon/spectest"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -18,13 +18,13 @@ import (
 type ShufflingCore struct {
 }
 
-func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest2.TestCase) (err error) {
+func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
 		Seed    common.Hash `yaml:"seed"`
 		Count   int         `yaml:"count"`
 		Mapping []int       `yaml:"mapping"`
 	}
-	if err := spectest2.ReadMeta(root, "mapping.yaml", &meta); err != nil {
+	if err := spectest.ReadMeta(root, "mapping.yaml", &meta); err != nil {
 		return err
 	}
 
