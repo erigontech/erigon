@@ -2027,7 +2027,7 @@ func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blo
 	}
 	defer d.Close()
 	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorSpans.String()))
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BeaconBlocks.String()))
 
 	var baseSpanId uint64
 	if blockFrom > zerothSpanEnd {
