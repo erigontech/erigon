@@ -52,7 +52,7 @@ type SharedDomains struct {
 	aggCtx *AggregatorV3Context
 	roTx   kv.Tx
 
-	txNum    atomic.Uint64
+	txNum    uint64
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool
@@ -584,7 +584,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 		}
 	}
 
-	sd.txNum.Store(txNum)
+	sd.txNum = txNum
 	sd.aggCtx.account.SetTxNum(txNum)
 	sd.aggCtx.code.SetTxNum(txNum)
 	sd.aggCtx.storage.SetTxNum(txNum)
@@ -595,7 +595,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	sd.aggCtx.logTopics.SetTxNum(txNum)
 }
 
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
 func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
@@ -683,7 +683,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		k = []byte(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum, reverse: true})
 		}
 	}
 
