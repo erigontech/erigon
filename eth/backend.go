@@ -201,7 +201,9 @@ type Ethereum struct {
 	logger         log.Logger
 
 	sentinel rpcsentinel.SentinelClient
-	silkworm *silkworm.Silkworm
+
+	silkworm                 *silkworm.Silkworm
+	silkwormRPCDaemonService *silkworm.RpcDaemonService
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -863,24 +865,17 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
-	go func() {
-		if config.SilkwormEnabled && httpRpcCfg.Enabled {
-			go func() {
-				<-ctx.Done()
-				s.silkworm.StopRpcDaemon()
-			}()
-			err = s.silkworm.StartRpcDaemon(chainKv)
-			if err != nil {
-				s.logger.Error(err.Error())
-				return
-			}
-		} else {
+
+	if config.SilkwormEnabled && httpRpcCfg.Enabled {
+		silkwormRPCDaemonService := s.silkworm.NewRpcDaemonService(chainKv)
+		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
+	} else {
+		go func() {
 			if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
-				s.logger.Error(err.Error())
-				return
+				s.logger.Error("cli.StartRpcServer error", "err", err)
 			}
-		}
-	}()
+		}()
+	}
 
 	go s.engineBackendRPC.Start(httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
@@ -1266,6 +1261,12 @@ func (s *Ethereum) Start() error {
 		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
+	if s.silkwormRPCDaemonService != nil {
+		if err := s.silkwormRPCDaemonService.Start(); err != nil {
+			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1311,6 +1312,11 @@ func (s *Ethereum) Stop() error {
 	}
 	s.chainDB.Close()
 
+	if s.silkwormRPCDaemonService != nil {
+		if err := s.silkwormRPCDaemonService.Stop(); err != nil {
+			s.logger.Error("silkworm.StopRpcDaemon error", "err", err)
+		}
+	}
 	if s.config.SilkwormEnabled {
 		s.silkworm.Close()
 	}

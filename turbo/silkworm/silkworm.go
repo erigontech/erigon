@@ -333,6 +333,26 @@ func (s *Silkworm) StopRpcDaemon() error {
 	return fmt.Errorf("silkworm_stop_rpcdaemon error %d", status)
 }
 
+type RpcDaemonService struct {
+	silkworm *Silkworm
+	db       kv.RoDB
+}
+
+func (s *Silkworm) NewRpcDaemonService(db kv.RoDB) RpcDaemonService {
+	return RpcDaemonService{
+		silkworm: s,
+		db:       db,
+	}
+}
+
+func (service RpcDaemonService) Start() error {
+	return service.silkworm.StartRpcDaemon(service.db)
+}
+
+func (service RpcDaemonService) Stop() error {
+	return service.silkworm.StopRpcDaemon()
+}
+
 func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (lastExecutedBlock uint64, err error) {
 	cTxn := (*C.MDBX_txn)(txn.CHandle())
 	cChainId := C.uint64_t(chainID.Uint64())
