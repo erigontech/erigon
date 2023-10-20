@@ -373,6 +373,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
+	chainConfig := st.evm.ChainConfig()
 	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -440,6 +441,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	st.state.AddBalance(coinbase, amount)
 	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
 		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
+		if chainConfig != nil && chainConfig.Bor != nil {
+			burntContractAddress = libcommon.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+		}
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
 		st.state.AddBalance(burntContractAddress, burnAmount)
 	}

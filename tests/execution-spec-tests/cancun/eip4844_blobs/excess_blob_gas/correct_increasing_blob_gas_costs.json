@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=17-expected_excess_blob_gas:0x240000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -205,7 +205,7 @@
     },
     "001-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=264-expected_excess_blob_gas:0x2120000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -409,7 +409,7 @@
     },
     "002-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=564-expected_excess_blob_gas:0x46a0000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -613,7 +613,7 @@
     },
     "003-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=829-expected_excess_blob_gas:0x67c0000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -817,7 +817,7 @@
     },
     "004-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=1129-expected_excess_blob_gas:0x8d40000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -1021,7 +1021,7 @@
     },
     "005-fork=Cancun-new_blobs=1-parent_blobs=4-parent_excess_blobs=1229-expected_excess_blob_gas:0x99c0000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -71,10 +72,11 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 		w := bufio.NewWriterSize(bufferFile, BufIOSize)
 		defer w.Flush() //nolint:errcheck
 
+		_, fName := filepath.Split(bufferFile.Name())
 		if err = b.Write(w); err != nil {
 			return fmt.Errorf("error writing entries to disk: %w", err)
 		}
-		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", bufferFile.Name())
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
 		return nil
 	})
 

@@ -1,7 +1,7 @@
 {
     "000-fork=Istanbul": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -106,7 +106,7 @@
     },
     "001-fork=Berlin": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -211,7 +211,7 @@
     },
     "002-fork=London": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -318,7 +318,7 @@
     },
     "003-fork=Merge": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -425,7 +425,7 @@
     },
     "004-fork=Shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -535,7 +535,7 @@
     },
     "005-fork=Cancun": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },

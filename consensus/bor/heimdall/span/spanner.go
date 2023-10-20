@@ -2,6 +2,7 @@ package span
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -67,28 +68,30 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 	return &span, nil
 }
 
-func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
-	span, err := getSpanForBlock(blockNumber)
-	if err != nil {
+	spanBytes := chain.BorSpan(spanId)
+	var span HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
 
 	return span.ValidatorSet.Validators, nil
 }
 
-func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
-	span, err := getSpanForBlock(blockNumber)
-	if err != nil {
+	spanBytes := chain.BorSpan(spanId)
+	var span HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
 
