@@ -64,7 +64,8 @@ type withSentinel struct {
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
-	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure())
+	// YOLO message size
+	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
