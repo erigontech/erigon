@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai-during_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         },
@@ -124,7 +124,7 @@
     },
     "001-fork=Cancun-during_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         },
