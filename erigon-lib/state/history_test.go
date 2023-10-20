@@ -481,10 +481,12 @@ func TestHistoryScanFiles(t *testing.T) {
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
+		db.Close()
 	})
 	t.Run("small_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
+		db.Close()
 	})
 }
 

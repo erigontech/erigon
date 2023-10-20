@@ -809,6 +809,7 @@ Loop:
 					if err := doms.Flush(ctx, applyTx); err != nil {
 						return err
 					}
+					doms.FinishWrites()
 					doms.ClearRam(false)
 					t3 = time.Since(tt)
 

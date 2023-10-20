@@ -62,6 +62,7 @@ var (
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
 	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
+	mxRunningFilesBuilding    = metrics.GetOrCreateCounter("domain_running_files_building")
 	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
 	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
@@ -75,6 +76,7 @@ var (
 	mxPruneSizeIndex          = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
 	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
+	mxDomainFlushes           = metrics.GetOrCreateCounter("domain_wal_flushes")
 	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
 	mxCommitmentRunning       = metrics.GetOrCreateCounter("domain_running_commitment")
 	mxCommitmentTook          = metrics.GetOrCreateSummary("domain_commitment_took")
@@ -666,7 +668,11 @@ func (d *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	return d.DeleteWithPrev(key1, key2, original)
 }
 
-func (dc *DomainContext) SetTxNum(v uint64) { dc.hc.SetTxNum(v) }
+func (dc *DomainContext) SetTxNum(v uint64) {
+	dc.hc.SetTxNum(v)
+
+	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(dc.hc.ic.txNum / dc.d.aggregationStep))
+}
 
 func (dc *DomainContext) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	if !buffered {
@@ -751,13 +757,18 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	kl := len(key1) + len(key2)
+	//d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	d.aux = append(append(d.aux[:0], key1...), key2...)
 	fullkey := d.aux[:kl+8]
-	//TODO: we have ii.txNumBytes, need also have d.stepBytes. update it at d.SetTxNum()
 	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
-	// defer func() {
-	// 	fmt.Printf("addValue %x->%x buffered %t largeVals %t file %s\n", fullkey, value, d.buffered, d.largeValues, d.d.filenameBase)
-	// }()
+	//stepbb := [8]byte{}
+	//binary.BigEndian.PutUint64(stepbb[:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
+	//if !bytes.Equal(d.dc.stepBytes[:], stepbb[:]) {
+	//	fmt.Printf("addValue %x: step %x != %x\n", fullkey[:kl], fullkey[kl:], stepbb[:])
+	//}
+	//defer func() {
+	//	fmt.Printf("addValue @%d %x->%x buffered %t largeVals %t file %s\n", d.dc.hc.ic.txNum, fullkey, value, d.buffered, d.largeValues, d.dc.d.filenameBase)
+	//}()
 
 	if d.largeValues {
 		if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
@@ -868,6 +879,7 @@ type DomainContext struct {
 
 	wal *domainWAL
 
+	stepBytes [8]byte  // current inverted step representation
 	keyBuf    [60]byte // 52b key and 8b for inverted step
 	valKeyBuf [60]byte // 52b key and 8b for inverted step
 
@@ -1417,7 +1429,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	d := dc.d
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
 	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
 	}
 	defer keysCursorForDeletes.Close()
 	keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
@@ -1442,9 +1454,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 			return err
 		}
 		defer valsCDup.Close()
-	}
-	if err != nil {
-		return err
 	}
 
 	//fmt.Printf("unwind %s txs [%d; %d) step %d\n", d.filenameBase, txFrom, txTo, step)

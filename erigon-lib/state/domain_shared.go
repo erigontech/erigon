@@ -122,6 +122,10 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 
+	if err := sd.Flush(ctx, rwTx); err != nil {
+		return err
+	}
+
 	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
@@ -906,9 +910,12 @@ func (sd *SharedDomains) rotate() []flusher {
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	flushers := sd.rotate()
 	for _, f := range flushers {
+		mxDomainFlushes.Inc()
 		if err := f.Flush(ctx, tx); err != nil {
+			mxDomainFlushes.Dec()
 			return err
 		}
+		mxDomainFlushes.Dec()
 	}
 	return nil
 }
