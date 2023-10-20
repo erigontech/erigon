@@ -13,8 +13,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -565,6 +566,9 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
+	if ctx != nil {
+		sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+	}
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
@@ -577,7 +581,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
+		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
 		_, err := sd.ComputeCommitment(ctx, true, sd.trace)
 		if err != nil {
 			panic(err)
@@ -802,6 +806,7 @@ func (sd *SharedDomains) Close() {
 	sd.LogTopics = nil
 	sd.TracesFrom = nil
 	sd.TracesTo = nil
+	sd.aggCtx = nil
 }
 
 // StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
@@ -865,6 +870,10 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
+
+	if sd.aggCtx == nil {
+		return
+	}
 
 	sd.aggCtx.account.FinishWrites()
 	sd.aggCtx.storage.FinishWrites()

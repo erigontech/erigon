@@ -917,6 +917,9 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
 	}
+	if b.bplus != nil && b.ef != b.bplus.offt {
+		panic("b.ef != b.bplus.offt")
+	}
 
 	offset := b.ef.Get(di)
 	g.Reset(offset)
@@ -1004,18 +1007,6 @@ func (b *BtIndex) Get(lookup []byte, gr ArchiveGetter) (k, v []byte, found bool,
 		if b.bplus == nil {
 			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 		}
-		//it, err := b.bplus.Seek(gr, lookup)
-		//if err != nil {
-		//	return k, v, false, err
-		//}
-		//k, v, err := it.KVFromGetter(gr)
-		//if err != nil {
-		//	return nil, nil, false, fmt.Errorf("kv from getter: %w", err)
-		//}
-		//if !bytes.Equal(k, lookup) {
-		//	return nil, nil, false, nil
-		//}
-		//index = it.i
 		// v is actual value, not offset.
 
 		// weak assumption that k will be ignored and used lookup instead.

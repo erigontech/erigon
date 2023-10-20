@@ -240,7 +240,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//ibs.SoftFinalise()
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			txTask.Error = ibs.FinalizeTx(rules, noop)
