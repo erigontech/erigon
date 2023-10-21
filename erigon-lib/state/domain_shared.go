@@ -403,44 +403,6 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) cursorBranchFn() (func(pref []byte) ([]byte, error), error) {
-	iter, err := sd.aggCtx.commitment.DomainRangeLatest(sd.roTx, nil, nil, -1)
-	if err != nil {
-		return nil, err
-	}
-	prevKey := make([]byte, 0)
-	return func(pref []byte) ([]byte, error) {
-		if bytes.Compare(pref, prevKey) < 0 {
-			fmt.Printf("cursorBranchFn: pref %x prevKey %x\n", pref, prevKey)
-			return sd.branchFn(pref)
-		}
-		for iter.HasNext() {
-			k, v, err := iter.Next()
-			if err != nil {
-				return nil, err
-			}
-			prevKey = k
-			cmp := bytes.Compare(pref, k)
-			if cmp == 0 {
-				if len(v) == 0 {
-					return nil, nil
-				}
-				// skip touchmap
-				return v[2:], nil
-			}
-			if cmp < 0 {
-				iter, err = sd.aggCtx.commitment.DomainRangeLatest(sd.roTx, nil, nil, -1)
-				if err != nil {
-					return nil, fmt.Errorf("resetting iterator: %w", err)
-				}
-				return sd.branchFn(pref)
-			}
-		}
-		fmt.Printf("cursorBranchFn: pref %x prevKey %x NOT FOUND\n", pref, prevKey)
-		return sd.branchFn(pref)
-	}, nil
-}
-
 func (sd *SharedDomains) branchFn(pref []byte) ([]byte, error) {
 	v, err := sd.LatestCommitment(pref)
 	if err != nil {
@@ -619,7 +581,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 	if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
+		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
 		_, err := sd.ComputeCommitment(ctx, true, sd.trace)
 		if err != nil {
 			panic(err)

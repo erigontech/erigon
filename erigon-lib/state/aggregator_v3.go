@@ -673,7 +673,6 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	}
 
 	outs, err := ac.staticFilesInRange(r)
-	defer outs.Close()
 	defer func() {
 		if closeAll {
 			outs.Close()
