@@ -3,6 +3,7 @@ package changeset
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/rand"
 	"reflect"
 	"strconv"
@@ -16,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 const (
@@ -30,7 +30,7 @@ func getDefaultIncarnation() uint64 { return defaultIncarnation }
 func getRandomIncarnation() uint64  { return rand.Uint64() }
 
 func hashValueGenerator(j int) []byte {
-	val, _ := common.HashData([]byte("val" + strconv.Itoa(j)))
+	val, _ := libcommon.HashData([]byte("val" + strconv.Itoa(j)))
 	return val.Bytes()
 }
 
@@ -40,7 +40,7 @@ func emptyValueGenerator(j int) []byte {
 
 func getTestDataAtIndex(i, j int, inc uint64) []byte {
 	address := libcommon.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
-	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
+	key, _ := libcommon.HashData([]byte("key" + strconv.Itoa(j)))
 	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
 }
 
@@ -317,8 +317,8 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
-		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
+		key, _ := libcommon.HashData([]byte("key" + strconv.Itoa(i)))
+		val, _ := libcommon.HashData([]byte("val" + strconv.Itoa(i)))
 		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:]), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
@@ -347,8 +347,8 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
-		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
+		key, _ := libcommon.HashData([]byte("key" + strconv.Itoa(i)))
+		val, _ := libcommon.HashData([]byte("val" + strconv.Itoa(i)))
 		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:]), val.Bytes())
 		if err != nil {
 			t.Fatal(err)

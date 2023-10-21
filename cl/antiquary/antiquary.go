@@ -29,14 +29,14 @@ func NewDownloader(
 func (d *Downloader) DownloadEpoch(tx kv.RwTx, ctx context.Context, epoch uint64) error {
 	// convert the epoch to a block
 	startBlock := epoch * d.config.SlotsPerEpoch
-	blocks, err := d.source.GetRange(tx, ctx, startBlock, d.config.SlotsPerEpoch)
+	blocks, err := d.source.GetRange(ctx, tx, startBlock, d.config.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}
 	// NOTE: the downloader does not perform any real verification on these blocks
 	// validation must be done separately
 	for _, v := range blocks {
-		err := d.beacondDB.WriteBlock(tx, ctx, v.Data, true)
+		err := d.beacondDB.WriteBlock(ctx, tx, v.Data, true)
 		if err != nil {
 			return err
 		}

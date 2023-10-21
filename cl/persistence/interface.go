@@ -11,13 +11,13 @@ import (
 )
 
 type BlockSource interface {
-	GetBlock(tx kv.Tx, ctx context.Context, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
-	GetRange(tx kv.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
-	PurgeRange(tx kv.RwTx, ctx context.Context, from uint64, count uint64) error
+	GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
+	GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
+	PurgeRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) error
 }
 
 type BeaconChainWriter interface {
-	WriteBlock(tx kv.RwTx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error
+	WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error
 }
 
 type RawBeaconBlockChain interface {

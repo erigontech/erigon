@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 )
 
@@ -66,7 +65,7 @@ var TxsV3 = Migration{
 				}
 				// Copying k because otherwise the same memory will be reused
 				// for the next key and Delete below will end up deleting 1 more record than required
-				kCopy := common.CopyBytes(k)
+				kCopy := common2.CopyBytes(k)
 				if err = tx.Delete(kv.Senders, kCopy); err != nil {
 					return err
 				}

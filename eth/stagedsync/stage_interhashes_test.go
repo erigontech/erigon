@@ -3,6 +3,7 @@ package stagedsync_test
 import (
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -91,7 +91,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	accountTrieA := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
-		accountTrieA[string(k)] = common.CopyBytes(v)
+		accountTrieA[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -118,7 +118,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	storageTrie := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrie[string(k)] = common.CopyBytes(v)
+		storageTrie[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -141,7 +141,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// ----------------------------------------------------------------
 
 	newAddress := libcommon.HexToAddress("0x4f61f2d5ebd991b85aa1677db97307caf5215c91")
-	hash4b, err := common.HashData(newAddress[:])
+	hash4b, err := libcommon.HashData(newAddress[:])
 	assert.Nil(t, err)
 	assert.Equal(t, hash4a[0], hash4b[0])
 
@@ -157,7 +157,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	accountTrieB := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
-		accountTrieB[string(k)] = common.CopyBytes(v)
+		accountTrieB[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -235,21 +235,21 @@ func TestStorageDeletion(t *testing.T) {
 	ctx := context.Background()
 
 	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000000")
-	hashedAddress, err := common.HashData(address[:])
+	hashedAddress, err := libcommon.HashData(address[:])
 	assert.Nil(t, err)
 	incarnation := uint64(1)
 	assert.Nil(t, addTestAccount(tx, hashedAddress, params.Ether, incarnation))
 
 	plainLocation1 := libcommon.HexToHash("0x1000000000000000000000000000000000000000000000000000000000000000")
-	hashedLocation1, err := common.HashData(plainLocation1[:])
+	hashedLocation1, err := libcommon.HashData(plainLocation1[:])
 	assert.Nil(t, err)
 
 	plainLocation2 := libcommon.HexToHash("0x1A00000000000000000000000000000000000000000000000000000000000000")
-	hashedLocation2, err := common.HashData(plainLocation2[:])
+	hashedLocation2, err := libcommon.HashData(plainLocation2[:])
 	assert.Nil(t, err)
 
 	plainLocation3 := libcommon.HexToHash("0x1E00000000000000000000000000000000000000000000000000000000000000")
-	hashedLocation3, err := common.HashData(plainLocation3[:])
+	hashedLocation3, err := libcommon.HashData(plainLocation3[:])
 	assert.Nil(t, err)
 
 	value1 := common.FromHex("0xABCD")
@@ -276,7 +276,7 @@ func TestStorageDeletion(t *testing.T) {
 
 	storageTrieA := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrieA[string(k)] = common.CopyBytes(v)
+		storageTrieA[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -307,7 +307,7 @@ func TestStorageDeletion(t *testing.T) {
 
 	storageTrieB := make(map[string][]byte)
 	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
-		storageTrieB[string(k)] = common.CopyBytes(v)
+		storageTrieB[string(k)] = libcommon.CopyBytes(v)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -319,67 +319,67 @@ func TestHiveTrieRoot(t *testing.T) {
 	db, tx := memdb.NewTestTx(t)
 	ctx := context.Background()
 
-	hashedAddress1, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000000"))
+	hashedAddress1, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000000"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress1[:],
 		common.FromHex("02081bc5e32fd4403800")))
 
-	hashedAddress2, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000314"))
+	hashedAddress2, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000314"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress2[:],
 		common.FromHex("0c0101203e6de602146067c01322e2528a8f320c504fd3d19a4d6c4c53b54d2b2f9357ec")))
 
-	hashedLocA, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
+	hashedLocA, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
 	require.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress2, 1, hashedLocA),
 		common.FromHex("1234")))
 
-	hashedLocB, _ := common.HashData(common.FromHex("6661e9d6d8b923d5bbaab1b96e1dd51ff6ea2a93520fdc9eb75d059238b8c5e9"))
+	hashedLocB, _ := libcommon.HashData(common.FromHex("6661e9d6d8b923d5bbaab1b96e1dd51ff6ea2a93520fdc9eb75d059238b8c5e9"))
 	require.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress2, 1, hashedLocB),
 		common.FromHex("01")))
 
-	hashedAddress3, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000315"))
+	hashedAddress3, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000315"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress3[:],
 		common.FromHex("0e100999999999999999999999999999999901012052de487a82a5e45f90f7fb0edf025b1d23f85c308ae7543736a91ac6295217f3")))
 
-	hashedAddress4, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000316"))
+	hashedAddress4, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000316"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress4[:],
 		common.FromHex("0c010120803ac275052ba5360d44e51a7d4a49ed9156c461a21119ff650506869827f2c8")))
 
-	hashedLocC, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000000000000000000000000000001"))
+	hashedLocC, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000000000000000000000000000001"))
 	require.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress4, 1, hashedLocC),
 		common.FromHex("030000")))
 
-	hashedAddress5, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000317"))
+	hashedAddress5, _ := libcommon.HashData(common.FromHex("0000000000000000000000000000000000000317"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress5[:],
 		common.FromHex("0c010120247c40b032c36acb07ca105280db053d204d3133302420f403dfbb54f775d0e2")))
 
-	hashedAddress6, _ := common.HashData(common.FromHex("0161e041aad467a890839d5b08b138c1e6373072"))
+	hashedAddress6, _ := libcommon.HashData(common.FromHex("0161e041aad467a890839d5b08b138c1e6373072"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress6[:],
 		common.FromHex("020b0123450000000000000000")))
 
-	hashedAddress7, _ := common.HashData(common.FromHex("6e53b788a8e675377c5f160e5c6cca6b46074af8"))
+	hashedAddress7, _ := libcommon.HashData(common.FromHex("6e53b788a8e675377c5f160e5c6cca6b46074af8"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress7[:],
 		common.FromHex("02081bc16d674ec80000")))
 
-	hashedAddress8, _ := common.HashData(common.FromHex("87da6a8c6e9eff15d703fc2773e32f6af8dbe301"))
+	hashedAddress8, _ := libcommon.HashData(common.FromHex("87da6a8c6e9eff15d703fc2773e32f6af8dbe301"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress8[:],
 		common.FromHex("020b0123450000000000000000")))
 
-	hashedAddress9, _ := common.HashData(common.FromHex("b97de4b8c857e4f6bc354f226dc3249aaee49209"))
+	hashedAddress9, _ := libcommon.HashData(common.FromHex("b97de4b8c857e4f6bc354f226dc3249aaee49209"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress9[:],
 		common.FromHex("020b0123450000000000000000")))
 
-	hashedAddress10, _ := common.HashData(common.FromHex("c5065c9eeebe6df2c2284d046bfc906501846c51"))
+	hashedAddress10, _ := libcommon.HashData(common.FromHex("c5065c9eeebe6df2c2284d046bfc906501846c51"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress10[:],
 		common.FromHex("020b0123450000000000000000")))
 
-	hashedAddress11, _ := common.HashData(common.FromHex("cf49fda3be353c69b41ed96333cd24302da4556f"))
+	hashedAddress11, _ := libcommon.HashData(common.FromHex("cf49fda3be353c69b41ed96333cd24302da4556f"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress11[:],
 		common.FromHex("0301010b012344fffb67ea09bf8000")))
 
-	hashedAddress12, _ := common.HashData(common.FromHex("e0840414c530d72e5c2f1fe64f6311cc3136cab1"))
+	hashedAddress12, _ := libcommon.HashData(common.FromHex("e0840414c530d72e5c2f1fe64f6311cc3136cab1"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress12[:],
 		common.FromHex("02081bc16d674ec80000")))
 
-	hashedAddress13, _ := common.HashData(common.FromHex("f8e0e7f6f1d0514ddfbc00bec204641f1f4d8cc8"))
+	hashedAddress13, _ := libcommon.HashData(common.FromHex("f8e0e7f6f1d0514ddfbc00bec204641f1f4d8cc8"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress13[:],
 		common.FromHex("02081bc16d674ec80000")))
 
@@ -392,7 +392,7 @@ func TestHiveTrieRoot(t *testing.T) {
 
 	// Now add a new account
 	newAddress := libcommon.HexToAddress("0xf76fefb6608ca3d826945a9571d1f8e53bb6f366")
-	newHash, err := common.HashData(newAddress[:])
+	newHash, err := libcommon.HashData(newAddress[:])
 	require.Nil(t, err)
 
 	require.Nil(t, tx.Put(kv.HashedAccounts, newHash[:], common.FromHex("02081bc16d674ec80000")))

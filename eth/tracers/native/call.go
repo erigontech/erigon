@@ -19,6 +19,7 @@ package native
 import (
 	"encoding/json"
 	"errors"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync/atomic"
 
@@ -26,8 +27,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -71,7 +70,7 @@ func (f callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.CopyBytes(output)
+	output = libcommon.CopyBytes(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -137,7 +136,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 		Type:  vm.CALL,
 		From:  from,
 		To:    to,
-		Input: common.CopyBytes(input),
+		Input: libcommon.CopyBytes(input),
 		Gas:   gas,
 	}
 	if value != nil {
@@ -212,7 +211,7 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 		Type:  typ,
 		From:  from,
 		To:    to,
-		Input: common.CopyBytes(input),
+		Input: libcommon.CopyBytes(input),
 		Gas:   gas,
 	}
 	if value != nil {

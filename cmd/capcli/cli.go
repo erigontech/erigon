@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/progress"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
@@ -29,7 +30,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
+
+	"github.com/jedib0t/go-pretty/v6/progress"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
@@ -129,9 +132,9 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(tx, ctx, vv, true)
+		err := beaconDB.WriteBlock(ctx, tx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -169,7 +172,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	rpcSource := persistence.NewBeaconRpcSource(beacon)
+	rpcSource := persistence2.NewBeaconRpcSource(beacon)
 
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
@@ -235,7 +238,7 @@ func (b *Epochs) Run(cctx *Context) error {
 		egg.Go(func() error {
 			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
 			for {
-				blocks, err = rpcSource.GetRange(tx, ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				blocks, err = rpcSource.GetRange(ctx, tx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
 					log.Error("dl error", "err", err, "epoch", ii)
 				} else {
@@ -245,7 +248,7 @@ func (b *Epochs) Run(cctx *Context) error {
 			for _, v := range blocks {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(tx, ctx, v.Data, true)
+				err := beaconDB.WriteBlock(ctx, tx, v.Data, true)
 				if err != nil {
 					return err
 				}

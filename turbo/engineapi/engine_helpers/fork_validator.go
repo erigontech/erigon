@@ -17,12 +17,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
@@ -272,7 +272,6 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		if criticalError != nil {
 			return
 		}
-		fmt.Println(latestValidNumber)
 		latestValidHash, criticalError = rawdb.ReadCanonicalHash(tx, latestValidNumber)
 		if criticalError != nil {
 			return

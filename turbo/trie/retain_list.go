@@ -20,14 +20,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -64,7 +63,7 @@ type ProofRetainer struct {
 // set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
 // operation in order to appropriately collect the proof elements.
 func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys []libcommon.Hash, rl *RetainList) (*ProofRetainer, error) {
-	addrHash, err := common.HashData(addr[:])
+	addrHash, err := libcommon.HashData(addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +71,7 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 
 	storageHexKeys := make([][]byte, len(storageKeys))
 	for i, sk := range storageKeys {
-		storageHash, err := common.HashData(sk[:])
+		storageHash, err := libcommon.HashData(sk[:])
 		if err != nil {
 			return nil, err
 		}
