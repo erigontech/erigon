@@ -130,7 +130,6 @@ func ComputeNextForkDigest(
 	// Retrieve next fork version.
 	nextForkIndex := 0
 	forkList := forkList(beaconConfig.ForkVersionSchedule)
-	fmt.Println(forkList, beaconConfig.ForkVersionSchedule)
 	for _, fork := range forkList {
 		if currentEpoch >= fork.epoch {
 			nextForkIndex++
@@ -143,7 +142,6 @@ func ComputeNextForkDigest(
 		return [4]byte{}, nil
 	}
 	nextForkIndex++
-	fmt.Println(forkList[nextForkIndex].version)
 	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }
 
