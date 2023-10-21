@@ -284,7 +284,10 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		fmt.Printf("pivot %d n %x [%d %d]\n", n.di, n.prefix, dl, dr)
 	}
 	l, r = dl, dr
-
+	if r > b.offt.Count() {
+		fmt.Printf("btindex.bs r %d > count %d\n", r, b.offt.Count())
+		r = b.offt.Count()
+	}
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1

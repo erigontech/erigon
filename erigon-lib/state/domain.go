@@ -760,9 +760,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	kl := len(key1) + len(key2)
-	//d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
-	//d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
 	//binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
 	if (d.dc.hc.ic.txNum / d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
