@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+var ErrStateNotFound = errors.New("state not found")
+
 type ChainSegmentInsertionResult uint
 
 const (
@@ -64,9 +66,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	file, err = f.fs.Open(getBeaconStateFilename(blockRoot))
 
 	if err != nil {
-		if errors.Is(err, afero.ErrFileNotFound) {
-			return nil, nil
-		}
 		return
 	}
 	defer file.Close()
@@ -113,7 +112,7 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	// Truncate and then grow the buffer to the size of the state.
 	encodingSizeSSZ := bs.EncodingSizeSSZ()
 	f.sszBuffer.Grow(encodingSizeSSZ)
-	f.sszBuffer.Truncate(0)
+	f.sszBuffer.Reset()
 
 	sszBuffer := f.sszBuffer.Bytes()
 	sszBuffer, err = bs.EncodeSSZ(sszBuffer)
@@ -321,7 +320,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 		return nil, err
 	}
 	if copyReferencedState == nil {
-		return nil, nil
+		return nil, ErrStateNotFound
 	}
 
 	// Traverse the blocks from top to bottom.
