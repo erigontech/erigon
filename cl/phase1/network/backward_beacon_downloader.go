@@ -87,6 +87,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 	}
 	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 	if err != nil {
+		log.Debug("Could not send beacon blocks by range request", "err", err)
 		return
 	}
 	// Import new blocks, order is forward so reverse the whole packet
@@ -103,6 +104,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
+			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.

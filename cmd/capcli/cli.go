@@ -405,7 +405,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
