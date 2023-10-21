@@ -37,7 +37,7 @@ func main() {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"))
+			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"), 0)
 		},
 	}
 
@@ -55,7 +55,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 	return snaptype.FileInfo{}, false // Return zero value and false if not found
 }
 
-func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) error {
+func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
 	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	segments, _, err := freezeblocks.Segments(dirs.Snap)
+	segments, _, err := freezeblocks.Segments(dirs.Snap, minBlock)
 	if err != nil {
 		return err
 	}

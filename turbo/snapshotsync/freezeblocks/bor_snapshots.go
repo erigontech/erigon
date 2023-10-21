@@ -586,6 +586,8 @@ type BorRoSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
+
+	segmentsMin atomic.Uint64
 }
 
 // NewBorRoSnapshots - opens all bor snapshots. But to simplify everything:
@@ -603,6 +605,8 @@ func (s *BorRoSnapshots) SegmentsReady() bool           { return s.segmentsReady
 func (s *BorRoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *BorRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *BorRoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *BorRoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
+func (s *BorRoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
 func (s *BorRoSnapshots) BlocksAvailable() uint64 {
 	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
 }
@@ -615,7 +619,7 @@ func (s *BorRoSnapshots) LogStat() {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
@@ -629,7 +633,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
+		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
@@ -641,7 +645,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 			}
 			l = append(l, f)
 		}
-		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
+		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
 		res = append(res, l...)
 	}
 
@@ -711,7 +715,7 @@ func removeSpanOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := BorSegments(s.dir)
+	existingFiles, missingSnapshots, err := BorSegments(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -727,6 +731,7 @@ func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, erro
 	}
 	return existingFilesMap, res, nil
 }
+
 func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected bor snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -983,7 +988,7 @@ func (s *BorRoSnapshots) Ranges() (ranges []Range) {
 func (s *BorRoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *BorRoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := BorSegments(s.dir)
+	files, _, err := BorSegments(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}

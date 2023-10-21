@@ -44,7 +44,9 @@ func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHeim
 	// it will return appropriate error.
 	hash, err := verifier.verify(ctx, config, checkpoint.StartBlock.Uint64(), checkpoint.EndBlock.Uint64(), checkpoint.RootHash.String()[2:], true)
 	if err != nil {
-		config.logger.Warn("Failed to whitelist checkpoint", "err", err)
+		if !errors.Is(err, errMissingBlocks) {
+			config.logger.Warn("Failed to whitelist checkpoint", "err", err)
+		}
 		return blockNum, blockHash, err
 	}
 

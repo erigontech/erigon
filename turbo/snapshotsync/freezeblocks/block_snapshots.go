@@ -335,6 +335,9 @@ type RoSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
+
+	// allows for pruning segments - this is the min availible segment
+	segmentsMin atomic.Uint64
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -352,6 +355,8 @@ func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Lo
 func (s *RoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
+func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
 func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
@@ -363,7 +368,7 @@ func (s *RoSnapshots) LogStat() {
 }
 
 func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := Segments(s.dir)
+	existingFiles, missingSnapshots, err := Segments(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -379,6 +384,7 @@ func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) 
 	}
 	return existingFilesMap, res, nil
 }
+
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -708,7 +714,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	files, _, err := Segments(s.dir)
+	files, _, err := Segments(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
@@ -719,6 +725,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	}
 	return s.ReopenList(list, false)
 }
+
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		snList, _, err := rawdb.ReadSnapshots(tx)
@@ -930,7 +937,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
-	segments, _, err := Segments(dir)
+	segments, _, err := Segments(dir, 0)
 	if err != nil {
 		return err
 	}
@@ -995,7 +1002,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 
-	segments, _, err := BorSegments(dir)
+	segments, _, err := BorSegments(dir, 0)
 	if err != nil {
 		return err
 	}
@@ -1043,8 +1050,8 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	}
 }
 
-func noGaps(in []snaptype.FileInfo) (out []snaptype.FileInfo, missingSnapshots []Range) {
-	var prevTo uint64
+func noGaps(in []snaptype.FileInfo, from uint64) (out []snaptype.FileInfo, missingSnapshots []Range) {
+	prevTo := from
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
@@ -1118,7 +1125,7 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return res
 }
 
-func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
@@ -1132,7 +1139,7 @@ func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, er
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		l, m = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)), minBlock)
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
@@ -1144,7 +1151,7 @@ func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, er
 			}
 			l = append(l, f)
 		}
-		l, _ = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		l, _ = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)), minBlock)
 		res = append(res, l...)
 	}
 	{
@@ -1155,7 +1162,7 @@ func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, er
 			}
 			l = append(l, f)
 		}
-		l, _ = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		l, _ = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)), minBlock)
 		res = append(res, l...)
 	}
 
@@ -1320,7 +1327,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
 		// go-routine is still working
@@ -1329,7 +1336,11 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	go func() {
 		defer br.working.Store(false)
 
-		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
+		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+			minBlockNum = frozen
+		}
+
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 		if ok {
 			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
 				br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
@@ -1337,7 +1348,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		}
 
 		if includeBor {
-			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+			blockFrom, blockTo, ok = CanRetire(maxBlockNum, br.blockReader.FrozenBorBlocks())
 			if ok {
 				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
 					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)

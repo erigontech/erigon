@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -22,11 +22,13 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -87,8 +89,8 @@ func StageSnapshotsCfg(db kv.RwDB,
 		silkworm:           silkworm,
 	}
 
-	if dbg.UploadSnapshots() {
-		cfg.snapshotUploader = &snapshotUploader{}
+	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
+		cfg.snapshotUploader = &snapshotUploader{version: "v1", uploadFs: uploadFs}
 	}
 
 	return cfg
@@ -344,7 +346,19 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, cfg.chainConfig.Bor != nil, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
+		var minBlockNumber uint64
+
+		if cfg.snapshotUploader != nil {
+			cfg.snapshotUploader.init(ctx, s, cfg, logger)
+
+			blockLimit := cfg.snapshotUploader.frozenBlockLimit
+
+			if maxUploaded := cfg.snapshotUploader.maxUploaded(); blockLimit > 0 && maxUploaded > blockLimit {
+				minBlockNumber = maxUploaded - blockLimit
+			}
+		}
+
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, cfg.chainConfig.Bor != nil, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 					return err
@@ -352,10 +366,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}
 			return nil
 		})
-
-		if cfg.snapshotUploader != nil {
-			cfg.snapshotUploader.init(ctx, s, cfg, logger)
-		}
 
 		//cfg.agg.BuildFilesInBackground()
 	}
@@ -372,33 +382,27 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 type uploadState struct {
 	sync.Mutex
 	file            string
-	info            snaptype.FileInfo
+	info            *snaptype.FileInfo
 	torrent         *torrent.TorrentSpec
 	buildingTorrent bool
-	uploadRequest   *http.Request
-	uploaded        bool
-}
-
-func (u *uploadState) torrentHash() (string, string) {
-	u.Lock()
-	torrent := u.torrent
-	u.Unlock()
-
-	if torrent == nil {
-		return "", ""
-	}
-
-	return torrent.DisplayName, torrent.InfoHash.String()
+	uploadRequest   *rcloneRequest
+	remote          bool
+	remoteHash      string
+	local           bool
+	localHash       string
 }
 
 type snapshotUploader struct {
-	cfg          *SnapshotsCfg
-	state        *PruneState
-	files        map[string]*uploadState
-	uploadFs     string
-	rclone       *exec.Cmd
-	rcloneUrl    string
-	rcloneClient *http.Client
+	version          string
+	cfg              *SnapshotsCfg
+	state            *PruneState
+	files            map[string]*uploadState
+	uploadFs         string
+	rclone           *exec.Cmd
+	rcloneUrl        string
+	rcloneClient     *http.Client
+	frozenBlockLimit uint64
+	remoteHasHashes  bool
 }
 
 func (u *snapshotUploader) init(ctx context.Context, s *PruneState, cfg SnapshotsCfg, logger log.Logger) {
@@ -407,12 +411,60 @@ func (u *snapshotUploader) init(ctx context.Context, s *PruneState, cfg Snapshot
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
 		if freezingCfg.Enabled && freezingCfg.Produce {
+			if dbg.FrozenBlockLimit() != 0 {
+				u.frozenBlockLimit = dbg.FrozenBlockLimit()
+			}
+
+			if maxUploaded := u.maxUploaded(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
+				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
+					snapshots.SetSegmentsMin(maxUploaded - u.frozenBlockLimit)
+				}
+
+				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+					snapshots.SetSegmentsMin(maxUploaded - u.frozenBlockLimit)
+				}
+			}
+
 			u.files = map[string]*uploadState{}
 			u.start(ctx, logger)
 		}
 	}
 
 	u.state = s
+}
+
+func (u *snapshotUploader) maxUploaded() uint64 {
+	var max uint64
+
+	if len(u.files) > 0 {
+		for _, state := range u.files {
+			if state.local && state.remote {
+				if state.info != nil {
+					if state.info.To > max {
+						max = state.info.To
+					}
+				} else {
+					if info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
+						if info.To > max {
+							max = info.To
+						}
+
+						state.info = &info
+					}
+				}
+			}
+		}
+	} else {
+		if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
+			for _, info := range list {
+				if info.Seedable() && info.To > max {
+					max = info.To
+				}
+			}
+		}
+	}
+
+	return max
 }
 
 func freePort() (port int, err error) {
@@ -448,308 +500,500 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 			logger.Info("[snapshot uploader] rclone started", "addr", addr)
 		}
 
-		u.uploadFs = "r2:erigon-v2-snapshots-mumbai"
-
-		listBody, err := json.Marshal(struct {
-			Fs     string `json:"fs"`
-			Remote string `json:"remote"`
-		}{
-			Fs:     u.uploadFs,
-			Remote: "",
-		})
-
-		if err == nil {
-			listRequest, err := http.NewRequestWithContext(ctx, http.MethodPost,
-				u.rcloneUrl+"/operations/list", bytes.NewBuffer(listBody))
+		go func() {
+			listBody, err := json.Marshal(struct {
+				Fs     string `json:"fs"`
+				Remote string `json:"remote"`
+			}{
+				Fs:     u.uploadFs,
+				Remote: "",
+			})
 
 			if err == nil {
-				listRequest.Header.Set("Content-Type", "application/json")
+				listRequest, err := http.NewRequestWithContext(ctx, http.MethodPost,
+					u.rcloneUrl+"/operations/list", bytes.NewBuffer(listBody))
 
-				var response *http.Response
+				if err == nil {
+					listRequest.Header.Set("Content-Type", "application/json")
 
-				for i := 0; i < 10; i++ {
-					response, err = u.rcloneClient.Do(listRequest)
-					if err == nil {
-						break
-					}
-					time.Sleep(2 * time.Second)
-				}
+					var response *http.Response
 
-				if err == nil && response.StatusCode == http.StatusOK {
-					defer response.Body.Close()
-
-					type fileInfo struct {
-						Name    string
-						Size    uint64
-						ModTime time.Time
+					for i := 0; i < 10; i++ {
+						response, err = u.rcloneClient.Do(listRequest)
+						if err == nil {
+							break
+						}
+						time.Sleep(2 * time.Second)
 					}
 
-					responseBody := struct {
-						List []fileInfo `json:"list"`
-					}{}
+					if err == nil && response.StatusCode == http.StatusOK {
+						defer response.Body.Close()
 
-					if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil {
-						for _, info := range responseBody.List {
-							var file string
+						type fileInfo struct {
+							Name    string
+							Size    uint64
+							ModTime time.Time
+						}
 
-							if filepath.Ext(info.Name) != ".torrent" {
-								file = info.Name
-							} else {
-								file = strings.TrimSuffix(info.Name, ".torrent")
-							}
+						responseBody := struct {
+							List []fileInfo `json:"list"`
+						}{}
 
-							// if we have found the file & its torrent we don't
-							// need to attmpt another sync operation
-							if state, ok := u.files[file]; ok {
-								state.uploaded = true
-							} else {
-								u.files[info.Name] = &uploadState{
-									file: info.Name,
+						if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil {
+							for _, fi := range responseBody.List {
+								var file string
+
+								if fi.Name == "."+u.version+"-torrent-hashes.toml" {
+									// TODO load hashes
+									u.remoteHasHashes = true
+								}
+
+								if filepath.Ext(fi.Name) != ".torrent" {
+									file = fi.Name
+								} else {
+									file = strings.TrimSuffix(fi.Name, ".torrent")
+								}
+
+								// if we have found the file & its torrent we don't
+								// need to attmept another sync operation
+								if state, ok := u.files[file]; ok {
+									state.remote = true
+								} else {
+									info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name)
+
+									if !ok {
+										continue
+									}
+
+									u.files[file] = &uploadState{
+										file:  file,
+										info:  &info,
+										local: dir.FileNonZero(info.Path),
+									}
 								}
 							}
 						}
 					}
 				}
+			}
+
+			logger.Debug("[snapshot uploader] starting snapshot subscription...")
+			newSnCh, newSnClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
+			defer newSnClean()
+
+			logger.Info("[snapshot uploader] subscription established")
+
+			defer func() {
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						logger.Warn("[snapshot uploader] subscription closed", "reason", err)
+					}
+				} else {
+					logger.Warn("[snapshot uploader] subscription closed")
+				}
+			}()
+
+			u.upload(ctx, logger)
+
+			for {
+				select {
+				case <-ctx.Done():
+					err = ctx.Err()
+					return
+				case <-newSnCh:
+					logger.Info("[snapshot uploader] new snapshot received")
+					u.upload(ctx, logger)
+				}
+			}
+		}()
+	}
+}
+
+func (u *snapshotUploader) removeBefore(before uint64) {
+	list, err := snaptype.Segments(u.cfg.dirs.Snap)
+
+	if err != nil {
+		return
+	}
+
+	var toReopen []string
+	var borToReopen []string
+
+	var toRemove []string
+
+	for _, f := range list {
+		if f.To > before {
+			switch f.T {
+			case snaptype.BorEvents, snaptype.BorSpans:
+				borToReopen = append(borToReopen, filepath.Base(f.Path))
+			default:
+				toReopen = append(toReopen, filepath.Base(f.Path))
+			}
+
+			continue
+		}
+
+		toRemove = append(toRemove, f.Path)
+	}
+
+	if len(toRemove) > 0 {
+		if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
+			snapshots.SetSegmentsMin(before)
+			snapshots.ReopenList(toReopen, true)
+		}
+
+		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+			snapshots.ReopenList(borToReopen, true)
+			snapshots.SetSegmentsMin(before)
+		}
+
+		for _, f := range toRemove {
+			_ = os.Remove(f)
+			_ = os.Remove(f + ".torrent")
+			ext := filepath.Ext(f)
+			withoutExt := f[:len(f)-len(ext)]
+			_ = os.Remove(withoutExt + ".idx")
+
+			if strings.HasSuffix(withoutExt, "transactions") {
+				_ = os.Remove(withoutExt + "-to-block.idx")
 			}
 		}
 	}
+}
 
-	go func() {
-		logger.Debug("[snapshot uploader] starting snapshot subscription...")
-		newSnCh, newSnClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
-		defer newSnClean()
+type rcloneFilter struct {
+	IncludeRule []string `json:"IncludeRule"`
+}
 
-		logger.Info("[snapshot uploader] subscription established")
+type rcloneRequest struct {
+	Async  bool                   `json:"_async,omitempty"`
+	Config map[string]interface{} `json:"_config,omitempty"`
+	SrcFs  string                 `json:"srcFs"`
+	DstFs  string                 `json:"dstFs"`
+	Filter rcloneFilter           `json:"_filter"`
+}
 
-		var err error
+func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[snapshot uploader] snapshot upload failed", "err", r, "stack", dbg.Stack())
+		}
+	}()
 
-		defer func() {
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Warn("[snapshot uploader] subscription closed", "reason", err)
+	retryTime := 30 * time.Second
+	maxRetryTime := 300 * time.Second
+
+	var uploadCount int
+
+	for {
+		var processList []*uploadState
+
+		for _, f := range u.cfg.blockReader.FrozenFiles() {
+			if state, ok := u.files[f]; !ok {
+				if fi, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, f); ok {
+					if fi.Seedable() {
+						state := &uploadState{
+							file:  f,
+							info:  &fi,
+							local: true,
+						}
+
+						if fi.TorrentFileExists() {
+							state.torrent, _ = downloader.LoadTorrent(fi.Path + ".torrent")
+						}
+
+						u.files[f] = state
+						processList = append(processList, state)
+					}
 				}
 			} else {
-				logger.Warn("[snapshot uploader] subscription closed")
-			}
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				err = ctx.Err()
-				return
-			case <-newSnCh:
 				func() {
-					logger.Info("[snapshot uploader] new snapshot received")
+					state.Lock()
+					defer state.Unlock()
 
-					var processList []*uploadState
+					state.local = true
 
-					for _, f := range u.cfg.blockReader.FrozenFiles() {
-						if state, ok := u.files[f]; !ok {
-							if fi, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, f); ok {
-								if fi.To-fi.From == 500_000 {
-									state := &uploadState{
-										file: f,
-										info: fi,
-									}
-
-									state.torrent, _ = downloader.LoadTorrent(fi.Path + ".torrent")
-
-									u.files[f] = state
-									processList = append(processList, state)
-								}
-							}
-						} else {
-							func() {
-								state.Lock()
-								defer state.Unlock()
-
-								if state.torrent == nil {
-									state.torrent, _ = downloader.LoadTorrent(state.info.Path + ".torrent")
-								}
-
-								if !state.uploaded {
-									processList = append(processList, state)
-								}
-							}()
+					if state.torrent == nil && state.info.TorrentFileExists() {
+						state.torrent, _ = downloader.LoadTorrent(state.info.Path + ".torrent")
+						if state.torrent != nil {
+							state.localHash = state.torrent.InfoHash.String()
 						}
 					}
 
-					g, gctx := errgroup.WithContext(ctx)
-					g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-					var i atomic.Int32
-					var pc int
-
-					for _, s := range processList {
-						state := s
-						func() {
-							state.Lock()
-							defer state.Unlock()
-
-							if !(state.torrent != nil || state.buildingTorrent) {
-								pc++
-
-								state.buildingTorrent = true
-
-								g.Go(func() error {
-									defer i.Add(1)
-									logger.Info("[snapshot uploader] building torrent", "file", state.file)
-
-									torrentPath, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap)
-
-									state.Lock()
-									state.buildingTorrent = false
-									state.Unlock()
-
-									if err != nil {
-										return err
-									}
-
-									torrent, err := downloader.LoadTorrent(torrentPath)
-
-									if err != nil {
-										return err
-									}
-
-									state.Lock()
-									state.torrent = torrent
-									state.Unlock()
-
-									return nil
-								})
-							}
-						}()
-					}
-
-					logEvery := time.NewTicker(20 * time.Second)
-					logEvery.Stop()
-
-				Torrents:
-					for int(i.Load()) < pc {
-						select {
-						case <-gctx.Done():
-							break Torrents
-						case <-logEvery.C:
-							if int(i.Load()) == pc {
-								break Torrents
-							}
-							log.Info("[snapshot uploader] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), pc))
-						}
-					}
-
-					if err := g.Wait(); err != nil {
-						logger.Debug(".torrent file creation failed", "err", err)
-					}
-
-					g, gctx = errgroup.WithContext(ctx)
-					g.SetLimit(8)
-					i.Store(0)
-					pc = 0
-
-					type rcloneFilter struct {
-						IncludeRule []string `json:"IncludeRule"`
-					}
-
-					type rcloneRequest struct {
-						Async  bool                   `json:"_async,omitempty"`
-						Config map[string]interface{} `json:"_config,omitempty"`
-						SrcFs  string                 `json:"srcFs"`
-						DstFs  string                 `json:"dstFs"`
-						Filter rcloneFilter           `json:"_filter"`
-					}
-
-					for _, s := range processList {
-						state := s
-						err := func() error {
-							state.Lock()
-							defer state.Unlock()
-							if !state.uploaded && state.torrent != nil && state.uploadRequest == nil && u.rclone != nil {
-								requestBody, err := json.Marshal(rcloneRequest{
-									SrcFs: u.cfg.dirs.Snap,
-									DstFs: u.uploadFs,
-									Filter: rcloneFilter{
-										IncludeRule: []string{state.file, state.file + ".torrent"},
-									},
-								})
-
-								if err != nil {
-									return err
-								}
-
-								state.uploadRequest, err = http.NewRequestWithContext(ctx, http.MethodPost,
-									u.rcloneUrl+"/sync/sync", bytes.NewBuffer(requestBody))
-
-								if err != nil {
-									return err
-								}
-
-								state.uploadRequest.Header.Set("Content-Type", "application/json")
-
-								g.Go(func() error {
-									defer i.Add(1)
-									defer func() {
-										state.Lock()
-										state.uploadRequest = nil
-										state.Unlock()
-									}()
-
-									response, err := u.rcloneClient.Do(state.uploadRequest)
-
-									if err != nil {
-										return err
-									}
-
-									defer response.Body.Close()
-
-									if response.StatusCode != http.StatusOK {
-
-										buff, _ := io.ReadAll(response.Body)
-
-										responseBody := struct {
-											Error string `json:"error"`
-										}{}
-
-										if err := json.NewDecoder(bytes.NewBuffer(buff)).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
-											return fmt.Errorf("upload request failed: %s: %s", response.Status, responseBody.Error)
-										} else {
-											return fmt.Errorf("upload request failed: %s", response.Status)
-										}
-									}
-
-									state.Lock()
-									state.uploaded = true
-									state.Unlock()
-									return nil
-								})
-							}
-
-							pc++
-							return nil
-						}()
-
-						if err != nil {
-							logger.Debug("upload failed", "file", state.file, "err", err)
-						}
-					}
-
-				Uploads:
-					for int(i.Load()) < pc {
-						select {
-						case <-gctx.Done():
-							break Uploads
-						case <-logEvery.C:
-							if int(i.Load()) == pc {
-								break Uploads
-							}
-							log.Info("[snapshot uploader] Uploading files", "progress", fmt.Sprintf("%d/%d", i.Load(), pc))
-						}
-					}
-
-					if err := g.Wait(); err != nil {
-						logger.Debug("upload failed", "err", err)
+					if !state.remote {
+						processList = append(processList, state)
 					}
 				}()
 			}
 		}
-	}()
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+		var i atomic.Int32
+
+		var torrentList []*uploadState
+
+		for _, state := range processList {
+			func() {
+				state.Lock()
+				defer state.Unlock()
+				if !(state.torrent != nil || state.buildingTorrent) {
+					torrentList = append(torrentList, state)
+					state.buildingTorrent = true
+				}
+			}()
+		}
+
+		go func() {
+			logEvery := time.NewTicker(20 * time.Second)
+			defer logEvery.Stop()
+
+			for int(i.Load()) < len(torrentList) {
+				select {
+				case <-gctx.Done():
+					return
+				case <-logEvery.C:
+					if int(i.Load()) == len(torrentList) {
+						return
+					}
+					log.Info("[snapshot uploader] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(torrentList)))
+				}
+			}
+		}()
+
+		for _, s := range torrentList {
+			state := s
+
+			g.Go(func() error {
+				defer i.Add(1)
+
+				torrentPath, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap)
+
+				state.Lock()
+				state.buildingTorrent = false
+				state.Unlock()
+
+				if err != nil {
+					return err
+				}
+
+				torrent, err := downloader.LoadTorrent(torrentPath)
+
+				if err != nil {
+					return err
+				}
+
+				state.Lock()
+				state.torrent = torrent
+				state.Unlock()
+
+				state.localHash = state.torrent.InfoHash.String()
+
+				logger.Info("[snapshot uploader] built torrent", "file", state.file, "hash", state.localHash)
+
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			logger.Debug(".torrent file creation failed", "err", err)
+		}
+
+		i.Store(0)
+		var f atomic.Int32
+
+		var uploadList []*uploadState
+
+		for _, state := range processList {
+			err := func() error {
+				state.Lock()
+				defer state.Unlock()
+				if !state.remote && state.torrent != nil && state.uploadRequest == nil && u.rclone != nil {
+					state.uploadRequest = &rcloneRequest{
+						SrcFs: u.cfg.dirs.Snap,
+						DstFs: u.uploadFs,
+						Filter: rcloneFilter{
+							IncludeRule: []string{state.file, state.file + ".torrent"},
+						},
+					}
+					uploadList = append(uploadList, state)
+				}
+
+				return nil
+			}()
+
+			if err != nil {
+				logger.Debug("upload failed", "file", state.file, "err", err)
+			}
+		}
+
+		g, gctx = errgroup.WithContext(ctx)
+		g.SetLimit(16)
+
+		go func() {
+			logEvery := time.NewTicker(20 * time.Second)
+			defer logEvery.Stop()
+
+			for int(i.Load()) < len(processList) {
+				select {
+				case <-gctx.Done():
+					log.Info("[snapshot uploader] Uploaded files", "processed", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
+					return
+				case <-logEvery.C:
+					if int(i.Load()+f.Load()) == len(processList) {
+						return
+					}
+					log.Info("[snapshot uploader] Uploading files", "progress", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
+				}
+			}
+		}()
+
+		for _, s := range uploadList {
+			state := s
+			func() {
+				state.Lock()
+				defer state.Unlock()
+
+				g.Go(func() error {
+					defer i.Add(1)
+					defer func() {
+						state.Lock()
+						state.uploadRequest = nil
+						state.Unlock()
+					}()
+
+					if err := u.syncRequest(gctx, state.uploadRequest, logger); err != nil {
+						f.Add(1)
+						return nil
+					}
+
+					uploadCount++
+
+					state.Lock()
+					state.remote = true
+					state.Unlock()
+					return nil
+				})
+			}()
+		}
+
+		if err := g.Wait(); err != nil {
+			logger.Debug("[snapshot uploader] upload failed", "err", err)
+		}
+
+		if f.Load() == 0 {
+			break
+		}
+
+		time.Sleep(retryTime)
+
+		if retryTime < maxRetryTime {
+			retryTime += retryTime
+		} else {
+			retryTime = maxRetryTime
+		}
+	}
+
+	var err error
+
+	if uploadCount > 0 {
+		hashesFile := filepath.Join(u.cfg.dirs.Snap, ".torrent_hashes.toml")
+
+		if u.remoteHasHashes {
+			err = u.syncRequest(ctx, &rcloneRequest{
+				DstFs: u.cfg.dirs.Snap,
+				SrcFs: u.uploadFs,
+				Filter: rcloneFilter{
+					IncludeRule: []string{".torrent_hashes.toml"},
+				},
+			}, logger)
+		}
+
+		if !u.remoteHasHashes || err == nil {
+			var hashes map[string]interface{}
+
+			var hashesData []byte
+
+			hashesData, err = os.ReadFile(hashesFile)
+
+			if err == nil {
+				err = toml.Unmarshal(hashesData, &hashes)
+			}
+
+			if err != nil {
+				hashes = map[string]interface{}{}
+			}
+
+			for file, state := range u.files {
+				if state.remote && state.local {
+					hashes[file] = state.localHash
+				}
+			}
+
+			hashesData, err = toml.Marshal(hashes)
+
+			if err == nil {
+				_ = os.WriteFile(hashesFile, hashesData, 0644)
+			}
+
+			u.syncRequest(ctx, &rcloneRequest{
+				SrcFs: u.cfg.dirs.Snap,
+				DstFs: u.uploadFs,
+				Filter: rcloneFilter{
+					IncludeRule: []string{"." + u.version + "-torrent-hashes.toml"},
+				},
+			}, logger)
+
+			if err == nil {
+				u.remoteHasHashes = true
+			}
+		}
+	}
+
+	if err == nil {
+		if maxUploaded := u.maxUploaded(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
+			u.removeBefore(maxUploaded - u.frozenBlockLimit)
+		}
+	}
+}
+
+func (u *snapshotUploader) syncRequest(ctx context.Context, request *rcloneRequest, logger log.Logger) error {
+	requestBody, err := json.Marshal(request)
+
+	if err != nil {
+		return err
+	}
+
+	uploadRequest, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		u.rcloneUrl+"/sync/sync", bytes.NewBuffer(requestBody))
+
+	if err != nil {
+		return err
+	}
+
+	uploadRequest.Header.Set("Content-Type", "application/json")
+
+	response, err := u.rcloneClient.Do(uploadRequest)
+
+	if err != nil {
+		return err
+	}
+
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		responseBody := struct {
+			Error string `json:"error"`
+		}{}
+
+		if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
+			logger.Warn("[snapshot uploader] sync request failed", "status", response.Status, "err", responseBody.Error)
+			return fmt.Errorf("sync request failed: %s: %s", response.Status, responseBody.Error)
+		} else {
+			logger.Warn("[snapshot uploader] sync reqiest failed", "status", response.Status)
+			return fmt.Errorf("sync request failed: %s", response.Status)
+		}
+	}
+
+	return nil
 }
