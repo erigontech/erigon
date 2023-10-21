@@ -12,8 +12,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -41,7 +43,7 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), true)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()))
 	if err != nil {
 		return err
 	}
