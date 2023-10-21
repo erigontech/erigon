@@ -15,9 +15,10 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 
@@ -277,7 +278,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	rs := state.NewStateV3(doms, logger)
-	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx, 0, math.MaxUint64)
+	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -772,7 +773,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 			//	return err
 			//} else if !ok {
 			//	break Loop
@@ -806,6 +807,7 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
+
 					if err := doms.Flush(ctx, applyTx); err != nil {
 						return err
 					}
@@ -826,6 +828,7 @@ Loop:
 						}
 						doms.SetContext(nil)
 						doms.SetTx(nil)
+						fmt.Printf("[dbg] externalTx v3 commit %d\n", blockNum)
 
 						t4 = time.Since(tt)
 						tt = time.Now()
@@ -929,25 +932,24 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root missmatch*/
-	/*
-		if err := domains.Flush(context.Background(), applyTx); err != nil {
-			panic(err)
-		}
-		oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-		if err != nil {
-			panic(err)
-		}
-		if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-			if oldAlogNonIncrementalHahs != header.Root {
-				log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-			} else {
-				log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is NOT correct): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-			}
+	/* uncomment it when need to debug state-root mismatch
+	if err := doms.Flush(context.Background(), applyTx); err != nil {
+		panic(err)
+	}
+	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true, false)
+	if err != nil {
+		panic(err)
+	}
+	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+		if oldAlogNonIncrementalHahs != header.Root {
+			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 		}
-	*/
+	} else {
+		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+	}
+	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
@@ -958,7 +960,6 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
 		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		// protect from too far unwind

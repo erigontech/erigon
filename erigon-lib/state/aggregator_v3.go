@@ -380,7 +380,6 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 	return nil
 }
 
-// Useless
 func (ac *AggregatorV3Context) buildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -554,9 +553,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
-			mxRunningMerges.Inc()
+			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningMerges.Dec()
+			mxRunningFilesBuilding.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -595,7 +594,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 			}
+			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			mxRunningFilesBuilding.Dec()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -661,8 +662,10 @@ Loop:
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
 	ac := a.MakeContext()
 	defer ac.Close()
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
 
-	closeAll := true
+	//closeAll := true
 	maxSpan := a.aggregationStep * StepsInColdFile
 	r := ac.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
@@ -670,11 +673,12 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	}
 
 	outs, err := ac.staticFilesInRange(r)
-	defer func() {
-		if closeAll {
-			outs.Close()
-		}
-	}()
+	defer outs.Close()
+	//defer func() {
+	//	if closeAll {
+	//		outs.Close()
+	//	}
+	//}()
 	if err != nil {
 		return false, err
 	}
@@ -683,14 +687,14 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	if err != nil {
 		return true, err
 	}
-	defer func() {
-		if closeAll {
-			in.Close()
-		}
-	}()
+	//defer func() {
+	//	if closeAll {
+	//		in.Close()
+	//	}
+	//}()
 	a.integrateMergedFiles(outs, in)
 	a.onFreeze(in.FrozenList())
-	closeAll = false
+	//closeAll = false
 	return true, nil
 }
 
@@ -805,7 +809,6 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	//for s := ac.a.stepToPrune.Load(); s < ac.a.aggregatedStep.Load(); s++ {
 	if err := ac.Prune(cc, ac.a.aggregatedStep.Load(), math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil
@@ -815,7 +818,6 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	if cc.Err() != nil { //nolint
 		return nil //nolint
 	}
-	//}
 	return nil
 }
 
@@ -1308,10 +1310,12 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
 	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.keepInDB {
+		close(fin)
 		return fin
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		close(fin)
 		return fin
 	}
 

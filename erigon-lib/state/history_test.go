@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/log/v3"
@@ -487,6 +488,207 @@ func TestHistoryScanFiles(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 		db.Close()
+	})
+}
+
+func TestHistory_UnwindExperiment(t *testing.T) {
+	db, h := testDbAndHistory(t, false, log.New())
+	defer db.Close()
+	defer h.Close()
+
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+	defer hc.FinishWrites()
+
+	key := common.FromHex("deadbeef")
+	loc := common.FromHex("1ceb00da")
+	var prevVal []byte
+	for i := 0; i < 8; i++ {
+		hc.SetTxNum(uint64(1 << i))
+		err := hc.AddPrevValue(key, loc, prevVal)
+		require.NoError(t, err)
+		prevVal = []byte("d1ce" + fmt.Sprintf("%x", i))
+	}
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return hc.Rotate().Flush(context.Background(), tx)
+	})
+	require.NoError(t, err)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for i := 0; i < 32; i++ {
+		toRest, needDelete, err := hc.ifUnwindKey(common.Append(key, loc), uint64(i), tx)
+		fmt.Printf("i=%d tx %d toRest=%v, needDelete=%v\n", i, i, toRest, needDelete)
+		require.NoError(t, err)
+		if i > 1 {
+			require.NotNil(t, toRest)
+			require.True(t, needDelete)
+			if 0 == (i&i - 1) {
+				require.Equal(t, uint64(i>>1), toRest.TxNum)
+				require.Equal(t, []byte("d1ce"+fmt.Sprintf("%x", i>>1)), toRest.Value)
+			}
+		} else {
+			require.Nil(t, toRest)
+			require.True(t, needDelete)
+		}
+	}
+}
+
+func TestHistory_IfUnwindKey(t *testing.T) {
+	db, h := testDbAndHistory(t, false, log.New())
+	defer h.Close()
+	defer db.Close()
+
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	// Add some test data
+	key := common.FromHex("1ceb00da")
+	var val []byte
+	for i := uint64(1); i <= 5; i++ {
+		hc.SetTxNum(i)
+		hc.AddPrevValue(key, nil, val)
+		val = []byte(fmt.Sprintf("value_%d", i))
+	}
+	err = hc.Rotate().Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+	hc.FinishWrites()
+
+	// Test case 1: key not found
+	toTxNum := uint64(0)
+	toRestore, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, toRestore)
+	require.True(t, needDeleting)
+
+	// Test case 2: key found, but no value at toTxNum
+	toTxNum = 6
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, toRestore)
+	require.True(t, needDeleting)
+
+	// Test case 3: key found, value at toTxNum, no value after toTxNum
+	toTxNum = 3
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, toRestore)
+	require.True(t, needDeleting)
+	require.Equal(t, uint64(2), toRestore.TxNum)
+	require.Equal(t, []byte("value_2"), toRestore.Value)
+
+	// Test case 4: key found, value at toTxNum, value after toTxNum
+	toTxNum = 2
+	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, toRestore)
+	require.True(t, needDeleting)
+	require.Equal(t, uint64(1), toRestore.TxNum)
+	require.Equal(t, []byte("value_1"), toRestore.Value)
+}
+
+func TestHisory_Unwind(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		hctx := h.MakeContext()
+		defer hctx.Close()
+
+		hctx.StartWrites()
+		defer hctx.FinishWrites()
+
+		unwindKeys := make([][]byte, 8)
+		for i := 0; i < len(unwindKeys); i++ {
+			unwindKeys[i] = []byte(fmt.Sprintf("unwind_key%d", i))
+		}
+
+		v := make([]byte, 8)
+		for i := uint64(0); i < txs; i += 6 {
+			hctx.SetTxNum(i)
+
+			binary.BigEndian.PutUint64(v, i)
+
+			for _, uk1 := range unwindKeys {
+				err := hctx.AddPrevValue(uk1, nil, v)
+				require.NoError(err)
+			}
+		}
+		err = hctx.Rotate().Flush(ctx, tx)
+		require.NoError(err)
+		hctx.FinishWrites()
+		require.NoError(tx.Commit())
+
+		collateAndMergeHistory(t, db, h, txs)
+
+		tx, err = db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		var keys, vals []string
+		_, _ = keys, vals
+
+		ic := h.MakeContext()
+		defer ic.Close()
+
+		for i := 0; i < len(unwindKeys); i++ {
+			// it, err := ic.IdxRange(unwindKeys[i], 30, int(txs), order.Asc, -1, tx)
+			val, found, err := ic.GetNoStateWithRecent(unwindKeys[i], 30, tx)
+			require.NoError(err)
+			require.True(found)
+			fmt.Printf("unwind key %x, val=%x (txn %d)\n", unwindKeys[i], val, binary.BigEndian.Uint64(val))
+
+			// for it.HasNext() {
+			// 	txN, err := it.Next()
+			// 	require.NoError(err)
+			// 	fmt.Printf("txN=%d\n", txN)
+			// }
+			rec, needDel, err := ic.ifUnwindKey(unwindKeys[i], 32, tx)
+			require.NoError(err)
+			require.True(needDel)
+			if rec != nil {
+				fmt.Printf("txn %d v=%x|prev %x\n", rec.TxNum, rec.Value, rec.PValue)
+			}
+		}
+
+		// it, err := ic.HistoryRange(2, 200, order.Asc, -1, tx)
+		// require.NoError(err)
+		// uniq := make(map[string]int)
+		// for it.HasNext() {
+
+		// 	k, v, err := it.Next()
+		// 	require.NoError(err)
+		// 	keys = append(keys, fmt.Sprintf("%x", k))
+		// 	vals = append(vals, fmt.Sprintf("%x", v))
+		// 	uniq[fmt.Sprintf("%x", k)]++
+		// 	fmt.Printf("k=%x, v=%x\n", k, v)
+		// }
+		// for k, v := range uniq {
+		// 	if v > 1 {
+		// 		fmt.Printf("count k=%s, v=%d\n", k, v)
+		// 	}
+		// }
+	}
+	t.Run("small_values", func(t *testing.T) {
+		db, h := testDbAndHistory(t, false, logger)
+		defer db.Close()
+		defer h.Close()
+
+		test(t, h, db, 1000)
 	})
 }
 

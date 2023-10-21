@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -679,11 +678,6 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		domains := libstate.NewSharedDomains(tx)
 		defer domains.Close()
-
-		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
-		if err != nil {
-			return fmt.Errorf("seek commitment: %w", err)
-		}
 		//txnUm := domains.TxNum()
 		blockNum := domains.BlockNum()
 
@@ -973,7 +967,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				defer ct.Close()
 				doms := libstate.NewSharedDomains(tx)
 				defer doms.Close()
-				_, err = doms.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+				_, err = doms.SeekCommitment(ctx, tx)
 				if err != nil {
 					return err
 				}
