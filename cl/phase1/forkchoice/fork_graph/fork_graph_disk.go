@@ -1,6 +1,7 @@
 package fork_graph
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -50,8 +51,8 @@ type forkGraphDisk struct {
 	highestSeen, anchorSlot uint64
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyBuffer []byte
+	sszBuffer       bytes.Buffer
+	sszSnappyBuffer bytes.Buffer
 }
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {
@@ -80,37 +81,51 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	if err != nil {
 		return
 	}
-	length := binary.BigEndian.Uint64(lengthBytes)
-	// Then read the state and expand the buffer if needed
-	if length > uint64(cap(f.sszSnappyBuffer)) {
-		f.sszSnappyBuffer = make([]byte, length*2)
-	}
-	f.sszSnappyBuffer = f.sszSnappyBuffer[:cap(f.sszSnappyBuffer)]
+	// Grow the snappy buffer
+	f.sszSnappyBuffer.Grow(int(binary.BigEndian.Uint64(lengthBytes)))
+	// Read the snappy buffer
+	sszSnappyBuffer := f.sszSnappyBuffer.Bytes()
+	sszSnappyBuffer = sszSnappyBuffer[:cap(sszSnappyBuffer)]
 	var n int
-	n, err = file.Read(f.sszSnappyBuffer)
+	n, err = file.Read(sszSnappyBuffer)
 	if err != nil {
 		return
 	}
-	var sszBuffer []byte
-	f.sszBuffer = f.sszBuffer[:cap(f.sszBuffer)]
-	f.sszBuffer, err = snappy.Decode(sszBuffer, f.sszSnappyBuffer[:n])
+
+	decLen, err := snappy.DecodedLen(sszSnappyBuffer[:n])
+	if err != nil {
+		return
+	}
+	// Grow the plain ssz buffer
+	f.sszBuffer.Grow(decLen)
+	sszBuffer := f.sszBuffer.Bytes()
+	sszBuffer, err = snappy.Decode(sszBuffer, sszSnappyBuffer[:n])
 	if err != nil {
 		return
 	}
 	bs = state.New(f.beaconCfg)
-	err = bs.DecodeSSZ(f.sszBuffer, int(v[0]))
+	err = bs.DecodeSSZ(sszBuffer, int(v[0]))
 	return
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
 func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, blockRoot libcommon.Hash) (err error) {
-	f.sszBuffer = f.sszBuffer[:0]
-	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer)
+	// Truncate and then grow the buffer to the size of the state.
+	encodingSizeSSZ := bs.EncodingSizeSSZ()
+	f.sszBuffer.Grow(encodingSizeSSZ)
+	f.sszBuffer.Truncate(0)
+
+	sszBuffer := f.sszBuffer.Bytes()
+	sszBuffer, err = bs.EncodeSSZ(sszBuffer)
 	if err != nil {
 		return
 	}
-	f.sszSnappyBuffer = f.sszSnappyBuffer[:cap(f.sszSnappyBuffer)]
-	f.sszSnappyBuffer = snappy.Encode(f.sszSnappyBuffer, f.sszBuffer)
+	// Grow the snappy buffer
+	f.sszSnappyBuffer.Grow(snappy.MaxEncodedLen(len(sszBuffer)))
+	// Compress the ssz buffer
+	sszSnappyBuffer := f.sszSnappyBuffer.Bytes()
+	sszSnappyBuffer = sszSnappyBuffer[:cap(sszSnappyBuffer)]
+	sszSnappyBuffer = snappy.Encode(sszSnappyBuffer, sszBuffer)
 	var dumpedFile afero.File
 	dumpedFile, err = f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
@@ -123,13 +138,13 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	}
 	// Second write the length
 	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszSnappyBuffer)))
+	binary.BigEndian.PutUint64(length, uint64(len(sszSnappyBuffer)))
 	_, err = dumpedFile.Write(length)
 	if err != nil {
 		return
 	}
 	// Lastly dump the state
-	_, err = dumpedFile.Write(f.sszSnappyBuffer)
+	_, err = dumpedFile.Write(sszSnappyBuffer)
 	if err != nil {
 		return
 	}
