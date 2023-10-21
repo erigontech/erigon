@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-opcode=CALL": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -177,7 +177,7 @@
     },
     "001-fork=Cancun-opcode=DELEGATECALL": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -352,7 +352,7 @@
     },
     "002-fork=Cancun-opcode=STATICCALL": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -526,7 +526,7 @@
     },
     "003-fork=Cancun-opcode=CALLCODE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -701,7 +701,7 @@
     },
     "004-fork=Cancun-opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -883,7 +883,7 @@
     },
     "005-fork=Cancun-opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },

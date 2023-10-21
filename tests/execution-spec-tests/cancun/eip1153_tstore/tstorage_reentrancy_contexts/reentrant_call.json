@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-tstore_in_reentrant_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -133,7 +133,7 @@
     },
     "001-fork=Cancun-tload_after_reentrant_tstore": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -265,7 +265,7 @@
     },
     "002-fork=Cancun-manipulate_in_reentrant_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -398,7 +398,7 @@
     },
     "003-fork=Cancun-tstore_in_call_then_tload_return_in_staticcall": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -532,7 +532,7 @@
     },
     "004-fork=Cancun-tstore_before_revert_has_no_effect": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -663,7 +663,7 @@
     },
     "005-fork=Cancun-revert_undoes_all": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -794,7 +794,7 @@
     },
     "006-fork=Cancun-revert_undoes_tstorage_after_successful_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -926,7 +926,7 @@
     },
     "007-fork=Cancun-tstore_before_invalid_has_no_effect": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1057,7 +1057,7 @@
     },
     "008-fork=Cancun-invalid_undoes_all": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -1188,7 +1188,7 @@
     },
     "009-fork=Cancun-invalid_undoes_tstorage_after_successful_call": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
