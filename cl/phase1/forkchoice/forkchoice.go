@@ -2,8 +2,6 @@ package forkchoice
 
 import (
 	"context"
-	"os"
-	"path"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -13,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -72,7 +69,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, tmpdir string) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -95,20 +92,6 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
-	var fcuFs afero.Fs
-
-	if tmpdir == "" {
-		fcuFs = afero.NewMemMapFs()
-	} else {
-		caplinFcuPath := path.Join(tmpdir, "caplin-forkchoice")
-		os.RemoveAll(caplinFcuPath)
-		err = os.MkdirAll(caplinFcuPath, 0o755)
-		if err != nil {
-			return nil, err
-		}
-		fcuFs = afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
-	}
-
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -117,7 +100,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		finalizedCheckpoint:           anchorCheckpoint.Copy(),
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     fork_graph.NewForkGraphDisk(anchorState, fcuFs),
+		forkGraph:                     forkGraph,
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              make(map[checkpointComparable]*checkpointState),
