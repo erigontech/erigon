@@ -15,9 +15,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -90,7 +92,15 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 	pool := pool.NewOperationsPool(beaconConfig)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, dirs.Tmp)
+	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
+	os.RemoveAll(caplinFcuPath)
+	err = os.MkdirAll(caplinFcuPath, 0o755)
+	if err != nil {
+		return err
+	}
+	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
+
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs))
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
