@@ -218,6 +218,8 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
+	AgraBlock               atomic.Pointer[uint64]
+	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	maxBlobsPerBlock        uint64
@@ -607,7 +609,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		return false, 0, nil // Too early
 	}
 
-	isShanghai := p.isShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	best := p.pending.best
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
@@ -727,7 +729,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
 }
 
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	if isShanghai {
 		if txn.DataLen > fixedgas.MaxInitCodeSize {
 			return txpoolcfg.InitCodeTooLarge
@@ -878,6 +880,40 @@ func (p *TxPool) isShanghai() bool {
 	activated := uint64(now) >= shanghaiTime
 	if activated {
 		p.isPostShanghai.Swap(true)
+	}
+	return activated
+}
+
+func (p *TxPool) isAgra() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostAgra.Load()
+	if set {
+		return true
+	}
+	if p.AgraBlock.Load() == nil {
+		return false
+	}
+	agraBlock := *p.AgraBlock.Load()
+
+	// a zero here means Shanghai is always active
+	if agraBlock == 0 {
+		p.isPostAgra.Swap(true)
+		return true
+	}
+
+	tx, err := p._chainDB.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	tx.Rollback()
+
+	now, err := chain.CurrentBlockNumber(tx)
+	if err != nil {
+		return false
+	}
+	activated := *now >= agraBlock
+	if activated {
+		p.isPostAgra.Swap(true)
 	}
 	return activated
 }
