@@ -6,6 +6,8 @@ import (
 	"io"
 	"path"
 
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -13,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/spf13/afero"
 )
 
@@ -32,7 +33,7 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
@@ -65,7 +66,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, f
 
 }
 
-func (b beaconChainDatabaseFilesystem) PurgeRange(tx kv.RwTx, ctx context.Context, from uint64, count uint64) error {
+func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) error {
 	if err := beacon_indicies.RangeBlockRoots(ctx, tx, from, from+count, func(slot uint64, beaconBlockRoot libcommon.Hash) bool {
 		b.rawDB.DeleteBlock(ctx, slot, beaconBlockRoot)
 		return true
@@ -76,7 +77,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(tx kv.RwTx, ctx context.Contex
 	return beacon_indicies.PruneBlockRoots(ctx, tx, from, from+count)
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(tx kv.RwTx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err

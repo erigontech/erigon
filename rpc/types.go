@@ -20,14 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"strconv"
 	"strings"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // API describes the set of methods offered over the RPC interface

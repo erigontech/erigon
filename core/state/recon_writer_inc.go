@@ -2,14 +2,13 @@ package state
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -60,7 +59,7 @@ func (w *StateReconWriterInc) UpdateAccountCode(address libcommon.Address, incar
 		return nil
 	}
 	if len(code) > 0 {
-		w.rs.Put(kv.CodeR, codeHashBytes, nil, common.CopyBytes(code), w.txNum)
+		w.rs.Put(kv.CodeR, codeHashBytes, nil, libcommon.CopyBytes(code), w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
 	} else {
 		w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
@@ -85,7 +84,7 @@ func (w *StateReconWriterInc) DeleteAccount(address libcommon.Address, original 
 	for k, _, err = c.Seek(addr); err == nil && bytes.HasPrefix(k, addr); k, _, err = c.Next() {
 		//fmt.Printf("delete account storage [%x] [%x]=>{} txNum: %d\n", address, k[20+8:], w.txNum)
 		if len(k) > 20 {
-			w.rs.Delete(kv.PlainStateD, addr, common.CopyBytes(k[20+8:]), w.txNum)
+			w.rs.Delete(kv.PlainStateD, addr, libcommon.CopyBytes(k[20+8:]), w.txNum)
 		}
 	}
 	if err != nil {

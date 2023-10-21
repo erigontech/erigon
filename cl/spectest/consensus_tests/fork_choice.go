@@ -3,6 +3,7 @@ package consensus_tests
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -16,7 +17,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

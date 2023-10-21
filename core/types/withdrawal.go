@@ -19,12 +19,12 @@ package types
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
