@@ -17,6 +17,17 @@ import (
 	"github.com/spf13/afero"
 )
 
+type ChainSegmentInsertionResult uint
+
+const (
+	Success        ChainSegmentInsertionResult = 0
+	InvalidBlock   ChainSegmentInsertionResult = 1
+	MissingSegment ChainSegmentInsertionResult = 2
+	BelowAnchor    ChainSegmentInsertionResult = 3
+	LogisticError  ChainSegmentInsertionResult = 4
+	PreValidated   ChainSegmentInsertionResult = 5
+)
+
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
@@ -230,7 +241,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	}
 
-	if block.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
+	if newState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
 			return nil, LogisticError, err
 		}
@@ -322,7 +333,7 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	pruneSlot -= f.beaconCfg.SlotsPerEpoch
+	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
 	for hash, signedBlock := range f.blocks {
 		if signedBlock.Block.Slot >= pruneSlot {

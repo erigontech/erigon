@@ -2,6 +2,8 @@ package forkchoice
 
 import (
 	"context"
+	"os"
+	"path"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -93,6 +95,20 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
+	var fcuFs afero.Fs
+
+	if tmpdir == "" {
+		fcuFs = afero.NewMemMapFs()
+	} else {
+		caplinFcuPath := path.Join(tmpdir, "caplin-forkchoice")
+		os.RemoveAll(caplinFcuPath)
+		err = os.MkdirAll(caplinFcuPath, 0o755)
+		if err != nil {
+			return nil, err
+		}
+		fcuFs = afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
+	}
+
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -101,7 +117,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		finalizedCheckpoint:           anchorCheckpoint.Copy(),
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     fork_graph.NewForkGraphDisk(anchorState, afero.NewBasePathFs(afero.NewOsFs(), tmpdir)),
+		forkGraph:                     fork_graph.NewForkGraphDisk(anchorState, fcuFs),
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              make(map[checkpointComparable]*checkpointState),
