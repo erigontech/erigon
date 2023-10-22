@@ -39,7 +39,7 @@ func (b *BeaconRpcSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, co
 		return nil, nil
 	}
 	var responses *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
-	reqInterval := time.NewTicker(300 * time.Millisecond)
+	reqInterval := time.NewTicker(200 * time.Millisecond)
 	doneRespCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
 	defer reqInterval.Stop()
 
