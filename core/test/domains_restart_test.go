@@ -117,7 +117,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]libcommon.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriterV4(domains, false)
 	)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -243,7 +243,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer domCtx.Close()
 	domains = state.NewSharedDomains(tx)
 	defer domains.Close()
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriterV4(domains, false)
 
 	txToStart := domains.TxNum()
 
@@ -320,7 +320,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]libcommon.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriterV4(domains, false)
 	)
 
 	testStartedFromTxNum := uint64(1)
@@ -409,7 +409,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domains = state.NewSharedDomains(tx)
 	defer domains.Close()
 
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriterV4(domains, false)
 
 	_, err = domains.SeekCommitment(ctx, tx)
 	require.NoError(t, err)

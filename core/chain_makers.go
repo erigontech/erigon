@@ -333,7 +333,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			return nil, err
 		}
 		stateReader = state.NewReaderV4(domains)
-		stateWriter = state.NewWriterV4(domains)
+		stateWriter = state.NewWriterV4(domains, false)
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
