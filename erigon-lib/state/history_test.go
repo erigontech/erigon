@@ -493,8 +493,6 @@ func TestHistoryScanFiles(t *testing.T) {
 
 func TestHistory_UnwindExperiment(t *testing.T) {
 	db, h := testDbAndHistory(t, false, log.New())
-	defer db.Close()
-	defer h.Close()
 
 	hc := h.MakeContext()
 	defer hc.Close()

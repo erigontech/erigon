@@ -125,7 +125,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
-	t.Parallel()
 
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
@@ -276,7 +275,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
-	t.Parallel()
 
 	logger := log.New()
 	aggStep := uint64(100)

@@ -16,7 +16,6 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
-	t.Parallel()
 
 	tmp := t.TempDir()
 	logger := log.New()
