@@ -351,11 +351,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		if cfg.snapshotUploader != nil {
 			cfg.snapshotUploader.init(ctx, s, cfg, logger)
 
-			blockLimit := cfg.snapshotUploader.frozenBlockLimit
-
-			if maxUploaded := cfg.snapshotUploader.maxUploaded(); blockLimit > 0 && maxUploaded > blockLimit {
-				minBlockNumber = maxUploaded - blockLimit
-			}
+			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 		}
 
 		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, cfg.chainConfig.Bor != nil, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
@@ -402,7 +398,7 @@ type snapshotUploader struct {
 	rcloneUrl        string
 	rcloneClient     *http.Client
 	frozenBlockLimit uint64
-	remoteHasHashes  bool
+	remoteHashes     map[string]interface{}
 }
 
 func (u *snapshotUploader) init(ctx context.Context, s *PruneState, cfg SnapshotsCfg, logger log.Logger) {
@@ -454,17 +450,23 @@ func (u *snapshotUploader) maxUploaded() uint64 {
 				}
 			}
 		}
-	} else {
-		if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
-			for _, info := range list {
-				if info.Seedable() && info.To > max {
-					max = info.To
-				}
+	}
+
+	return max
+}
+
+func (u *snapshotUploader) minBlockNumber() uint64 {
+	var min uint64
+
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
+		for _, info := range list {
+			if info.Seedable() && min == 0 || info.From < min {
+				min = info.From
 			}
 		}
 	}
 
-	return max
+	return min
 }
 
 func freePort() (port int, err error) {
@@ -478,6 +480,10 @@ func freePort() (port int, err error) {
 			return l.Addr().(*net.TCPAddr).Port, nil
 		}
 	}
+}
+
+func (u *snapshotUploader) hashesFile() string {
+	return "." + u.version + "-torrent-hashes.toml"
 }
 
 func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
@@ -543,9 +549,14 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 							for _, fi := range responseBody.List {
 								var file string
 
-								if fi.Name == "."+u.version+"-torrent-hashes.toml" {
-									// TODO load hashes
-									u.remoteHasHashes = true
+								if hashesFile := u.hashesFile(); fi.Name == hashesFile {
+									var hashes map[string]interface{}
+
+									if hashesData, err := exec.Command("rclone", "cat", u.uploadFs+"/"+hashesFile).Output(); err == nil {
+										if err = toml.Unmarshal(hashesData, &hashes); err == nil {
+											u.remoteHashes = hashes
+										}
+									}
 								}
 
 								if filepath.Ext(fi.Name) != ".torrent" {
@@ -897,57 +908,46 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 	var err error
 
 	if uploadCount > 0 {
-		hashesFile := filepath.Join(u.cfg.dirs.Snap, ".torrent_hashes.toml")
+		hashesFile := u.hashesFile()
 
-		if u.remoteHasHashes {
-			err = u.syncRequest(ctx, &rcloneRequest{
-				DstFs: u.cfg.dirs.Snap,
-				SrcFs: u.uploadFs,
-				Filter: rcloneFilter{
-					IncludeRule: []string{".torrent_hashes.toml"},
-				},
-			}, logger)
+		var hashes map[string]interface{}
+		var hashesData []byte
+
+		hashesData, err = os.ReadFile(filepath.Join(u.cfg.dirs.Snap, hashesFile))
+
+		if err == nil {
+			err = toml.Unmarshal(hashesData, &hashes)
 		}
 
-		if !u.remoteHasHashes || err == nil {
-			var hashes map[string]interface{}
+		if err != nil {
+			hashes = map[string]interface{}{}
+		}
 
-			var hashesData []byte
+		for file, hash := range u.remoteHashes {
+			hashes[file] = hash
+		}
 
-			hashesData, err = os.ReadFile(hashesFile)
-
-			if err == nil {
-				err = toml.Unmarshal(hashesData, &hashes)
-			}
-
-			if err != nil {
-				hashes = map[string]interface{}{}
-			}
-
-			for file, state := range u.files {
-				if state.remote && state.local {
-					hashes[file] = state.localHash
-				}
-			}
-
-			hashesData, err = toml.Marshal(hashes)
-
-			if err == nil {
-				_ = os.WriteFile(hashesFile, hashesData, 0644)
-			}
-
-			u.syncRequest(ctx, &rcloneRequest{
-				SrcFs: u.cfg.dirs.Snap,
-				DstFs: u.uploadFs,
-				Filter: rcloneFilter{
-					IncludeRule: []string{"." + u.version + "-torrent-hashes.toml"},
-				},
-			}, logger)
-
-			if err == nil {
-				u.remoteHasHashes = true
+		for file, state := range u.files {
+			if len(state.localHash) > 0 && state.remote {
+				hashes[file] = state.localHash
 			}
 		}
+
+		hashesData, err = toml.Marshal(hashes)
+
+		if err == nil {
+			_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, hashesFile), hashesData, 0644)
+		}
+
+		u.syncRequest(ctx, &rcloneRequest{
+			SrcFs: u.cfg.dirs.Snap,
+			DstFs: u.uploadFs,
+			Filter: rcloneFilter{
+				IncludeRule: []string{hashesFile},
+			},
+		}, logger)
+
+		u.remoteHashes = hashes
 	}
 
 	if err == nil {
