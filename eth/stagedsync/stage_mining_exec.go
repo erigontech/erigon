@@ -91,7 +91,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
-		stateWriter state.WriterWithChangeSets
+		stateWriter state.StateWriter
 	)
 	if histV3 {
 		domains = state2.NewSharedDomains(tx)

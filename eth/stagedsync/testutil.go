@@ -105,22 +105,22 @@ func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
 	assert.Equalf(t, bucket1 /*expected*/, bucket2 /*actual*/, "bucket %q", bucketName)
 }
 
-type stateWriterGen func(uint64) state.WriterWithChangeSets
+type stateWriterGen func(uint64) state.StateWriter
 
 func hashedWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewDbStateWriter(tx, blockNum)
 	}
 }
 
 func plainWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}
 }
 
 func domainWriterGen(tx kv.TemporalTx, domains *state2.SharedDomains) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewWriterV4(domains)
 	}
 }
@@ -266,8 +266,10 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			testAccounts[i] = newAcc
 		}
 		if blockNumber >= from {
-			if err := blockWriter.WriteChangeSets(); err != nil {
-				t.Fatal(err)
+			if casted, ok := blockWriter.(state.WriterWithChangeSets); ok {
+				if err := casted.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 	}
