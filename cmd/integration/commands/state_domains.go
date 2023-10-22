@@ -5,11 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"path/filepath"
 	"strings"
 
-	"github.com/holiman/uint256"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
