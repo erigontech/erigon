@@ -558,7 +558,7 @@ func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
 }
 
-// The Agra hard fork is almost identical to the Shanghai hard fork, but it doesn't include withdrawals.
+// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
 // Also Agra is activated based on the block number rather than the timestamp.
 // Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
 func (c *BorConfig) IsAgra(number uint64) bool {
