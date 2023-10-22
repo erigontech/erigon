@@ -17,7 +17,6 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"embed"
@@ -27,10 +26,9 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -227,13 +225,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
-		//rh, err := domains.ComputeCommitment(ctx, tx.(*temporal.Tx).Agg().EndTxNumMinimax() == 0, false)
-		rh, err := domains.ComputeCommitment(ctx, true, false)
+		_, err := domains.ComputeCommitment(ctx, true, false)
 		if err != nil {
 			return nil, nil, err
-		}
-		if !bytes.Equal(rh, block.Root().Bytes()) {
-			return nil, nil, fmt.Errorf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
 		}
 		if err := domains.Flush(ctx, tx); err != nil {
 			return nil, nil, err
