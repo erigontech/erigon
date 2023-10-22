@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -226,7 +227,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
-	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
+	chain := consensuschain.NewReader(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	var blockNum uint64
 	var fetchTime time.Duration
