@@ -87,7 +87,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		start = 0
 	}
 
-	reqInterval := time.NewTicker(100 * time.Millisecond)
+	reqInterval := time.NewTicker(300 * time.Millisecond)
 	doneRespCh := make(chan []*cltypes.SignedBeaconBlock, 1)
 	var responses []*cltypes.SignedBeaconBlock
 Loop:
@@ -97,6 +97,9 @@ Loop:
 			go func() {
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
+					return
+				}
+				if responses == nil {
 					return
 				}
 				if len(responses) == 0 {
