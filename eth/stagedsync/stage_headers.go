@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -175,7 +176,7 @@ func HeadersPOW(
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
-	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	cfg.hd.SetHeaderReader(consensuschain.NewReader(&cfg.chainConfig, tx, cfg.blockReader, logger))
 
 	stopped := false
 	var noProgressCounter uint = 0
@@ -504,77 +505,4 @@ func logProgressHeaders(
 	)
 
 	return now
-}
-
-type ChainReaderImpl struct {
-	config      *chain.Config
-	tx          kv.Tx
-	blockReader services.FullBlockReader
-	logger      log.Logger
-}
-
-func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
-	return &ChainReaderImpl{config, tx, blockReader, logger}
-}
-
-func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
-func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
-func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
-	if cr.blockReader != nil {
-		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
-		return h
-	}
-	return rawdb.ReadHeader(cr.tx, hash, number)
-}
-func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
-	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
-		return h
-	}
-	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
-}
-func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
-	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
-	}
-	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
-	return h
-}
-func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
-	td, err := rawdb.ReadTd(cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("ReadTd failed", "err", err)
-		return nil
-	}
-	return td
-}
-func (cr ChainReaderImpl) FrozenBlocks() uint64 {
-	return cr.blockReader.FrozenBlocks()
-}
-func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
-	panic("")
-}
-func (cr ChainReaderImpl) HasBlock(hash libcommon.Hash, number uint64) bool {
-	panic("")
-}
-func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
-	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return nil
-	}
-	return events
-}
-func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {
-	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
-	if err != nil {
-		log.Error("BorSpan failed", "err", err)
-		return nil
-	}
-	return span
 }

@@ -110,6 +110,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
 	sd.StartWrites()
+	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		panic(err)
 	}
