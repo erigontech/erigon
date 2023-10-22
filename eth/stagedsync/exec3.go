@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -219,6 +220,20 @@ func ExecV3(ctx context.Context,
 		//}
 	}
 
+	// MA setio
+	doms := state2.NewSharedDomains(applyTx)
+	defer doms.Close()
+	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx)
+	if err != nil {
+		return err
+	}
+
+	if applyTx != nil {
+		if dbg.DiscardHistory() {
+			doms.DiscardHistory()
+		}
+	}
+
 	if applyTx != nil {
 		var err error
 		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
@@ -256,6 +271,23 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	log.Debug("execv3 starting",
+		"inputTxNum", inputTxNum, "restored_block", blockNum,
+		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
+
+	// Cases:
+	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
+	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
+	fmt.Printf("need adjust? %d, %d->%d, %d->%d\n", &execStage.BlockNumber, blockNum, doms.BlockNum(), inputTxNum, doms.TxNum())
+	if doms.TxNum() > inputTxNum {
+		inputTxNum = doms.TxNum()
+	}
+	if doms.BlockNum() > blockNum {
+		blockNum = doms.BlockNum()
+	}
+	fmt.Printf("after adjust: %d, %d\n", blockNum, inputTxNum)
+	outputTxNum.Store(inputTxNum)
+
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
@@ -266,30 +298,8 @@ func ExecV3(ctx context.Context,
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 	var lock sync.RWMutex
-	var err error
-
-	// MA setio
-	doms := state2.NewSharedDomains(applyTx)
-	defer doms.Close()
-	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			doms.DiscardHistory()
-		}
-	}
 
 	rs := state.NewStateV3(doms, logger)
-	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx)
-	if err != nil {
-		return err
-	}
-
-	log.Debug("execv3 starting",
-		"inputTxNum", inputTxNum, "restored_block", doms.BlockNum(),
-		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
-
-	inputTxNum = doms.TxNum()
-	blockNum = doms.BlockNum()
-	outputTxNum.Store(inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -585,6 +595,8 @@ func ExecV3(ctx context.Context,
 	blocksInSnapshots := cfg.blockReader.FrozenBlocks()
 	var b *types.Block
 	//var err error
+
+	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -886,11 +898,13 @@ Loop:
 
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
-	if !dbg.DiscardCommitment() && b != nil {
+	if b != nil {
 		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
 			return err
 		}
+	} else {
+		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
@@ -918,6 +932,63 @@ Loop:
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 	return nil
+}
+
+// nolint
+func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains, blockNum uint64, histV3 bool) {
+	fmt.Printf("[dbg] plain state: %d\n", blockNum)
+	defer fmt.Printf("[dbg] plain state end\n")
+	if !histV3 {
+		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			if len(k) == 20 {
+				a := accounts.NewAccount()
+				a.DecodeForStorage(v)
+				fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			if len(k) > 20 {
+				fmt.Printf("%x, %x\n", k, v)
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	doms.Flush(context.Background(), tx)
+	{
+		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		if err != nil {
+			panic(err)
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				panic(err)
+			}
+			a := accounts.NewAccount()
+			accounts.DeserialiseV3(&a, v)
+			fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
+		}
+	}
+	{
+		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		if err != nil {
+			panic(1)
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("%x, %x\n", k, v)
+		}
+	}
 }
 
 // applyTx is required only for debugging
@@ -962,12 +1033,9 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 		return false, nil
 	}
 
-	jump := maxBlockNum - minBlockNum
 	// Binary search, but not too deep
-	unwindTo := maxBlockNum - (jump / 2)
-	if jump > 1000 {
-		unwindTo = maxBlockNum - (jump / 10)
-	}
+	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
+	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
 	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)

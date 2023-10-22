@@ -32,6 +32,8 @@ type StateV3 struct {
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
+
+	trace bool
 }
 
 func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
@@ -41,6 +43,7 @@ func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
+		//trace: false,
 	}
 }
 

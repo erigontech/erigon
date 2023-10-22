@@ -569,6 +569,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
+		statedb.SetTrace(false)
 
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {

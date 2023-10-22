@@ -670,6 +670,10 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
+	if sdb.trace {
+		fmt.Printf("FinalizeTx: txIdx=%d\n", sdb.txIndex)
+	}
+
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
@@ -748,6 +752,10 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
+	if sdb.trace {
+		fmt.Printf("SetTxContext: %d\n", ti)
+	}
+
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
@@ -777,9 +785,6 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {
-	if sdb.trace {
-		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v\n", sender, coinbase, dst, precompiles, list, rules)
-	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
