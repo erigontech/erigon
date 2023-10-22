@@ -105,7 +105,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
-		//trace: true,
+		trace:             true,
 	}
 }
 
@@ -777,6 +777,9 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {
+	if sdb.trace {
+		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v\n", sender, coinbase, dst, precompiles, list, rules)
+	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
