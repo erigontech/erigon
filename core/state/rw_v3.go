@@ -118,27 +118,38 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
-				//if AssertReads {
-				//	original := txTask.AccountDels[key]
-				//	var originalBytes []byte
-				//	if original != nil {
-				//		originalBytes = accounts.SerialiseV3(original)
-				//	}
-				//}
-				if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-					return err
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
+						return err
+					}
+				} else {
+					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+						return err
+					}
 				}
 			}
 		case kv.CodeDomain:
 			for i, key := range list.Keys {
-				if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-					return err
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil); err != nil {
+						return err
+					}
+				} else {
+					if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+						return err
+					}
 				}
 			}
 		case kv.StorageDomain:
-			for k, key := range list.Keys {
-				if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[k], nil); err != nil {
-					return err
+			for i, key := range list.Keys {
+				if list.Vals[i] == nil {
+					if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
+						return err
+					}
+				} else {
+					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+						return err
+					}
 				}
 			}
 		default:

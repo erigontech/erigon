@@ -958,7 +958,7 @@ func (sd *SharedDomains) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err 
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte) error {
 	if val == nil {
-		return sd.DomainDel(domain, k1, k2, prevVal)
+		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed")
 	}
 	if prevVal == nil {
 		var err error
