@@ -27,9 +27,6 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 		}
 	}
 	value, origValue := accounts.SerialiseV3(account), accounts.SerialiseV3(original)
-	if value == nil {
-		panic(2)
-	}
 	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, value, origValue)
 }
 
