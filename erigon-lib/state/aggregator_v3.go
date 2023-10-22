@@ -806,7 +806,7 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 }
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
 	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
-	return histBlockNumProgress + 1, err
+	return histBlockNumProgress, err
 }
 func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 { return ac.maxTxNumInFiles(false) }
 
