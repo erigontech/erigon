@@ -101,7 +101,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 				u.frozenBlockLimit = dbg.FrozenBlockLimit()
 			}
 
-			if maxSeedable := u.maxSeedable(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+			if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
 				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
 					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
 				}
@@ -419,35 +419,41 @@ type snapshotUploader struct {
 	rcloneClient     *http.Client
 	frozenBlockLimit uint64
 	remoteHashes     map[string]interface{}
+	uploadScheduled  atomic.Bool
 }
 
 func (u *snapshotUploader) init(ctx context.Context, s *PruneState, logger log.Logger) {
-	freezingCfg := u.cfg.blockReader.FreezingCfg()
+	if u.files == nil {
+		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-	if freezingCfg.Enabled && freezingCfg.Produce {
-		u.files = map[string]*uploadState{}
-		u.start(ctx, logger)
+		if freezingCfg.Enabled && freezingCfg.Produce {
+			u.files = map[string]*uploadState{}
+			u.start(ctx, logger)
+		}
 	}
 
 	u.state = s
 }
 
-func (u *snapshotUploader) maxUploaded() uint64 {
+func (u *snapshotUploader) maxUploadedHeader() uint64 {
 	var max uint64
 
 	if len(u.files) > 0 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.To > max {
-						max = state.info.To
+					if state.info.T == snaptype.Headers {
+						if state.info.To > max {
+							max = state.info.To
+						}
 					}
 				} else {
 					if info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.To > max {
-							max = info.To
+						if info.T == snaptype.Headers {
+							if info.To > max {
+								max = info.To
+							}
 						}
-
 						state.info = &info
 					}
 				}
@@ -458,12 +464,12 @@ func (u *snapshotUploader) maxUploaded() uint64 {
 	return max
 }
 
-func (u *snapshotUploader) maxSeedable() uint64 {
+func (u *snapshotUploader) maxSeedableHeader() uint64 {
 	var max uint64
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
 		for _, info := range list {
-			if info.Seedable() && info.To > max {
+			if info.Seedable() && info.T == snaptype.Headers && info.To > max {
 				max = info.To
 			}
 		}
@@ -621,7 +627,7 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 				}
 			}()
 
-			u.upload(ctx, logger)
+			u.scheduleUpload(ctx, logger)
 
 			for {
 				select {
@@ -630,11 +636,26 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 					return
 				case <-newSnCh:
 					logger.Info("[snapshot uploader] new snapshot received")
-					u.upload(ctx, logger)
+					u.scheduleUpload(ctx, logger)
 				}
 			}
 		}()
 	}
+}
+
+func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger) {
+	ok := u.uploadScheduled.CompareAndSwap(false, true)
+
+	if !ok {
+		return
+	}
+
+	go func() {
+		for u.uploadScheduled.Load() {
+			u.uploadScheduled.Store(false)
+			u.upload(ctx, logger)
+		}
+	}()
 }
 
 func (u *snapshotUploader) removeBefore(before uint64) {
@@ -755,10 +776,6 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 			}
 		}
 
-		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-		var i atomic.Int32
-
 		var torrentList []*uploadState
 
 		for _, state := range processList {
@@ -772,62 +789,67 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 			}()
 		}
 
-		go func() {
-			logEvery := time.NewTicker(20 * time.Second)
-			defer logEvery.Stop()
+		if len(torrentList) > 0 {
+			g, gctx := errgroup.WithContext(ctx)
+			g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+			var i atomic.Int32
 
-			for int(i.Load()) < len(torrentList) {
-				select {
-				case <-gctx.Done():
-					return
-				case <-logEvery.C:
-					if int(i.Load()) == len(torrentList) {
+			go func() {
+				logEvery := time.NewTicker(20 * time.Second)
+				defer logEvery.Stop()
+
+				for int(i.Load()) < len(torrentList) {
+					select {
+					case <-gctx.Done():
 						return
+					case <-logEvery.C:
+						if int(i.Load()) == len(torrentList) {
+							return
+						}
+						log.Info("[snapshot uploader] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(torrentList)))
 					}
-					log.Info("[snapshot uploader] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(torrentList)))
 				}
+			}()
+
+			for _, s := range torrentList {
+				state := s
+
+				g.Go(func() error {
+					defer i.Add(1)
+
+					torrentPath, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap)
+
+					state.Lock()
+					state.buildingTorrent = false
+					state.Unlock()
+
+					if err != nil {
+						return err
+					}
+
+					torrent, err := downloader.LoadTorrent(torrentPath)
+
+					if err != nil {
+						return err
+					}
+
+					state.Lock()
+					state.torrent = torrent
+					state.Unlock()
+
+					state.localHash = state.torrent.InfoHash.String()
+
+					logger.Info("[snapshot uploader] built torrent", "file", state.file, "hash", state.localHash)
+
+					return nil
+				})
 			}
-		}()
 
-		for _, s := range torrentList {
-			state := s
-
-			g.Go(func() error {
-				defer i.Add(1)
-
-				torrentPath, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap)
-
-				state.Lock()
-				state.buildingTorrent = false
-				state.Unlock()
-
-				if err != nil {
-					return err
-				}
-
-				torrent, err := downloader.LoadTorrent(torrentPath)
-
-				if err != nil {
-					return err
-				}
-
-				state.Lock()
-				state.torrent = torrent
-				state.Unlock()
-
-				state.localHash = state.torrent.InfoHash.String()
-
-				logger.Info("[snapshot uploader] built torrent", "file", state.file, "hash", state.localHash)
-
-				return nil
-			})
+			if err := g.Wait(); err != nil {
+				logger.Debug(".torrent file creation failed", "err", err)
+			}
 		}
 
-		if err := g.Wait(); err != nil {
-			logger.Debug(".torrent file creation failed", "err", err)
-		}
-
-		i.Store(0)
 		var f atomic.Int32
 
 		var uploadList []*uploadState
@@ -855,58 +877,63 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 			}
 		}
 
-		g, gctx = errgroup.WithContext(ctx)
-		g.SetLimit(16)
+		if len(uploadList) > 0 {
+			log.Info("[snapshot uploader] Starting upload", "count", len(uploadList))
 
-		go func() {
-			logEvery := time.NewTicker(20 * time.Second)
-			defer logEvery.Stop()
+			g, gctx := errgroup.WithContext(ctx)
+			g.SetLimit(16)
+			var i atomic.Int32
 
-			for int(i.Load()) < len(processList) {
-				select {
-				case <-gctx.Done():
-					log.Info("[snapshot uploader] Uploaded files", "processed", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
-					return
-				case <-logEvery.C:
-					if int(i.Load()+f.Load()) == len(processList) {
+			go func() {
+				logEvery := time.NewTicker(20 * time.Second)
+				defer logEvery.Stop()
+
+				for int(i.Load()) < len(processList) {
+					select {
+					case <-gctx.Done():
+						log.Info("[snapshot uploader] Uploaded files", "processed", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
 						return
+					case <-logEvery.C:
+						if int(i.Load()+f.Load()) == len(processList) {
+							return
+						}
+						log.Info("[snapshot uploader] Uploading files", "progress", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
 					}
-					log.Info("[snapshot uploader] Uploading files", "progress", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
 				}
-			}
-		}()
-
-		for _, s := range uploadList {
-			state := s
-			func() {
-				state.Lock()
-				defer state.Unlock()
-
-				g.Go(func() error {
-					defer i.Add(1)
-					defer func() {
-						state.Lock()
-						state.uploadRequest = nil
-						state.Unlock()
-					}()
-
-					if err := u.syncRequest(gctx, state.uploadRequest, logger); err != nil {
-						f.Add(1)
-						return nil
-					}
-
-					uploadCount++
-
-					state.Lock()
-					state.remote = true
-					state.Unlock()
-					return nil
-				})
 			}()
-		}
 
-		if err := g.Wait(); err != nil {
-			logger.Debug("[snapshot uploader] upload failed", "err", err)
+			for _, s := range uploadList {
+				state := s
+				func() {
+					state.Lock()
+					defer state.Unlock()
+
+					g.Go(func() error {
+						defer i.Add(1)
+						defer func() {
+							state.Lock()
+							state.uploadRequest = nil
+							state.Unlock()
+						}()
+
+						if err := u.syncRequest(gctx, state.uploadRequest, logger); err != nil {
+							f.Add(1)
+							return nil
+						}
+
+						uploadCount++
+
+						state.Lock()
+						state.remote = true
+						state.Unlock()
+						return nil
+					})
+				}()
+			}
+
+			if err := g.Wait(); err != nil {
+				logger.Debug("[snapshot uploader] upload failed", "err", err)
+			}
 		}
 
 		if f.Load() == 0 {
@@ -968,7 +995,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 	}
 
 	if err == nil {
-		if maxUploaded := u.maxUploaded(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
+		if maxUploaded := u.maxUploadedHeader(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
 			u.removeBefore(maxUploaded - u.frozenBlockLimit)
 		}
 	}
