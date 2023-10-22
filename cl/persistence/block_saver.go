@@ -41,7 +41,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 	}
 
 	if len(beaconBlockRooots) == 0 {
-		return nil, nil
+		return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}, nil
 	}
 
 	blocks := []*cltypes.SignedBeaconBlock{}

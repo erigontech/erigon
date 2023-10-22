@@ -228,7 +228,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
 		ii := i
 		egg.Go(func() error {
-			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
+			var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 			for {
 				blocks, err = rpcSource.GetRange(ctx, tx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
@@ -237,10 +237,10 @@ func (b *Epochs) Run(cctx *Context) error {
 					break
 				}
 			}
-			for _, v := range blocks {
+			for _, v := range blocks.Data {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(ctx, tx, v.Data, true)
+				err := beaconDB.WriteBlock(ctx, tx, v, true)
 				if err != nil {
 					return err
 				}
