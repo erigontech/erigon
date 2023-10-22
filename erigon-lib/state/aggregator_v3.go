@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -803,7 +804,11 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	return math2.MaxUint64
 }
-func (ac *AggregatorV3Context) CanUnwindDomainsTo() uint64 { return ac.maxTxNumInFiles(false) }
+func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
+	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
+	return histBlockNumProgress + 1, err
+}
+func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 { return ac.maxTxNumInFiles(false) }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)

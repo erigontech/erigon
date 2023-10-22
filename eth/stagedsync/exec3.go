@@ -960,10 +960,13 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
 		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-
-		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		// protect from too far unwind
-		unwindTo = cmp.Max(unwindTo, applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsTo())
+		unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
+		if err != nil {
+			return false, err
+		}
+		unwindTo = cmp.Max(unwindTo, unwindToLimit)
+		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
 	return false, nil

@@ -329,20 +329,18 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	defer domains.Close()
 	rs := state.NewStateV3(domains, logger)
 
-	if u.UnwindPoint < tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo() {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo())
+	unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+	if err != nil {
+		return err
 	}
-
-	domains.StartWrites()
-	defer domains.FinishWrites()
+	if u.UnwindPoint < unwindToLimit {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	}
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
-	}
-	if tx == nil {
-		panic(1)
 	}
 	if err := rs.Unwind(ctx, tx, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
