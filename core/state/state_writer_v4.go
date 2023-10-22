@@ -16,8 +16,11 @@ type WriterV4 struct {
 	trace bool
 }
 
-func NewWriterV4(tx kv.TemporalPutDel, trace bool) *WriterV4 {
-	return &WriterV4{tx: tx, trace: trace}
+func NewWriterV4(tx kv.TemporalPutDel) *WriterV4 {
+	return &WriterV4{
+		tx:    tx,
+		trace: false,
+	}
 }
 
 func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
