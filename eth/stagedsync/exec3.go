@@ -958,17 +958,25 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 		hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber
-	if maxBlockNum > minBlockNum {
-		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		// protect from too far unwind
-		unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
-		if err != nil {
-			return false, err
-		}
-		unwindTo = cmp.Max(unwindTo, unwindToLimit)
-		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	if maxBlockNum <= minBlockNum {
+		return false, nil
 	}
+
+	jump := maxBlockNum - minBlockNum
+	// Binary search, but not too deep
+	unwindTo := maxBlockNum - (jump / 2)
+	if jump > 1000 {
+		unwindTo = maxBlockNum - (jump / 10)
+	}
+
+	// protect from too far unwind
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	unwindTo = cmp.Max(unwindTo, unwindToLimit)
+	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 
