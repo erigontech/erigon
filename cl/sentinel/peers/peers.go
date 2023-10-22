@@ -3,7 +3,7 @@ package peers
 const (
 	maxBadPeers       = 50000
 	maxPeerRecordSize = 1000
-	DefaultMaxPeers   = 64
+	DefaultMaxPeers   = 16
 	MaxBadResponses   = 50
 )
 
