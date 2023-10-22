@@ -171,9 +171,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
 			s.sentinel.Host().Network().ClosePeer(pid)
 		}
-		if resp.StatusCode == http.StatusRequestTimeout {
-			s.sentinel.Peers().SetBanStatus(pid, true)
-		}
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
 			s.sentinel.Host().Network().ClosePeer(pid)
