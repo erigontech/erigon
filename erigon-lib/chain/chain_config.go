@@ -199,6 +199,9 @@ func (c *Config) IsShanghai(time uint64) bool {
 }
 
 // IsAgra returns whether num is either equal to the Agra fork block or greater.
+// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
+// Also Agra is activated based on the block number rather than the timestamp.
+// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
 func (c *Config) IsAgra(num uint64) bool {
 	if c == nil || c.Bor == nil {
 		return false
@@ -556,13 +559,6 @@ func (c *BorConfig) IsDelhi(number uint64) bool {
 
 func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
-}
-
-// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
-// Also Agra is activated based on the block number rather than the timestamp.
-// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
-func (c *BorConfig) IsAgra(number uint64) bool {
-	return isForked(c.AgraBlock, number)
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
