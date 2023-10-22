@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -481,13 +480,13 @@ func TestCommit(t *testing.T) {
 	//buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
 
 	//addr1 := common.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
-	addr2 := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
-	loc1 := common.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	addr2 := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	loc1 := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
 	//err = domains.UpdateAccountData(addr2, buf, nil)
 	//require.NoError(t, err)
 
 	for i := 1; i < 3; i++ {
-		ad := common.CopyBytes(addr2)
+		ad := libcommon.CopyBytes(addr2)
 		ad[0] = byte(i)
 
 		//err = domains.UpdateAccountData(ad, buf, nil)
