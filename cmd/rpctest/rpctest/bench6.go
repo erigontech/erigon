@@ -61,5 +61,5 @@ func Bench6(erigon_url string) error {
 			}
 		}
 	}
-        return nil
+	return nil
 }

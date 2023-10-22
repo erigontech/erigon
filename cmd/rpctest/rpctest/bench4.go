@@ -61,5 +61,5 @@ func Bench4(erigon_url string) error {
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))
-        return nil
+	return nil
 }

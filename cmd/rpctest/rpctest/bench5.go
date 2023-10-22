@@ -34,5 +34,5 @@ func Bench5(erigonURL string) error {
 	if err != nil {
 		panic(err)
 	}
-        return nil
+	return nil
 }
