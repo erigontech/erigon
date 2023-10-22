@@ -2,6 +2,7 @@ package trie
 
 import (
 	"crypto/ecdsa"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"reflect"
 	"testing"
 
@@ -9,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )

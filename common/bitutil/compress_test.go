@@ -18,12 +18,11 @@ package bitutil
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/rand"
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // Tests that data bitset encoding and decoding works and is bijective.

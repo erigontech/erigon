@@ -557,7 +557,6 @@ node.
 |-----------|------|----------|------------------|---------------|
 | sentinel  | 4000 | UDP      | Peering          | Public        |
 | sentinel  | 4001 | TCP      | Peering          | Public        |
-| sentinel  | 7777 | TCP      | gRPC Connections | Private       |
 
 If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
 

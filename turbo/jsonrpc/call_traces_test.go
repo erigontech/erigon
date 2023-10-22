@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"sync"
 	"testing"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/valyala/fastjson"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
