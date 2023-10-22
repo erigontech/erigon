@@ -95,8 +95,12 @@ Loop:
 		select {
 		case <-reqInterval.C:
 			go func() {
-				responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
+					return
+				}
+				if len(responses) == 0 {
+					b.rpc.BanPeer(peerId)
 					return
 				}
 				select {
