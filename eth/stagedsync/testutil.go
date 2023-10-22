@@ -119,12 +119,6 @@ func plainWriterGen(tx kv.RwTx) stateWriterGen {
 	}
 }
 
-func domainWriterGen(tx kv.TemporalTx, domains *state2.SharedDomains) stateWriterGen {
-	return func(blockNum uint64) state.StateWriter {
-		return state.NewWriterV4(domains, false)
-	}
-}
-
 type testGenHook func(n, from, numberOfBlocks uint64)
 
 func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWriter state.StateWriter, beforeBlock, afterBlock testGenHook, difficulty int) {
