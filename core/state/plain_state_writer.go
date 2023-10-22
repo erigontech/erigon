@@ -68,7 +68,7 @@ func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original
 
 func (w *PlainStateWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if w.trace {
-		fmt.Printf("code: %x,%x\n", address, code)
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
