@@ -120,12 +120,12 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 
 	blks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
-	require.Equal(t, len(blks), 1)
+	require.Equal(t, len(blks.Data), 1)
 
 	expectedRoot, err := block.HashSSZ()
 	require.NoError(t, err)
 
-	haveRoot, err := blks[0].Data.HashSSZ()
+	haveRoot, err := blks.Data[0].HashSSZ()
 	require.NoError(t, err)
 
 	require.Equal(t, expectedRoot, haveRoot)
@@ -134,5 +134,5 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 
 	newBlks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
-	require.Equal(t, len(newBlks), 0)
+	require.Equal(t, len(newBlks.Data), 0)
 }
