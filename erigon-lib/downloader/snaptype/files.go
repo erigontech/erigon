@@ -41,6 +41,7 @@ const (
 	BorEvents
 	BorSpans
 	NumberOfTypes
+	BeaconBlocks
 )
 
 func (ft Type) String() string {
@@ -55,6 +56,8 @@ func (ft Type) String() string {
 		return "borevents"
 	case BorSpans:
 		return "borspans"
+	case BeaconBlocks:
+		return "beaconblocks"
 	default:
 		panic(fmt.Sprintf("unknown file type: %d", ft))
 	}
@@ -72,6 +75,8 @@ func ParseFileType(s string) (Type, bool) {
 		return BorEvents, true
 	case "borspans":
 		return BorSpans, true
+	case "beaconblocks":
+		return BeaconBlocks, true
 	default:
 		return NumberOfTypes, false
 	}

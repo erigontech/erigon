@@ -441,6 +441,8 @@ const (
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
+	HighestFinalized = "HighestFinalized" // hash -> transaction/receipt lookup metadata
+
 	// BlockRoot => Beacon Block Header
 	BeaconBlockHeaders = "BeaconBlockHeaders"
 
@@ -478,6 +480,7 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 	PlainStateVersion           = []byte("PlainStateVersion")
 
+	HighestFinalizedKey         = []byte("HighestFinalized")
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
@@ -601,6 +604,7 @@ var ChaindataTables = []string{
 	StateRootToBlockRoot,
 	BlockRootToParentRoot,
 	BeaconBlockHeaders,
+	HighestFinalized,
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
