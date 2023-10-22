@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	math2 "math"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -622,20 +621,13 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 
-	keys := make([][]byte, 0, len(branchNodeUpdates))
-	for k := range branchNodeUpdates {
-		keys = append(keys, []byte(k))
-	}
-	sort.SliceStable(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
-
-	for _, key := range keys {
+	for pref, update := range branchNodeUpdates {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		prefix := key
-		update := branchNodeUpdates[string(prefix)]
+		prefix := []byte(pref)
 
 		stateValue, err := sd.LatestCommitment(prefix)
 		if err != nil {
