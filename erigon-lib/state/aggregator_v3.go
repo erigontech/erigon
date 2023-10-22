@@ -666,7 +666,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
-	//closeAll := true
+	closeAll := true
 	maxSpan := a.aggregationStep * StepsInColdFile
 	r := ac.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
@@ -674,12 +674,12 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	}
 
 	outs, err := ac.staticFilesInRange(r)
-	defer outs.Close()
-	//defer func() {
-	//	if closeAll {
-	//		outs.Close()
-	//	}
-	//}()
+	//defer outs.Close()
+	defer func() {
+		if closeAll {
+			outs.Close()
+		}
+	}()
 	if err != nil {
 		return false, err
 	}
@@ -688,14 +688,14 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	if err != nil {
 		return true, err
 	}
-	//defer func() {
-	//	if closeAll {
-	//		in.Close()
-	//	}
-	//}()
+	defer func() {
+		if closeAll {
+			in.Close()
+		}
+	}()
 	a.integrateMergedFiles(outs, in)
 	a.onFreeze(in.FrozenList())
-	//closeAll = false
+	closeAll = false
 	return true, nil
 }
 
