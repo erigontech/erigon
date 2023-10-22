@@ -27,6 +27,9 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 		}
 	}
 	value, origValue := accounts.SerialiseV3(account), accounts.SerialiseV3(original)
+	if value == nil {
+		panic(2)
+	}
 	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, value, origValue)
 }
 
@@ -35,7 +38,7 @@ func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint
 }
 
 func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
-	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, nil, nil)
+	return w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, nil)
 }
 
 func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
