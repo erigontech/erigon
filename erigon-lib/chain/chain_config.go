@@ -649,11 +649,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                    *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon          bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul    bool
-	IsBerlin, IsLondon, IsShanghai, IsAgra, IsCancun, IsPrague bool
-	IsAura                                                     bool
+	ChainID                                                 *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
+	IsAura                                                  bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -674,8 +674,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time),
-		IsAgra:             c.IsAgra(num),
+		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,
