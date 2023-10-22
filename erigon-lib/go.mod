@@ -22,7 +22,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.40.2
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
-	github.com/crate-crypto/go-kzg-4844 v0.6.1-0.20231019121413-3621cc59f0c7
+	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/go-stack/stack v1.8.1
