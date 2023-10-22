@@ -218,7 +218,7 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
-	AgraBlock               atomic.Pointer[uint64]
+	agraBlock               *uint64
 	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
@@ -227,7 +227,7 @@ type TxPool struct {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -279,6 +279,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		shanghaiTimeU64 := shanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
+	}
+	if agraBlock != nil {
+		if !agraBlock.IsUint64() {
+			return nil, errors.New("agraBlock overflow")
+		}
+		agraBlockU64 := agraBlock.Uint64()
+		res.agraBlock = &agraBlockU64
 	}
 	if cancunTime != nil {
 		if !cancunTime.IsUint64() {
@@ -890,12 +897,12 @@ func (p *TxPool) isAgra() bool {
 	if set {
 		return true
 	}
-	if p.AgraBlock.Load() == nil {
+	if p.agraBlock == nil {
 		return false
 	}
-	agraBlock := *p.AgraBlock.Load()
+	agraBlock := *p.agraBlock
 
-	// a zero here means Shanghai is always active
+	// a zero here means Agra is always active
 	if agraBlock == 0 {
 		p.isPostAgra.Swap(true)
 		return true
@@ -905,7 +912,7 @@ func (p *TxPool) isAgra() bool {
 	if err != nil {
 		return false
 	}
-	tx.Rollback()
+	defer tx.Rollback()
 
 	now, err := chain.CurrentBlockNumber(tx)
 	if err != nil {
