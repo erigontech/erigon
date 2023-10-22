@@ -38,28 +38,28 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 
 func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if w.trace {
-		fmt.Printf("code,%x,%x\n", address, code)
+		fmt.Printf("code: %x,%x\n", address, code)
 	}
 	return w.tx.DomainPut(kv.CodeDomain, address.Bytes(), nil, code, nil)
 }
 
 func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("delete,%x\n", address)
+		fmt.Printf("del account: %x\n", address)
 	}
 	return w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, nil)
 }
 
 func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if w.trace {
-		fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
 	return w.tx.DomainPut(kv.StorageDomain, address.Bytes(), key.Bytes(), value.Bytes(), original.Bytes())
 }
 
 func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
 	if w.trace {
-		fmt.Printf("CreateContract: %x\n", address)
+		fmt.Printf("create contract: %x\n", address)
 	}
 	//seems don't need delete code here - tests starting fail
 	//if err = sd.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
