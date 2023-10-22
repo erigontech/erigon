@@ -77,5 +77,5 @@ func Bench7(erigonURL, gethURL string) error {
 		return fmt.Errorf("storage are different")
 	}
 	fmt.Printf("storageRanges: %d\n", len(sm))
-        return nil
+	return nil
 }

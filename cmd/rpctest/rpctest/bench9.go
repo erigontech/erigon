@@ -95,5 +95,5 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 			}
 		}
 	}
-        return nil
+	return nil
 }
