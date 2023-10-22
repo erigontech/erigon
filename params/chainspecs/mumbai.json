@@ -12,8 +12,10 @@
   "muirGlacierBlock": 2722000,
   "berlinBlock": 13996000,
   "londonBlock": 22640000,
-  "eip1559FeeCollectorTransition": 22640000,
-  "eip1559FeeCollector": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
+  "burntContract": {
+    "22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
+    "41824608": "0x617b94CCCC2511808A3C9478ebb96f455CF167aA"
+  },
   "bor": {
     "period": {
       "0": 2,
@@ -35,10 +37,6 @@
     },
     "stateSyncConfirmationDelay": {
       "37075456": 128
-    },
-    "burntContract": {
-      "22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
-      "41824608": "0x617b94CCCC2511808A3C9478ebb96f455CF167aA"
     },
     "validatorContract": "0x0000000000000000000000000000000000001000",
     "stateReceiverContract": "0x0000000000000000000000000000000000001001",
