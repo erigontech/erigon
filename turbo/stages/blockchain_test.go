@@ -25,6 +25,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
@@ -39,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"

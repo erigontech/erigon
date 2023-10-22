@@ -10,15 +10,19 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -32,7 +36,7 @@ import (
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
-	rawBeaconChain persistence.RawBeaconBlockChain,
+	rawBeaconChain persistence2.RawBeaconBlockChain,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
@@ -65,7 +69,7 @@ func OpenCaplinDatabase(ctx context.Context,
 			db.Close() // close sql database here
 		}()
 	}
-	return persistence.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
+	return persistence2.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
@@ -84,13 +88,21 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	logger := log.New("app", "caplin")
 
 	if caplinFreezer != nil {
-		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
+		if err := freezer2.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
 			return err
 		}
 	}
 	pool := pool.NewOperationsPool(beaconConfig)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, true)
+	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
+	os.RemoveAll(caplinFcuPath)
+	err = os.MkdirAll(caplinFcuPath, 0o755)
+	if err != nil {
+		return err
+	}
+	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
+
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs))
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err

@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -120,7 +119,7 @@ func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return libcommon.CopyBytes(result.ReturnData)
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -129,7 +128,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if result.Err != vm.ErrExecutionReverted {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return libcommon.CopyBytes(result.ReturnData)
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -374,6 +373,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
+	chainConfig := st.evm.ChainConfig()
 	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -441,6 +441,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	st.state.AddBalance(coinbase, amount)
 	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
 		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
+		if chainConfig != nil && chainConfig.Bor != nil {
+			burntContractAddress = libcommon.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+		}
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
 		st.state.AddBalance(burntContractAddress, burnAmount)
 	}

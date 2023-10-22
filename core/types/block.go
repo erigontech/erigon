@@ -27,13 +27,14 @@ import (
 	"reflect"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/gballet/go-verkle"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -1375,7 +1376,7 @@ func (b *Block) ParentHash() libcommon.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() libcommon.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() libcommon.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() libcommon.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte               { return common.CopyBytes(b.header.Extra) }
+func (b *Block) Extra() []byte               { return libcommon.CopyBytes(b.header.Extra) }
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
 		return nil

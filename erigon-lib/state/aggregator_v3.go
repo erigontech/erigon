@@ -1456,7 +1456,6 @@ type AggregatorV3Context struct {
 	logTopics  *InvertedIndexContext
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
-	keyBuf     []byte
 
 	id uint64 // set only if TRACE_AGG=true
 }

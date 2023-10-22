@@ -1103,41 +1103,6 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 	return nil, true, nil
 }
 
-// deprecated
-// returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
-func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
-	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
-	if err != nil {
-		return nil, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
-	}
-
-	res := make([]HistoryRecord, 0, 2)
-	var finished bool
-	for txn, err := it.Next(); !finished; txn, err = it.Next() {
-		if err != nil {
-			return nil, err
-		}
-		v, ok, err := hc.GetNoStateWithRecent(key, txn, rwTx)
-		if err != nil {
-			return nil, err
-		}
-		// if bytes.Equal(key, common.FromHex("1079")) {
-		fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, fmt.Sprintf("%x", v))
-		// }
-		if !ok {
-			continue
-		}
-		res = append(res, HistoryRecord{TxNum: txn, Value: v})
-		if len(res) == 2 {
-			break
-		}
-		finished = !it.HasNext()
-
-	}
-
-	return res, nil
-}
-
 type HistoryContext struct {
 	h  *History
 	ic *InvertedIndexContext

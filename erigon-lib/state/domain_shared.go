@@ -622,7 +622,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 
 	keys := make([][]byte, 0, len(branchNodeUpdates))
-	for k, _ := range branchNodeUpdates {
+	for k := range branchNodeUpdates {
 		keys = append(keys, []byte(k))
 	}
 	sort.SliceStable(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })

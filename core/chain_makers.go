@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -365,7 +364,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
+				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
@@ -437,7 +436,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func hashKeyAndAddIncarnation(k []byte, h *common.Hasher) (newK []byte, err error) {
+func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err error) {
 	if len(k) == length.Addr {
 		newK = make([]byte, length.Hash)
 	} else {
@@ -484,8 +483,8 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		//if GenerateTrace {
 		//	panic("implement me")
 		//}
-		h := common.NewHasher()
-		defer common.ReturnHasherToPool(h)
+		h := libcommon.NewHasher()
+		defer libcommon.ReturnHasherToPool(h)
 
 		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
@@ -551,8 +550,8 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	if err != nil {
 		return hashRoot, err
 	}
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
@@ -562,11 +561,11 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 		}
 		if len(k) > length.Addr {
-			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
 				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
 				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
@@ -684,3 +683,4 @@ func (cr *FakeChainReader) FrozenBlocks() uint64                                
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
+func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

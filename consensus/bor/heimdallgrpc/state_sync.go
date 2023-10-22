@@ -6,7 +6,6 @@ import (
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	proto "github.com/maticnetwork/polyproto/heimdall"
 )
@@ -46,7 +45,7 @@ func (h *HeimdallGRPCClient) StateSyncEvents(ctx context.Context, fromID uint64,
 				EventRecord: clerk.EventRecord{
 					ID:       event.ID,
 					Contract: libcommon.HexToAddress(event.Contract),
-					Data:     common.Hex2Bytes(event.Data[2:]),
+					Data:     libcommon.Hex2Bytes(event.Data[2:]),
 					TxHash:   libcommon.HexToHash(event.TxHash),
 					LogIndex: event.LogIndex,
 					ChainID:  event.ChainID,

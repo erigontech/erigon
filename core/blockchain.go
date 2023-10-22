@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
+
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -37,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 

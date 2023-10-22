@@ -10,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )
@@ -49,17 +48,17 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	key := []byte{uint8(1)}
 	val := []byte{uint8(1)}
 
-	keyHash, err := common.HashData(key)
+	keyHash, err := libcommon.HashData(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	addrHash1, err := common.HashData(addr1[:])
+	addrHash1, err := libcommon.HashData(addr1[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	addrHash2, err := common.HashData(addr2[:])
+	addrHash2, err := libcommon.HashData(addr2[:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +364,7 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	addrHash, err := common.HashData(crypto.PubkeyToAddress(key.PublicKey).Bytes())
+	addrHash, err := libcommon.HashData(crypto.PubkeyToAddress(key.PublicKey).Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,13 +376,13 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	}
 
 	val1 := []byte("1")
-	dataKey1, err := common.HashData([]byte("1"))
+	dataKey1, err := libcommon.HashData([]byte("1"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	val2 := []byte("2")
-	dataKey2, err := common.HashData([]byte("2"))
+	dataKey2, err := libcommon.HashData([]byte("2"))
 	if err != nil {
 		t.Fatal(err)
 	}

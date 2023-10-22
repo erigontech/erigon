@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -21,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -284,7 +286,7 @@ func generateAddrs(numOfAddrs int, isPlain bool) ([][]byte, error) {
 			addrs[i] = addr.Bytes()
 			continue
 		}
-		hash, err := common.HashData(addr.Bytes())
+		hash, err := common2.HashData(addr.Bytes())
 		if err != nil {
 			return nil, err
 		}

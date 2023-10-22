@@ -3,14 +3,13 @@ package shards
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"unsafe"
 
 	"github.com/google/btree"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -216,7 +215,7 @@ func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasTree, has
 	cpy := make([]libcommon.Hash, len(hashes))
 	copy(cpy, hashes)
 	ai := AccountHashItem{
-		addrHashPrefix: common.CopyBytes(prefix),
+		addrHashPrefix: libcommon.CopyBytes(prefix),
 		hasState:       hasState,
 		hasTree:        hasTree,
 		hasHash:        hasHash,
@@ -232,7 +231,7 @@ func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasTree, hasH
 	assertSubset(hasTree, hasState)
 	assertSubset(hasHash, hasState)
 	ai := AccountHashItem{
-		addrHashPrefix: common.CopyBytes(prefix),
+		addrHashPrefix: libcommon.CopyBytes(prefix),
 		hasState:       hasState,
 		hasTree:        hasTree,
 		hasHash:        hasHash,
@@ -258,7 +257,7 @@ func (sc *StateCache) SetStorageHashRead(addrHash libcommon.Hash, incarnation ui
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: libcommon.CopyBytes(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,
@@ -273,7 +272,7 @@ func (sc *StateCache) SetStorageHashWrite(addrHash libcommon.Hash, incarnation u
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: libcommon.CopyBytes(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,
@@ -290,7 +289,7 @@ func (sc *StateCache) SetStorageHashDelete(addrHash libcommon.Hash, incarnation 
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
-		locHashPrefix: common.CopyBytes(locHashPrefix),
+		locHashPrefix: libcommon.CopyBytes(locHashPrefix),
 		hasState:      hasState,
 		hasTree:       hasTree,
 		hasHash:       hasHash,

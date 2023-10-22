@@ -4,13 +4,14 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

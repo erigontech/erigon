@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -42,7 +44,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	common2 "github.com/ledgerwatch/erigon/common"

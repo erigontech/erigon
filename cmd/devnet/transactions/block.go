@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
@@ -12,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 

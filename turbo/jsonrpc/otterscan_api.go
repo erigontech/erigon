@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"sync"
 
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -15,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -474,7 +475,7 @@ func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, 
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/ledgerwatch/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["totalDifficulty"] = (*hexutil.Big)(td)
+	response["totalDifficulty"] = (*hexutil2.Big)(td)
 	response["transactionCount"] = b.Transactions().Len()
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -510,10 +511,10 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
+	ret.BlockReward = hexutil2.EncodeBig(minerReward.ToBig())
+	ret.Issuance = hexutil2.EncodeBig(issuance.ToBig())
 	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
+	ret.UncleReward = hexutil2.EncodeBig(issuance.ToBig())
 	return ret, nil
 }
 

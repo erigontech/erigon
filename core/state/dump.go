@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -28,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -273,7 +273,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					}
 					loc := k[20:]
 					account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-					h, _ := common.HashData(loc)
+					h, _ := libcommon.HashData(loc)
 					t.Update(h.Bytes(), libcommon.Copy(vs))
 				}
 			} else {
@@ -284,7 +284,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					d.blockNumber,
 					func(_, loc, vs []byte) (bool, error) {
 						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-						h, _ := common.HashData(loc)
+						h, _ := libcommon.HashData(loc)
 						t.Update(h.Bytes(), libcommon.Copy(vs))
 						return true, nil
 					}); err != nil {

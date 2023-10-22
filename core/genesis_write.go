@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -42,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -532,6 +533,10 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	var withdrawals []*types.Withdrawal
 	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
 		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsAgra(g.Number) {
+		withdrawals = nil
 	}
 
 	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {

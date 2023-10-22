@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -24,7 +26,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"

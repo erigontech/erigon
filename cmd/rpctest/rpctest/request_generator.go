@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 type CallResult struct {

@@ -6,8 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/spectest"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

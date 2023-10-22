@@ -18,13 +18,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 )
 

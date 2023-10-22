@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/stretchr/testify/require"
 )
 

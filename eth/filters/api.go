@@ -22,11 +22,12 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 

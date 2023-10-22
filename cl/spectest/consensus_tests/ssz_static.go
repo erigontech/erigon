@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -11,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 )

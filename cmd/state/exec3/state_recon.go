@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -149,7 +148,7 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
-			codeHash, err := common.HashData(val)
+			codeHash, err := libcommon.HashData(val)
 			if err != nil {
 				return err
 			}

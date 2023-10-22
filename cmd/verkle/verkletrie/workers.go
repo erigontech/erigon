@@ -6,7 +6,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
@@ -149,16 +148,16 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
-			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
+			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
 				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
-				chunkKeys = append(chunkKeys, common.CopyBytes(currentKey))
+				chunkKeys = append(chunkKeys, libcommon.CopyBytes(currentKey))
 				offset = 1
 				offsetOverflow = false
 			} else {
-				codeKey := common.CopyBytes(currentKey)
+				codeKey := libcommon.CopyBytes(currentKey)
 				codeKey[31] += offset
-				chunkKeys = append(chunkKeys, common.CopyBytes(codeKey))
+				chunkKeys = append(chunkKeys, libcommon.CopyBytes(codeKey))
 				offset += 1
 				// If offset overflows, handle it.
 				offsetOverflow = offset == 0
@@ -207,8 +206,8 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
-			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
-			codeKey := common.CopyBytes(currentKey)
+			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
+			codeKey := libcommon.CopyBytes(currentKey)
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
 				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
 				chunkKeys = append(chunkKeys, codeKey)

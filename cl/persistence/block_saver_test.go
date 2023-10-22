@@ -115,9 +115,9 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 
 	ctx := context.Background()
 	block := getTestBlock()
-	require.NoError(t, store.WriteBlock(tx, ctx, block, true))
+	require.NoError(t, store.WriteBlock(ctx, tx, block, true))
 
-	blks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
+	blks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
 	require.Equal(t, len(blks), 1)
 
@@ -129,9 +129,9 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 
 	require.Equal(t, expectedRoot, haveRoot)
 
-	require.NoError(t, store.PurgeRange(tx, ctx, 0, 99999999999)) // THE PUURGE
+	require.NoError(t, store.PurgeRange(ctx, tx, 0, 99999999999)) // THE PUURGE
 
-	newBlks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
+	newBlks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
 	require.Equal(t, len(newBlks), 0)
 }

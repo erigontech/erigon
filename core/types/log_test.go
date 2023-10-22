@@ -22,10 +22,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/davecgh/go-spew/spew"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 var unmarshalLogTests = map[string]struct {
