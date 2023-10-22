@@ -355,8 +355,8 @@ type StateWriterBufferedV3 struct {
 func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:         rs,
-		trace:      true,
 		writeLists: newWriteList(),
+		//trace:      true,
 	}
 }
 
