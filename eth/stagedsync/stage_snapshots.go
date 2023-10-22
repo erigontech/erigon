@@ -90,7 +90,27 @@ func StageSnapshotsCfg(db kv.RwDB,
 	}
 
 	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
-		cfg.snapshotUploader = &snapshotUploader{version: "v1", uploadFs: uploadFs}
+		cfg.snapshotUploader = &snapshotUploader{version: "v1", cfg: &cfg, uploadFs: uploadFs}
+
+		freezingCfg := cfg.blockReader.FreezingCfg()
+
+		if freezingCfg.Enabled && freezingCfg.Produce {
+			u := cfg.snapshotUploader
+
+			if dbg.FrozenBlockLimit() != 0 {
+				u.frozenBlockLimit = dbg.FrozenBlockLimit()
+			}
+
+			if maxSeedable := u.maxSeedable(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
+					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
+				}
+
+				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
+				}
+			}
+		}
 	}
 
 	return cfg
@@ -349,7 +369,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		var minBlockNumber uint64
 
 		if cfg.snapshotUploader != nil {
-			cfg.snapshotUploader.init(ctx, s, cfg, logger)
+			cfg.snapshotUploader.init(ctx, s, logger)
 
 			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 		}
@@ -401,29 +421,12 @@ type snapshotUploader struct {
 	remoteHashes     map[string]interface{}
 }
 
-func (u *snapshotUploader) init(ctx context.Context, s *PruneState, cfg SnapshotsCfg, logger log.Logger) {
-	if u.cfg == nil {
-		u.cfg = &cfg
-		freezingCfg := cfg.blockReader.FreezingCfg()
+func (u *snapshotUploader) init(ctx context.Context, s *PruneState, logger log.Logger) {
+	freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.Produce {
-			if dbg.FrozenBlockLimit() != 0 {
-				u.frozenBlockLimit = dbg.FrozenBlockLimit()
-			}
-
-			if maxUploaded := u.maxUploaded(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
-				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxUploaded - u.frozenBlockLimit)
-				}
-
-				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxUploaded - u.frozenBlockLimit)
-				}
-			}
-
-			u.files = map[string]*uploadState{}
-			u.start(ctx, logger)
-		}
+	if freezingCfg.Enabled && freezingCfg.Produce {
+		u.files = map[string]*uploadState{}
+		u.start(ctx, logger)
 	}
 
 	u.state = s
@@ -448,6 +451,20 @@ func (u *snapshotUploader) maxUploaded() uint64 {
 						state.info = &info
 					}
 				}
+			}
+		}
+	}
+
+	return max
+}
+
+func (u *snapshotUploader) maxSeedable() uint64 {
+	var max uint64
+
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
+		for _, info := range list {
+			if info.Seedable() && info.To > max {
+				max = info.To
 			}
 		}
 	}
