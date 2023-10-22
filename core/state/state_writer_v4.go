@@ -38,7 +38,7 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 
 func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if w.trace {
-		fmt.Printf("code: %x,%x\n", address, code)
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	return w.tx.DomainPut(kv.CodeDomain, address.Bytes(), nil, code, nil)
 }

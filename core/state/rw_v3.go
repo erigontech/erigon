@@ -402,12 +402,10 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 }
 
 func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), code)
-	if len(code) > 0 {
-		if w.trace {
-			fmt.Printf("code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)
-		}
+	if w.trace {
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
+	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), code)
 	return nil
 }
 
