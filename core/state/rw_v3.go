@@ -382,22 +382,21 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 }
 
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if w.trace {
+		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
+	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 	if original.Incarnation > account.Incarnation {
 		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-		err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 	}
 
-	if w.trace {
-		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
-	}
 	return nil
 }
 
