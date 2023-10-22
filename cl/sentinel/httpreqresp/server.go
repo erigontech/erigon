@@ -97,7 +97,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, err = io.ReadFull(stream, code)
 		if err != nil {
-			http.Error(w, "Read Code: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "Read Code: "+err.Error(), http.StatusRequestTimeout)
 			return
 		}
 		// this is not neccesary, but seems like the right thing to do
@@ -114,7 +114,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// the first write to w will call code 200, so we do not need to
 		_, err = io.Copy(w, stream)
 		if err != nil {
-			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusRequestTimeout)
 			return
 		}
 		return
