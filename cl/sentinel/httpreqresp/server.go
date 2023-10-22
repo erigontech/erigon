@@ -2,8 +2,6 @@
 package httpreqresp
 
 import (
-	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -98,10 +96,6 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, err = io.ReadFull(stream, code)
-		if errors.Is(err, context.DeadlineExceeded) {
-			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusRequestTimeout)
-			return
-		}
 		if err != nil {
 			http.Error(w, "Read Code: "+err.Error(), http.StatusBadRequest)
 			return
@@ -119,10 +113,6 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// copy the data now to the stream
 		// the first write to w will call code 200, so we do not need to
 		_, err = io.Copy(w, stream)
-		if errors.Is(err, context.DeadlineExceeded) {
-			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusRequestTimeout)
-			return
-		}
 		if err != nil {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
 			return
