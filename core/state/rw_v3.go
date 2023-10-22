@@ -424,12 +424,16 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
 	return nil
 }
 
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
+	if w.trace {
+		fmt.Printf("create contract: %x\n", address)
+	}
+
 	//seems don't need delete code here - tests starting fail
 	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
@@ -438,9 +442,6 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	})
 	if err != nil {
 		return err
-	}
-	if w.trace {
-		fmt.Printf("contract [%x]\n", address)
 	}
 	return nil
 }
