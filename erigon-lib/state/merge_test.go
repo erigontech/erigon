@@ -20,6 +20,8 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 		filenameBase: "test", aggregationStep: aggStep, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
 func TestFindMergeRangeCornerCases(t *testing.T) {
+	t.Parallel()
+
 	t.Run("> 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
