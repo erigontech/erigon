@@ -507,7 +507,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		hash1, _ := blk.Block.HashSSZ()
 		hash2, _ := blk2.Block.HashSSZ()
 		if hash1 != hash2 {
-			log.Error("Mismatching blocks", "slot", i, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
+			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
 			//return nil
 		}
 		log.Info("Successfully checked", "slot", i)
