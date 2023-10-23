@@ -208,6 +208,7 @@ func ExecV3(ctx context.Context,
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		blockNum = execStage.BlockNumber + 1
+		fmt.Printf("exec1 blockNum=%d\n", blockNum)
 	} else if !useExternalTx { //nolint
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
 		//if err != nil {
@@ -282,6 +283,7 @@ func ExecV3(ctx context.Context,
 	}
 	if doms.BlockNum() > blockNum {
 		blockNum = doms.BlockNum()
+		fmt.Printf("exec2 blockNum=%d\n", blockNum)
 	}
 	outputTxNum.Store(inputTxNum)
 
@@ -593,7 +595,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -816,10 +818,6 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
-
-					if err := doms.Flush(ctx, applyTx); err != nil {
-						return err
-					}
 					doms.FinishWrites()
 					doms.ClearRam(false)
 					t3 = time.Since(tt)
@@ -912,7 +910,7 @@ Loop:
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 
-	//dumpPlainStateDebug(applyTx, doms)
+	dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
@@ -960,7 +958,9 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		return
 	}
 
-	doms.Flush(context.Background(), tx)
+	if doms != nil {
+		doms.Flush(context.Background(), tx)
+	}
 	{
 		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {

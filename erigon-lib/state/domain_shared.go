@@ -154,9 +154,13 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
+	if err := sd.Flush(ctx, rwTx); err != nil {
+		return err
+	}
 	sd.ClearRam(true)
 
 	_, err := sd.SeekCommitment(ctx, rwTx)
+	fmt.Printf("unw done\n")
 	return err
 }
 
