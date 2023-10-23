@@ -139,6 +139,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(v)
 
 	// Read the first chunk
 	chunk1, dT1, err := chunk_encoding.ReadChunk(r)
@@ -148,6 +149,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if dT1 != chunk_encoding.ChunkDataType {
 		return nil, fmt.Errorf("malformed beacon block, invalid chunk 1 type %d, expected: %d", dT1, chunk_encoding.ChunkDataType)
 	}
+	fmt.Println("A")
 	plainSSZ = append(plainSSZ, chunk1...)
 	// Read the attestation chunk (2nd chunk)
 	chunk2, dT2, err := chunk_encoding.ReadChunk(snappy.NewReader(r))
