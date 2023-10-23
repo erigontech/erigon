@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -457,6 +458,7 @@ func NewDefaultStages(ctx context.Context,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.IHeimdallClient,
 	logger log.Logger,
+	tracer tracers.Tracer,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3)
@@ -485,7 +487,7 @@ func NewDefaultStages(ctx context.Context,
 			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
-			&vm.Config{},
+			&vm.Config{Tracer: tracer},
 			notifications.Accumulator,
 			cfg.StateStream,
 			/*stateStream=*/ false,

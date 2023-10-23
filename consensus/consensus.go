@@ -41,6 +41,10 @@ type ChainHeaderReader interface {
 	// CurrentHeader retrieves the current header from the local chain.
 	CurrentHeader() *types.Header
 
+	CurrentFinalizedHeader() *types.Header
+
+	CurrentSafeHeader() *types.Header
+
 	// GetHeader retrieves a block header from the database by hash and number.
 	GetHeader(hash libcommon.Hash, number uint64) *types.Header
 

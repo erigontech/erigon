@@ -36,6 +36,35 @@ func (cr ChainReader) CurrentHeader() *types.Header {
 	return h
 }
 
+// CurrentFinalizedHeader retrieves the current finalized header from the local chain.
+func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceFinalized(cr.Db)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.Db, hash, *number)
+}
+
+func (cr ChainReader) CurrentSafeHeader() *types.Header {
+	hash := rawdb.ReadForkchoiceSafe(cr.Db)
+	if hash == (libcommon.Hash{}) {
+		return nil
+	}
+
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	if number == nil {
+		return nil
+	}
+
+	return rawdb.ReadHeader(cr.Db, hash, *number)
+}
+
 // GetHeader retrieves a block header from the database by hash and number.
 func (cr ChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, number)

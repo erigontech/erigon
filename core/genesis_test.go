@@ -33,7 +33,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger, nil)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -48,12 +48,12 @@ func TestGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "")
+	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "", nil)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "", nil)
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -62,7 +62,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "", nil)
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -80,13 +80,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, nil)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, nil)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestAllocConstructor(t *testing.T) {
 	}
 
 	historyV3, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-	_, _, err := core.CommitGenesisBlock(db, genSpec, "", logger)
+	_, _, err := core.CommitGenesisBlock(db, genSpec, "", logger, nil)
 	require.NoError(err)
 
 	tx, err := db.BeginRo(context.Background())

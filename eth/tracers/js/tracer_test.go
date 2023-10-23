@@ -29,6 +29,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -77,12 +78,12 @@ func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, c
 		contract.Code = contractCode
 	}
 
-	tracer.CaptureTxStart(gasLimit)
-	tracer.CaptureStart(env, contract.Caller(), contract.Address(), false /* precompile */, false /* create */, []byte{}, startGas, value, []byte{} /* code */)
+	tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), gasLimit, new(uint256.Int), nil))
+	tracer.CaptureStart(contract.Caller(), contract.Address(), false /* precompile */, false /* create */, []byte{}, startGas, value, []byte{} /* code */)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
 	tracer.CaptureEnd(ret, startGas-contract.Gas, err)
 	// Rest gas assumes no refund
-	tracer.CaptureTxEnd(contract.Gas)
+	tracer.CaptureTxEnd(&types.Receipt{GasUsed: gasLimit - contract.Gas}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +189,8 @@ func TestHaltBetweenSteps(t *testing.T) {
 	scope := &vm.ScopeContext{
 		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
-	tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
+	tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil))
+	tracer.CaptureStart(libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
 	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
@@ -209,7 +211,8 @@ func TestNoStepExec(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
-		tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
+		tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil))
+		tracer.CaptureStart(libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
 		tracer.CaptureEnd(nil, 0, nil)
 		ret, err := tracer.GetResult()
 		if err != nil {

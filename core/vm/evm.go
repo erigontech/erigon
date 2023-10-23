@@ -160,6 +160,19 @@ func (evm *EVM) Interpreter() Interpreter {
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
+	p, isPrecompile := evm.precompile(addr)
+
+	// Invoke tracer hooks that signal entering/exiting a call frame
+	if evm.Config().Tracer != nil {
+		v := value
+		if typ == STATICCALL {
+			v = nil
+		}
+		evm.captureBegin(depth == 0, STATICCALL, caller.Address(), addr, isPrecompile, input, gas, v, nil)
+		defer func(startGas uint64) {
+			evm.captureEnd(false, STATICCALL, startGas, leftOverGas, ret, err)
+		}(gas)
+	}
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
@@ -176,7 +189,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}
 		}
 	}
-	p, isPrecompile := evm.precompile(addr)
+
 	var code []byte
 	if !isPrecompile {
 		code = evm.intraBlockState.GetCode(addr)
@@ -187,20 +200,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
-				if evm.config.Debug {
-					v := value
-					if typ == STATICCALL {
-						v = nil
-					}
-					// Calling a non existing account, don't do anything, but ping the tracer
-					if depth == 0 {
-						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-						evm.config.Tracer.CaptureEnd(ret, 0, nil)
-					} else {
-						evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-						evm.config.Tracer.CaptureExit(ret, 0, nil)
-					}
-				}
+				// Calling a non existing account, don't do anything
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
@@ -211,29 +211,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0)
-	}
-	if evm.config.Debug {
-		v := value
-		if typ == STATICCALL {
-			v = nil
-		}
-		if depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-			defer func(startGas uint64) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
-			}(gas)
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-			defer func(startGas uint64) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
-			}(gas)
-		}
+		evm.intraBlockState.AddBalance(addr, u256.Num0, evmtypes.BalanceChangeTouchAccount)
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas)
+		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -268,6 +251,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if err != nil || evm.config.RestoreState {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
+			if evm.Config().Tracer != nil {
+				evm.Config().Tracer.OnGasChange(gas, 0, GasChangeCallFailedExecution)
+			}
 			gas = 0
 		}
 		// TODO: consider clearing up unused snapshots:
@@ -326,24 +312,14 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
-	var ret []byte
-	var err error
-	var gasConsumption uint64
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) (ret []byte, createAddress libcommon.Address, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
-	if evm.config.Debug {
-		if depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-			defer func() {
-				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
-			}()
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-			defer func() {
-				evm.config.Tracer.CaptureExit(ret, gasConsumption, err)
-			}()
-		}
+	if evm.Config().Tracer != nil {
+		evm.captureBegin(depth == 0, typ, caller.Address(), address, false, codeAndHash.code, gas, value, nil)
+		defer func(startGas uint64) {
+			evm.captureEnd(depth == 0, typ, startGas, leftOverGas, ret, err)
+		}(gas)
 	}
 
 	// Depth check execution. Fail if we're trying to execute above the
@@ -373,6 +349,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contractHash := evm.intraBlockState.GetCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
+		if evm.Config().Tracer != nil {
+			evm.Config().Tracer.OnGasChange(gas, 0, GasChangeCallFailedExecution)
+		}
 		return nil, libcommon.Address{}, 0, err
 	}
 	// Create a new account on the state
@@ -413,7 +392,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas) {
+		if contract.UseGas(createDataGas, evm.Config().Tracer, GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
 		} else if evm.chainRules.IsHomestead {
 			err = ErrCodeStoreOutOfGas
@@ -426,12 +405,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
-			contract.UseGas(contract.Gas)
+			contract.UseGas(contract.Gas, evm.Config().Tracer, GasChangeCallFailedExecution)
 		}
 	}
-
-	// calculate gasConsumption for deferred captures
-	gasConsumption = gas - contract.Gas
 
 	return ret, address, contract.Gas, err
 }
@@ -489,4 +465,30 @@ func (evm *EVM) TxContext() evmtypes.TxContext {
 // IntraBlockState returns the EVM's IntraBlockState
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
+}
+
+func (evm *EVM) captureBegin(isRoot bool, typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, startGas uint64, value *uint256.Int, code []byte) {
+	tracer := evm.Config().Tracer
+
+	if isRoot {
+		tracer.CaptureStart(from, to, precompile, typ == CREATE || typ == CREATE2, input, startGas, value, code)
+	} else {
+		tracer.CaptureEnter(typ, from, to, precompile, typ == CREATE || typ == CREATE2, input, startGas, value, code)
+	}
+
+	tracer.OnGasChange(0, startGas, GasChangeCallInitialBalance)
+}
+
+func (evm *EVM) captureEnd(isRoot bool, typ OpCode, startGas uint64, leftOverGas uint64, ret []byte, err error) {
+	tracer := evm.Config().Tracer
+
+	if leftOverGas != 0 {
+		tracer.OnGasChange(leftOverGas, 0, GasChangeCallLeftOverReturned)
+	}
+
+	if isRoot {
+		tracer.CaptureEnd(ret, startGas-leftOverGas, err)
+	} else {
+		tracer.CaptureExit(ret, startGas-leftOverGas, err)
+	}
 }

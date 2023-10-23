@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -130,6 +131,7 @@ func (n *node) ChainID() *big.Int {
 // run configures, creates and serves an erigon node
 func (n *node) run(ctx *cli.Context) error {
 	var logger log.Logger
+	var tracer tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 
@@ -144,7 +146,7 @@ func (n *node) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, metricsMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if logger, tracer, metricsMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -167,7 +169,7 @@ func (n *node) run(ctx *cli.Context) error {
 		n.ethCfg.Bor.StateSyncConfirmationDelay = map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
 	}
 
-	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
+	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger, tracer)
 
 	if metricsMux != nil {
 		diagnostics.Setup(ctx, metricsMux, n.ethNode)

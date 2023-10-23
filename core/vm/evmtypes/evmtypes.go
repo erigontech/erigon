@@ -55,12 +55,34 @@ type (
 	GetHashFunc func(uint64) common.Hash
 )
 
+// BalanceChangeReason is used to indicate the reason for a balance change, useful
+// for tracing and reporting.
+type BalanceChangeReason byte
+
+const (
+	BalanceChangeUnspecified BalanceChangeReason = iota
+	BalanceChangeRewardMineUncle
+	BalanceChangeRewardMineBlock
+	BalanceChangeDaoRefundContract
+	BalanceChangeDaoAdjustBalance
+	BalanceChangeTransfer
+	BalanceChangeGenesisBalance
+	BalanceChangeGasBuy
+	BalanceChangeRewardTransactionFee
+	BalanceChangeGasRefund
+	BalanceChangeTouchAccount
+	BalanceChangeSuicideRefund
+	BalanceChangeSuicideWithdraw
+	BalanceChangeBurn
+	BalanceChangeWithdrawal
+)
+
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	CreateAccount(common.Address, bool)
 
-	SubBalance(common.Address, *uint256.Int)
-	AddBalance(common.Address, *uint256.Int)
+	SubBalance(common.Address, *uint256.Int, BalanceChangeReason)
+	AddBalance(common.Address, *uint256.Int, BalanceChangeReason)
 	GetBalance(common.Address) *uint256.Int
 
 	GetNonce(common.Address) uint64

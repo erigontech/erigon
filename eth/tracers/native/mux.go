@@ -18,11 +18,14 @@ package native
 
 import (
 	"encoding/json"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
@@ -60,9 +63,9 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, er
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *muxTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
-		t.CaptureStart(env, from, to, precompile, create, input, gas, value, code)
+		t.CaptureStart(from, to, precompile, create, input, gas, value, code)
 	}
 }
 
@@ -87,6 +90,20 @@ func (t *muxTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scop
 	}
 }
 
+// CaptureKeccakPreimage is called during the KECCAK256 opcode.
+func (t *muxTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {
+	for _, t := range t.tracers {
+		t.CaptureKeccakPreimage(hash, data)
+	}
+}
+
+// CaptureGasConsumed is called when gas is consumed.
+func (t *muxTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {
+	for _, t := range t.tracers {
+		t.OnGasChange(old, new, reason)
+	}
+}
+
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *muxTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
@@ -102,15 +119,57 @@ func (t *muxTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *muxTracer) CaptureTxStart(gasLimit uint64) {
+func (t *muxTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	for _, t := range t.tracers {
-		t.CaptureTxStart(gasLimit)
+		t.CaptureTxStart(env, tx)
 	}
 }
 
-func (t *muxTracer) CaptureTxEnd(restGas uint64) {
+func (t *muxTracer) CaptureTxEnd(receipt *types.Receipt, err error) {
 	for _, t := range t.tracers {
-		t.CaptureTxEnd(restGas)
+		t.CaptureTxEnd(receipt, err)
+	}
+}
+
+func (t *muxTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+	for _, t := range t.tracers {
+		t.OnBlockStart(b, td, finalized, safe)
+	}
+}
+
+func (t *muxTracer) OnBlockEnd(err error) {
+	for _, t := range t.tracers {
+		t.OnBlockEnd(err)
+	}
+}
+
+func (t *muxTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+	for _, t := range t.tracers {
+		t.OnGenesisBlock(b, alloc)
+	}
+}
+
+func (t *muxTracer) OnBalanceChange(addr libcommon.Address, prev *uint256.Int, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+	for _, t := range t.tracers {
+		t.OnBalanceChange(addr, prev, new, reason)
+	}
+}
+
+func (t *muxTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {
+	for _, t := range t.tracers {
+		t.OnNonceChange(a, prev, new)
+	}
+}
+
+func (t *muxTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+	for _, t := range t.tracers {
+		t.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
+	}
+}
+
+func (t *muxTracer) OnStorageChange(addr libcommon.Address, slot *libcommon.Hash, prev uint256.Int, new uint256.Int) {
+	for _, t := range t.tracers {
+		t.OnStorageChange(addr, slot, prev, new)
 	}
 }
 
@@ -129,6 +188,18 @@ func (t *muxTracer) GetResult() (json.RawMessage, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+func (t *muxTracer) OnLog(log *types.Log) {
+	for _, t := range t.tracers {
+		t.OnLog(log)
+	}
+}
+
+func (t *muxTracer) OnNewAccount(a libcommon.Address) {
+	for _, t := range t.tracers {
+		t.OnNewAccount(a)
+	}
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

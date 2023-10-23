@@ -17,10 +17,14 @@
 package logger
 
 import (
+	"encoding/json"
+	"math/big"
+
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -145,11 +149,11 @@ func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]st
 	}
 }
 
-func (a *AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+func (a *AccessListTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {}
 
-func (a *AccessListTracer) CaptureTxEnd(restGas uint64) {}
+func (a *AccessListTracer) CaptureTxEnd(receipt *types.Receipt, err error) {}
 
-func (a *AccessListTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 func (a *AccessListTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -215,11 +219,50 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 
 }
 
-func (*AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (a *AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (*AccessListTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+
+func (a *AccessListTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
-func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+
+func (a *AccessListTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
+
+func (a *AccessListTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+}
+
+func (a *AccessListTracer) OnBlockEnd(err error) {
+}
+
+func (a *AccessListTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+}
+
+func (a *AccessListTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
+
+func (a *AccessListTracer) OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+}
+
+func (a *AccessListTracer) OnNonceChange(addr libcommon.Address, prev, new uint64) {}
+
+func (a *AccessListTracer) OnCodeChange(addr libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
+
+func (a *AccessListTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+}
+
+func (a *AccessListTracer) OnLog(log *types.Log) {}
+
+func (a *AccessListTracer) OnNewAccount(addr libcommon.Address) {}
+
+func (a *AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+}
+
+// GetResult returns an empty json object.
+func (a *AccessListTracer) GetResult() (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// Stop terminates execution of the tracer at the first opportune moment.
+func (a *AccessListTracer) Stop(err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.

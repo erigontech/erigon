@@ -22,8 +22,7 @@ import (
 	"errors"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
@@ -37,7 +36,7 @@ type Context struct {
 // Tracer interface extends vm.EVMLogger and additionally
 // allows collecting the tracing result.
 type Tracer interface {
-	vm.EVMLogger
+	core.BlockchainLogger
 	GetResult() (json.RawMessage, error)
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop(err error)

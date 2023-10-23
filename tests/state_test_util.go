@@ -182,7 +182,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := core.GenesisToBlock(t.genesis(config), "")
+	block, _, err := core.GenesisToBlock(t.genesis(config), "", nil)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -316,7 +316,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		if a.Balance != nil {
 			balance, _ = uint256.FromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, balance)
+		statedb.SetBalance(addr, balance, 0x0)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())

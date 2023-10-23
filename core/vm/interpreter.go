@@ -264,7 +264,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		if !contract.UseGas(cost) {
+		if !contract.UseGas(cost, in.cfg.Tracer, GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
 		if operation.dynamicGas != nil {
@@ -290,7 +290,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if err != nil || !contract.UseGas(dynamicCost) {
+			if err != nil || !contract.UseGas(dynamicCost, in.cfg.Tracer, GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
 			if memorySize > 0 {
@@ -298,6 +298,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		if in.cfg.Debug {
+			in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, GasChangeCallOpCode)
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}

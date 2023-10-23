@@ -2,9 +2,10 @@ package app
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -76,7 +77,7 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}

@@ -48,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -133,7 +134,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 
 	var (
-		tracer        vm.EVMLogger
+		tracer        tracers.Tracer
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
@@ -153,7 +154,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "")
+		core.MustCommitGenesis(gen, db, "", tracer)
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

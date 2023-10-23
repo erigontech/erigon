@@ -1,0 +1,19 @@
+package tracing
+
+import (
+	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/urfave/cli/v2"
+)
+
+// SetupTracerCtx performs the tracing setup according to the parameters
+// containted in the given urfave context.
+func SetupTracerCtx(ctx *cli.Context) (tracers.Tracer, error) {
+	tracerName := ctx.String(TracerFlag.Name)
+	if tracerName == "" {
+		return nil, nil
+	}
+
+	cfg := ctx.String(TracerConfigFlag.Name)
+
+	return tracers.New(tracerName, &tracers.Context{}, []byte(cfg))
+}

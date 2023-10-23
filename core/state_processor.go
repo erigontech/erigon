@@ -35,6 +35,17 @@ import (
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+	var (
+		receipt *types.Receipt
+		err     error
+	)
+	if evm.Config().Tracer != nil {
+		evm.Config().Tracer.CaptureTxStart(evm, tx)
+		defer func() {
+			evm.Config().Tracer.CaptureTxEnd(receipt, err)
+		}()
+	}
+
 	rules := evm.ChainRules()
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, rules)
 	if err != nil {
@@ -58,7 +69,8 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
 
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	var result *ExecutionResult
+	result, err = ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -73,7 +85,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the tx.
 		receipt = &types.Receipt{Type: tx.Type(), CumulativeGasUsed: *usedGas}

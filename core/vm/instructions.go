@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -278,6 +279,9 @@ func opKeccak256(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		panic(err)
 	}
 
+	if interpreter.evm.Config().Tracer != nil {
+		interpreter.evm.Config().Tracer.CaptureKeccakPreimage(libcommon.BytesToHash(interpreter.hasherBuf[:]), data)
+	}
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil
 }
@@ -651,7 +655,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	scope.Contract.UseGas(gas)
+	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, GasChangeCallContractCreation)
 
 	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value)
 
@@ -665,6 +669,10 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		stackvalue.Clear()
 	} else {
 		stackvalue.SetBytes(addr.Bytes())
+	}
+
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
 	}
 	scope.Contract.Gas += returnGas
 
@@ -690,7 +698,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseGas(gas)
+	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
@@ -701,8 +709,12 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	} else {
 		stackValue.SetBytes(addr.Bytes())
 	}
-
 	scope.Stack.Push(&stackValue)
+
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
+	}
+
 	scope.Contract.Gas += returnGas
 
 	if suberr == ErrExecutionReverted {
@@ -745,6 +757,10 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
+	}
+
 	scope.Contract.Gas += returnGas
 
 	interpreter.returnData = ret
@@ -779,6 +795,10 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
+	}
+
 	scope.Contract.Gas += returnGas
 
 	interpreter.returnData = ret
@@ -809,6 +829,10 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
+	}
+
 	scope.Contract.Gas += returnGas
 
 	interpreter.returnData = ret
@@ -837,6 +861,10 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	if err == nil || err == ErrExecutionReverted {
 		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	}
+
+	if interpreter.evm.Config().Tracer != nil && returnGas > 0 {
+		interpreter.evm.Config().Tracer.OnGasChange(scope.Contract.Gas, scope.Contract.Gas+returnGas, GasChangeCallLeftOverRefunded)
 	}
 
 	scope.Contract.Gas += returnGas
@@ -880,7 +908,7 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
 	}
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, evmtypes.BalanceChangeSuicideRefund)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
 	return nil, errStopToken
 }
@@ -899,8 +927,8 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
 	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance)
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, evmtypes.BalanceChangeSuicideWithdraw)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, evmtypes.BalanceChangeSuicideRefund)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	return nil, errStopToken
 }

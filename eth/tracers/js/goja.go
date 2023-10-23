@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -94,6 +95,8 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 // jsTracer is an implementation of the Tracer interface which evaluates
 // JS functions on the relevant EVM hooks. It uses Goja as its JS engine.
 type jsTracer struct {
+	tracers.NoopTracer
+
 	vm                *goja.Runtime
 	env               *vm.EVM
 	toBig             toBigFn               // Converts a hex string into a JS bigint
@@ -213,21 +216,33 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer
 
 // CaptureTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
-func (t *jsTracer) CaptureTxStart(gasLimit uint64) {
-	t.gasLimit = gasLimit
+func (t *jsTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
+	t.env = env
+	// Need statedb access for db object
+	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
+	t.dbValue = db.setupObject()
+	// Update list of precompiles based on current block
+	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	t.activePrecompiles = vm.ActivePrecompiles(rules)
+	t.ctx["block"] = t.vm.ToValue(t.env.Context().BlockNumber)
+	t.ctx["gasPrice"] = t.vm.ToValue(t.env.TxContext().GasPrice)
 }
 
 // CaptureTxEnd implements the Tracer interface and is invoked at the end of
 // transaction processing.
-func (t *jsTracer) CaptureTxEnd(restGas uint64) {
-	t.ctx["gasUsed"] = t.vm.ToValue(t.gasLimit - restGas)
+func (t *jsTracer) CaptureTxEnd(receipt *types.Receipt, err error) {
+	if err != nil {
+		// Don't override vm error
+		if _, ok := t.ctx["error"]; !ok {
+			t.ctx["error"] = t.vm.ToValue(err.Error())
+		}
+		return
+	}
+	t.ctx["gasUsed"] = t.vm.ToValue(receipt.GasUsed)
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	t.env = env
-	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
-	t.dbValue = db.setupObject()
+func (t *jsTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if create {
 		t.ctx["type"] = t.vm.ToValue("CREATE")
 	} else {
@@ -237,17 +252,12 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
 	t.ctx["gas"] = t.vm.ToValue(gas)
-	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice.ToBig())
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
 		return
 	}
 	t.ctx["value"] = valueBig
-	t.ctx["block"] = t.vm.ToValue(env.Context().BlockNumber)
-	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
-	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.

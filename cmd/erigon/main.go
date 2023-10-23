@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/diagnostics"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
@@ -57,10 +58,11 @@ func runErigon(cliCtx *cli.Context) error {
 	}
 
 	var logger log.Logger
+	var tracer tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 
-	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, tracer, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -77,7 +79,7 @@ func runErigon(cliCtx *cli.Context) error {
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

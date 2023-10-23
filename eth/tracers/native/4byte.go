@@ -25,6 +25,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -48,7 +49,7 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	noopTracer
+	tracers.NoopTracer
 	ids               map[string]int      // ids aggregates the 4byte ids found
 	interrupt         uint32              // Atomic flag to signal execution interruption
 	reason            error               // Textual reason for the interruption
@@ -80,12 +81,13 @@ func (t *fourByteTracer) store(id []byte, size int) {
 	t.ids[key] += 1
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *fourByteTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	// Update list of precompiles based on current block
+func (t *fourByteTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
+}
 
+// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
+func (t *fourByteTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	// Save the outer calldata also
 	if len(input) >= 4 {
 		t.store(input[0:4], len(input)-4)

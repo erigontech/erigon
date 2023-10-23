@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -25,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -243,9 +245,9 @@ type OeTracer struct {
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
+func (ot *OeTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {}
 
-func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
+func (ot *OeTracer) CaptureTxEnd(receipt *types.Receipt, err error) {}
 
 func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("captureStartOrEnter deep %t, typ %s, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", deep, typ.String(), from, to, create, input, gas, value, precompile)
@@ -353,7 +355,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
@@ -573,6 +575,34 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 
 func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
+
+func (ot *OeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+}
+
+func (ot *OeTracer) OnBlockEnd(err error) {
+}
+
+func (ot *OeTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+}
+
+func (ot *OeTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
+
+func (ot *OeTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
+
+func (ot *OeTracer) OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+}
+
+func (ot *OeTracer) OnNonceChange(addr libcommon.Address, prev, new uint64) {}
+
+func (aot *OeTracer) OnCodeChange(addr libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
+
+func (ot *OeTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+}
+
+func (ot *OeTracer) OnLog(log *types.Log) {}
+
+func (ot *OeTracer) OnNewAccount(addr libcommon.Address) {}
 
 // Implements core/state/StateWriter to provide state diffs
 type StateDiff struct {

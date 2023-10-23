@@ -49,7 +49,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = MustCommitGenesis(gspec, db, tmpDir)
+		genesis = MustCommitGenesis(gspec, db, tmpDir, nil)
 	)
 
 	// We need to generate as many blocks +1 as uncles

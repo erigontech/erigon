@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -102,10 +103,11 @@ type callFrameMarshaling struct {
 }
 
 type callTracer struct {
-	noopTracer
+	tracers.NoopTracer
 	callstack []callFrame
 	config    callTracerConfig
 	gasLimit  uint64
+	depth     int
 	interrupt uint32 // Atomic flag to signal execution interruption
 	reason    error  // Textual reason for the interruption
 	logIndex  uint64
@@ -132,7 +134,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.callstack[0] = callFrame{
 		Type:  vm.CALL,
 		From:  from,
@@ -159,47 +161,11 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
 func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	// Only logs need to be captured via opcode processing
-	if !t.config.WithLog {
-		return
-	}
-	// Avoid processing nested calls when only caring about top call
-	if t.config.OnlyTopCall && depth > 0 {
-		return
-	}
-	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
-		return
-	}
-	switch op {
-	case vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4:
-		size := int(op - vm.LOG0)
-
-		stack := scope.Stack
-		stackData := stack.Data
-		stackSize := len(stackData)
-		if stackSize < 2 {
-			return
-		}
-		// Don't modify the stack
-		mStart := stackData[stackSize-1]
-		mSize := stackData[stackSize-2]
-		topics := make([]libcommon.Hash, size)
-		dataStart := stackSize - 3
-		for i := 0; i < size && dataStart-i >= 0; i++ {
-			topic := stackData[dataStart-i]
-			topics[i] = libcommon.Hash(topic.Bytes32())
-		}
-
-		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data), Index: t.logIndex}
-		t.logIndex++
-		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
-	}
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.depth++
 	if t.config.OnlyTopCall {
 		return
 	}
@@ -207,16 +173,14 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
 	}
-
+	toCopy := to
 	call := callFrame{
 		Type:  typ,
 		From:  from,
-		To:    to,
+		To:    toCopy,
 		Input: common.CopyBytes(input),
 		Gas:   gas,
-	}
-	if value != nil {
-		call.Value = value.ToBig()
+		Value: value.ToBig(),
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -224,6 +188,7 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 // CaptureExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
 func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	t.depth--
 	if t.config.OnlyTopCall {
 		return
 	}
@@ -241,18 +206,38 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) CaptureTxStart(gasLimit uint64) {
-
-	t.gasLimit = gasLimit
+func (t *callTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
+	t.gasLimit = tx.GetGas()
 }
 
-func (t *callTracer) CaptureTxEnd(restGas uint64) {
-	t.callstack[0].GasUsed = t.gasLimit - restGas
+func (t *callTracer) CaptureTxEnd(receipt *types.Receipt, err error) {
+	// Error happened during tx validation.
+	if err != nil {
+		return
+	}
+
+	t.callstack[0].GasUsed = receipt.GasUsed
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false, 0, t.logGaps)
 		fixLogIndexGap(&t.callstack[0], t.logGaps)
 	}
+}
+
+func (t *callTracer) OnLog(log *types.Log) {
+	// Only logs need to be captured via opcode processing
+	if !t.config.WithLog {
+		return
+	}
+	// Avoid processing nested calls when only caring about top call
+	if t.config.OnlyTopCall && t.depth > 0 {
+		return
+	}
+	// Skip if tracing was interrupted
+	if atomic.LoadUint32(&t.interrupt) > 0 {
+		return
+	}
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data})
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -265,7 +250,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(res), t.reason
+	return res, t.reason
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

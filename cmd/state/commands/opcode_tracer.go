@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -162,9 +164,12 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64) {}
+func (ot *opcodeTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
+	ot.env = env
+	ot.depth = 0
+}
 
-func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
+func (ot *opcodeTracer) CaptureTxEnd(receipt *types.Receipt, err error) {}
 
 func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
@@ -194,8 +199,7 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create b
 	ot.stack = append(ot.stack, &newTx)
 }
 
-func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ot.env = env
+func (ot *opcodeTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth = 0
 	ot.captureStartOrEnter(from, to, create, input)
 }
@@ -386,6 +390,43 @@ func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
 	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, err)
 
+}
+
+func (ot *opcodeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+}
+
+func (ot *opcodeTracer) OnBlockEnd(err error) {
+}
+
+func (ot *opcodeTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+}
+
+func (ot *opcodeTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
+
+func (ot *opcodeTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
+
+func (ot *opcodeTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+}
+
+func (ot *opcodeTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}
+
+func (ot *opcodeTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
+
+func (ot *opcodeTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+}
+
+func (ot *opcodeTracer) OnLog(log *types.Log) {}
+
+func (ot *opcodeTracer) OnNewAccount(a libcommon.Address) {}
+
+// GetResult returns an empty json object.
+func (ot *opcodeTracer) GetResult() (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// Stop terminates execution of the tracer at the first opportune moment.
+func (ot *opcodeTracer) Stop(err error) {
 }
 
 type segPrefix struct {

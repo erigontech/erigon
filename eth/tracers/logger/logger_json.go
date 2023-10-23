@@ -26,7 +26,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 type JSONLogger struct {
@@ -45,12 +47,13 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
-func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
-
-func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
-
-func (l *JSONLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	l.env = env
+}
+
+func (l *JSONLogger) CaptureTxEnd(receipt *types.Receipt, err error) {}
+
+func (l *JSONLogger) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 func (l *JSONLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -104,5 +107,42 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
 }
 
+func (l *JSONLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+}
+
+func (l *JSONLogger) OnBlockEnd(err error) {
+}
+
+func (l *JSONLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+}
+
+func (l *JSONLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
+
+func (l *JSONLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
+
+func (l *JSONLogger) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+}
+
+func (l *JSONLogger) OnNonceChange(a libcommon.Address, prev, new uint64) {}
+
+func (l *JSONLogger) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
+
+func (l *JSONLogger) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+}
+
+func (l *JSONLogger) OnLog(log *types.Log) {}
+
+func (l *JSONLogger) OnNewAccount(a libcommon.Address) {}
+
 func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+}
+
+// GetResult returns an empty json object.
+func (l *JSONLogger) GetResult() (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// Stop terminates execution of the tracer at the first opportune moment.
+func (l *JSONLogger) Stop(err error) {
 }

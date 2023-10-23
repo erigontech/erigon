@@ -3,6 +3,8 @@ package logger
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -10,7 +12,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -47,13 +51,13 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	return logger
 }
 
-func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
-
-func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
-
-// CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	l.env = env
+}
+
+func (l *JsonStreamLogger) CaptureTxEnd(receipt *types.Receipt, err error) {}
+
+func (l *JsonStreamLogger) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -191,9 +195,45 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *JsonStreamLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
+func (l *JsonStreamLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+}
+
+func (l *JsonStreamLogger) OnBlockEnd(err error) {
+}
+
+func (l *JsonStreamLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+}
+
+func (l *JsonStreamLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
+
+func (l *JsonStreamLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
+
+func (l *JsonStreamLogger) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+}
+
+func (l *JsonStreamLogger) OnNonceChange(a libcommon.Address, prev, new uint64) {}
+
+func (l *JsonStreamLogger) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+}
+
+func (l *JsonStreamLogger) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
+}
+
+func (l *JsonStreamLogger) OnLog(log *types.Log) {}
+
+func (l *JsonStreamLogger) OnNewAccount(a libcommon.Address) {}
+
 func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+}
+
+// GetResult returns an empty json object.
+func (l *JsonStreamLogger) GetResult() (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// Stop terminates execution of the tracer at the first opportune moment.
+func (l *JsonStreamLogger) Stop(err error) {
 }

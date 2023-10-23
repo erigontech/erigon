@@ -18,7 +18,9 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -54,6 +56,18 @@ const (
 	SysCallGasLimit = uint64(30_000_000)
 )
 
+// BlockchainLogger is used to collect traces during chain processing.
+// Please make a copy of the referenced types if you intend to retain them.
+type BlockchainLogger interface {
+	vm.EVMLogger
+	state.StateLogger
+	// OnBlockStart is called before executing `block`.
+	// `td` is the total difficulty prior to `block`.
+	OnBlockStart(block *types.Block, td *big.Int, finalized *types.Header, safe *types.Header)
+	OnBlockEnd(err error)
+	OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc)
+}
+
 type RejectedTx struct {
 	Index int    `json:"index"    gencodec:"required"`
 	Err   string `json:"error"    gencodec:"required"`
@@ -83,11 +97,21 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
 	logger log.Logger,
-) (*EphemeralExecResult, error) {
+) (res *EphemeralExecResult, executeBlockErr error) {
+
+	var bcLogger BlockchainLogger
+	if vmConfig.Tracer != nil {
+		l, ok := vmConfig.Tracer.(BlockchainLogger)
+		if !ok {
+			return nil, errors.New("only extended tracers are supported for live mode")
+		}
+		bcLogger = l
+	}
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
+	ibs.SetLogger(bcLogger)
 	header := block.Header()
 
 	usedGas := new(uint64)
@@ -100,6 +124,14 @@ func ExecuteBlockEphemerally(
 		includedTxs types.Transactions
 		receipts    types.Receipts
 	)
+
+	if bcLogger != nil {
+		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
+		bcLogger.OnBlockStart(block, td, chainReader.CurrentFinalizedHeader(), chainReader.CurrentSafeHeader())
+		defer func() {
+			bcLogger.OnBlockEnd(executeBlockErr)
+		}()
+	}
 
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
 		return nil, err
