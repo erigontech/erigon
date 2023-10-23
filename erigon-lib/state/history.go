@@ -1062,7 +1062,7 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 		if !ok {
 			break
 		}
-		fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
+		//fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
 
 		if txn == txNumUnindTo {
 			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
