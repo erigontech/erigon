@@ -3,8 +3,9 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -85,6 +86,7 @@ func TestReplayTransaction(t *testing.T) {
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
+	defer t.Fail()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 

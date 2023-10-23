@@ -346,7 +346,6 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err := rs.Unwind(ctx, tx, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
-	//dumpPlainStateDebug(tx, domains)
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate receipts: %w", err)
 	}
@@ -579,7 +578,7 @@ Loop:
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
-	//dumpPlainStateDebug(tx, nil)
+	dumpPlainStateDebug(tx, nil)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
@@ -727,6 +726,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if err = u.Done(tx); err != nil {
 		return err
 	}
+	dumpPlainStateDebug(tx, nil)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
@@ -840,7 +840,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	//dumpPlainStateDebug(tx, nil)
 
 	if err := historyv2.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return err
