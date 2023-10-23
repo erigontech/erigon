@@ -8,13 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 var testCheckpoint = solid.NewCheckpointFromParameters(libcommon.HexToHash("0x3"), 69)
 
-var expectedTestCheckpointMarshalled = common.Hex2Bytes("45000000000000000000000000000000000000000000000000000000000000000000000000000003")
-var expectedTestCheckpointRoot = common.Hex2Bytes("be8567f9fdae831b10720823dbcf0e3680e61d6a2a27d85ca00f6c15a7bbb1ea")
+var expectedTestCheckpointMarshalled = libcommon.Hex2Bytes("45000000000000000000000000000000000000000000000000000000000000000000000000000003")
+var expectedTestCheckpointRoot = libcommon.Hex2Bytes("be8567f9fdae831b10720823dbcf0e3680e61d6a2a27d85ca00f6c15a7bbb1ea")
 
 func TestCheckpointMarshalUnmarmashal(t *testing.T) {
 	marshalled, err := testCheckpoint.EncodeSSZ(nil)

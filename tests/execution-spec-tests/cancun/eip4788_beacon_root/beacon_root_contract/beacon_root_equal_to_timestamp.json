@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-auto_access_list=False-beacon_root=12-timestamp=12": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -131,7 +131,7 @@
     },
     "001-fork=Cancun-auto_access_list=False-beacon_root=4294967296-timestamp=4294967296": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -261,7 +261,7 @@
     },
     "002-fork=Cancun-auto_access_list=False-beacon_root=18446744073709551614-timestamp=18446744073709551614": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -391,7 +391,7 @@
     },
     "003-fork=Cancun-auto_access_list=False-beacon_root=18446744073709551615-timestamp=18446744073709551615": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -521,7 +521,7 @@
     },
     "004-fork=Cancun-auto_access_list=True-beacon_root=12-timestamp=12": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -659,7 +659,7 @@
     },
     "005-fork=Cancun-auto_access_list=True-beacon_root=4294967296-timestamp=4294967296": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -797,7 +797,7 @@
     },
     "006-fork=Cancun-auto_access_list=True-beacon_root=18446744073709551614-timestamp=18446744073709551614": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -935,7 +935,7 @@
     },
     "007-fork=Cancun-auto_access_list=True-beacon_root=18446744073709551615-timestamp=18446744073709551615": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },

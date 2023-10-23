@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=0-tx_value=0": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -137,7 +137,7 @@
     },
     "001-fork=Shanghai--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=0-tx_value=100000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -273,7 +273,7 @@
     },
     "002-fork=Shanghai--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=100000-tx_value=0": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -415,7 +415,7 @@
     },
     "003-fork=Shanghai--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=100000-tx_value=100000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -557,7 +557,7 @@
     },
     "004-fork=Cancun--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=0-tx_value=0": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -713,7 +713,7 @@
     },
     "005-fork=Cancun--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=0-tx_value=100000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -869,7 +869,7 @@
     },
     "006-fork=Cancun--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=100000-tx_value=0": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1031,7 +1031,7 @@
     },
     "007-fork=Cancun--selfdestruct_contract_address=0x6295ee1b4f6dd65047762f924ecd367c17eabf8f-selfdestruct_contract_initial_balance=100000-tx_value=100000": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },

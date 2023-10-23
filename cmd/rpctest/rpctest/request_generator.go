@@ -3,6 +3,7 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net/http"
 	"strings"
 	"time"
@@ -11,8 +12,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 type CallResult struct {

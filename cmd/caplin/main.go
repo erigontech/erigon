@@ -19,21 +19,21 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cl/beacon"
-	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/cl/sentinel/service"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
@@ -104,9 +104,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	var executionEngine execution_client.ExecutionEngine
+	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client2.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}
@@ -114,9 +114,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		executionEngine = cc
 	}
 
-	var caplinFreezer freezer.Freezer
+	var caplinFreezer freezer2.Freezer
 	if cfg.RecordMode {
-		caplinFreezer = &freezer.RootPathOsFs{
+		caplinFreezer = &freezer2.RootPathOsFs{
 			Root: cfg.RecordDir,
 		}
 	}

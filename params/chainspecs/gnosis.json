@@ -11,8 +11,9 @@
   "istanbulBlock": 7298030,
   "berlinBlock": 16101500,
   "londonBlock": 19040000,
-  "eip1559FeeCollectorTransition": 19040000,
-  "eip1559FeeCollector": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92",
+  "burntContract": {
+    "19040000": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"
+  },
   "terminalTotalDifficulty": 8626000000000000000000058750000000000000000000,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1690889660,

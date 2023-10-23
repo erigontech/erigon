@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-scenario=single_valid": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -452,7 +452,7 @@
     },
     "001-fork=Cancun-scenario=repeated_valid": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -903,7 +903,7 @@
     },
     "002-fork=Cancun-scenario=valid_invalid": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -1354,7 +1354,7 @@
     },
     "003-fork=Cancun-scenario=varied_valid": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },

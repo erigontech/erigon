@@ -1,6 +1,7 @@
 package consensus_tests
 
 import (
+	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 )

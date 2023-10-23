@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -15,7 +16,6 @@ import (
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 

@@ -1137,7 +1137,7 @@ func TestUnpackRevert(t *testing.T) {
 	}
 	for index, c := range cases {
 		t.Run(fmt.Sprintf("case %d", index), func(t *testing.T) {
-			got, err := UnpackRevert(common.Hex2Bytes(c.input))
+			got, err := UnpackRevert(libcommon.Hex2Bytes(c.input))
 			if c.expectErr != nil {
 				if err == nil {
 					t.Fatalf("Expected non-nil error")

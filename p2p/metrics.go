@@ -19,9 +19,8 @@
 package p2p
 
 import (
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"net"
-
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 const (

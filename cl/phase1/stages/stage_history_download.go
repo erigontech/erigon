@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -95,7 +96,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+			if err := cfg.db.WriteBlock(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
@@ -120,7 +121,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
-
 		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
 	})
 	prevProgress := cfg.downloader.Progress()

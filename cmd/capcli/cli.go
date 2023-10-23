@@ -7,14 +7,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/progress"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -24,6 +30,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
+
+	"github.com/jedib0t/go-pretty/v6/progress"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
@@ -36,7 +45,8 @@ var CLI struct {
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 
-	Chain Chain `cmd:"" help:"download the entire chain from reqresp network"`
+	Chain         Chain         `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots DumpSnapshots `cmd:"" help:"generate caplin snapshots"`
 }
 
 type chainCfg struct {
@@ -57,7 +67,8 @@ type withSentinel struct {
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
-	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure())
+	// YOLO message size
+	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +132,9 @@ func (b *Blocks) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
+	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 	for _, vv := range resp {
-		err := beaconDB.WriteBlock(tx, ctx, vv, true)
+		err := beaconDB.WriteBlock(ctx, tx, vv, true)
 		if err != nil {
 			return err
 		}
@@ -161,7 +172,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	rpcSource := persistence.NewBeaconRpcSource(beacon)
+	rpcSource := persistence2.NewBeaconRpcSource(beacon)
 
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
@@ -225,19 +236,19 @@ func (b *Epochs) Run(cctx *Context) error {
 	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
 		ii := i
 		egg.Go(func() error {
-			var blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]
+			var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 			for {
-				blocks, err = rpcSource.GetRange(tx, ctx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
+				blocks, err = rpcSource.GetRange(ctx, tx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
 				if err != nil {
 					log.Error("dl error", "err", err, "epoch", ii)
 				} else {
 					break
 				}
 			}
-			for _, v := range blocks {
+			for _, v := range blocks.Data {
 				tk.Increment(1)
 				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(tx, ctx, v.Data, true)
+				err := beaconDB.WriteBlock(ctx, tx, v, true)
 				if err != nil {
 					return err
 				}
@@ -345,18 +356,14 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	log.Info("Started chain download", "chain", c.Chain)
 
-	aferoFS, err := openFs(c.Datadir, "caplin/beacon")
-	if err != nil {
-		return err
-	}
+	dirs := datadir.New(c.Datadir)
 
-	db := mdbx.MustOpen("caplin/db")
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
 
@@ -367,6 +374,12 @@ func (c *Chain) Run(ctx *Context) error {
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {
+		return err
+	}
+
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, bs.Slot())
+	}); err != nil {
 		return err
 	}
 
@@ -383,4 +396,34 @@ func (c *Chain) Run(ctx *Context) error {
 		PruneDepth: math.MaxUint64,
 	}, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
+}
+
+type DumpSnapshots struct {
+	chainCfg
+	outputFolder
+}
+
+func (c *DumpSnapshots) Run(ctx *Context) error {
+	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	db.View(ctx, func(tx kv.Tx) (err error) {
+		to, err = beacon_indicies.ReadHighestFinalized(tx)
+		return
+	})
+
+	return snapshot_format.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
 }

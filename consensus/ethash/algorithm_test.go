@@ -19,13 +19,12 @@ package ethash
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
 	"reflect"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal

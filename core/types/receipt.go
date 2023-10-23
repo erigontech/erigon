@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 )
