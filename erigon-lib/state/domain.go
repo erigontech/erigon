@@ -1463,7 +1463,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		defer valsCDup.Close()
 	}
 
-	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txFrom, txTo, step, d.domainLargeValues)
+	fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step, d.domainLargeValues)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -1482,7 +1482,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			if err := dc.PutWithPrev(k, nil, toRestore.Value, toRestore.PValue); err != nil {
 				return err
 			}
-			//fmt.Printf("[domain][%s][toTx=%d] restore %x to txNum %d -> '%x'\n", d.filenameBase, txFrom, k, toRestore.TxNum, toRestore.Value)
+			fmt.Printf("[domain][%s][toTx=%d] restore %x to txNum %d -> '%x'\n", d.filenameBase, txNumUnindTo, k, toRestore.TxNum, toRestore.Value)
 		}
 		if !needDelete {
 			continue
@@ -1499,7 +1499,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 				}
 			}
 			if kk != nil {
-				//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
+				fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -1514,7 +1514,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 					return err
 				}
 			}
-			//fmt.Printf("[domain][%s] rm small value %x v %x\n", d.filenameBase, k, vv)
+			fmt.Printf("[domain][%s] rm small value %x v %x\n", d.filenameBase, k, vv)
 			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
 				return err
 			}

@@ -538,7 +538,6 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 }
 
 func TestHistory_IfUnwindKey(t *testing.T) {
-	t.Skip()
 	db, h := testDbAndHistory(t, false, log.New())
 
 	hc := h.MakeContext()

@@ -31,9 +31,9 @@ type PlainStateWriter struct {
 
 func NewPlainStateWriter(db putDel, changeSetsDB kv.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
-		db:    db,
-		csw:   NewChangeSetWriterPlain(changeSetsDB, blockNumber),
-		trace: true,
+		db:  db,
+		csw: NewChangeSetWriterPlain(changeSetsDB, blockNumber),
+		//trace: true,
 	}
 }
 

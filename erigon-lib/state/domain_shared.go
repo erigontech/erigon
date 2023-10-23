@@ -185,17 +185,17 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if sd.trace {
 			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
 		}
-		if txn > firstTxInBlock {
+		if txn == lastTxInBlock {
+			blockNum++
+		} else if txn > firstTxInBlock {
+			// snapshots are counted in transactions and can stop in the middle of block
 			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			txsFromBlockBeginning = txn - firstTxInBlock
+		} else {
+			txn = firstTxInBlock
 		}
 		if sd.trace {
 			fmt.Printf("[commitment] block tx range -%d |%d| %d\n", txsFromBlockBeginning, txn, lastTxInBlock-txn)
-		}
-		if txn == lastTxInBlock {
-			blockNum++
-		} else {
-			txn = firstTxInBlock
 		}
 	} else {
 		blockNum = bn

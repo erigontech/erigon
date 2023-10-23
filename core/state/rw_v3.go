@@ -43,7 +43,7 @@ func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
-		//trace: false,
+		//trace: true,
 	}
 }
 
@@ -130,7 +130,6 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 					if err := accounts.DeserialiseV3(&a, list.Vals[i]); err != nil {
 						return err
 					}
-					fmt.Printf("DomainPut: %x, %d\n", []byte(key), &a.Balance)
 					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 						return err
 					}
@@ -165,7 +164,6 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		}
 	}
 
-	fmt.Printf("applyState %d\n", len(txTask.BalanceIncreaseSet))
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
@@ -182,12 +180,10 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			fmt.Printf("+applied1 %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, nil, enc0); err != nil {
 				return err
 			}
 		} else {
-			fmt.Printf("+applied2 %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 			enc1 := accounts.SerialiseV3(&acc)
 			if err := domains.DomainPut(kv.AccountsDomain, addrBytes, nil, enc1, enc0); err != nil {
 				return err
@@ -263,6 +259,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 				if err := accounts.DeserialiseV3(&acc, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
+				fmt.Printf("[dbg] HistoryRange: %x, n=%d\n", k, acc.Nonce)
 				var address common.Address
 				copy(address[:], k)
 
@@ -366,7 +363,7 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:         rs,
 		writeLists: newWriteList(),
-		trace:      true,
+		//trace:      true,
 	}
 }
 
@@ -468,8 +465,8 @@ type StateReaderV3 struct {
 
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
+		//trace:     true,
 		rs:        rs,
-		trace:     false,
 		readLists: newReadList(),
 	}
 }

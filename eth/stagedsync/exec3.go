@@ -696,6 +696,9 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 			}
+			if txTask.HistoryExecution {
+				panic(1)
+			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
@@ -1119,7 +1122,6 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 		if err := rs.ApplyLogsAndTraces4(txTask, rs.Domains()); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		processedBlockNum = txTask.BlockNum
 		stopedAtBlockEnd = txTask.Final
 		if forceStopAtBlockEnd && txTask.Final {

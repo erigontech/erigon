@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -106,7 +105,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
-		trace:             true,
+		//trace:             true,
 	}
 }
 
@@ -511,12 +510,10 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-		fmt.Printf("balanceIncreaseTransfer set to true: %x, %d + %d, %s\n", addr, &object.data.Balance, &bi.increase, dbg.Stack())
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
-	fmt.Printf("setStateObject res %x, %d\n", addr, &object.data.Balance)
 	sdb.stateObjects[addr] = object
 }
 
@@ -739,10 +736,8 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 }
 
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
-	fmt.Printf("make balance increase set: %d\n", len(sdb.balanceInc))
 	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
-		fmt.Printf("make balance increase set: %x, %t\n", addr, bi.transferred)
 		if !bi.transferred {
 			s[addr] = bi.increase
 		}
