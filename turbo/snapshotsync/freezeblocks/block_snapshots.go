@@ -2021,7 +2021,7 @@ func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blo
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(segmentFilePath)
+	d, err := compress.NewDecompressor(join.Path(snapDir, segmentFilePath))
 	if err != nil {
 		return err
 	}
