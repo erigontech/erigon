@@ -380,7 +380,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			return err
 		}
 		if obj == nil {
-			if err := sn.AddWord(nil); err != nil {
+			if err := sn.AddWord([]byte{0xff}); err != nil {
 				return err
 			}
 			continue
