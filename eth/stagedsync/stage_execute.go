@@ -455,6 +455,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, cfg.engine, false)
 		defer clean()
 	}
+	fmt.Printf("exec: %d -> %d\n", stageProgress+1, to)
 
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
