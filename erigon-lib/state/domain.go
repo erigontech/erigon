@@ -1982,7 +1982,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 	if k, v, err = keysCursor.Seek(prefix); err != nil {
 		return err
 	}
-	fmt.Printf("kkkkk3: %x,%x\n", k, v)
 	if k != nil && bytes.HasPrefix(k, prefix) {
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
@@ -2008,7 +2007,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val := cursor.Value()
-				fmt.Printf("kkkkk2: %x,%x\n", key, val)
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 			}
 		} else {
@@ -2023,7 +2021,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 			dc.d.stats.FilesQueries.Add(1)
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val, lofft := g.Next(nil)
-				fmt.Printf("kkkkk1: %x,%x\n", key, val)
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: g, latestOffset: lofft, key: key, val: val, endTxNum: item.endTxNum, reverse: true})
 			}
 		}
@@ -2074,7 +2071,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				if err != nil {
 					return err
 				}
-				fmt.Printf("kkkkk: %x,%x\n", k, v)
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = k
 					keySuffix := make([]byte, len(k)+8)
