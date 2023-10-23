@@ -102,7 +102,7 @@ func (s *beaconBlockSegments) View(f func(segments []*BeaconBlockSegment) error)
 	return f(s.segments)
 }
 
-func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -121,7 +121,7 @@ func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blo
 	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
 
-	if err := Idx(ctx, d, blockFrom, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, d, sn.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
@@ -348,7 +348,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			return err
 		}
 		if obj == nil {
-			if err := sn.AddWord([]byte{0xff}); err != nil {
+			if err := sn.AddWord(nil); err != nil {
 				return err
 			}
 			continue
@@ -367,7 +367,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return BeaconBlocksIdx(ctx, segName, fromSlot, toSlot, snapDir, tmpDir, p, lvl, logger)
+	return BeaconBlocksIdx(ctx, f, segName, fromSlot, toSlot, snapDir, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
