@@ -15,10 +15,9 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 
@@ -898,14 +897,6 @@ Loop:
 
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
-	if b != nil {
-		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
-		if err != nil {
-			return err
-		}
-	} else {
-		fmt.Printf("[dbg] mmmm... do we need action here????\n")
-	}
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
@@ -923,6 +914,16 @@ Loop:
 			return fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
+
+	if b != nil {
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		if err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("[dbg] mmmm... do we need action here????\n")
+	}
+
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
 			return err
@@ -935,9 +936,18 @@ Loop:
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains, blockNum uint64, histV3 bool) {
+func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		panic(err)
+	}
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
 	fmt.Printf("[dbg] plain state: %d\n", blockNum)
 	defer fmt.Printf("[dbg] plain state end\n")
+
 	if !histV3 {
 		if err := tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
 			if len(k) == 20 {
@@ -1029,22 +1039,13 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 		hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber
-	if maxBlockNum <= minBlockNum {
-		return false, nil
-	}
+	if maxBlockNum > minBlockNum {
+		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
+		//unwindTo := maxBlockNum - 1
 
-	// Binary search, but not too deep
-	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
-	unwindTo := maxBlockNum - jump
-
-	// protect from too far unwind
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
-	if err != nil {
-		return false, err
+		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	}
-	unwindTo = cmp.Max(unwindTo, unwindToLimit)
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 
