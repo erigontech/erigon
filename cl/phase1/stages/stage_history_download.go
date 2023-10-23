@@ -170,7 +170,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"kbps/sec", fmt.Sprintf("%.1f", float64(bytesReadIn15Seconds.Load())/(1000*15)),
+					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadIn15Seconds.Load())/(1000*1000*15)),
 					"peers", peerCount)
 				logger.Info("Downloading History", logArgs...)
 			case <-finishCh:
