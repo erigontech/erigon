@@ -442,7 +442,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started chain download", "chain", c.Chain)
+	log.Info("Started the checking process", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
@@ -473,10 +473,12 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			return err
 		}
 		if data == nil {
+			log.Info("Block not found", i)
 			continue
 		}
 		blk := data.Data
 		if blk == nil {
+			log.Info("Block not found", i)
 			continue
 		}
 		// first thing if the block is bellatrix update the mock block reader
