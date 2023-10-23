@@ -66,7 +66,7 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
 		for key, value := range statisticsArray {
 			peer := PeerResponse{
-				ENR:      "",
+				ENR:      "", //TODO: find a way how to get missing data
 				Enode:    "",
 				ID:       key,
 				Name:     "",
