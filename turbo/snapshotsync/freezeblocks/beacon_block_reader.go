@@ -2,6 +2,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -37,7 +38,11 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if err != nil {
 		return nil, err
 	}
-	return snapshot_format.ReadBlockFromSnapshot(bytes.NewBuffer(buf), r.eth1Getter, r.cfg)
+	if buf == nil {
+		return nil, nil
+	}
+	fmt.Println(len(buf))
+	return snapshot_format.ReadBlockFromSnapshot(bytes.NewReader(buf), r.eth1Getter, r.cfg)
 }
 
 func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
