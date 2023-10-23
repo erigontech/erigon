@@ -492,7 +492,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		}
 		blk2, err := snReader.ReadBlock(i)
 		if err != nil {
-			log.Error("Error detected", "err", err, "slot", i)
+			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
 			return nil
 		}
 		hash1, _ := blk.HashSSZ()
