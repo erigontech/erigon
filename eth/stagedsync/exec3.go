@@ -593,7 +593,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -908,9 +908,6 @@ Loop:
 		if err != nil {
 			return err
 		}
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return err
-		}
 	} else {
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
@@ -1017,6 +1014,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
+		if err := doms.Flush(ctx, applyTx); err != nil {
+			return false, err
+		}
 		return true, nil
 	}
 	/* uncomment it when need to debug state-root mismatch
