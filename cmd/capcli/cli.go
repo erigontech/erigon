@@ -459,6 +459,11 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+
 	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
