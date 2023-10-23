@@ -784,7 +784,7 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//if ok, err := flushAndCheckCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 			//	return err
 			//} else if !ok {
 			//	break Loop
@@ -809,7 +809,7 @@ Loop:
 				var t1, t3, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
-				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -903,20 +903,10 @@ Loop:
 			return err
 		}
 		waitWorkers()
-	} else {
-		if err = doms.Flush(ctx, applyTx); err != nil {
-			return err
-		}
-		if err = execStage.Update(applyTx, stageProgress); err != nil {
-			return err
-		}
-		if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
-			return fmt.Errorf("writing plain state version: %w", err)
-		}
 	}
 
 	if b != nil {
-		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, doms, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
 		if err != nil {
 			return err
 		}
@@ -1001,8 +991,19 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 	}
 }
 
-// applyTx is required only for debugging
-func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+// flushAndCheckCommitmentV3 - does write state to db and then check commitment
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder) (bool, error) {
+	if !parallel {
+		if err := doms.Flush(ctx, applyTx); err != nil {
+			return false, err
+		}
+		if err := e.Update(applyTx, maxBlockNum); err != nil {
+			return false, err
+		}
+		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
+			return false, fmt.Errorf("writing plain state version: %w", err)
+		}
+	}
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
@@ -1032,11 +1033,11 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, doms *state2.Share
 	}
 	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-	if badBlockHalt {
+	if cfg.badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
 	}
-	if hd != nil {
-		hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+	if cfg.hd != nil {
+		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
