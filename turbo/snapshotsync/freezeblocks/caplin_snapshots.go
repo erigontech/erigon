@@ -289,7 +289,6 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(files)
 	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
