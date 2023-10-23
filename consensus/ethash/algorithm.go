@@ -18,6 +18,7 @@ package ethash
 
 import (
 	"encoding/binary"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"hash"
 	"math/big"
 	"reflect"
@@ -135,7 +136,7 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := common.NewHasher()
+	h := common2.NewHasher()
 
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
@@ -151,7 +152,7 @@ func seedHash(block uint64) []byte {
 		}
 	}
 
-	common.ReturnHasherToPool(h)
+	common2.ReturnHasherToPool(h)
 
 	return seed
 }

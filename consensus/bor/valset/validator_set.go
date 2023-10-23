@@ -320,6 +320,7 @@ func (vals *ValidatorSet) TotalVotingPower(logger log.Logger) int64 {
 // is returned.
 func (vals *ValidatorSet) GetProposer() (proposer *Validator) {
 	if len(vals.Validators) == 0 {
+		fmt.Printf("GetProposer - no validator\n")
 		return nil
 	}
 

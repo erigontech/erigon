@@ -23,11 +23,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -39,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -48,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -511,6 +511,10 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	var withdrawals []*types.Withdrawal
 	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
 		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsAgra(g.Number) {
+		withdrawals = nil
 	}
 
 	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {

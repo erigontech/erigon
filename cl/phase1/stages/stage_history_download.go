@@ -2,10 +2,11 @@ package stages
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -33,14 +33,14 @@ type StageHistoryReconstructionCfg struct {
 	startingSlot uint64
 	tmpdir       string
 	db           persistence.BeaconChainDatabase
-	indiciesDB   *sql.DB
+	indiciesDB   kv.RwDB
 	engine       execution_client.ExecutionEngine
 	logger       log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB *sql.DB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:   genesisCfg,
 		beaconCfg:    beaconCfg,
@@ -83,7 +83,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
-	tx, err := cfg.indiciesDB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+			if err := cfg.db.WriteBlock(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
@@ -121,7 +121,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
-
 		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
 	})
 	prevProgress := cfg.downloader.Progress()
@@ -133,7 +132,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		for {
 			select {
 			case <-logInterval.C:
-				if cfg.engine.SupportInsertion() {
+				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(); !ready {
 						if err != nil {
 							log.Warn("could not log progress", "err", err)

@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-call_type=CALL-call_value=1-valid_input=True-call_gas=100000-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -131,7 +131,7 @@
     },
     "001-fork=Cancun-call_type=CALL-call_value=1-valid_input=True-call_gas=100001-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -261,7 +261,7 @@
     },
     "002-fork=Cancun-call_type=CALL-call_value=0-valid_input=True-call_gas=100000-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -391,7 +391,7 @@
     },
     "003-fork=Cancun-call_type=CALL-call_value=0-valid_input=True-call_gas=100001-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -521,7 +521,7 @@
     },
     "004-fork=Cancun-call_type=CALLCODE-call_value=0-valid_input=False-call_gas=100000-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -646,7 +646,7 @@
     },
     "005-fork=Cancun-call_type=CALLCODE-call_value=0-valid_input=False-call_gas=100001-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -771,7 +771,7 @@
     },
     "006-fork=Cancun-call_type=CALLCODE-call_value=0-valid_input=False-call_gas=99999-valid_call=False": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -896,7 +896,7 @@
     },
     "007-fork=Cancun-call_type=DELEGATECALL-call_value=0-valid_input=False-call_gas=100000-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -1021,7 +1021,7 @@
     },
     "008-fork=Cancun-call_type=DELEGATECALL-call_value=0-valid_input=False-call_gas=100001-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -1146,7 +1146,7 @@
     },
     "009-fork=Cancun-call_type=DELEGATECALL-call_value=0-valid_input=False-call_gas=99999-valid_call=False": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -1271,7 +1271,7 @@
     },
     "010-fork=Cancun-call_type=STATICCALL-call_value=0-valid_input=True-call_gas=100000-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },
@@ -1401,7 +1401,7 @@
     },
     "011-fork=Cancun-call_type=STATICCALL-call_value=0-valid_input=True-call_gas=100001-valid_call=True": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4788.md",
             "reference-spec-version": "e7608fe8ac8a60934ca874f5aab7d5c1f4ff7782"
         },

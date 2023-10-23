@@ -2,11 +2,11 @@ package requests
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 

@@ -2,12 +2,12 @@ package main
 
 import (
 	"flag"
-
-	"github.com/ledgerwatch/erigon/metrics"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+
+	"github.com/ledgerwatch/erigon/turbo/debug"
+
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"

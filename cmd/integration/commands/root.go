@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -63,9 +62,9 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB).Accede()
-	if label == kv.ChainDB {
-		opts = opts.MapSize(8 * datasize.TB)
-	}
+	//if label == kv.ChainDB {
+	//	opts = opts.MapSize(8 * datasize.TB)
+	//}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}

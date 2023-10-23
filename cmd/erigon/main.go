@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/diagnostics"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli/v2"

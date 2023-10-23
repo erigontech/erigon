@@ -4,12 +4,14 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,9 +36,12 @@ type ForkChoiceStore struct {
 	proposerBoostRoot             libcommon.Hash
 	headHash                      libcommon.Hash
 	headSlot                      uint64
+	genesisTime                   uint64
+	childrens                     map[libcommon.Hash]childrens
+
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies map[uint64]struct{}
-	forkGraph            *fork_graph.ForkGraph
+	forkGraph            fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates map[checkpointComparable]*checkpointState // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages   map[uint64]*LatestMessage
@@ -50,6 +55,7 @@ type ForkChoiceStore struct {
 	recorder freezer.Freezer
 	// operations pool
 	operationsPool pool.OperationsPool
+	beaconCfg      *clparams.BeaconChainConfig
 }
 
 type LatestMessage struct {
@@ -57,8 +63,13 @@ type LatestMessage struct {
 	Root  libcommon.Hash
 }
 
+type childrens struct {
+	childrenHashes []libcommon.Hash
+	parentSlot     uint64 // we keep this one for pruning
+}
+
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, enabledPruning bool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -89,7 +100,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		finalizedCheckpoint:           anchorCheckpoint.Copy(),
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     fork_graph.New(anchorState, enabledPruning),
+		forkGraph:                     forkGraph,
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              make(map[checkpointComparable]*checkpointState),
@@ -98,6 +109,9 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		recorder:                      recorder,
 		operationsPool:                operationsPool,
 		anchorPublicKeys:              anchorPublicKeys,
+		genesisTime:                   anchorState.GenesisTime(),
+		beaconCfg:                     anchorState.BeaconConfig(),
+		childrens:                     make(map[libcommon.Hash]childrens),
 	}, nil
 }
 
@@ -106,6 +120,28 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestSeen
+}
+
+func (f *ForkChoiceStore) children(parent libcommon.Hash) []libcommon.Hash {
+	children, ok := f.childrens[parent]
+	if !ok {
+		return nil
+	}
+	return children.childrenHashes
+}
+
+// updateChildren adds a new child to the parent node hash.
+func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child libcommon.Hash) {
+	c, ok := f.childrens[parent]
+	if !ok {
+		c = childrens{}
+	}
+	c.parentSlot = parentSlot // can be innacurate.
+	if slices.Contains(c.childrenHashes, child) {
+		return
+	}
+	c.childrenHashes = append(c.childrenHashes, child)
+	f.childrens[parent] = c
 }
 
 // AdvanceHighestSeen advances the highest seen block by n and returns the new slot after the change

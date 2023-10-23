@@ -234,7 +234,7 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 
 		jobs <- &regeneratePedersenCodeJob{
 			address: libcommon.BytesToAddress(k),
-			code:    common.CopyBytes(code),
+			code:    libcommon.CopyBytes(code),
 		}
 		select {
 		case <-logInterval.C:

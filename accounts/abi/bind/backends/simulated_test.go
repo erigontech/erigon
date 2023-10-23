@@ -467,7 +467,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      0,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     common.Hex2Bytes("d8b98391"),
+			Data:     libcommon.Hex2Bytes("d8b98391"),
 		}, 0, errors.New("execution reverted: revert reason"), "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d72657665727420726561736f6e00000000000000000000000000000000000000"},
 
 		{"PureRevert", ethereum.CallMsg{
@@ -476,7 +476,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      0,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     common.Hex2Bytes("aa8b1d30"),
+			Data:     libcommon.Hex2Bytes("aa8b1d30"),
 		}, 0, errors.New("execution reverted"), nil},
 
 		{"OOG", ethereum.CallMsg{
@@ -485,7 +485,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     common.Hex2Bytes("50f6fe34"),
+			Data:     libcommon.Hex2Bytes("50f6fe34"),
 		}, 0, errors.New("gas required exceeds allowance (100000)"), nil},
 
 		{"Assert", ethereum.CallMsg{
@@ -494,7 +494,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     common.Hex2Bytes("b9b046f9"),
+			Data:     libcommon.Hex2Bytes("b9b046f9"),
 		}, 0, errors.New("invalid opcode: INVALID"), nil},
 
 		{"Valid", ethereum.CallMsg{
@@ -503,7 +503,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     common.Hex2Bytes("e09fface"),
+			Data:     libcommon.Hex2Bytes("e09fface"),
 		}, 21275, nil, nil},
 	}
 	for _, c := range cases {

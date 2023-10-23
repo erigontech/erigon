@@ -2,8 +2,6 @@ package caplin1
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"os"
 	"path"
 	"time"
@@ -12,49 +10,52 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
-	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
-	rawBeaconChain persistence.RawBeaconBlockChain,
+	rawBeaconChain persistence2.RawBeaconBlockChain,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
-) (persistence.BeaconChainDatabase, *sql.DB, error) {
+	wipeout bool,
+) (persistence.BeaconChainDatabase, kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
-	os.Remove(dataDirIndexer)
-	os.MkdirAll(dbPath, 0700)
-
-	db, err := sql.Open("sqlite", dataDirIndexer)
-	if err != nil {
-		return nil, nil, err
+	if wipeout {
+		os.RemoveAll(dataDirIndexer)
 	}
 
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: false})
+	os.MkdirAll(dbPath, 0700)
+
+	db := mdbx.MustOpen(dataDirIndexer)
+
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
 
-	if err := sql_migrations.ApplyMigrations(ctx, tx); err != nil {
-		return nil, nil, err
-	}
 	if err := db_config.WriteConfigurationIfNotExist(ctx, tx, databaseConfig); err != nil {
 		return nil, nil, err
 	}
@@ -68,15 +69,14 @@ func OpenCaplinDatabase(ctx context.Context,
 			db.Close() // close sql database here
 		}()
 	}
-	return persistence.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
+	return persistence2.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration) error {
-	caplinDBPath := path.Join(dirs.CaplinIndexing, "db")
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, caplinDBPath)
-	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinHistory, engine)
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, sqlDB, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine, true)
 	if err != nil {
 		return err
 	}
@@ -88,13 +88,21 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	logger := log.New("app", "caplin")
 
 	if caplinFreezer != nil {
-		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
+		if err := freezer2.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
 			return err
 		}
 	}
 	pool := pool.NewOperationsPool(beaconConfig)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, true)
+	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
+	os.RemoveAll(caplinFcuPath)
+	err = os.MkdirAll(caplinFcuPath, 0o755)
+	if err != nil {
+		return err
+	}
+	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
+
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs))
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -108,7 +116,6 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		return true
 	})
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer)
-	fmt.Println("A")
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(50 * time.Millisecond)
@@ -151,7 +158,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}()
 	}
 
-	tx, err := sqlDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := sqlDB.BeginRo(ctx)
 	if err != nil {
 		return err
 	}

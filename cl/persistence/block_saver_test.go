@@ -2,16 +2,16 @@ package persistence
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	_ "embed"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/sql_migrations"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -98,26 +98,9 @@ func getTestBlock() *cltypes.SignedBeaconBlock {
 	return bcBlock
 }
 
-func setupStore(t *testing.T, full bool) (BeaconChainDatabase, *sql.DB, execution_client.ExecutionEngine) {
+func setupStore(t *testing.T, full bool) (BeaconChainDatabase, kv.RwDB, execution_client.ExecutionEngine) {
 	// Open an in-memory SQLite database for testing
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-
-	// Start a transaction for testing
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Failed to start transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	// Call ApplyMigrations with the test transaction
-	err = sql_migrations.ApplyMigrations(context.Background(), tx)
-	if err != nil {
-		t.Fatalf("ApplyMigrations failed: %v", err)
-	}
-	tx.Commit()
+	db := memdb.NewTestDB(t)
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 	engine := newMockEngine()
@@ -128,28 +111,28 @@ func TestBlockSaverStoreLoadPurgeFull(t *testing.T) {
 	store, db, _ := setupStore(t, true)
 	defer db.Close()
 
-	tx, _ := db.Begin()
+	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
 	ctx := context.Background()
 	block := getTestBlock()
-	require.NoError(t, store.WriteBlock(tx, ctx, block, true))
+	require.NoError(t, store.WriteBlock(ctx, tx, block, true))
 
-	blks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
+	blks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
-	require.Equal(t, len(blks), 1)
+	require.Equal(t, len(blks.Data), 1)
 
 	expectedRoot, err := block.HashSSZ()
 	require.NoError(t, err)
 
-	haveRoot, err := blks[0].Data.HashSSZ()
+	haveRoot, err := blks.Data[0].HashSSZ()
 	require.NoError(t, err)
 
 	require.Equal(t, expectedRoot, haveRoot)
 
-	require.NoError(t, store.PurgeRange(tx, ctx, 0, 99999999999)) // THE PUURGE
+	require.NoError(t, store.PurgeRange(ctx, tx, 0, 99999999999)) // THE PUURGE
 
-	newBlks, err := store.GetRange(tx, context.Background(), block.Block.Slot, 1)
+	newBlks, err := store.GetRange(context.Background(), tx, block.Block.Slot, 1)
 	require.NoError(t, err)
-	require.Equal(t, len(newBlks), 0)
+	require.Equal(t, len(newBlks.Data), 0)
 }
