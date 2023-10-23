@@ -914,11 +914,13 @@ func (p *TxPool) isAgra() bool {
 	}
 	defer tx.Rollback()
 
-	now, err := chain.CurrentBlockNumber(tx)
+	head_block, err := chain.CurrentBlockNumber(tx)
 	if err != nil {
 		return false
 	}
-	activated := *now >= agraBlock
+	// A new block is built on top of the head block, so when the head is agraBlock-1,
+	// the new block should use the Agra rules.
+	activated := (*head_block + 1) >= agraBlock
 	if activated {
 		p.isPostAgra.Swap(true)
 	}
