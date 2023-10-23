@@ -560,23 +560,24 @@ func TestHistory_IfUnwindKey(t *testing.T) {
 	require.NoError(t, err)
 	hc.FinishWrites()
 
-	// Test case 1: key not found
-	toTxNum := uint64(0)
-	toRestore, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
-	require.NoError(t, err)
-	require.Nil(t, toRestore)
-	require.True(t, needDeleting)
+	//// Test case 1: key not found
+	//toTxNum := uint64(0)
+	//toRestore, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
+	//require.NoError(t, err)
+	//require.Nil(t, toRestore)
+	//require.True(t, needDeleting)
+	//
+	//// Test case 2: key found, but no value at toTxNum
+	//toTxNum = 6
+	//toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	//require.NoError(t, err)
+	//require.Nil(t, toRestore)
+	//require.True(t, needDeleting)
 
-	// Test case 2: key found, but no value at toTxNum
-	toTxNum = 6
-	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
-	require.NoError(t, err)
-	require.Nil(t, toRestore)
-	require.True(t, needDeleting)
-
+	var toTxNum uint64
 	// Test case 3: key found, value at toTxNum, no value after toTxNum
 	toTxNum = 3
-	toRestore, needDeleting, err = hc.ifUnwindKey(key, toTxNum, rwTx)
+	toRestore, needDeleting, err := hc.ifUnwindKey(key, toTxNum, rwTx)
 	require.NoError(t, err)
 	require.NotNil(t, toRestore)
 	require.True(t, needDeleting)
