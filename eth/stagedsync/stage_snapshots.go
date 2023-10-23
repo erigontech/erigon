@@ -420,6 +420,7 @@ type snapshotUploader struct {
 	frozenBlockLimit uint64
 	remoteHashes     map[string]interface{}
 	uploadScheduled  atomic.Bool
+	uploading        atomic.Bool
 }
 
 func (u *snapshotUploader) init(ctx context.Context, s *PruneState, logger log.Logger) {
@@ -644,18 +645,19 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 }
 
 func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger) {
-	ok := u.uploadScheduled.CompareAndSwap(false, true)
-
-	if !ok {
+	if !u.uploadScheduled.CompareAndSwap(false, true) {
 		return
 	}
 
-	go func() {
-		for u.uploadScheduled.Load() {
-			u.uploadScheduled.Store(false)
-			u.upload(ctx, logger)
-		}
-	}()
+	if u.uploading.CompareAndSwap(false, true) {
+		go func() {
+			defer u.uploading.Store(false)
+			for u.uploadScheduled.Load() {
+				u.uploadScheduled.Store(false)
+				u.upload(ctx, logger)
+			}
+		}()
+	}
 }
 
 func (u *snapshotUploader) removeBefore(before uint64) {
