@@ -1118,6 +1118,27 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return res
 }
 
+func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, missingSnapshots, err
+	}
+	{
+		var l []snaptype.FileInfo
+		var m []Range
+		for _, f := range list {
+			if f.T != snaptype.BeaconBlocks {
+				continue
+			}
+			l = append(l, f)
+		}
+		l, m = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		res = append(res, l...)
+		missingSnapshots = append(missingSnapshots, m...)
+	}
+	return res, missingSnapshots, nil
+}
+
 func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
@@ -2009,71 +2030,6 @@ RETRY:
 			goto RETRY
 		}
 		return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
-	}
-
-	return nil
-}
-
-func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BeaconBlocks.String()))
-
-	var baseSpanId uint64
-	if blockFrom > zerothSpanEnd {
-		baseSpanId = 1 + (blockFrom-zerothSpanEnd-1)/spanLength
-	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      d.Count() > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
-		BaseDataID: baseSpanId,
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g.Reset(0)
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
 	}
 
 	return nil

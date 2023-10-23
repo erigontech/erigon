@@ -201,3 +201,74 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 
 	return block, block.DecodeSSZ(plainSSZ, int(v))
 }
+
+func ReadRawBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) ([]byte, error) {
+	plainSSZ := []byte{}
+
+	// Metadata section is just the current hardfork of the block. TODO(give it a useful purpose)
+	v, err := readMetadataForBlock(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read the first chunk
+	chunk1, dT1, err := chunk_encoding.ReadChunk(r)
+	if err != nil {
+		return nil, err
+	}
+	if dT1 != chunk_encoding.ChunkDataType {
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 1 type %d, expected: %d", dT1, chunk_encoding.ChunkDataType)
+	}
+	plainSSZ = append(plainSSZ, chunk1...)
+	// Read the attestation chunk (2nd chunk)
+	chunk2, dT2, err := chunk_encoding.ReadChunk(snappy.NewReader(r))
+	if err != nil {
+		return nil, err
+	}
+	if dT2 != chunk_encoding.ChunkDataType {
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 2 type %d, expected: %d", dT2, chunk_encoding.ChunkDataType)
+	}
+	plainSSZ = append(plainSSZ, chunk2...)
+	// Read the 3rd chunk
+	chunk3, dT3, err := chunk_encoding.ReadChunk(r)
+	if err != nil {
+		return nil, err
+	}
+	if dT3 != chunk_encoding.ChunkDataType {
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 3 type %d, expected: %d", dT3, chunk_encoding.ChunkDataType)
+	}
+	plainSSZ = append(plainSSZ, chunk3...)
+	if v <= clparams.AltairVersion {
+		return plainSSZ, nil
+	}
+	// Read the block pointer and retrieve chunk4 from the execution reader
+	blockPointer, err := readExecutionBlockPtr(r)
+	if err != nil {
+		return nil, err
+	}
+	executionBlock, err := executionReader.BlockByNumber(blockPointer)
+	if err != nil {
+		return nil, err
+	}
+	// Read the 4th chunk
+	chunk4, err := executionBlock.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	plainSSZ = append(plainSSZ, chunk4...)
+	if v <= clparams.BellatrixVersion {
+		return plainSSZ, nil
+	}
+
+	// Read the 5h chunk
+	chunk5, dT5, err := chunk_encoding.ReadChunk(r)
+	if err != nil {
+		return nil, err
+	}
+	if dT5 != chunk_encoding.ChunkDataType {
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 5 type %d, expected: %d", dT5, chunk_encoding.ChunkDataType)
+	}
+	plainSSZ = append(plainSSZ, chunk5...)
+
+	return plainSSZ, nil
+}

@@ -43,19 +43,11 @@ func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
 	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock}
 }
 
-type TestBlockReader struct {
-	Block *cltypes.Eth1Block
-}
-
-func (t *TestBlockReader) BlockByNumber(number uint64) (*cltypes.Eth1Block, error) {
-	return t.Block, nil
-}
-
 func TestBlockSnapshotEncoding(t *testing.T) {
 	for _, blk := range getTestBlocks(t) {
-		var br TestBlockReader
+		var br snapshot_format.MockBlockReader
 		if blk.Version() >= clparams.BellatrixVersion {
-			br = TestBlockReader{Block: blk.Block.Body.ExecutionPayload}
+			br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}
 		}
 		var b bytes.Buffer
 		require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
