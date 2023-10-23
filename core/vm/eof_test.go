@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestEOFMarshaling(t *testing.T) {
@@ -31,7 +31,7 @@ func TestEOFMarshaling(t *testing.T) {
 		{
 			want: Container{
 				Types: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 1}},
-				Code:  [][]byte{common.Hex2Bytes("604200")},
+				Code:  [][]byte{libcommon.Hex2Bytes("604200")},
 				Data:  []byte{0x01, 0x02, 0x03},
 			},
 		},
@@ -43,9 +43,9 @@ func TestEOFMarshaling(t *testing.T) {
 					{Input: 1, Output: 1, MaxStackHeight: 1},
 				},
 				Code: [][]byte{
-					common.Hex2Bytes("604200"),
-					common.Hex2Bytes("6042604200"),
-					common.Hex2Bytes("00"),
+					libcommon.Hex2Bytes("604200"),
+					libcommon.Hex2Bytes("6042604200"),
+					libcommon.Hex2Bytes("00"),
 				},
 				Data: []byte{},
 			},
