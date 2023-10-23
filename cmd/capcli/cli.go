@@ -467,7 +467,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
-	_ = csn.ReopenFolder()
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
 
 	br := &snapshot_format.MockBlockReader{}
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br)
@@ -493,6 +495,10 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		blk2, err := snReader.ReadBlock(i)
 		if err != nil {
 			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
+			return nil
+		}
+		if blk2 == nil {
+			log.Error("Block not found in snapshot", "slot", i)
 			return nil
 		}
 		hash1, _ := blk.HashSSZ()
