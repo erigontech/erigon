@@ -868,14 +868,16 @@ func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.aggCtx.account.FinishWrites()
-	sd.aggCtx.storage.FinishWrites()
-	sd.aggCtx.code.FinishWrites()
-	sd.aggCtx.commitment.FinishWrites()
-	sd.aggCtx.logAddrs.FinishWrites()
-	sd.aggCtx.logTopics.FinishWrites()
-	sd.aggCtx.tracesFrom.FinishWrites()
-	sd.aggCtx.tracesTo.FinishWrites()
+	if sd.aggCtx != nil {
+		sd.aggCtx.account.FinishWrites()
+		sd.aggCtx.storage.FinishWrites()
+		sd.aggCtx.code.FinishWrites()
+		sd.aggCtx.commitment.FinishWrites()
+		sd.aggCtx.logAddrs.FinishWrites()
+		sd.aggCtx.logTopics.FinishWrites()
+		sd.aggCtx.tracesFrom.FinishWrites()
+		sd.aggCtx.tracesTo.FinishWrites()
+	}
 }
 
 func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {
