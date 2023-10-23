@@ -108,60 +108,28 @@ func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blo
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
+	num := make([]byte, 8)
+
 	// Calculate how many records there will be in the index
 	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BeaconBlocks.String()))
 
-	var baseSpanId uint64
-	if blockFrom > zerothSpanEnd {
-		baseSpanId = 1 + (blockFrom-zerothSpanEnd-1)/spanLength
-	}
+	_, fname := filepath.Split(segmentFilePath)
+	p.Name.Store(&fname)
+	p.Total.Store(uint64(d.Count()))
 
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      d.Count() > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
-		BaseDataID: baseSpanId,
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g.Reset(0)
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
+	if err := Idx(ctx, d, blockFrom, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		p.Processed.Add(1)
+		n := binary.PutUvarint(num, i)
+		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
+		return nil
+	}, logger); err != nil {
+		return fmt.Errorf("BodyNumberIdx: %w", err)
 	}
 
 	return nil
