@@ -287,7 +287,6 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 
 	for !s.IsDone() {
 		var badBlockUnwind bool
-		fmt.Printf("See unwPoint: %t\n", s.unwindPoint != nil)
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
@@ -457,7 +456,6 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
 	unwind.Reason = s.unwindReason
 
-	fmt.Printf("unwindStage: %s, %d -> %d\n", stage.ID, stageState.BlockNumber, unwind.UnwindPoint)
 	if stageState.BlockNumber <= unwind.UnwindPoint {
 		return nil
 	}
