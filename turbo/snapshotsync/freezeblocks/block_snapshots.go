@@ -1123,7 +1123,6 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
-	fmt.Println(list)
 
 	{
 		var l []snaptype.FileInfo
@@ -1134,7 +1133,8 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		fmt.Println(l)
+		l, m = noGaps(noOverlaps(l))
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
