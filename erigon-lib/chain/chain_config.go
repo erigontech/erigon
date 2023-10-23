@@ -199,6 +199,9 @@ func (c *Config) IsShanghai(time uint64) bool {
 }
 
 // IsAgra returns whether num is either equal to the Agra fork block or greater.
+// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
+// Also Agra is activated based on the block number rather than the timestamp.
+// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
 func (c *Config) IsAgra(num uint64) bool {
 	if c == nil || c.Bor == nil {
 		return false
@@ -558,10 +561,6 @@ func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
 }
 
-func (c *BorConfig) IsAgra(number uint64) bool {
-	return isForked(c.AgraBlock, number)
-}
-
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
@@ -649,11 +648,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                    *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon          bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul    bool
-	IsBerlin, IsLondon, IsShanghai, IsAgra, IsCancun, IsPrague bool
-	IsAura                                                     bool
+	ChainID                                                 *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
+	IsAura                                                  bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -674,8 +673,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time),
-		IsAgra:             c.IsAgra(num),
+		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,
