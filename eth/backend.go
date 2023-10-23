@@ -90,6 +90,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common/debug"
 
+	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
@@ -198,6 +199,7 @@ type Ethereum struct {
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
 
+	sentinel rpcsentinel.SentinelClient
 	silkworm *silkworm.Silkworm
 }
 
@@ -808,6 +810,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
+
+		backend.sentinel = client
+
 		go func() {
 			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}); err != nil {
 				logger.Error("could not start caplin", "err", err)
@@ -1206,7 +1211,18 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
+
 	return &reply, nil
+}
+
+func (s *Ethereum) DiagnosticsPeersData() []*p2p.PeerInfo {
+	var reply []*p2p.PeerInfo
+	for _, sentryServer := range s.sentryServers {
+		peers := sentryServer.DiagnosticsPeersData()
+		reply = append(reply, peers...)
+	}
+
+	return reply
 }
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
@@ -1389,4 +1405,8 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 		return err
 	})
 	return currentTD, err
+}
+
+func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
+	return s.sentinel
 }
