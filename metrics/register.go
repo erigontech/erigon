@@ -45,6 +45,9 @@ func GetOrCreateCounter(s string, isGauge ...bool) Counter {
 		counter := defaultSet.GetOrCreateGauge(s)
 		return intCounter{counter}
 	} else {
+		if counter := DefaultRegistry.Get(s); counter != nil {
+			return counter.(Counter)
+		}
 		counter := vm.GetOrCreateCounter(s, isGauge...)
 		DefaultRegistry.Register(s, counter)
 		vm.GetDefaultSet().UnregisterMetric(s)
