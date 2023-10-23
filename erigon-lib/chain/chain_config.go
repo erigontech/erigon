@@ -223,7 +223,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := calcConfig(c.BurntContract, num)
+	addr := borKeyValueConfigHelper(c.BurntContract, num)
 	return &addr
 }
 
@@ -542,11 +542,11 @@ func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return calcConfig(c.BackupMultiplier, number)
+	return borKeyValueConfigHelper(c.BackupMultiplier, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return calcConfig(c.Period, number)
+	return borKeyValueConfigHelper(c.Period, number)
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
@@ -565,48 +565,25 @@ func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
 
-func calcConfig[T uint64 | common.Address](field map[string]T, number uint64) T {
-	keys := make([]string, 0, len(field))
-	for k := range field {
-		keys = append(keys, k)
+func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
+	fieldUint := make(map[uint64]T)
+	for k, v := range field {
+		keyUint, err := strconv.ParseUint(k, 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		fieldUint[keyUint] = v
 	}
 
-	sort.Strings(keys)
+	keys := common.SortedKeys(fieldUint)
 
 	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-
-		if number >= valUint && number < valUintNext {
-			return field[keys[i]]
+		if number >= keys[i] && number < keys[i+1] {
+			return fieldUint[keys[i]]
 		}
 	}
 
-	return field[keys[len(keys)-1]]
-}
-
-func borKeyValueConfigHelper(field map[string]uint64, number uint64) uint64 {
-	keys := sortMapKeys(field)
-	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-
-		if number >= valUint && number < valUintNext {
-			return field[keys[i]]
-		}
-	}
-
-	return field[keys[len(keys)-1]]
-}
-
-func sortMapKeys(m map[string]uint64) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	return keys
+	return fieldUint[keys[len(keys)-1]]
 }
 
 type sprint struct {
