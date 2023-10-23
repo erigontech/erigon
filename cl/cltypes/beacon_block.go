@@ -94,7 +94,9 @@ func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
-	return &BeaconBody{beaconCfg: beaconCfg}
+	return &BeaconBody{
+		beaconCfg: beaconCfg,
+	}
 }
 
 // Version returns beacon block version.

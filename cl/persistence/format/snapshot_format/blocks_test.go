@@ -27,8 +27,11 @@ var capellaBlockSSZSnappy []byte
 //go:embed test_data/deneb.ssz_snappy
 var denebBlockSSZSnappy []byte
 
+var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
+	emptyBlock.EncodingSizeSSZ()
 	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
@@ -40,7 +43,7 @@ func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
 	require.NoError(t, utils.DecodeSSZSnappy(bellatrixBlock, bellatrixBlockSSZSnappy, int(clparams.BellatrixVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(altairBlock, altairBlockSSZSnappy, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(phase0Block, phase0BlockSSZSnappy, int(clparams.Phase0Version)))
-	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock}
+	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock}
 }
 
 func TestBlockSnapshotEncoding(t *testing.T) {
