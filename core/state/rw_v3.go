@@ -126,10 +126,6 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
-					a := accounts.NewAccount()
-					if err := accounts.DeserialiseV3(&a, list.Vals[i]); err != nil {
-						return err
-					}
 					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 						return err
 					}

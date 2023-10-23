@@ -1088,19 +1088,19 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 	if tnums[0].TxNum != math.MaxUint64 {
 		if tnums[1] != nil {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
-			fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
+			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
 			return toRestore, true, nil
 		}
 		if tnums[2] != nil {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
-			fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
+			//fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
 			return toRestore, true, nil
 		}
-		fmt.Printf("toRestore %x @%d [0] %x\n", key, toRestore.TxNum, toRestore.Value)
+		//fmt.Printf("toRestore %x @%d [0] %x\n", key, toRestore.TxNum, toRestore.Value)
 		// actual value is in domain and no need to delete
 		return nil, false, nil
 	}
-	fmt.Printf("toRestore NONE %x @%d ->%x [1] %+v [2] %+v\n", key, tnums[0].TxNum, tnums[0].Value, tnums[1], tnums[2])
+	//fmt.Printf("toRestore NONE %x @%d ->%x [1] %+v [2] %+v\n", key, tnums[0].TxNum, tnums[0].Value, tnums[1], tnums[2])
 	return nil, true, nil
 }
 

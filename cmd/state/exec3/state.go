@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -262,7 +261,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 	}
-	fmt.Printf("finish exec txn: %s, %d\n", txTask.Error, len(txTask.BalanceIncreaseSet))
 }
 
 func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
