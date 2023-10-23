@@ -908,6 +908,9 @@ Loop:
 		if err != nil {
 			return err
 		}
+		if err := doms.Flush(ctx, applyTx); err != nil {
+			return err
+		}
 	} else {
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
