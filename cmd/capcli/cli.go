@@ -494,7 +494,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		if blk.Version() >= clparams.BellatrixVersion {
 			br.Block = blk.Block.Body.ExecutionPayload
 		}
-		blk2, err := snReader.ReadBlock(i + 1)
+		blk2, err := snReader.ReadBlock(i)
 		if err != nil {
 			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
 			return nil
