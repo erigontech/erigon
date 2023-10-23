@@ -47,9 +47,9 @@ var CLI struct {
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 
-	Chain          Chain         `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots  DumpSnapshots `cmd:"" help:"generate caplin snapshots"`
-	CheckSnapshots DumpSnapshots `cmd:"" help:"check snapshot folder against content of chain data"`
+	Chain          Chain          `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots  DumpSnapshots  `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots CheckSnapshots `cmd:"" help:"check snapshot folder against content of chain data"`
 }
 
 type chainCfg struct {
