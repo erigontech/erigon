@@ -566,23 +566,24 @@ func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 }
 
 func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
-	keys := make([]string, 0, len(field))
-	for k := range field {
-		keys = append(keys, k)
+	fieldUint := make(map[uint64]T)
+	for k, v := range field {
+		keyUint, err := strconv.ParseUint(k, 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		fieldUint[keyUint] = v
 	}
 
-	sort.Strings(keys)
+	keys := common.SortedKeys(fieldUint)
 
 	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-
-		if number >= valUint && number < valUintNext {
-			return field[keys[i]]
+		if number >= keys[i] && number < keys[i+1] {
+			return fieldUint[keys[i]]
 		}
 	}
 
-	return field[keys[len(keys)-1]]
+	return fieldUint[keys[len(keys)-1]]
 }
 
 type sprint struct {
