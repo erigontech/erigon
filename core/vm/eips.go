@@ -379,6 +379,12 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		terminal:    true,
 	}
+	jt[JUMPF] = &operation{
+		execute:     opJumpf,
+		constantGas: GasFastStep,
+		numPop:      0,
+		numPush:     0,
+	}
 	jt[DUPN] = &operation{
 		execute:     opDupN,
 		constantGas: GasFastestStep,
@@ -478,7 +484,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	scope.ReturnStack = append(scope.ReturnStack, retCtx)
 	scope.CodeSection = uint64(idx)
 	*pc = 0
-	*pc -= 1 // hacks xD
+	// *pc -= 1 // hacks xD
 	return nil, nil
 }
 
@@ -496,6 +502,20 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if len(scope.ReturnStack) == 0 {
 		return nil, errStopToken
 	}
+	return nil, nil
+}
+
+func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		code    = scope.Contract.CodeAt(scope.CodeSection)
+		section = binary.BigEndian.Uint16(code[*pc+1:])
+		typ     = scope.Contract.Container.Types[scope.CodeSection]
+	)
+	if scope.Stack.Len()+int(typ.MaxStackHeight) >= 1024 {
+		return nil, fmt.Errorf("stack overflow")
+	}
+	scope.CodeSection = uint64(section)
+	*pc = 0
 	return nil, nil
 }
 

@@ -286,7 +286,7 @@ func parseList(b []byte, idx int) ([]int, error) {
 	return list, nil
 }
 
-// parseUint16 parses a 16 bit unsigned integer.
+// parseUint16 parses a 16 bit BigEndian unsigned integer.
 func parseUint16(b []byte) (int, error) {
 	if len(b) < 2 {
 		return 0, io.ErrUnexpectedEOF

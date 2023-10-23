@@ -91,7 +91,7 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 				}
 			}
 			i += 1 + 2*count
-		case op == CALLF:
+		case op == CALLF || op == JUMPF:
 			if i+2 >= len(code) {
 				return fmt.Errorf("%w: op %s, pos %d", ErrTruncatedImmediate, op, i)
 			}
