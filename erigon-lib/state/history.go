@@ -1035,7 +1035,8 @@ type HistoryRecord struct {
 }
 
 func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
+	it, err := hc.IdxRange(key, 0, int(txNumUnindTo+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
+	//it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
