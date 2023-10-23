@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -105,7 +106,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
-		//trace:             true,
+		trace:             true,
 	}
 }
 
@@ -313,9 +314,6 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int) {
-	if sdb.trace {
-		fmt.Printf("AddBalance %x, %d\n", addr, amount)
-	}
 	// If this account has not been read, add to the balance increment map
 	_, needAccount := sdb.stateObjects[addr]
 	if !needAccount && addr == ripemd && amount.IsZero() {
@@ -332,10 +330,16 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.balanceInc[addr] = bi
 		}
 		bi.increase.Add(&bi.increase, amount)
+		if sdb.trace {
+			fmt.Printf("AddBalance1 %x, %d -> \n", addr, amount)
+		}
 		bi.count++
 		return
 	}
 
+	if sdb.trace {
+		fmt.Printf("AddBalance2 %x, %d -> \n", addr, amount)
+	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	stateObject.AddBalance(amount)
 }
@@ -507,10 +511,12 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+		fmt.Printf("balanceIncreaseTransfer set to true: %x, %d + %d, %s\n", addr, &object.data.Balance, &bi.increase, dbg.Stack())
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
+	fmt.Printf("setStateObject res %x, %d\n", addr, &object.data.Balance)
 	sdb.stateObjects[addr] = object
 }
 
@@ -703,6 +709,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	return nil
 }
 
+func (sdb *IntraBlockState) SoftFinalise() {
+	for addr := range sdb.journal.dirties {
+		_, exist := sdb.stateObjects[addr]
+		if !exist {
+			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+			// it will persist in the journal even though the journal is reverted. In this special circumstance,
+			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
+			// Thus, we can safely ignore it here
+			continue
+		}
+		sdb.stateObjectsDirty[addr] = struct{}{}
+	}
+	// Invalidate journal because reverting across transactions is not allowed.
+	sdb.clearJournalAndRefund()
+}
+
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
@@ -715,8 +739,10 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 }
 
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
+	fmt.Printf("make balance increase set: %d\n", len(sdb.balanceInc))
 	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
+		fmt.Printf("make balance increase set: %x, %t\n", addr, bi.transferred)
 		if !bi.transferred {
 			s[addr] = bi.increase
 		}
@@ -763,7 +789,7 @@ func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal.Reset()
+	sdb.journal = newJournal()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }

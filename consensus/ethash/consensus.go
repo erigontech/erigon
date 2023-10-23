@@ -665,8 +665,11 @@ func accumulateRewards(config *chain.Config, state *state.IntraBlockState, heade
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
+			fmt.Printf("Ethash.Finalize.Uncle\n")
 			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
 		}
 	}
+	fmt.Printf("Ethash.Finalize.Coinbase\n")
 	state.AddBalance(header.Coinbase, &minerReward)
+	fmt.Printf("Ethash.Finalize.End\n")
 }

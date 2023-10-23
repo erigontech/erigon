@@ -31,9 +31,9 @@ type PlainStateWriter struct {
 
 func NewPlainStateWriter(db putDel, changeSetsDB kv.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
-		db:  db,
-		csw: NewChangeSetWriterPlain(changeSetsDB, blockNumber),
-		//trace: true,
+		db:    db,
+		csw:   NewChangeSetWriterPlain(changeSetsDB, blockNumber),
+		trace: true,
 	}
 }
 
@@ -50,7 +50,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 
 func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
@@ -111,9 +111,6 @@ func (w *PlainStateWriter) DeleteAccount(address libcommon.Address, original *ac
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
-	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
-	}
 	if w.csw != nil {
 		if err := w.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 			return err
@@ -121,6 +118,9 @@ func (w *PlainStateWriter) WriteAccountStorage(address libcommon.Address, incarn
 	}
 	if *original == *value {
 		return nil
+	}
+	if w.trace {
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 

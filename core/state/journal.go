@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -233,6 +235,7 @@ func (ch balanceIncreaseTransfer) dirtied() *libcommon.Address {
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) {
+	fmt.Printf("balanceIncreaseTransfer revert\n")
 	ch.bi.transferred = false
 }
 func (ch nonceChange) revert(s *IntraBlockState) {

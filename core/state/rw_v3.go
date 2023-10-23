@@ -126,6 +126,11 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
+					a := accounts.NewAccount()
+					if err := accounts.DeserialiseV3(&a, list.Vals[i]); err != nil {
+						return err
+					}
+					fmt.Printf("DomainPut: %x, %d\n", []byte(key), &a.Balance)
 					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 						return err
 					}
@@ -160,6 +165,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		}
 	}
 
+	fmt.Printf("applyState %d\n", len(txTask.BalanceIncreaseSet))
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
@@ -175,16 +181,17 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		var enc1 []byte
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			enc1 = nil
+			fmt.Printf("+applied1 %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
+			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, nil, enc0); err != nil {
+				return err
+			}
 		} else {
-			enc1 = accounts.SerialiseV3(&acc)
-		}
-
-		//fmt.Printf("+applied %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
-		if err := domains.DomainPut(kv.AccountsDomain, addrBytes, nil, enc1, enc0); err != nil {
-			return err
+			fmt.Printf("+applied2 %x b=%d n=%d c=%x\n", []byte(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
+			enc1 := accounts.SerialiseV3(&acc)
+			if err := domains.DomainPut(kv.AccountsDomain, addrBytes, nil, enc1, enc0); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -359,7 +366,7 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:         rs,
 		writeLists: newWriteList(),
-		//trace:      true,
+		trace:      true,
 	}
 }
 
@@ -386,7 +393,7 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
@@ -412,10 +419,10 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 }
 
 func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
-	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	if w.trace {
-		fmt.Printf("account [%x] deleted\n", address.Bytes())
+		fmt.Printf("del acc: %x\n", address)
 	}
+	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	return nil
 }
 

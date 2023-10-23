@@ -278,9 +278,11 @@ func (so *stateObject) AddBalance(amount *uint256.Int) {
 			so.touch()
 		}
 
+		fmt.Printf("AddBalance3 %d\n", new(uint256.Int).Add(so.Balance(), amount))
 		return
 	}
 
+	fmt.Printf("AddBalance4 %d\n", new(uint256.Int).Add(so.Balance(), amount))
 	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
 }
 

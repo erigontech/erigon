@@ -593,7 +593,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -912,7 +912,7 @@ Loop:
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 
-	//dumpPlainStateDebug(applyTx, doms)
+	dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {

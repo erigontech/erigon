@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -215,9 +216,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			//incorrect unwind to block 2
-			if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-				txTask.Error = err
-			}
+			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
+			//	txTask.Error = err
+			//}
 			txTask.TraceTos = map[libcommon.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
@@ -238,10 +239,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//ibs.SoftFinalise()
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
-			txTask.Error = ibs.FinalizeTx(rules, noop)
+			ibs.SoftFinalise()
+			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
@@ -261,6 +262,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 	}
+	fmt.Printf("finish exec txn: %s, %d\n", txTask.Error, len(txTask.BalanceIncreaseSet))
 }
 
 func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
