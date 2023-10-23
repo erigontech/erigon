@@ -1079,13 +1079,10 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 			return nil, false, err
 		}
 		if !ok {
-			tnums[0].TxNum = math.MaxUint64
-		} else {
-			tnums[0].Value = common.Copy(v)
+			return nil, true, nil
 		}
-	}
+		tnums[0].Value = common.Copy(v)
 
-	if tnums[0].TxNum != math.MaxUint64 {
 		if tnums[1] != nil {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
 			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)

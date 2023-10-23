@@ -12,8 +12,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -655,7 +656,16 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 		mxCommitmentBranchUpdates.Inc()
 	}
 	if saveStateAfter {
-		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash); err != nil {
+		prevState, been, err := sd.aggCtx.commitment.GetLatest(keyCommitmentState, nil, sd.roTx)
+		if err != nil {
+			return nil, err
+		}
+
+		if !been {
+			prevState = nil
+		}
+
+		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash, prevState); err != nil {
 			return nil, err
 		}
 	}

@@ -15,9 +15,10 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 
@@ -987,6 +988,22 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 				panic(err)
 			}
 			fmt.Printf("%x, %x\n", k, v)
+		}
+	}
+	{
+		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		if err != nil {
+			panic(1)
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("%x, %x\n", k, v)
+			if bytes.Equal(k, []byte("state")) {
+				fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
+			}
 		}
 	}
 }

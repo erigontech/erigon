@@ -86,7 +86,6 @@ func TestReplayTransaction(t *testing.T) {
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
-	defer t.Fail()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
