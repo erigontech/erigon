@@ -168,9 +168,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			v = nil
 		}
-		evm.captureBegin(depth == 0, STATICCALL, caller.Address(), addr, isPrecompile, input, gas, v, nil)
+		evm.captureBegin(depth == 0, typ, caller.Address(), addr, isPrecompile, input, gas, v, nil)
 		defer func(startGas uint64) {
-			evm.captureEnd(false, STATICCALL, startGas, leftOverGas, ret, err)
+			evm.captureEnd(depth == 0, typ, startGas, leftOverGas, ret, err)
 		}(gas)
 	}
 

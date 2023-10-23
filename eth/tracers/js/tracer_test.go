@@ -78,7 +78,7 @@ func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, c
 		contract.Code = contractCode
 	}
 
-	tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), gasLimit, new(uint256.Int), nil))
+	tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, nil, gasLimit, nil, nil))
 	tracer.CaptureStart(contract.Caller(), contract.Address(), false /* precompile */, false /* create */, []byte{}, startGas, value, []byte{} /* code */)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
 	tracer.CaptureEnd(ret, startGas-contract.Gas, err)

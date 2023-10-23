@@ -237,7 +237,8 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data})
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex})
+	t.logIndex++
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
