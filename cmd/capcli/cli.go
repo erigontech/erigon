@@ -494,7 +494,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		if blk.Version() >= clparams.BellatrixVersion {
 			br.Block = blk.Block.Body.ExecutionPayload
 		}
-		blk2, err := snReader.ReadBlock(i)
+		blk2, err := snReader.ReadBlock(i + 1)
 		if err != nil {
 			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
 			return nil
@@ -504,12 +504,8 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			return nil
 		}
 
-		d1, _ := blk.EncodeSSZ(nil)
-		d2, _ := blk2.EncodeSSZ(nil)
-		fmt.Println(fmt.Println(d1[:140]))
-		fmt.Println(fmt.Println(d2[:140]))
-		hash1, _ := blk.HashSSZ()
-		hash2, _ := blk2.HashSSZ()
+		hash1, _ := blk.Block.HashSSZ()
+		hash2, _ := blk2.Block.HashSSZ()
 		if hash1 != hash2 {
 			log.Error("Mismatching blocks", "slot", i, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
 			return nil
