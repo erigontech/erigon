@@ -912,7 +912,7 @@ Loop:
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 
-	dumpPlainStateDebug(applyTx, doms)
+	//dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
