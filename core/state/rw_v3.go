@@ -255,7 +255,6 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 				if err := accounts.DeserialiseV3(&acc, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
-				fmt.Printf("[dbg] HistoryRange: %x, n=%d\n", k, acc.Nonce)
 				var address common.Address
 				copy(address[:], k)
 
