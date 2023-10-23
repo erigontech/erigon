@@ -277,14 +277,12 @@ func ExecV3(ctx context.Context,
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	fmt.Printf("need adjust? %d, %d->%d, %d->%d\n", &execStage.BlockNumber, blockNum, doms.BlockNum(), inputTxNum, doms.TxNum())
 	if doms.TxNum() > inputTxNum {
 		inputTxNum = doms.TxNum()
 	}
 	if doms.BlockNum() > blockNum {
 		blockNum = doms.BlockNum()
 	}
-	fmt.Printf("after adjust: %d, %d\n", blockNum, inputTxNum)
 	outputTxNum.Store(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
