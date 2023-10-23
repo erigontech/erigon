@@ -915,7 +915,7 @@ func (p *TxPool) isAgra() bool {
 	defer tx.Rollback()
 
 	head_block, err := chain.CurrentBlockNumber(tx)
-	if err != nil {
+	if head_block == nil || err != nil {
 		return false
 	}
 	// A new block is built on top of the head block, so when the head is agraBlock-1,
