@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -501,10 +503,16 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			log.Error("Block not found in snapshot", "slot", i)
 			return nil
 		}
+
+		d1, _ := blk.EncodeSSZ(nil)
+		d2, _ := blk2.EncodeSSZ(nil)
+		fmt.Println(fmt.Println(d1[:140]))
+		fmt.Println(fmt.Println(d2[:140]))
 		hash1, _ := blk.HashSSZ()
 		hash2, _ := blk2.HashSSZ()
 		if hash1 != hash2 {
-			log.Error("Mismatching blocks", "slot", i, "datadir", hash1, "snapshot", hash2)
+			log.Error("Mismatching blocks", "slot", i, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
+			return nil
 		}
 		log.Info("Successfully checked", "slot", i)
 	}
