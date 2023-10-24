@@ -477,7 +477,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br)
 	for i := uint64(1); i < to; i++ {
 		// Read the original canonical slot
-		data, err := beaconDB.GetBlock(ctx, tx, i)
+		data, err := beaconDB.GetBlock(ctx, tx, i+1)
 		if err != nil {
 			return err
 		}
