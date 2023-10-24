@@ -359,6 +359,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		if err := sn.AddWord(buf.Bytes()); err != nil {
 			return err
 		}
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
+		}
 		buf.Reset()
 	}
 	if err := sn.Compress(); err != nil {
