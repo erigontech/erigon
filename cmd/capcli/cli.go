@@ -436,6 +436,8 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 type CheckSnapshots struct {
 	chainCfg
 	outputFolder
+
+	Slot uint64 `arg:"" name:"slot" help:"slot to check"`
 }
 
 func (c *CheckSnapshots) Run(ctx *Context) error {
@@ -475,7 +477,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	br := &snapshot_format.MockBlockReader{}
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
-	for i := uint64(0); i < to; i++ {
+	for i := uint64(c.Slot); i < to; i++ {
 		// Read the original canonical slot
 		data, err := beaconDB.GetBlock(ctx, tx, i)
 		if err != nil {
