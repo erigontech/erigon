@@ -48,6 +48,7 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	defer view.Close()
 
 	var buf []byte
+
 	seg, ok := view.BeaconBlocksSegment(slot)
 	if !ok {
 		return nil, nil
