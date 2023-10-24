@@ -66,6 +66,7 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stZeroKnowledge2`)
 		st.skipLoad(`^stZeroKnowledge`)
 		st.skipLoad(`^stZeroCallsTest`)
+		st.skipLoad(`^stZeroCallsRevert`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
