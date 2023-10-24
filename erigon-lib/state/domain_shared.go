@@ -165,6 +165,9 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	return err
 }
 
+func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, err error) {
+	return sd.Commitment.SeekCommitment(tx, sinceTx, untilTx, sd.aggCtx.commitment)
+}
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	fromTx := uint64(0)
 	toTx := uint64(math2.MaxUint64)

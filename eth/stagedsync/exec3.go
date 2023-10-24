@@ -15,6 +15,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -1062,13 +1063,27 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber
-	if maxBlockNum > minBlockNum {
-		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		//unwindTo := maxBlockNum - 1
-
-		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-		u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	if maxBlockNum <= minBlockNum {
+		return false, nil
 	}
+
+	// Binary search, but not too deep
+	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
+	unwindTo := maxBlockNum - jump
+
+	// protect from too far unwind
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
+	blockNumWithCommitment, _, err := doms.SeekCommitment2(applyTx, unwindToLimit, unwindTo)
+	if err != nil {
+		return false, err
+	}
+	unwindTo = cmp.Min(unwindTo, blockNumWithCommitment) // not all blocks have commitment
+	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 
