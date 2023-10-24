@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"math/big"
 	"net"
 	"os"
@@ -39,6 +40,7 @@ type Network struct {
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
+	BorWithMilestones  *bool
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
@@ -73,6 +75,12 @@ func (nw *Network) Start(ctx context.Context) error {
 		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
+	}
+
+	if nw.BorWithMilestones != nil {
+		baseNode.WithHeimdallMilestones = *nw.BorWithMilestones
+	} else {
+		baseNode.WithHeimdallMilestones = utils.WithHeimdallMilestones.Value
 	}
 
 	cliCtx := CliContext(ctx)

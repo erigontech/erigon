@@ -44,6 +44,7 @@ type Node struct {
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
 	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 }
 
@@ -85,6 +86,8 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.AuthRpcPort = apiPort + 4
 
 	node.Port = base.Port + nodeNumber
+
+	node.WithHeimdallMilestones = base.WithHeimdallMilestones
 
 	return nil
 }

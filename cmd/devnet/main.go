@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -364,11 +365,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 		} else {
 			var heimdallGrpc string
 			var services []devnet.Service
+			var withMilestones = utils.WithHeimdallMilestones.Value
 
 			checkpointOwner := accounts.NewAccount("checkpoint-owner")
 
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
+				// milestones are not supported yet on the local heimdall
+				withMilestones = false
 
 				if sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name)); sprintSize > 0 {
 					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
@@ -394,6 +398,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BaseRPCHost:        baseRpcHost,
 					BaseRPCPort:        baseRpcPort,
 					BorStateSyncDelay:  5 * time.Second,
+					BorWithMilestones:  &withMilestones,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
