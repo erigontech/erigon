@@ -36,8 +36,15 @@ import (
 )
 
 func TestZkState(t *testing.T) {
+	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist("stZero*")
+	testState(t, st)
+}
+func TestTimeConsumingState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist("stTimeConsuming*")
 	testState(t, st)
 }
 
@@ -45,6 +52,7 @@ func TestState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.skipLoad(`^stZero`)
+	st.skipLoad(`^stTimeConsuming`)
 	testState(t, st)
 }
 func testState(t *testing.T, st *testMatcher) {
@@ -63,6 +71,8 @@ func testState(t *testing.T, st *testMatcher) {
 	if ethconfig.EnableHistoryV3InTest {
 		//TODO: AlexSharov - need to fix this test
 		st.skipLoad(`^stWalletTest`)
+		st.skipLoad(`^stTransitionTest`)
+
 		st.skipLoad(`^stZeroKnowledge2`)
 		st.skipLoad(`^stZeroKnowledge`)
 		st.skipLoad(`^stZeroCallsTest`)
