@@ -65,7 +65,7 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	gg.Next(buf)
-	buf, _ = gg.Next(buf[:0])
+	buf, _ = gg.Next(buf)
+	fmt.Println("buf", buf[:200])
 	return buf, nil
 }
