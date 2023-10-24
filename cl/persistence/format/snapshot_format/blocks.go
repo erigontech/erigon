@@ -119,6 +119,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	plainSSZ := []byte{}
 
 	block := cltypes.NewSignedBeaconBlock(cfg)
+	fmt.Println("BX")
 	// Metadata section is just the current hardfork of the block. TODO(give it a useful purpose)
 	v, err := readMetadataForBlock(r)
 	if err != nil {
@@ -130,7 +131,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println("AX")
 	if dT1 != chunk_encoding.ChunkDataType {
 		return nil, fmt.Errorf("malformed beacon block, invalid chunk 1 type %d, expected: %d", dT1, chunk_encoding.ChunkDataType)
 	}
@@ -154,9 +155,11 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 		return nil, err
 	}
 	plainSSZ = append(plainSSZ, chunk2...)
+	fmt.Println("RX")
 	if v <= clparams.BellatrixVersion {
 		return block, block.DecodeSSZ(plainSSZ, int(v))
 	}
+	fmt.Println("FX")
 
 	// Read the 5h chunk
 	chunk3, dT5, err := chunk_encoding.ReadChunk(r)
@@ -166,6 +169,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if dT5 != chunk_encoding.ChunkDataType {
 		return nil, fmt.Errorf("malformed beacon block, invalid chunk 5 type %d, expected: %d", dT5, chunk_encoding.ChunkDataType)
 	}
+	fmt.Println("PX")
 	plainSSZ = append(plainSSZ, chunk3...)
 
 	return block, block.DecodeSSZ(plainSSZ, int(v))
