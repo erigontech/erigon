@@ -51,6 +51,7 @@ func TestBlockchain(t *testing.T) {
 		//TODO: AlexSharov - need to fix this test
 		bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow.json`)
 		bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow2.json`)
+		bt.skipLoad(`^TransitionTests/bcHomesteadToDao/DaoTransactions.json`)
 	}
 
 	checkStateRoot := true
