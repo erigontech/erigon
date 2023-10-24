@@ -127,7 +127,7 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 		}
 		if i == 0 {
 			fmt.Println(offset, i)
-			fmt.Println(word[:140])
+			fmt.Println(word[:200])
 		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
