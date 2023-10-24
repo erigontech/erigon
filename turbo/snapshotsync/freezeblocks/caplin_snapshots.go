@@ -125,6 +125,9 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 		if i%100_000 == 0 {
 			logger.Log(lvl, "Compressing beacon blocks", "progress", i)
 		}
+		if i == 0 {
+			fmt.Println(offset, i)
+		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
