@@ -367,7 +367,13 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, &buf); err != nil {
 			return err
 		}
-		if err := sn.AddWord(buf.Bytes()); err != nil {
+		word := buf.Bytes()
+
+		if i == 0 {
+			fmt.Println(word[:140])
+		}
+
+		if err := sn.AddWord(word); err != nil {
 			return err
 		}
 		buf.Reset()
