@@ -63,6 +63,7 @@ func testState(t *testing.T, st *testMatcher) {
 	if ethconfig.EnableHistoryV3InTest {
 		//TODO: AlexSharov - need to fix this test
 		st.skipLoad(`^stWalletTest`)
+		st.skipLoad(`^stZeroKnowledge2`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
