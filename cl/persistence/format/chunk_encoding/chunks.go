@@ -2,6 +2,7 @@ package chunk_encoding
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -35,6 +36,7 @@ func ReadChunk(r io.Reader) (buf []byte, t DataType, err error) {
 	}
 	t = DataType(prefix[0])
 	prefix[0] = 0
+	fmt.Println("D")
 	buf = make([]byte, binary.BigEndian.Uint64(prefix))
 	if _, err = r.Read(buf); err != nil {
 		return
