@@ -1035,7 +1035,8 @@ type HistoryRecord struct {
 }
 
 func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
+	it, err := hc.IdxRange(key, 0, int(txNumUnindTo+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
+	//it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
@@ -1078,13 +1079,10 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 			return nil, false, err
 		}
 		if !ok {
-			tnums[0].TxNum = math.MaxUint64
-		} else {
-			tnums[0].Value = common.Copy(v)
+			return nil, true, nil
 		}
-	}
+		tnums[0].Value = common.Copy(v)
 
-	if tnums[0].TxNum != math.MaxUint64 {
 		if tnums[1] != nil {
 			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
 			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
@@ -1165,6 +1163,7 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !hc.CanPrune(rwTx) {
 		return nil
 	}

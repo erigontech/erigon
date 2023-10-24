@@ -1424,8 +1424,10 @@ func TestDomain_Unwind(t *testing.T) {
 	dc.Close()
 
 	dc = d.MakeContext()
+	dc.StartWrites()
 	err = dc.Unwind(ctx, tx, 0, 5, maxTx, math.MaxUint64, nil)
 	require.NoError(t, err)
+	dc.FinishWrites()
 	dc.Close()
 
 	require.NoError(t, err)

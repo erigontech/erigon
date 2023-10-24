@@ -225,7 +225,6 @@ type DomainCommitted struct {
 	mode         CommitmentMode
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
-	prevState    []byte
 	discard      bool
 }
 
@@ -310,7 +309,7 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint64, rh []byte) error {
+func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint64, rh, prevState []byte) error {
 	state, err := d.PatriciaState()
 	if err != nil {
 		return err
@@ -324,10 +323,9 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 	if d.trace {
 		fmt.Printf("[commitment] put txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
 	}
-	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
+	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
 		return err
 	}
-	d.prevState = common.Copy(encoded)
 	return nil
 }
 
@@ -561,6 +559,7 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *
 		if d.trace {
 			fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		}
+
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}
