@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-func Bench2(erigon_url string) {
+func Bench2(erigon_url string) error {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -19,12 +19,10 @@ func Bench2(erigon_url string) {
 	blockNumTemplate := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
 	var blockNumber EthBlockNumber
 	if err := post(client, erigon_url, fmt.Sprintf(blockNumTemplate, req_id), &blockNumber); err != nil {
-		fmt.Printf("Could not get block number: %v\n", err)
-		return
+		return fmt.Errorf("Could not get block number: %v\n", err)
 	}
 	if blockNumber.Error != nil {
-		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-		return
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
@@ -35,8 +33,7 @@ func Bench2(erigon_url string) {
 		blockByNumTemplate := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}` //nolint
 		var b EthBlockByNumber
 		if err := post(client, erigon_url, fmt.Sprintf(blockByNumTemplate, bn, req_id), &b); err != nil {
-			fmt.Printf("Could not retrieve block %d: %v\n", bn, err)
-			return
+			return fmt.Errorf("Could not retrieve block %d: %v\n", bn, err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -53,8 +50,7 @@ func Bench2(erigon_url string) {
 				for nextKey != nil {
 					var sr DebugStorageRange
 					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
-						fmt.Printf("Could not get storageRange: %x: %v\n", tx.Hash, err)
-						return
+						return fmt.Errorf("Could not get storageRange: %x: %v\n", tx.Hash, err)
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -83,15 +79,14 @@ func Bench2(erigon_url string) {
 			accountRangeTemplate := `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}` //nolint
 			var ma DebugModifiedAccounts
 			if err := post(client, erigon_url, fmt.Sprintf(accountRangeTemplate, prevBn, bn, req_id), &ma); err != nil {
-				fmt.Printf("Could not get modified accounts: %v\n", err)
-				return
+				return fmt.Errorf("Could not get modified accounts: %v\n", err)
 			}
 			if ma.Error != nil {
-				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
-				return
+				return fmt.Errorf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(ma.Result))
 			prevBn = bn
 		}
 	}
+	return nil
 }
