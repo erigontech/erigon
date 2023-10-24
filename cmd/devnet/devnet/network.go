@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"net/url"
 	"os"
 	"reflect"
 	"strings"
@@ -114,20 +113,14 @@ func (nw *Network) Start(ctx context.Context) error {
 
 	for _, node := range nw.Nodes {
 		err := nw.startNode(node)
-
 		if err != nil {
 			nw.Stop()
 			return err
 		}
 
-		for _, service := range nw.Services {
-			service.NodeStarted(ctx, node)
-		}
-
 		// get the enode of the node
 		// - note this has the side effect of waiting for the node to start
 		enode, err := getEnode(node)
-
 		if err != nil {
 			if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
 				continue
@@ -136,12 +129,15 @@ func (nw *Network) Start(ctx context.Context) error {
 			nw.Stop()
 			return err
 		}
-
 		nw.peers = append(nw.peers, enode)
 
 		// TODO do we need to call AddPeer to the nodes to make them aware of this one
 		// the current model only works for an appending node network where the peers gossip
 		// connections - not sure if this is the case ?
+
+		for _, service := range nw.Services {
+			service.NodeStarted(ctx, node)
+		}
 	}
 
 	return nil
@@ -254,6 +250,14 @@ func (nw *Network) startNode(n Node) error {
 	return nil
 }
 
+func isConnectionError(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Op == "dial"
+	}
+	return false
+}
+
 // getEnode returns the enode of the netowrk node
 func getEnode(n Node) (string, error) {
 	reqCount := 0
@@ -268,21 +272,10 @@ func getEnode(n Node) (string, error) {
 				}
 			}
 
-			if reqCount < 10 {
-				var urlErr *url.Error
-				if errors.As(err, &urlErr) {
-					var opErr *net.OpError
-					if errors.As(urlErr.Err, &opErr) {
-						var callErr *os.SyscallError
-						if errors.As(opErr.Err, &callErr) {
-							if strings.HasPrefix(callErr.Syscall, "connect") {
-								reqCount++
-								time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
-								continue
-							}
-						}
-					}
-				}
+			if isConnectionError(err) && (reqCount < 10) {
+				reqCount++
+				time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
+				continue
 			}
 
 			return "", err
