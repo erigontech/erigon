@@ -395,7 +395,6 @@ func runPeer(
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
-			msgType = "StatusMsg"
 			msg.Discard()
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
