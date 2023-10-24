@@ -524,6 +524,8 @@ func TestHistory_UnwindExperiment(t *testing.T) {
 		if i > 1 {
 			require.NotNil(t, toRest)
 			require.True(t, needDelete)
+			//TODO: fix linter
+			//nolint
 			if 0 == (i&i - 1) {
 				require.Equal(t, uint64(i>>1), toRest.TxNum)
 				require.Equal(t, []byte("d1ce"+fmt.Sprintf("%x", i>>1)), toRest.Value)
