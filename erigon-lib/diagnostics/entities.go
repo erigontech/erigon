@@ -21,6 +21,10 @@ type PeerStatisticsGetter interface {
 }
 
 type PeerStatistics struct {
-	BytesIn  uint64
-	BytesOut uint64
+	BytesIn      int
+	BytesOut     int
+	CapBytesIn   map[string]int
+	CapBytesOut  map[string]int
+	TypeBytesIn  map[string]int
+	TypeBytesOut map[string]int
 }
