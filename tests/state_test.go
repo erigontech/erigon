@@ -28,22 +28,31 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/log/v3"
 )
 
+func TestZkState(t *testing.T) {
+	st := new(testMatcher)
+	st.whitelist("stZero*")
+	testState(t, st)
+}
+
 func TestState(t *testing.T) {
+	st := new(testMatcher)
+	st.skipLoad(`^stZero`)
+	testState(t, st)
+}
+func testState(t *testing.T, st *testMatcher) {
+	t.Helper()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
 	//t.Parallel()
-
-	st := new(testMatcher)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
