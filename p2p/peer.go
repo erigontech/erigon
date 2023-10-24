@@ -241,26 +241,16 @@ func (p *Peer) Log() log.Logger {
 func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes int) {
 	if p.CapBytesTransfered == nil {
 		p.CapBytesTransfered = make(map[string]int)
-		p.CapBytesTransfered[msgCap] = bytes
+		p.CapBytesTransfered[msgCap] += bytes
 	} else {
-		_, capFound := p.CapBytesTransfered[msgCap]
-		if capFound {
-			p.CapBytesTransfered[msgCap] += bytes
-		} else {
-			p.CapBytesTransfered[msgCap] = bytes
-		}
+		p.CapBytesTransfered[msgCap] += bytes
 	}
 
 	if p.TypeBytesTransfered == nil {
 		p.TypeBytesTransfered = make(map[string]int)
-		p.TypeBytesTransfered[msgType] = bytes
+		p.TypeBytesTransfered[msgType] += bytes
 	} else {
-		_, typeFound := p.TypeBytesTransfered[msgType]
-		if typeFound {
-			p.TypeBytesTransfered[msgType] += bytes
-		} else {
-			p.TypeBytesTransfered[msgType] = bytes
-		}
+		p.TypeBytesTransfered[msgType] += bytes
 	}
 
 	p.BytesTransfered += bytes
