@@ -63,6 +63,7 @@ func testState(t *testing.T, st *testMatcher) {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
+				t.Parallel()
 				_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx, err := db.BeginRw(context.Background())
