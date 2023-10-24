@@ -19,12 +19,13 @@ package p2p
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"io"
 	"net"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -123,7 +124,9 @@ type Peer struct {
 	metricsEnabled bool
 
 	//diagnostics info
-	BytesTransfered int
+	BytesTransfered     int
+	CapBytesTransfered  map[string]int
+	TypeBytesTransfered map[string]int
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -233,6 +236,34 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 
 func (p *Peer) Log() log.Logger {
 	return p.log
+}
+
+func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes int) {
+	if p.CapBytesTransfered == nil {
+		p.CapBytesTransfered = make(map[string]int)
+		p.CapBytesTransfered[msgCap] = bytes
+	} else {
+		_, capFound := p.CapBytesTransfered[msgCap]
+		if capFound {
+			p.CapBytesTransfered[msgCap] += bytes
+		} else {
+			p.CapBytesTransfered[msgCap] = bytes
+		}
+	}
+
+	if p.TypeBytesTransfered == nil {
+		p.TypeBytesTransfered = make(map[string]int)
+		p.TypeBytesTransfered[msgType] = bytes
+	} else {
+		_, typeFound := p.TypeBytesTransfered[msgType]
+		if typeFound {
+			p.TypeBytesTransfered[msgType] += bytes
+		} else {
+			p.TypeBytesTransfered[msgType] = bytes
+		}
+	}
+
+	p.BytesTransfered += bytes
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
