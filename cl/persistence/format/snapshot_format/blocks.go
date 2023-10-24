@@ -64,6 +64,10 @@ func computeInitialOffset(version clparams.StateVersion) uint64 {
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
 func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error {
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	if err != nil {
+		return err
+	}
 	// Maybe reuse the buffer?
 	encoded, err := block.EncodeSSZ(nil)
 	if err != nil {
@@ -71,6 +75,9 @@ func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error 
 	}
 	version := block.Version()
 	if _, err := w.Write([]byte{byte(version)}); err != nil {
+		return err
+	}
+	if _, err := w.Write(bodyRoot[:]); err != nil {
 		return err
 	}
 	currentChunkLength := computeInitialOffset(version)
@@ -116,7 +123,7 @@ func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error 
 }
 
 func readMetadataForBlock(r io.Reader) (clparams.StateVersion, error) {
-	b := []byte{0}
+	b := make([]byte, 33) // version + body root
 	if _, err := r.Read(b); err != nil {
 		return 0, err
 	}

@@ -166,14 +166,13 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
-	processBlock := func(tx kv.RwTx, block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
-		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
-			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
-			cfg.rpc.BanPeer(block.Peer)
+	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
+		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation); err != nil {
+			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
 			return err
 		}
 		// Write block to database optimistically if we are very behind.
-		return cfg.beaconDB.WriteBlock(ctx, tx, block.Data, false)
+		return cfg.beaconDB.WriteBlock(ctx, tx, block, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -282,21 +281,29 @@ func ConsensusClStages(ctx context.Context,
 						if err != nil {
 							return err
 						}
+						// If we got an empty packet ban the peer
+						if len(blocks.Data) == 0 {
+							cfg.rpc.BanPeer(blocks.Peer)
+							continue MainLoop
+						}
 
 						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
-						for _, block := range blocks {
-							if shouldInsert && block.Data.Version() >= clparams.BellatrixVersion {
-								executionPayload := block.Data.Block.Body.ExecutionPayload
+						for _, block := range blocks.Data {
+
+							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								executionPayload := block.Block.Body.ExecutionPayload
 								body := executionPayload.Body()
 								txs, err := types.DecodeTransactions(body.Transactions)
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
+									cfg.rpc.BanPeer(blocks.Peer)
 									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 									continue MainLoop
 								}
 								header, err := executionPayload.RlpHeader()
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
+									cfg.rpc.BanPeer(blocks.Peer)
 									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 									continue MainLoop
 								}
@@ -304,6 +311,7 @@ func ConsensusClStages(ctx context.Context,
 							}
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
+								cfg.rpc.BanPeer(blocks.Peer)
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
 							}
@@ -337,7 +345,7 @@ func ConsensusClStages(ctx context.Context,
 						"targetSlot", args.targetSlot,
 						"requestedSlots", totalRequest,
 					)
-					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
+					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
 					sources := []persistence.BlockSource{gossipSource}
 
@@ -372,7 +380,7 @@ func ConsensusClStages(ctx context.Context,
 					case err := <-errCh:
 						return err
 					case blocks := <-respCh:
-						for _, block := range blocks {
+						for _, block := range blocks.Data {
 							if err := processBlock(tx, block, true, true); err != nil {
 								return err
 							}
@@ -505,7 +513,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 
-					for _, block := range blocks {
+					for _, block := range blocks.Data {
 						err := processBlock(tx, block, true, true)
 						if err != nil {
 							// its okay if block processing fails

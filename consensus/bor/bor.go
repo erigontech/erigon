@@ -138,9 +138,6 @@ var (
 	errUnknownValidators = errors.New("unknown validators")
 
 	errUnknownSnapshot = errors.New("unknown snapshot")
-
-	errWithdrawalNotSupported     = errors.New("withdrawal not supported")
-	errWithdrawalHashNotSupported = errors.New("withdrawal hash not supported")
 )
 
 // SignerFn is a signer callback function to request a header to be signed by a
@@ -571,9 +568,12 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 
 	// Verify that the gas limit is <= 2^63-1
 	gasCap := uint64(0x7fffffffffffffff)
-
 	if header.GasLimit > gasCap {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, gasCap)
+	}
+
+	if header.WithdrawalsHash != nil {
+		return consensus.ErrUnexpectedWithdrawals
 	}
 
 	// All basic checks passed, verify cascading fields
@@ -635,10 +635,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
-	}
-
-	if header.WithdrawalsHash != nil {
-		return consensus.ErrUnexpectedWithdrawals
 	}
 
 	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
@@ -988,19 +984,10 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
-	var err error
-
 	headerNumber := header.Number.Uint64()
 
-	if withdrawals != nil {
-		// withdrawals != nil not required because withdrawals are not used
-		log.Warn("Bor does not support withdrawals", "number", headerNumber)
-	}
-
-	if header.WithdrawalsHash != nil {
-		header.WithdrawalsHash = nil
-
-		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
+	if withdrawals != nil || header.WithdrawalsHash != nil {
+		return nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
@@ -1013,14 +1000,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				return nil, types.Receipts{}, err
 			}
 			// commit states
-			if err = c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
-	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
+	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
@@ -1063,16 +1050,8 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 	headerNumber := header.Number.Uint64()
 
-	if withdrawals != nil {
-		withdrawals = nil
-
-		log.Warn("Bor does not support withdrawals", "number", headerNumber)
-	}
-
-	if header.WithdrawalsHash != nil {
-		header.WithdrawalsHash = nil
-
-		log.Warn("Bor does not support withdrawalHash", "number", headerNumber)
+	if withdrawals != nil || header.WithdrawalsHash != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {

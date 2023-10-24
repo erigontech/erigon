@@ -33,7 +33,31 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b beaconChainDatabaseFilesystem) GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if blockRoot == (libcommon.Hash{}) {
+		return nil, nil
+	}
+
+	r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	block := cltypes.NewSignedBeaconBlock(b.cfg)
+	version := b.cfg.GetCurrentStateVersion(slot / b.cfg.SlotsPerEpoch)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, version); err != nil {
+		return nil, err
+	}
+
+	return &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block}, nil
+}
+
+func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
@@ -41,10 +65,10 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 	}
 
 	if len(beaconBlockRooots) == 0 {
-		return nil, nil
+		return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}, nil
 	}
 
-	blocks := []*peers.PeeredObject[*cltypes.SignedBeaconBlock]{}
+	blocks := []*cltypes.SignedBeaconBlock{}
 	for idx, blockRoot := range beaconBlockRooots {
 		slot := slots[idx]
 
@@ -60,9 +84,9 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 			return nil, err
 		}
 
-		blocks = append(blocks, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block})
+		blocks = append(blocks, block)
 	}
-	return blocks, nil
+	return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: blocks}, nil
 
 }
 

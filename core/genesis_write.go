@@ -528,10 +528,6 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	if g.Config != nil && g.Config.Bor != nil && g.Config.Bor.IsAgra(g.Number) {
-		withdrawals = nil
-	}
-
 	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
 		if g.BlobGasUsed != nil {
 			head.BlobGasUsed = g.BlobGasUsed

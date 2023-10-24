@@ -819,7 +819,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 				al.AddSlot(el.Address, key)
 			}
 		}
-		if rules.IsShanghai || rules.IsAgra { // EIP-3651: warm coinbase
+		if rules.IsShanghai { // EIP-3651: warm coinbase
 			al.AddAddress(coinbase)
 		}
 	}
