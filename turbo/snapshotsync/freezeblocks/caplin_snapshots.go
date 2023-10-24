@@ -370,6 +370,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		word := buf.Bytes()
 
 		if i == 0 {
+			fmt.Println(obj.Data.Block.Slot, i)
 			fmt.Println(word[:140])
 		}
 
