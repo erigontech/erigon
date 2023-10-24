@@ -174,6 +174,8 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
+	b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
+
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
 }
