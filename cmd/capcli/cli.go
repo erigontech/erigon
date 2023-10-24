@@ -437,7 +437,7 @@ type CheckSnapshots struct {
 	chainCfg
 	outputFolder
 
-	Slot uint64 `arg:"" name:"slot" help:"slot to check"`
+	Slot uint64 `name:"slot" help:"slot to check"`
 }
 
 func (c *CheckSnapshots) Run(ctx *Context) error {
