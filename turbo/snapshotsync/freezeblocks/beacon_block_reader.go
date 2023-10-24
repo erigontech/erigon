@@ -2,7 +2,6 @@ package freezeblocks
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -57,7 +56,6 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	if seg.idxSlot == nil {
 		return nil, nil
 	}
-	fmt.Println(seg.seg.Count())
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 
 	gg := seg.seg.MakeGetter()

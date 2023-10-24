@@ -342,7 +342,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	defer tx.Rollback()
 	// Generate .seg file, which is just the list of beacon blocks.
 	var buf bytes.Buffer
-	for i := fromSlot; i <= toSlot; i++ {
+	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
 		if err != nil {
 			return err
