@@ -514,8 +514,10 @@ type PeerInfo struct {
 		Trusted       bool   `json:"trusted"`
 		Static        bool   `json:"static"`
 	} `json:"network"`
-	Protocols       map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
-	BytesTransfered int                    `json:"bytesTransfered,omitempty"`
+	Protocols           map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
+	BytesTransfered     int                    `json:"bytesTransfered,omitempty"`
+	CapBytesTransfered  map[string]int         `json:"capBytesTransfered"`
+	TypeBytesTransfered map[string]int         `json:"typeBytesTransfered"`
 }
 
 // Info gathers and returns a collection of metadata known about a peer.
@@ -542,6 +544,8 @@ func (p *Peer) Info() *PeerInfo {
 	info.Network.Trusted = p.rw.is(trustedConn)
 	info.Network.Static = p.rw.is(staticDialedConn)
 	info.BytesTransfered = p.BytesTransfered
+	info.CapBytesTransfered = p.CapBytesTransfered
+	info.TypeBytesTransfered = p.TypeBytesTransfered
 
 	// Gather all the running protocol infos
 	for _, proto := range p.running {
