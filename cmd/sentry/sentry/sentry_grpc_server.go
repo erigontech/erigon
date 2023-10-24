@@ -389,7 +389,7 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
-		var msgType = ""
+		msgType := ""
 		msgCap := msg.Capability()
 
 		givePermit := false
