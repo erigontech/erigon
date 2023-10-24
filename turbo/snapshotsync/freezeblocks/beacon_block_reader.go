@@ -66,6 +66,5 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 		return nil, nil
 	}
 	buf, _ = gg.Next(buf)
-	fmt.Println("buf", buf[:200])
 	return buf, nil
 }

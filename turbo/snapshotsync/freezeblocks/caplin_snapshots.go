@@ -124,10 +124,6 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 		if i%100_000 == 0 {
 			logger.Log(lvl, "Compressing beacon blocks", "progress", i)
 		}
-		if i == 0 {
-			fmt.Println(offset, i)
-			fmt.Println(word[:200])
-		}
 		p.Processed.Add(1)
 		num := make([]byte, 8)
 		n := binary.PutUvarint(num, i)
@@ -368,11 +364,6 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			return err
 		}
 		word := buf.Bytes()
-
-		if i == 0 || i == 1 {
-			fmt.Println(obj.Data.Block.Slot, i)
-			fmt.Println(word[:200])
-		}
 
 		if err := sn.AddWord(word); err != nil {
 			return err
