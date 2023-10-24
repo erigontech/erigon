@@ -112,7 +112,6 @@ func readMetadataForBlock(r io.Reader) (clparams.StateVersion, error) {
 	if _, err := r.Read(b); err != nil {
 		return 0, err
 	}
-	fmt.Println(b)
 	return clparams.StateVersion(b[0]), nil
 }
 

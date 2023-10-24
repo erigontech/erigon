@@ -122,6 +122,9 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 	p.Total.Store(uint64(d.Count()))
 
 	if err := Idx(ctx, d, sn.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
+		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
@@ -347,7 +350,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		if err != nil {
 			return err
 		}
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
+		}
 		if obj == nil {
+
 			if err := sn.AddWord(nil); err != nil {
 				return err
 			}
@@ -358,9 +365,6 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		}
 		if err := sn.AddWord(buf.Bytes()); err != nil {
 			return err
-		}
-		if i%20_000 == 0 {
-			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
 		buf.Reset()
 	}
