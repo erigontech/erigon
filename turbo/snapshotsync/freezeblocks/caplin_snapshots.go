@@ -348,7 +348,6 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	}
 	defer tx.Rollback()
 	// Generate .seg file, which is just the list of beacon blocks.
-	var buf bytes.Buffer
 	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
 		if err != nil {
@@ -364,6 +363,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			}
 			continue
 		}
+		var buf bytes.Buffer
 		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, &buf); err != nil {
 			return err
 		}
@@ -377,7 +377,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		if err := sn.AddWord(word); err != nil {
 			return err
 		}
-		buf.Reset()
+
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
