@@ -122,8 +122,8 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 	p.Total.Store(uint64(d.Count()))
 
 	if err := Idx(ctx, d, sn.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		if i%20_000 == 0 {
-			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
+		if i%100_000 == 0 {
+			logger.Log(lvl, "Compressing beacon blocks", "progress", i)
 		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)

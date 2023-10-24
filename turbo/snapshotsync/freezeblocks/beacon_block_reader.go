@@ -57,7 +57,7 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	if seg.idxSlot == nil {
 		return nil, nil
 	}
-	fmt.Println(seg.idxSlot.BaseDataID(), seg.seg.Count(), seg.idxSlot.KeyCount())
+	fmt.Println(slot, seg.idxSlot.BaseDataID(), seg.seg.Count(), seg.idxSlot.KeyCount())
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 
 	gg := seg.seg.MakeGetter()
