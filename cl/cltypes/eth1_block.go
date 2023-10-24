@@ -161,6 +161,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Extra = solid.NewExtraData()
 	b.Transactions = &solid.TransactionsSSZ{}
+	fmt.Println(b.beaconCfg)
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
