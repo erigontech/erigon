@@ -547,15 +547,15 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if contractCreation {
-		if previous != nil && previous.selfdestructed {
-			prevInc = previous.data.Incarnation
+	if previous != nil && previous.selfdestructed {
+		prevInc = previous.data.Incarnation
+	} else if previous != nil && previous.data.Incarnation == 0 {
+		prevInc = previous.data.PrevIncarnation
+	} else {
+		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
+			prevInc = inc
 		} else {
-			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-				prevInc = inc
-			} else {
-				sdb.savedErr = err
-			}
+			sdb.savedErr = err
 		}
 	}
 
@@ -570,6 +570,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Incarnation = prevInc + 1
 	} else {
 		newObj.selfdestructed = false
+		newObj.data.PrevIncarnation = prevInc
 	}
 }
 
