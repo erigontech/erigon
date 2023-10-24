@@ -161,7 +161,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	sd.ClearRam(true)
 
 	_, err := sd.SeekCommitment(ctx, rwTx)
-	fmt.Printf("unw done\n")
 	return err
 }
 

@@ -1163,7 +1163,7 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
+	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !hc.CanPrune(rwTx) {
 		return nil
 	}

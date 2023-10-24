@@ -210,7 +210,6 @@ func ExecV3(ctx context.Context,
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		blockNum = execStage.BlockNumber + 1
-		fmt.Printf("exec1 blockNum=%d\n", blockNum)
 	} else if !useExternalTx { //nolint
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
 		//if err != nil {
@@ -597,7 +596,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -912,7 +911,7 @@ Loop:
 		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 
-	dumpPlainStateDebug(applyTx, doms)
+	//dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
@@ -1081,6 +1080,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, err
 	}
+	fmt.Printf("[dbg] alex %d -> %d, unwindToLimit=%d\n", unwindTo, blockNumWithCommitment, unwindToLimit)
 	unwindTo = cmp.Min(unwindTo, blockNumWithCommitment) // not all blocks have commitment
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
