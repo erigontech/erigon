@@ -124,9 +124,9 @@ type Peer struct {
 	metricsEnabled bool
 
 	//diagnostics info
-	BytesTransfered     int
-	CapBytesTransfered  map[string]int
-	TypeBytesTransfered map[string]int
+	BytesTransfered     uint64
+	CapBytesTransfered  map[string]uint64
+	TypeBytesTransfered map[string]uint64
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -238,16 +238,16 @@ func (p *Peer) Log() log.Logger {
 	return p.log
 }
 
-func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes int) {
+func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes uint64) {
 	if p.CapBytesTransfered == nil {
-		p.CapBytesTransfered = make(map[string]int)
+		p.CapBytesTransfered = make(map[string]uint64)
 		p.CapBytesTransfered[msgCap] += bytes
 	} else {
 		p.CapBytesTransfered[msgCap] += bytes
 	}
 
 	if p.TypeBytesTransfered == nil {
-		p.TypeBytesTransfered = make(map[string]int)
+		p.TypeBytesTransfered = make(map[string]uint64)
 		p.TypeBytesTransfered[msgType] += bytes
 	} else {
 		p.TypeBytesTransfered[msgType] += bytes
@@ -515,9 +515,9 @@ type PeerInfo struct {
 		Static        bool   `json:"static"`
 	} `json:"network"`
 	Protocols           map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
-	BytesTransfered     int                    `json:"bytesTransfered,omitempty"`
-	CapBytesTransfered  map[string]int         `json:"capBytesTransfered"`
-	TypeBytesTransfered map[string]int         `json:"typeBytesTransfered"`
+	BytesTransfered     uint64                 `json:"bytesTransfered,omitempty"`
+	CapBytesTransfered  map[string]uint64      `json:"capBytesTransfered"`
+	TypeBytesTransfered map[string]uint64      `json:"typeBytesTransfered"`
 }
 
 // Info gathers and returns a collection of metadata known about a peer.

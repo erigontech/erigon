@@ -540,7 +540,7 @@ func runPeer(
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 
-		peerInfo.peer.CountBytesTransfered(msgType, msgCap, int(msg.Size))
+		peerInfo.peer.CountBytesTransfered(msgType, msgCap, uint64(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)

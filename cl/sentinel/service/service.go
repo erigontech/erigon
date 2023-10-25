@@ -358,23 +358,23 @@ func (s *SentinelServer) trackPeerStatistics(peerID string, inbound bool, msgTyp
 
 	if _, exists := s.peerStatistics[peerID]; !exists {
 		s.peerStatistics[peerID] = &diagnostics.PeerStatistics{
-			CapBytesIn:   make(map[string]int),
-			CapBytesOut:  make(map[string]int),
-			TypeBytesIn:  make(map[string]int),
-			TypeBytesOut: make(map[string]int),
+			CapBytesIn:   make(map[string]uint64),
+			CapBytesOut:  make(map[string]uint64),
+			TypeBytesIn:  make(map[string]uint64),
+			TypeBytesOut: make(map[string]uint64),
 		}
 	}
 
 	stats := s.peerStatistics[peerID]
 
 	if inbound {
-		stats.BytesIn += bytes
-		stats.CapBytesIn[msgCap] += bytes
-		stats.TypeBytesIn[msgType] += bytes
+		stats.BytesIn += uint64(bytes)
+		stats.CapBytesIn[msgCap] += uint64(bytes)
+		stats.TypeBytesIn[msgType] += uint64(bytes)
 	} else {
-		stats.BytesOut += bytes
-		stats.CapBytesOut[msgCap] += bytes
-		stats.TypeBytesOut[msgType] += bytes
+		stats.BytesOut += uint64(bytes)
+		stats.CapBytesOut[msgCap] += uint64(bytes)
+		stats.TypeBytesOut[msgType] += uint64(bytes)
 	}
 }
 

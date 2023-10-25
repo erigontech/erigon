@@ -10,17 +10,17 @@ import (
 )
 
 type PeerNetworkInfo struct {
-	LocalAddress  string         `json:"localAddress"`  // Local endpoint of the TCP data connection
-	RemoteAddress string         `json:"remoteAddress"` // Remote endpoint of the TCP data connection
-	Inbound       bool           `json:"inbound"`
-	Trusted       bool           `json:"trusted"`
-	Static        bool           `json:"static"`
-	BytesIn       int            `json:"bytesIn"`
-	BytesOut      int            `json:"bytesOut"`
-	CapBytesIn    map[string]int `json:"capBytesIn"`
-	CapBytesOut   map[string]int `json:"capBytesOut"`
-	TypeBytesIn   map[string]int `json:"typeBytesIn"`
-	TypeBytesOut  map[string]int `json:"typeBytesOut"`
+	LocalAddress  string            `json:"localAddress"`  // Local endpoint of the TCP data connection
+	RemoteAddress string            `json:"remoteAddress"` // Remote endpoint of the TCP data connection
+	Inbound       bool              `json:"inbound"`
+	Trusted       bool              `json:"trusted"`
+	Static        bool              `json:"static"`
+	BytesIn       uint64            `json:"bytesIn"`
+	BytesOut      uint64            `json:"bytesOut"`
+	CapBytesIn    map[string]uint64 `json:"capBytesIn"`
+	CapBytesOut   map[string]uint64 `json:"capBytesOut"`
+	TypeBytesIn   map[string]uint64 `json:"typeBytesIn"`
+	TypeBytesOut  map[string]uint64 `json:"typeBytesOut"`
 }
 
 type PeerResponse struct {
@@ -108,14 +108,14 @@ func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 	peers := make([]*PeerResponse, 0, len(reply))
 
 	for _, rpcPeer := range reply {
-		var bytesIn = 0
-		var bytesOut = 0
+		var bytesIn = uint64(0)
+		var bytesOut = uint64(0)
 
-		var capBytesIn = map[string]int{}
-		var capBytesOut = map[string]int{}
+		var capBytesIn = map[string]uint64{}
+		var capBytesOut = map[string]uint64{}
 
-		var typeBytesIn = map[string]int{}
-		var typeBytesOut = map[string]int{}
+		var typeBytesIn = map[string]uint64{}
+		var typeBytesOut = map[string]uint64{}
 
 		if rpcPeer.Network.Inbound {
 			bytesIn = rpcPeer.BytesTransfered
