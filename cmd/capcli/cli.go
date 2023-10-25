@@ -7,11 +7,15 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -45,8 +49,9 @@ var CLI struct {
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 
-	Chain         Chain         `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots DumpSnapshots `cmd:"" help:"generate caplin snapshots"`
+	Chain          Chain          `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots  DumpSnapshots  `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots CheckSnapshots `cmd:"" help:"check snapshot folder against content of chain data"`
 }
 
 type chainCfg struct {
@@ -425,5 +430,87 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return snapshot_format.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+}
+
+type CheckSnapshots struct {
+	chainCfg
+	outputFolder
+
+	Slot uint64 `name:"slot" help:"slot to check"`
+}
+
+func (c *CheckSnapshots) Run(ctx *Context) error {
+	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+
+	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+
+	br := &snapshot_format.MockBlockReader{}
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
+	for i := c.Slot; i < to; i++ {
+		// Read the original canonical slot
+		data, err := beaconDB.GetBlock(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if data == nil {
+			continue
+		}
+		blk := data.Data
+		if blk == nil {
+			continue
+		}
+		// first thing if the block is bellatrix update the mock block reader
+		if blk.Version() >= clparams.BellatrixVersion {
+			br.Block = blk.Block.Body.ExecutionPayload
+		}
+		blk2, err := snReader.ReadBlock(i)
+		if err != nil {
+			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
+			return nil
+		}
+		if blk2 == nil {
+			log.Error("Block not found in snapshot", "slot", i)
+			return nil
+		}
+
+		hash1, _ := blk.Block.HashSSZ()
+		hash2, _ := blk2.Block.HashSSZ()
+		if hash1 != hash2 {
+			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
+			return nil
+		}
+		log.Info("Successfully checked", "slot", i)
+	}
+	return nil
 }

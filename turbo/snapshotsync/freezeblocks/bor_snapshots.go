@@ -83,11 +83,6 @@ func (sn *BorEventSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.IdxBorTxnHash.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxBorTxnHash.Close()
-		sn.IdxBorTxnHash = nil
-	}
 	return nil
 }
 
@@ -153,11 +148,6 @@ func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
 	sn.idx, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	if sn.idx.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idx.Close()
-		sn.idx = nil
 	}
 	return nil
 }
