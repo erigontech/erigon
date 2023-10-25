@@ -32,9 +32,18 @@ func TestEncoder(t *testing.T) {
 	buf := &bytes.Buffer{}
 
 	enc := NewEncoder(buf)
-	enc.WriteCycle(NewInstruction([]byte("foo"), []byte("bar")))
-	enc.WriteCycle()
-	enc.WriteCycle(NewInstruction([]byte("bar"), []byte("foo")))
+
+	enc.Encode(NewInstruction([]byte("foo"), []byte("bar")))
+	err := enc.NextCycle()
+	require.NoError(t, err)
+
+	err = enc.NextCycle()
+	require.NoError(t, err)
+
+	enc.Encode(NewInstruction([]byte("bar"), []byte("foo")))
+	err = enc.NextCycle()
+	require.NoError(t, err)
+
 	expected := `foo(626172)
 
 bar(666f6f)

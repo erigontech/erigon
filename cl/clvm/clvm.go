@@ -18,36 +18,33 @@ func NewEncoder(w io.Writer) Encoder {
 	}
 }
 
-func (e *encoder) WriteCycle(xs ...Instruction) error {
-	e.b.Reset()
-	for _, x := range xs {
-		if _, err := e.b.Write(x.Opcode()); err != nil {
-			return err
-		}
-		if err := e.b.WriteByte('('); err != nil {
-			return err
-		}
-		args := x.Arguments()
-		for idx, v := range args {
-			if _, err := hex.NewEncoder(&e.b).Write(v); err != nil {
-				return err
-			}
-			if idx != len(args)-1 {
-				if err := e.b.WriteByte(','); err != nil {
-					return err
-				}
-			}
-		}
-		if err := e.b.WriteByte(')'); err != nil {
-			return err
-		}
-	}
-	if _, err := e.b.Write([]byte("\n")); err != nil {
+func (e *encoder) NextCycle() error {
+	e.b.WriteByte('\n')
+	// TODO: consider prefixing this with a length/header
+	if _, err := e.b.WriteTo(e.w); err != nil {
 		return err
 	}
-	// TODO: consider a length prefix + header here ???
-	_, err := e.b.WriteTo(e.w)
-	return err
+	e.b.Reset()
+	return nil
+}
+
+func (e *encoder) Encode(xs ...Instruction) {
+	for i, x := range xs {
+		e.b.Write(x.Opcode())
+		e.b.WriteByte('(')
+		args := x.Arguments()
+		for idx, v := range args {
+			hex.NewEncoder(&e.b).Write(v)
+			if idx != len(args)-1 {
+				e.b.WriteByte(',')
+			}
+		}
+		e.b.WriteByte(')')
+		if i != len(xs)-1 {
+			e.b.WriteByte(' ')
+		}
+	}
+	return
 }
 
 // Decoder
