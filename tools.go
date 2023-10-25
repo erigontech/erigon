@@ -17,6 +17,7 @@ package tools
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
 
 import (
+	_ "github.com/eiiches/go-gen-proxy/cmd/go-gen-proxy"
 	_ "github.com/erigontech/mdbx-go"
 	_ "github.com/erigontech/mdbx-go/mdbxdist"
 	_ "github.com/fjl/gencodec"
