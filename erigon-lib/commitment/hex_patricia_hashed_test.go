@@ -266,9 +266,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 	return pks, updates
 }
 
-// TODO(awskii)
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
-	t.Skip("awskii should fix issue with insertion of storage before account")
 	ctx := context.Background()
 
 	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
@@ -355,17 +353,16 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 
 	// Same PLAIN prefix is not necessary while HASHED CPL>0 is required
 	t.Run("InsertStorageWhenCPL==0", func(t *testing.T) {
-		// processed 03.87 then 03
+		// ordering of keys differs
 		uniqTest(t, true, true)
 	})
 	t.Run("InsertStorageWhenCPL>0", func(t *testing.T) {
-		// processed 03 then 03.87
+		// ordering of keys differs
 		uniqTest(t, false, true)
 	})
 }
 
 func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
-	t.Skip("has to fix Test_HexPatriciaHashed_BrokenUniqueRepr first to get this green")
 	ctx := context.Background()
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
