@@ -81,14 +81,8 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stWalletTest`)
 		st.skipLoad(`^stTransitionTest`)
 
-		st.skipLoad(`^stZeroKnowledge2`)
-		st.skipLoad(`^stZeroKnowledge`)
 		st.skipLoad(`^stZeroCallsTest`)
 		st.skipLoad(`^stZeroCallsRevert`)
-
-		//st.skipLoad(`^stTransactionTest/TransactionToItself.json`)
-		//st.skipLoad(`^stTransactionTest/TransactionSendingToZero.json`)
-		//st.skipLoad(`^stTransactionTest/TransactionToAddressh160minusOne.json`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
