@@ -30,42 +30,30 @@ func GetUnslashedIndiciesSet(s abstract.BeaconState) [][]bool {
 // ProcessEpoch process epoch transition.
 func ProcessEpoch(s abstract.BeaconState) error {
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
-	// start := time.Now()
 
 	unslashedIndiciesSet := GetUnslashedIndiciesSet(s)
 	if err := ProcessJustificationBitsAndFinality(s, unslashedIndiciesSet); err != nil {
 		return err
 	}
-	// fmt.Println("ProcessJustificationBitsAndFinality", time.Since(start))
-	// start = time.Now()
 
 	if s.Version() >= clparams.AltairVersion {
 		if err := ProcessInactivityScores(s, eligibleValidators, unslashedIndiciesSet); err != nil {
 			return err
 		}
 	}
-	// fmt.Println("ProcessInactivityScores", time.Since(start))
-	// start = time.Now()
 	if err := ProcessRewardsAndPenalties(s, eligibleValidators, unslashedIndiciesSet); err != nil {
 		return err
 	}
-	// fmt.Println("ProcessRewardsAndPenalties", time.Since(start))
-	// start = time.Now()
 	if err := ProcessRegistryUpdates(s); err != nil {
 		return err
 	}
-	// fmt.Println("ProcessRegistryUpdates", time.Since(start))
-	// start = time.Now()
 	if err := ProcessSlashings(s); err != nil {
 		return err
 	}
-	// fmt.Println("ProcessSlashings", time.Since(start))
 	ProcessEth1DataReset(s)
-	// start = time.Now()
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}
-	// fmt.Println("ProcessEffectiveBalanceUpdates", time.Since(start))
 	ProcessSlashingsReset(s)
 	ProcessRandaoMixesReset(s)
 	if err := ProcessHistoricalRootsUpdate(s); err != nil {

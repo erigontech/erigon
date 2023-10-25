@@ -840,6 +840,7 @@ func (I *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth
 
 func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	beaconConfig := s.BeaconConfig()
+	h := metrics.NewHistTimer("process_slots")
 	sSlot := s.Slot()
 	if slot <= sSlot {
 		return fmt.Errorf("new slot: %d not greater than current slot: %d", slot, sSlot)
@@ -885,5 +886,6 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 			}
 		}
 	}
+	h.PutSince()
 	return nil
 }
