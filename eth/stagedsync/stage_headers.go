@@ -307,13 +307,24 @@ Loop:
 	}
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
+			unwindTo := headerInserter.UnwindPoint()
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
-			blockNumWithCommitment, _, err := doms.SeekCommitment2(tx, 0, headerInserter.UnwindPoint())
+			blockNumWithCommitment, _, err := doms.SeekCommitment2(tx, 0, unwindTo)
 			if err != nil {
 				return err
 			}
-			unwindTo := cmp.Min(headerInserter.UnwindPoint(), blockNumWithCommitment) // not all blocks have commitment
+			if blockNumWithCommitment > 0 {
+				unwindTo = cmp.Max(unwindTo, blockNumWithCommitment) // not all blocks have commitment
+				if blockNumWithCommitment != unwindTo {
+					log.Info(fmt.Sprintf("[%s] unwindTo != blockNumWithCommitment", logPrefix), "headerInserter.UnwindPoint()", headerInserter.UnwindPoint(), "unwindTo", unwindTo, "blockNumWithCommitment", blockNumWithCommitment)
+				}
+			}
+			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+			if err != nil {
+				return err
+			}
+			unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
