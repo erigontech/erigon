@@ -21,6 +21,7 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 	if expectedStateRoot != currentBlock.StateRoot {
 		return fmt.Errorf("expected state root differs from received state root")
 	}
+
 	return nil
 }
 
