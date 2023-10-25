@@ -38,19 +38,19 @@ import (
 func TestZkState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist("stZero*")
+	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
 func TestTimeConsumingState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist("stTimeConsuming*")
+	st.whitelist(`^stTimeConsuming*`)
 	testState(t, st)
 }
 func TestTransitionState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist("stTransactionTest*")
+	st.whitelist(`^stTransactionTest*`)
 	testState(t, st)
 }
 
@@ -86,9 +86,9 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stZeroCallsTest`)
 		st.skipLoad(`^stZeroCallsRevert`)
 
-		st.skipLoad(`^stTransactionTest/TransactionToItself.json`)
-		st.skipLoad(`^stTransactionTest/TransactionSendingToZero.json`)
-		st.skipLoad(`^stTransactionTest/TransactionToAddressh160minusOne.json`)
+		//st.skipLoad(`^stTransactionTest/TransactionToItself.json`)
+		//st.skipLoad(`^stTransactionTest/TransactionSendingToZero.json`)
+		//st.skipLoad(`^stTransactionTest/TransactionToAddressh160minusOne.json`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {

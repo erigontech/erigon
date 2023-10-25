@@ -27,15 +27,14 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -197,8 +196,19 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
-	w := rpchelper.NewLatestStateWriter(tx, writeBlockNr, ethconfig.EnableHistoryV4InTest)
+	var r state.StateReader
+	var w state.StateWriter
+	var domains *state2.SharedDomains
+	if ethconfig.EnableHistoryV4InTest {
+		domains = state2.NewSharedDomains(tx)
+		defer domains.Close()
+		defer domains.Flush(context2.Background(), tx)
+		r = rpchelper.NewLatestStateReader(domains, ethconfig.EnableHistoryV4InTest)
+		w = rpchelper.NewLatestStateWriter(domains, writeBlockNr, ethconfig.EnableHistoryV4InTest)
+	} else {
+		r = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+		w = rpchelper.NewLatestStateWriter(tx, writeBlockNr, ethconfig.EnableHistoryV4InTest)
+	}
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -258,7 +268,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	if ethconfig.EnableHistoryV4InTest {
 		var root libcommon.Hash
-		rootBytes, err := state2.NewSharedDomains(tx).ComputeCommitment(context2.Background(), false, false)
+		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, false)
 		if err != nil {
 			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 		}
@@ -339,7 +349,17 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	w := rpchelper.NewLatestStateWriter(tx, blockNr-1, histV3)
+	var w state.StateWriter
+	var domains *state2.SharedDomains
+	if ethconfig.EnableHistoryV4InTest {
+		domains = state2.NewSharedDomains(tx)
+		defer domains.Close()
+		defer domains.Flush(context2.Background(), tx)
+		w = rpchelper.NewLatestStateWriter(domains, blockNr-1, histV3)
+	} else {
+		w = rpchelper.NewLatestStateWriter(tx, blockNr-1, histV3)
+	}
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
