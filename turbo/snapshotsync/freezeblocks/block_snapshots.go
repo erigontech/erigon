@@ -227,7 +227,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		//  - or didn't finish download and start indexing
 		// this was a "quick-fix protection" against this cases
 		// but now we have other protections for this cases
-		// let's try to remove this one - becaues it's not compatible with "copy datadir" and "restore datadir from backup" scenarios
+		// let's try to remove this one - because it's not compatible with "copy datadir" and "restore datadir from backup" scenarios
 		if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
 			log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
 			//Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
