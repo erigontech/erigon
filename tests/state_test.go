@@ -52,11 +52,6 @@ func TestState(t *testing.T) {
 
 	if ethconfig.EnableHistoryV3InTest {
 		//TODO: AlexSharov - need to fix this test
-		st.skipLoad(`^stWalletTest`)
-		st.skipLoad(`^stTransitionTest`)
-
-		//st.skipLoad(`^stZeroCallsTest`)
-		//st.skipLoad(`^stZeroCallsRevert`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
