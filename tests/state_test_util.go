@@ -202,7 +202,6 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if ethconfig.EnableHistoryV4InTest {
 		domains = state2.NewSharedDomains(tx)
 		defer domains.Close()
-		defer domains.Flush(context2.Background(), tx)
 		r = rpchelper.NewLatestStateReader(domains, ethconfig.EnableHistoryV4InTest)
 		w = rpchelper.NewLatestStateWriter(domains, writeBlockNr, ethconfig.EnableHistoryV4InTest)
 	} else {
