@@ -45,6 +45,7 @@ func TestTimeConsumingState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stTimeConsuming*`)
+	st.whitelist(`^VMTests*`)
 	testState(t, st)
 }
 func TestTransitionState(t *testing.T) {
@@ -60,6 +61,7 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stZero`)
 	st.skipLoad(`^stTimeConsuming`)
 	st.skipLoad(`^stTransactionTest`)
+	st.skipLoad(`^VMTests`)
 	testState(t, st)
 }
 
