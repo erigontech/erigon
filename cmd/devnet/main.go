@@ -345,7 +345,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -353,7 +353,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -404,7 +404,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -412,7 +412,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -420,7 +420,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						/*args.BlockProducer{
+						/*&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -428,7 +428,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},*/
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -451,7 +451,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -461,7 +461,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							DevPeriod:    5,
 							AccountSlots: 200,
 						},
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "3",
@@ -487,14 +487,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					account_services.NewFaucet(networkname.DevChainName, faucetSource),
 				},
 				Nodes: []devnet.Node{
-					args.BlockProducer{
+					&args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
-					args.NonBlockProducer{
+					&args.NonBlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",

@@ -56,11 +56,6 @@ func (nw *Network) ChainID() *big.Int {
 
 // Start starts the process for multiple erigon nodes running on the dev chain
 func (nw *Network) Start(ctx context.Context) error {
-
-	type configurable interface {
-		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
-	}
-
 	for _, service := range nw.Services {
 		if err := service.Start(ctx); err != nil {
 			nw.Stop()
@@ -89,22 +84,25 @@ func (nw *Network) Start(ctx context.Context) error {
 	metricsNode := cliCtx.Int("metrics.node")
 	nw.namedNodes = map[string]Node{}
 
-	for i, node := range nw.Nodes {
-		if configurable, ok := node.(configurable); ok {
-
+	for i, nodeConfig := range nw.Nodes {
+		{
 			base := baseNode
-
 			if metricsEnabled && metricsNode == i {
 				base.Metrics = true
 				base.MetricsPort = cliCtx.Int("metrics.port")
 			}
+			base.StaticPeers = strings.Join(nw.peers, ",")
 
-			nodePort, args, err := configurable.Configure(base, i)
-
-			if err == nil {
-				node, err = nw.createNode(fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort), args)
+			argsObj, err := nodeConfig.Configure(base, i)
+			if err != nil {
+				nw.Stop()
+				return err
 			}
 
+			nodePort := nodeConfig.GetHttpPort()
+			nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort)
+
+			node, err := nw.createNode(nodeAddr, argsObj)
 			if err != nil {
 				nw.Stop()
 				return err
@@ -112,6 +110,7 @@ func (nw *Network) Start(ctx context.Context) error {
 
 			nw.Nodes[i] = node
 			nw.namedNodes[node.Name()] = node
+			nw.peers = append(nw.peers, nodeConfig.GetEnodeURL())
 
 			for _, service := range nw.Services {
 				service.NodeCreated(ctx, node)
@@ -125,23 +124,6 @@ func (nw *Network) Start(ctx context.Context) error {
 			nw.Stop()
 			return err
 		}
-
-		// get the enode of the node
-		// - note this has the side effect of waiting for the node to start
-		enode, err := getEnode(node)
-		if err != nil {
-			if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
-				continue
-			}
-
-			nw.Stop()
-			return err
-		}
-		nw.peers = append(nw.peers, enode)
-
-		// TODO do we need to call AddPeer to the nodes to make them aware of this one
-		// the current model only works for an appending node network where the peers gossip
-		// connections - not sure if this is the case ?
 
 		for _, service := range nw.Services {
 			service.NodeStarted(ctx, node)
@@ -205,26 +187,8 @@ func (nw *Network) startNode(n Node) error {
 	node := n.(*node)
 
 	args, err := args.AsArgs(node.args)
-
 	if err != nil {
 		return err
-	}
-
-	if len(nw.peers) > 0 {
-		peersIndex := -1
-
-		for i, arg := range args {
-			if strings.HasPrefix(arg, "--staticpeers") {
-				peersIndex = i
-				break
-			}
-		}
-
-		if peersIndex >= 0 {
-			args[peersIndex] = args[peersIndex] + "," + strings.Join(nw.peers, ",")
-		} else {
-			args = append(args, "--staticpeers="+strings.Join(nw.peers, ","))
-		}
 	}
 
 	go func() {
