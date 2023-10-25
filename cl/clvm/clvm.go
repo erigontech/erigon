@@ -8,42 +8,45 @@ import (
 )
 
 type encoder struct {
-	w *bufio.Writer
+	w io.Writer
+	b bytes.Buffer
 }
 
 func NewEncoder(w io.Writer) Encoder {
 	return &encoder{
-		w: bufio.NewWriter(w),
+		w: w,
 	}
 }
 
 func (e *encoder) WriteCycle(xs ...Instruction) error {
+	e.b.Reset()
 	for _, x := range xs {
-		if _, err := e.w.Write(x.Opcode()); err != nil {
+		if _, err := e.b.Write(x.Opcode()); err != nil {
 			return err
 		}
-		if err := e.w.WriteByte('('); err != nil {
+		if err := e.b.WriteByte('('); err != nil {
 			return err
 		}
 		args := x.Arguments()
 		for idx, v := range args {
-			if _, err := hex.NewEncoder(e.w).Write(v); err != nil {
+			if _, err := hex.NewEncoder(&e.b).Write(v); err != nil {
 				return err
 			}
 			if idx != len(args)-1 {
-				if err := e.w.WriteByte(','); err != nil {
+				if err := e.b.WriteByte(','); err != nil {
 					return err
 				}
 			}
 		}
-		if err := e.w.WriteByte(')'); err != nil {
+		if err := e.b.WriteByte(')'); err != nil {
 			return err
 		}
 	}
-	if _, err := e.w.Write([]byte("\n")); err != nil {
+	if _, err := e.b.Write([]byte("\n")); err != nil {
 		return err
 	}
-	return e.w.Flush()
+	_, err := e.b.WriteTo(e.w)
+	return err
 }
 
 // Decoder
