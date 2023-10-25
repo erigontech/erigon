@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -67,3 +68,9 @@ func (t *DefaultTracer) OnNewAccount(addr libcommon.Address) {}
 
 func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
+
+func (t *DefaultTracer) GetResult() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
+}
+
+func (t *DefaultTracer) Stop(err error) {}

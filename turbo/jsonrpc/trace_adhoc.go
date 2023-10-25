@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -225,6 +226,56 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	}
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
+}
+
+// ToTransaction converts CallArgs to the Transaction type used by the core evm
+func (args *TraceCallParam) ToTransaction(msg types.Message) (types.Transaction, error) {
+	var tx types.Transaction
+	switch {
+	case args.MaxFeePerGas != nil:
+		al := types2.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce: msg.Nonce(),
+				Gas:   msg.Gas(),
+				To:    args.To,
+				Value: msg.Value(),
+				Data:  msg.Data(),
+			},
+			FeeCap:     msg.FeeCap(),
+			Tip:        msg.Tip(),
+			AccessList: al,
+		}
+	case args.AccessList != nil:
+		tx = &types.AccessListTx{
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce: msg.Nonce(),
+					Gas:   msg.Gas(),
+					To:    args.To,
+					Value: msg.Value(),
+					Data:  msg.Data(),
+				},
+				GasPrice: msg.GasPrice(),
+			},
+			AccessList: *args.AccessList,
+		}
+	default:
+		tx = &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce: msg.Nonce(),
+				Gas:   msg.Gas(),
+				To:    args.To,
+				Value: msg.Value(),
+				Data:  msg.Data(),
+			},
+			GasPrice: msg.GasPrice(),
+		}
+	}
+	return tx, nil
 }
 
 // OpenEthereum-style tracer
@@ -603,6 +654,12 @@ func (ot *OeTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Hash, p
 func (ot *OeTracer) OnLog(log *types.Log) {}
 
 func (ot *OeTracer) OnNewAccount(addr libcommon.Address) {}
+
+func (ot *OeTracer) GetResult() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
+}
+
+func (ot *OeTracer) Stop(err error) {}
 
 // Implements core/state/StateWriter to provide state diffs
 type StateDiff struct {
@@ -993,6 +1050,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
+	txn, err := args.ToTransaction(msg)
+	if err != nil {
+		return nil, err
+	}
+
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
 	txCtx := core.NewEVMTxContext(msg)
 
@@ -1011,10 +1073,15 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *core.ExecutionResult
 	ibs.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, 0)
+	ibs.SetLogger(&ot)
+
+	ot.CaptureTxStart(evm, txn)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
+		ot.CaptureTxEnd(nil, err)
 		return nil, err
 	}
+	ot.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[libcommon.Address]*StateDiffAccount)
@@ -1111,17 +1178,23 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 	msgs := make([]types.Message, len(callParams))
+	txns := make([]types.Transaction, len(callParams))
 	for i, args := range callParams {
 		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
 		}
+
+		txns[i], err = args.ToTransaction(msgs[i])
+		if err != nil {
+			return nil, fmt.Errorf("convert callParam to txn: %w", err)
+		}
 	}
-	results, _, err := api.doCallMany(ctx, dbtx, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
+	results, _, err := api.doCallMany(ctx, dbtx, txns, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
 	return results, err
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []types.Message, callParams []TraceCallParam,
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, txns []types.Transaction, msgs []types.Message, callParams []TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
 ) ([]*TraceCallResult, *state.IntraBlockState, error) {
 	chainConfig, err := api.chainConfig(dbtx)
@@ -1198,6 +1271,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 		vmConfig := vm.Config{}
+		var tracer tracers.Tracer
 		if (traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded)) || traceTypeVmTrace {
 			var ot OeTracer
 			ot.compat = api.compatibility
@@ -1211,6 +1285,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
+			tracer = &ot
 		}
 
 		// Get a new instance of the EVM.
@@ -1222,6 +1297,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			blockCtx.MaxGasLimit = true
 		}
 		ibs.Reset()
+		ibs.SetLogger(tracer)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
@@ -1239,9 +1315,19 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		} else {
 			ibs.SetTxContext(libcommon.Hash{}, header.Hash(), txIndex)
 		}
+
+		if tracer != nil {
+			tracer.CaptureTxStart(evm, txns[txIndex])
+		}
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		if err != nil {
+			if tracer != nil {
+				tracer.CaptureTxEnd(nil, err)
+			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+		}
+		if tracer != nil {
+			tracer.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {

@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 
@@ -17,7 +18,7 @@ import (
 )
 
 type GenericTracer interface {
-	vm.EVMLogger
+	tracers.Tracer
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }
@@ -63,6 +64,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 	ibs := state.New(cachedReader)
+	ibs.SetLogger(tracer)
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
@@ -92,9 +94,21 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if tracer != nil {
+			tracer.CaptureTxStart(vmenv, tx)
+		}
+		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			if tracer != nil {
+				tracer.CaptureTxEnd(nil, err)
+			}
 			return err
 		}
+
+		if tracer != nil {
+			tracer.CaptureTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
+		}
+
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 
 		if tracer.Found() {

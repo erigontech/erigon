@@ -770,9 +770,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
+		ibs.SetLogger(&ot)
+
+		ot.CaptureTxStart(evm, txn)
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
+			ot.CaptureTxEnd(nil, err)
 			if first {
 				first = false
 			} else {
@@ -783,6 +787,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		ot.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
@@ -930,7 +935,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	parentHash := block.ParentHash()
 
-	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
+	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, txs, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,

@@ -127,10 +127,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 // be tracer dependent.
 func TraceTx(
 	ctx context.Context,
+	tx types.Transaction,
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracers.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
@@ -138,7 +139,7 @@ func TraceTx(
 ) error {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
-		tracer vm.EVMLogger
+		tracer tracers.Tracer
 		err    error
 	)
 	var streaming bool
@@ -167,7 +168,7 @@ func TraceTx(
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 		go func() {
 			<-deadlineCtx.Done()
-			tracer.(tracers.Tracer).Stop(errors.New("execution timeout"))
+			tracer.Stop(errors.New("execution timeout"))
 		}()
 		defer cancel()
 		streaming = false
@@ -182,6 +183,7 @@ func TraceTx(
 	}
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+	ibs.SetLogger(tracer)
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
@@ -192,6 +194,7 @@ func TraceTx(
 		stream.WriteArrayStart()
 	}
 
+	tracer.CaptureTxStart(vmenv, tx)
 	var result *core.ExecutionResult
 	if config != nil && config.BorTx != nil && *config.BorTx {
 		callmsg := prepareCallMessage(message)
@@ -201,6 +204,7 @@ func TraceTx(
 	}
 
 	if err != nil {
+		tracer.CaptureTxEnd(nil, err)
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
@@ -211,6 +215,7 @@ func TraceTx(
 		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
+	tracer.CaptureTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
@@ -230,7 +235,7 @@ func TraceTx(
 		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
-		if r, err1 := tracer.(tracers.Tracer).GetResult(); err1 == nil {
+		if r, err1 := tracer.GetResult(); err1 == nil {
 			stream.Write(r)
 		} else {
 			return err1
