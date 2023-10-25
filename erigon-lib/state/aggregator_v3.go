@@ -31,10 +31,11 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -674,7 +675,6 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	}
 
 	outs, err := ac.staticFilesInRange(r)
-	//defer outs.Close()
 	defer func() {
 		if closeAll {
 			outs.Close()

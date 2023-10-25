@@ -14,10 +14,11 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -629,8 +630,10 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 }
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
-	fmt.Printf("set context old[%p] new[%p]\n", sd.aggCtx, ctx)
 	sd.aggCtx = ctx
+	if ctx != nil {
+		sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+	}
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
