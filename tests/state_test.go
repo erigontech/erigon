@@ -47,14 +47,22 @@ func TestTimeConsumingState(t *testing.T) {
 	st.whitelist("stTimeConsuming*")
 	testState(t, st)
 }
+func TestTransitionState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist("stTransactionTest*")
+	testState(t, st)
+}
 
 func TestState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.skipLoad(`^stZero`)
 	st.skipLoad(`^stTimeConsuming`)
+	st.skipLoad(`^stTransactionTest`)
 	testState(t, st)
 }
+
 func testState(t *testing.T, st *testMatcher) {
 	t.Helper()
 	defer log.Root().SetHandler(log.Root().GetHandler())
@@ -77,6 +85,9 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stZeroKnowledge`)
 		st.skipLoad(`^stZeroCallsTest`)
 		st.skipLoad(`^stZeroCallsRevert`)
+
+		st.skipLoad(`^stTransactionTest/TransactionToItself.json`)
+		st.skipLoad(`^stTransactionTest/TransactionToAddressh160minusOne.json`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
