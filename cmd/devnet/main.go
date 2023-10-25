@@ -444,7 +444,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePort:           30403,
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        baseRpcHost,
-					BaseRPCPort:        baseRpcPort,
+					BaseRPCPort:        baseRpcPort + 1000,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
