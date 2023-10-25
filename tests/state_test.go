@@ -52,16 +52,19 @@ func TestTransitionState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stTransactionTest*`)
+	st.whitelist(`^stArgsZeroOneBalance*`)
 	testState(t, st)
 }
 
 func TestState(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
+	// another Test*State targets are running this tests
 	st.skipLoad(`^stZero`)
 	st.skipLoad(`^stTimeConsuming`)
 	st.skipLoad(`^stTransactionTest`)
 	st.skipLoad(`^VMTests`)
+	st.skipLoad(`^stArgsZeroOneBalance`)
 	testState(t, st)
 }
 
@@ -83,8 +86,8 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stWalletTest`)
 		st.skipLoad(`^stTransitionTest`)
 
-		st.skipLoad(`^stZeroCallsTest`)
-		st.skipLoad(`^stZeroCallsRevert`)
+		//st.skipLoad(`^stZeroCallsTest`)
+		//st.skipLoad(`^stZeroCallsRevert`)
 	}
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
