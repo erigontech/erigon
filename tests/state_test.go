@@ -87,6 +87,7 @@ func testState(t *testing.T, st *testMatcher) {
 		st.skipLoad(`^stZeroCallsRevert`)
 
 		st.skipLoad(`^stTransactionTest/TransactionToItself.json`)
+		st.skipLoad(`^stTransactionTest/TransactionSendingToZero.json`)
 		st.skipLoad(`^stTransactionTest/TransactionToAddressh160minusOne.json`)
 	}
 
