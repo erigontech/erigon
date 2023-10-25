@@ -54,12 +54,12 @@ func TestState(t *testing.T) {
 		//TODO: AlexSharov - need to fix this test
 	}
 
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
-				_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx, err := db.BeginRw(context.Background())
 					if err != nil {
