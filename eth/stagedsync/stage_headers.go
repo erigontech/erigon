@@ -313,7 +313,6 @@ Loop:
 			if err != nil {
 				return err
 			}
-			fmt.Printf("[dbg] alex unnnn: %d, %d\n", headerInserter.UnwindPoint(), blockNumWithCommitment)
 			unwindTo := cmp.Min(headerInserter.UnwindPoint(), blockNumWithCommitment) // not all blocks have commitment
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
