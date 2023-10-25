@@ -45,6 +45,7 @@ func (e *encoder) WriteCycle(xs ...Instruction) error {
 	if _, err := e.b.Write([]byte("\n")); err != nil {
 		return err
 	}
+	// TODO: consider a length prefix + header here ???
 	_, err := e.b.WriteTo(e.w)
 	return err
 }
