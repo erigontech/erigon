@@ -38,10 +38,6 @@ type BorEventReader interface {
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
 }
 
-type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Getter, spanNum uint64) ([]byte, error)
-}
-
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
@@ -75,7 +71,6 @@ type FullBlockReader interface {
 	BodyReader
 	HeaderReader
 	BorEventReader
-	BorSpanReader
 	TxnReader
 	CanonicalReader
 
