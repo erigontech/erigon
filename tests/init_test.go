@@ -207,7 +207,10 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 			return nil
 		}
 		if filepath.Ext(path) == ".json" {
-			t.Run(name, func(t *testing.T) { tm.runTestFile(t, path, name, runTest) })
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				tm.runTestFile(t, path, name, runTest)
+			})
 		}
 		return nil
 	})
@@ -225,7 +228,6 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 			t.Skip("Skipped by whitelist")
 		}
 	}
-	//t.Parallel()
 
 	// Load the file as map[string]<testType>.
 	m := makeMapFromTestFunc(runTest)
