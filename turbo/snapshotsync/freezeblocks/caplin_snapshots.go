@@ -83,11 +83,6 @@ func (sn *BeaconBlockSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.idxSlot.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idxSlot.Close()
-		sn.idxSlot = nil
-	}
 	return nil
 }
 
