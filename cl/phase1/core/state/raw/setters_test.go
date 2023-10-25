@@ -346,11 +346,3 @@ func TestBeaconState_SetEpochParticipationForValidatorIndex(t *testing.T) {
 	state.SetEpochParticipationForValidatorIndex(isCurrentEpoch, index, cltypes.ParticipationFlags(1))
 	assert.Equal(t, uint8(1), state.currentEpochParticipation.Get(index))
 }
-
-func TestBeaconState_SetValidatorAtIndex(t *testing.T) {
-	state := GetTestState()
-	index := 0
-	validator := solid.NewValidator()
-	state.SetValidatorAtIndex(index, validator)
-	assert.Equal(t, validator, state.validators.Get(index))
-}

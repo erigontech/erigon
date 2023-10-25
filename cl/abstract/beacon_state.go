@@ -84,7 +84,6 @@ type BeaconStateMutator interface {
 	SetRandaoMixAt(index int, mix common.Hash)
 	SetSlashingSegmentAt(index int, segment uint64)
 	SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags)
-	SetValidatorAtIndex(index int, validator solid.Validator)
 
 	SetJustificationBits(justificationBits cltypes.JustificationBits)
 	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
