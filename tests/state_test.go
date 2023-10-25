@@ -36,13 +36,12 @@ import (
 )
 
 func TestState(t *testing.T) {
-	t.Helper()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
-	//t.Parallel()
+	t.Parallel()
 
 	st := new(testMatcher)
 
