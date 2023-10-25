@@ -317,7 +317,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// that if so. Otherwise we need to generate a new genesis spec.
 	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, chainConfig.Bor != nil, logger)
 	if err != nil {
-		fmt.Println("AAAAAA,  ", err)
 		return nil, err
 	}
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
