@@ -1071,7 +1071,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	blockNumWithCommitment, _, err := doms.SeekCommitment2(applyTx, 0, unwindTo)
+	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(applyTx, 0, unwindTo)
 	if err != nil {
 		return false, err
 	}
@@ -1079,7 +1079,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, err
 	}
-	if blockNumWithCommitment > 0 {
+	if ok {
 		unwindTo = cmp.Max(unwindTo, blockNumWithCommitment) // not all blocks have commitment
 	}
 	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
