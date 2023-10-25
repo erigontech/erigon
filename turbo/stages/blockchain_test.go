@@ -25,13 +25,15 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -246,7 +248,6 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
-
 	length := 10
 
 	// Make first chain starting from genesis

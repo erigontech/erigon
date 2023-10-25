@@ -15,9 +15,10 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 
@@ -258,7 +259,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			if blockNum > 0 {
-				_outputTxNum, err := rawdbv3.TxNums.Max(tx, execStage.BlockNumber)
+				_outputTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
 				if err != nil {
 					return err
 				}
@@ -914,6 +915,7 @@ Loop:
 	//dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
+		fmt.Printf("[dbg] externalTx v3 commit %d\n", blockNum)
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
