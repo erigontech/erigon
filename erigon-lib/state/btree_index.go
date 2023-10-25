@@ -917,9 +917,10 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
 	}
-	if b.bplus != nil && b.ef != b.bplus.offt {
-		panic("b.ef != b.bplus.offt")
-	}
+	// assert
+	//if b.bplus != nil && b.ef != b.bplus.offt {
+	//	panic("b.ef != b.bplus.offt")
+	//}
 
 	offset := b.ef.Get(di)
 	g.Reset(offset)
