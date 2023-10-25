@@ -77,10 +77,6 @@ func (msg Msg) Time() time.Time {
 	return msg.ReceivedAt
 }
 
-func (msg Msg) Capability() string {
-	return msg.meterCap.String()
-}
-
 type MsgReader interface {
 	ReadMsg() (Msg, error)
 }

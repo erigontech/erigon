@@ -345,13 +345,14 @@ func handShake(
 func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
-	protocol uint,
+	cap p2p.Cap,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 	logger log.Logger,
 ) *p2p.PeerError {
+	protocol := cap.Version
 	printTime := time.Now().Add(time.Minute)
 	peerPrinted := false
 	defer func() {
@@ -389,8 +390,8 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
-		msgType := ""
-		msgCap := msg.Capability()
+		msgType := eth.ToProto[protocol][msg.Code].String()
+		msgCap := cap.String()
 
 		givePermit := false
 		switch msg.Code {
@@ -399,7 +400,6 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
-			msgType = "GetBlockHeadersMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -410,7 +410,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
-			msgType = "BlockHeadersMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -421,7 +420,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
-			msgType = "GetBlockBodiesMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -431,7 +429,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
-			msgType = "BlockBodiesMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -442,7 +439,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
-			msgType = "GetNodeDataMsg"
 			if protocol >= direct.ETH67 {
 				msg.Discard()
 				return p2p.NewPeerError(p2p.PeerErrorMessageObsolete, p2p.DiscSubprotocolError, nil, fmt.Sprintf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol))
@@ -457,7 +453,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
-			msgType = "GetReceiptsMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -468,7 +463,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
-			msgType = "ReceiptsMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -479,7 +473,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
-			msgType = "NewBlockHashesMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -490,7 +483,6 @@ func runPeer(
 			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
-			msgType = "NewBlockMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -501,7 +493,6 @@ func runPeer(
 			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
-			msgType = "NewPooledTransactionHashesMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -512,7 +503,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
-			msgType = "GetPooledTransactionsMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -523,7 +513,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
-			msgType = "TransactionsMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -534,7 +523,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
-			msgType = "PooledTransactionsMsg"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -649,10 +637,12 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
 
+				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
+
 				err = runPeer(
 					ctx,
 					peerID,
-					protocol,
+					cap,
 					rw,
 					peerInfo,
 					ss.send,
