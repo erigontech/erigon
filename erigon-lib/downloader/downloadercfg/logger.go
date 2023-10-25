@@ -90,29 +90,15 @@ func (b adapterHandler) Handle(r lg.Record) {
 	case lg.Warning:
 		str := r.String()
 		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "requested chunk too long")
-
-		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "banned ip") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "reservation cancelled") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "received invalid reject") { // suppress useless errors
-		//	break
-		//}
+			strings.Contains(str, "requested chunk too long") ||
+			strings.Contains(str, "banned ip") ||
+			strings.Contains(str, "banning webseed") ||
+			strings.Contains(str, "TrackerClient closed") ||
+			strings.Contains(str, "being sole dirtier of piece") ||
+			strings.Contains(str, "webrtc conn for unloaded torrent") ||
+			strings.Contains(str, "could not find offer for id") ||
+			strings.Contains(str, "received invalid reject") ||
+			strings.Contains(str, "reservation cancelled")
 
 		if skip {
 			log.Trace(str)
