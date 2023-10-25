@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -318,7 +317,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 		return err
 	}
 
-	msgType, msgCap := parseTopick(pkt.GetTopic())
+	msgType, msgCap := parseTopic(pkt.GetTopic())
 	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
@@ -378,17 +377,15 @@ func (s *SentinelServer) trackPeerStatistics(peerID string, inbound bool, msgTyp
 	}
 }
 
-func parseTopick(input string) (string, string) {
-	re := regexp.MustCompile(`^/([^/]+)/[^/]+/([^/]+)`)
+func parseTopic(input string) (string, string) {
+	parts := strings.Split(input, "/")
 
-	matches := re.FindStringSubmatch(input)
-
-	if len(matches) != 3 {
+	if len(parts) < 4 {
 		return "unknown", "unknown"
 	}
 
-	capability := matches[1]
-	topick := matches[2]
+	capability := parts[1]
+	topick := parts[3]
 
 	return capability, topick
 }
