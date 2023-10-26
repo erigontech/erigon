@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -171,6 +172,18 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+}
+
+func (config *Config) ListenPort() int {
+	_, portStr, err := net.SplitHostPort(config.ListenAddr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // Server manages all peer connections.
