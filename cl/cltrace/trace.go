@@ -1,9 +1,9 @@
 package cltrace
 
 import (
+	"encoding/binary"
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/abstract/proxystate"
@@ -25,7 +25,7 @@ func NewStateTracer(enc clvm.Encoder) *StateTracer {
 func (t *StateTracer) TransitionState(s abstract.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	cvm := &eth2.Impl{FullValidation: fullValidation}
 	t.enc.Encode(
-		clvm.NewInstruction([]byte("#block"), []byte(strconv.Itoa(int(block.Block.Slot)))),
+		clvm.NewInstruction([]byte("#block"), binary.LittleEndian.AppendUint64(nil, block.Block.Slot)),
 	)
 	s = &proxystate.BeaconStateProxy{
 		Handler: proxystate.InvocationHandlerFunc(func(method string, args []any) (retvals []any, intercept bool) {

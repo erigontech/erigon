@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/golang/snappy"
@@ -180,6 +179,7 @@ func NewForkGraphDisk(anchorState abstract.BeaconState, aferoFs afero.Fs) ForkGr
 
 	farthestExtendingPath[anchorRoot] = true
 
+	file, _ := os.OpenFile("trace.tmp", os.O_RDWR|os.O_CREATE, 0o644)
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// storage
@@ -196,7 +196,7 @@ func NewForkGraphDisk(anchorState abstract.BeaconState, aferoFs afero.Fs) ForkGr
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
 		anchorSlot:  anchorState.Slot(),
-		tracer:      cltrace.NewStateTracer(clvm.NewEncoder(io.Discard)),
+		tracer:      cltrace.NewStateTracer(clvm.NewEncoder(file)),
 	}
 	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
 	return f
