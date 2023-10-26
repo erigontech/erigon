@@ -10,8 +10,8 @@ import (
 )
 
 type HttpCfg struct {
-	Enabled                  bool
-	PrivateApiAddr           string
+	Enabled bool
+
 	GraphQLEnabled           bool
 	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	DataDir                  string
@@ -21,26 +21,31 @@ type HttpCfg struct {
 	TLSCertfile              string
 	TLSCACert                string
 	TLSKeyFile               string
-	HttpPort                 int
-	AuthRpcPort              int
-	HttpCORSDomain           []string
-	HttpVirtualHost          []string
-	AuthRpcVirtualHost       []string
-	HttpCompression          bool
-	API                      []string
-	Gascap                   uint64
-	MaxTraces                uint64
-	WebsocketEnabled         bool
-	WebsocketCompression     bool
-	RpcAllowListFilePath     string
-	RpcBatchConcurrency      uint
-	RpcStreamingDisable      bool
-	DBReadConcurrency        int
-	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr            string
-	StateCache               kvcache.CoherentConfig
-	Snap                     ethconfig.BlocksFreezing
-	Sync                     ethconfig.Sync
+
+	HttpServerEnabled  bool
+	HttpPort           int
+	HttpCORSDomain     []string
+	HttpVirtualHost    []string
+	AuthRpcVirtualHost []string
+	HttpCompression    bool
+
+	AuthRpcPort    int
+	PrivateApiAddr string
+
+	API                  []string
+	Gascap               uint64
+	MaxTraces            uint64
+	WebsocketEnabled     bool
+	WebsocketCompression bool
+	RpcAllowListFilePath string
+	RpcBatchConcurrency  uint
+	RpcStreamingDisable  bool
+	DBReadConcurrency    int
+	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr        string
+	StateCache           kvcache.CoherentConfig
+	Snap                 ethconfig.BlocksFreezing
+	Sync                 ethconfig.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool
@@ -48,10 +53,9 @@ type HttpCfg struct {
 	GRPCPort               int
 	GRPCHealthCheckEnabled bool
 
-	// Raw TCP Server
-	TCPServerEnabled bool
-	TCPListenAddress string
-	TCPPort          int
+	// Socket Server
+	SocketServerEnabled bool
+	SocketListenUrl     string
 
 	JWTSecretPath   string // Engine API Authentication
 	TraceRequests   bool   // Always trace requests in INFO level
