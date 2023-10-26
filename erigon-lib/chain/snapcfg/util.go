@@ -146,6 +146,10 @@ var KnownWebseeds = map[string][]string{
 	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
 }
 
+var KnownWebseedsCaplin = map[string][]string{
+	networkname.SepoliaChainName: webseedsParse(webseed.SepoliaCaplin),
+}
+
 func webseedsParse(in []byte) (res []string) {
 	a := map[string]string{}
 	if err := toml.Unmarshal(in, &a); err != nil {
