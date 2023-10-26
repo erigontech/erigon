@@ -107,7 +107,9 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
-		skip := strings.Contains(str, "EOF")
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "short write") ||
+			strings.Contains(str, "disabling data download")
 		if skip {
 			log.Trace(str)
 			break
