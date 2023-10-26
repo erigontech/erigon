@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
@@ -164,9 +165,39 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	return err
 }
 
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx) ([]byte, error) {
+	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math2.MaxInt64, order.Asc, -1, rwTx)
+	if err != nil {
+		return nil, err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchAccount)
+	}
+
+	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math2.MaxInt64, order.Asc, -1, rwTx)
+	if err != nil {
+		return nil, err
+	}
+
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchStorage)
+	}
+
+	return sd.ComputeCommitment(ctx, true, false)
+}
+
 func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	return sd.Commitment.SeekCommitment(tx, sinceTx, untilTx, sd.aggCtx.commitment)
 }
+
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	fromTx := uint64(0)
 	toTx := uint64(math2.MaxUint64)
@@ -177,6 +208,27 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if !ok {
 		//TODO: implement me!
 	}
+
+	// startingBlock := sd.BlockNum()
+	// startingTxnum := sd.TxNum()
+	// if bn != startingBlock || txn != startingTxnum {
+	// 	sd.Commitment.Reset()
+	// 	snapTxNum := utils.Min64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
+	// 	toTx := utils.Max64(snapTxNum, startingTxnum)
+	// 	if toTx > 0 {
+	// 		sd.SetTxNum(ctx, toTx)
+	// 		newRh, err := sd.rebuildCommitment(ctx, tx)
+	// 		if err != nil {
+	// 			return 0, err
+	// 		}
+	// 		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
+	// 	}
+	// 	bn, txn, err = rawdbv3.TxNums.Last(tx)
+	// 	if err != nil {
+	// 		return 0, err
+	// 	}
+	// 	latestTxn := utils.Max64(txn, snapTxNum)
+	// }
 
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
 	if ok {
@@ -580,6 +632,9 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
+	if ctx != nil {
+		sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+	}
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {

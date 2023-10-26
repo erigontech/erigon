@@ -762,16 +762,10 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	kl := len(key1) + len(key2)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
-	//binary.BigEndian.PutUint64(fullkey[kl:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
 	if (d.dc.hc.ic.txNum / d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
 		panic(fmt.Sprintf("assert: %d != %d", d.dc.hc.ic.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.dc.stepBytes[:])))
 	}
 
-	//stepbb := [8]byte{}
-	//binary.BigEndian.PutUint64(stepbb[:], ^(d.dc.hc.ic.txNum / d.dc.d.aggregationStep))
-	//if !bytes.Equal(d.dc.stepBytes[:], stepbb[:]) {
-	//	fmt.Printf("addValue %x: step %x != %x\n", fullkey[:kl], fullkey[kl:], stepbb[:])
-	//}
 	//defer func() {
 	//	fmt.Printf("addValue @%d %x->%x buffered %t largeVals %t file %s\n", d.dc.hc.ic.txNum, fullkey, value, d.buffered, d.largeValues, d.dc.d.filenameBase)
 	//}()
@@ -1432,6 +1426,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
+// context Flush should be managed by caller.
 func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64, f func(step uint64, k, v []byte) error) error {
 	d := dc.d
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
@@ -1537,7 +1532,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
 	}
-	// dc flush and start/finish is managed by sharedDomains
 	return nil
 }
 

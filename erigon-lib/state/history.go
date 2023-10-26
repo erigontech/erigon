@@ -548,9 +548,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	}
 
 	ic := h.hc.ic
-	// defer func() {
-	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
-	// }()
+	//defer func() {
+	//	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
+	//}()
 
 	if h.largeValues {
 		lk := len(key1) + len(key2)

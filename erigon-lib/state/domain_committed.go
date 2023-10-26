@@ -500,17 +500,10 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
+	//fmt.Printf("[commitment] ComputeCommitment %d keys\n", len(touchedKeys))
 	mxCommitmentKeys.Add(len(touchedKeys))
 
-	if len(touchedKeys) == 0 {
-		rootHash, err = d.patriciaTrie.RootHash()
-		return rootHash, nil, err
-	}
-
-	if len(touchedKeys) > 1 {
-		d.patriciaTrie.Reset()
-	}
-	// data accessing functions should be set once before
+	// data accessing functions should be set when domain is opened/shared context updated
 	d.patriciaTrie.SetTrace(trace)
 
 	switch d.mode {
