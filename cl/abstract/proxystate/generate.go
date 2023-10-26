@@ -1,3 +1,3 @@
-package cltrace
+package proxystate
 
 //go:generate ./generate.sh
