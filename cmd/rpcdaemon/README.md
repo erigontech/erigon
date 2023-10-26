@@ -196,7 +196,7 @@ note that this is NOT geth-style IPC. for that, read the next section, IPC endpo
 
 ### IPC endpoint (geth compatible)
 
-erigon supports the geth-style unix socket IPC. you can enable this with `--socket.enable` flag,
+erigon supports the geth-style unix socket IPC. you can enable this with `--socket.enabled` flag,
 and setting the `--socket.url` flag. For instance, if you wanted the socket to exist at `/var/run/erigon.ipc`,
 you would do `--socket.url=unix:///var/run/erigon.ipc`
 
