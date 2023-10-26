@@ -73,7 +73,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
 			strings.Contains(str, "inited with remoteAddr")
 		if skip {
-			log.Trace(str)
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Debug(str)
@@ -83,7 +83,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//strings.Contains(str, "banning ip <nil>") ||
 		//strings.Contains(str, "spurious timer") { // suppress useless errors
 		if skip {
-			log.Trace(str)
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Info(str)
@@ -111,7 +111,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "short write") ||
 			strings.Contains(str, "disabling data download")
 		if skip {
-			log.Trace(str)
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Error(str)
@@ -121,7 +121,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "torrent closed") ||
 			strings.Contains(str, "don't want conns")
 		if skip {
-			log.Trace(str)
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Error(str)
@@ -129,7 +129,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		str := r.String()
 		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status")
 		if skip {
-			log.Trace(str)
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
