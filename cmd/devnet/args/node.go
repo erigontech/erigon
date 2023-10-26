@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"math/big"
@@ -141,6 +142,8 @@ func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, e
 			m.DevPeriod = 30
 		}
 		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+		core.DevnetEtherbase = m.account.Address
+		core.DevnetSignPrivateKey = m.account.SigKey()
 
 	case networkname.BorDevnetChainName:
 		m.account = accounts.NewAccount(m.Name() + "-etherbase")
