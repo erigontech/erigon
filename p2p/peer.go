@@ -22,6 +22,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -248,7 +249,34 @@ func (p *Peer) Log() log.Logger {
 	return p.log
 }
 
+func makeFirstCharCap(input string) string {
+	// Convert the entire string to lowercase
+	input = strings.ToLower(input)
+	// Use strings.Title to capitalize the first letter of each word
+	input = strings.ToUpper(input[:1]) + input[1:]
+	return input
+}
+
+func convertToCamelCase(input string) string {
+	parts := strings.Split(input, "_")
+	if len(parts) == 1 {
+		return input
+	}
+
+	var result string
+
+	for _, part := range parts {
+		if len(part) > 0 && part != parts[len(parts)-1] {
+			result += makeFirstCharCap(part)
+		}
+	}
+
+	return result
+}
+
 func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes uint64, inbound bool) {
+	msgType = convertToCamelCase(msgType)
+
 	if inbound {
 		p.BytesIn += bytes
 		p.CapBytesIn[msgCap] += bytes

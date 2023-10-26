@@ -554,7 +554,7 @@ func runPeer(
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 
-		saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType, uint64(msg.Size), true)
+		//saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType, uint64(msg.Size), true)
 		peerInfo.peer.CountBytesTransfered(msgType, msgCap, uint64(msg.Size), true)
 
 		msg.Discard()
@@ -770,6 +770,11 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
+
+		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
+		msgType := eth.ToProto[cap.Version][msgcode]
+		peerInfo.peer.CountBytesTransfered(msgType.String(), cap.String(), uint64(len(data)), false)
+
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			peerInfo.Remove(p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
