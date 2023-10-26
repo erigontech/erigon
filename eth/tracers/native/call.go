@@ -145,15 +145,11 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 	if create {
 		t.callstack[0].Type = vm.CREATE
 	}
-	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	t.callstack[0].processOutput(output, err)
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
@@ -241,8 +237,9 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
 func (t *callTracer) CaptureTxStart(gasLimit uint64) {
-
 	t.gasLimit = gasLimit
+	t.logIndex = 0
+	t.logGaps = make(map[uint64]int)
 }
 
 func (t *callTracer) CaptureTxEnd(restGas uint64) {
@@ -252,6 +249,8 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 		clearFailedLogs(&t.callstack[0], false, 0, t.logGaps)
 		fixLogIndexGap(&t.callstack[0], t.logGaps)
 	}
+	t.logIndex = 0
+	t.logGaps = nil
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -282,7 +281,7 @@ func clearFailedLogs(cf *callFrame, parentFailed bool, gap int, logGaps map[uint
 		gap += len(cf.Logs)
 		if gap > 0 {
 			lastIdx := len(cf.Logs) - 1
-			if lastIdx > 0 {
+			if lastIdx > 0 && logGaps != nil {
 				idx := cf.Logs[lastIdx].Index
 				logGaps[idx] = gap
 			}
