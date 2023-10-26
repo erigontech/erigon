@@ -42,6 +42,17 @@ func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.Er
 		w.Header().Set("Content-Type", "application/json")
 		writePeers(w, ctx, node)
 	})
+
+	metricsMux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeMessages(w, ctx, node)
+	})
+}
+
+func writeMessages(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {
+	messagesArray := node.Backend().DiagnosticsMessagesData()
+	json.NewEncoder(w).Encode(messagesArray)
 }
 
 func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {
@@ -103,49 +114,30 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
 func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
-	reply := node.Backend().DiagnosticsPeersData()
+	statisticsArray := node.Backend().DiagnosticsPeersData()
 
-	peers := make([]*PeerResponse, 0, len(reply))
+	peers := make([]*PeerResponse, 0, len(statisticsArray))
 
-	for _, rpcPeer := range reply {
-		var bytesIn = uint64(0)
-		var bytesOut = uint64(0)
-
-		var capBytesIn = map[string]uint64{}
-		var capBytesOut = map[string]uint64{}
-
-		var typeBytesIn = map[string]uint64{}
-		var typeBytesOut = map[string]uint64{}
-
-		if rpcPeer.Network.Inbound {
-			bytesIn = rpcPeer.BytesTransfered
-			capBytesIn = rpcPeer.CapBytesTransfered
-			typeBytesIn = rpcPeer.TypeBytesTransfered
-		} else {
-			bytesOut = rpcPeer.BytesTransfered
-			capBytesOut = rpcPeer.CapBytesTransfered
-			typeBytesOut = rpcPeer.TypeBytesTransfered
-		}
-
+	for key, value := range statisticsArray {
 		peer := PeerResponse{
-			ENR:   rpcPeer.ENR,
-			Enode: rpcPeer.Enode,
-			ID:    rpcPeer.ID,
-			Name:  rpcPeer.Name,
+			ENR:   "", //TODO: find a way how to get missing data
+			Enode: "",
+			ID:    key,
+			Name:  "",
 			Type:  "Sentry",
-			Caps:  rpcPeer.Caps,
+			Caps:  []string{},
 			Network: PeerNetworkInfo{
-				LocalAddress:  rpcPeer.Network.LocalAddress,
-				RemoteAddress: rpcPeer.Network.RemoteAddress,
-				Inbound:       rpcPeer.Network.Inbound,
-				Trusted:       rpcPeer.Network.Trusted,
-				Static:        rpcPeer.Network.Static,
-				BytesIn:       bytesIn,
-				BytesOut:      bytesOut,
-				CapBytesIn:    capBytesIn,
-				CapBytesOut:   capBytesOut,
-				TypeBytesIn:   typeBytesIn,
-				TypeBytesOut:  typeBytesOut,
+				LocalAddress:  "",
+				RemoteAddress: "",
+				Inbound:       false,
+				Trusted:       false,
+				Static:        false,
+				BytesIn:       value.BytesIn,
+				BytesOut:      value.BytesOut,
+				CapBytesIn:    value.CapBytesIn,
+				CapBytesOut:   value.CapBytesOut,
+				TypeBytesIn:   value.TypeBytesIn,
+				TypeBytesOut:  value.TypeBytesOut,
 			},
 			Protocols: nil,
 		}
@@ -153,5 +145,17 @@ func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 		peers = append(peers, &peer)
 	}
 
-	return peers, nil
+	return filterPeersWithoutBytesIn(peers), nil
+}
+
+func filterPeersWithoutBytesIn(peers []*PeerResponse) []*PeerResponse {
+	filteredPeers := make([]*PeerResponse, 0, len(peers))
+
+	for _, peer := range peers {
+		if peer.Network.BytesIn > 0 {
+			filteredPeers = append(filteredPeers, peer)
+		}
+	}
+
+	return filteredPeers
 }

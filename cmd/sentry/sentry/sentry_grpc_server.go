@@ -27,6 +27,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -351,6 +352,7 @@ func runPeer(
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 	logger log.Logger,
+	saveTransferedMessage func(peerID string, cap string, msgType string, size uint64, inbound bool),
 ) *p2p.PeerError {
 	protocol := cap.Version
 	printTime := time.Now().Add(time.Minute)
@@ -390,7 +392,7 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
-		msgType := eth.ToProto[protocol][msg.Code].String()
+		msgType := "unknown"
 		msgCap := cap.String()
 
 		givePermit := false
@@ -400,6 +402,7 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
+			msgType = "GetBlockHeaders"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -410,6 +413,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
+			msgType = "BlockHeaders"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -420,6 +424,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
+			msgType = "GetBlockBodies"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -429,6 +434,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
+			msgType = "BlockBodies"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -439,6 +445,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
+			msgType = "GetNodeData"
 			if protocol >= direct.ETH67 {
 				msg.Discard()
 				return p2p.NewPeerError(p2p.PeerErrorMessageObsolete, p2p.DiscSubprotocolError, nil, fmt.Sprintf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol))
@@ -453,6 +460,7 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
+			msgType = "GetReceipts"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -463,6 +471,7 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
+			msgType = "Receipts"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -473,6 +482,7 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
+			msgType = "NewBlockHashes"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -483,6 +493,7 @@ func runPeer(
 			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
+			msgType = "NewBlock"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -493,6 +504,7 @@ func runPeer(
 			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
+			msgType = "NewPooledTransactionHashes"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -503,6 +515,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
+			msgType = "GetPooledTransactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -513,6 +526,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
+			msgType = "Transactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -523,6 +537,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
+			msgType = "PooledTransactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -536,11 +551,11 @@ func runPeer(
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
-			msgType = "Unknown"
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 
-		peerInfo.peer.CountBytesTransfered(msgType, msgCap, uint64(msg.Size))
+		saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType, uint64(msg.Size), true)
+		peerInfo.peer.CountBytesTransfered(msgType, msgCap, uint64(msg.Size), true)
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -648,6 +663,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					ss.send,
 					ss.hasSubscribers,
 					logger,
+					ss.saveTransferedMessage,
 				)
 				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return err
@@ -707,6 +723,19 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
+
+	transferedMesages []*diagnostics.MessageTransfered
+}
+
+func (ss *GrpcServer) saveTransferedMessage(peerID string, cap string, msgType string, size uint64, inbound bool) {
+	ss.transferedMesages = append(ss.transferedMesages, &diagnostics.MessageTransfered{
+		PeerID:    peerID,
+		Cap:       cap,
+		MsgType:   msgType,
+		Size:      size,
+		Inbound:   inbound,
+		Timestamp: time.Now().String(),
+	})
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
@@ -1049,13 +1078,19 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 	return &reply, nil
 }
 
-func (ss *GrpcServer) DiagnosticsPeersData() []*p2p.PeerInfo {
+func (ss *GrpcServer) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
 	if ss.P2pServer == nil {
-		return []*p2p.PeerInfo{}
+		return map[string]*diagnostics.PeerStatistics{}
 	}
 
-	peers := ss.P2pServer.PeersInfo()
+	peers := ss.P2pServer.DiagnosticsPeersInfo()
 	return peers
+}
+
+func (ss *GrpcServer) MessagesTransfered() []*diagnostics.MessageTransfered {
+	mTrs := ss.transferedMesages
+	ss.transferedMesages = []*diagnostics.MessageTransfered{}
+	return mTrs
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {

@@ -33,6 +33,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cl/beacon"
@@ -1215,11 +1216,26 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	return &reply, nil
 }
 
-func (s *Ethereum) DiagnosticsPeersData() []*p2p.PeerInfo {
-	var reply []*p2p.PeerInfo
+func (s *Ethereum) DiagnosticsMessagesData() []*diagnostics.MessageTransfered {
+	reply := []*diagnostics.MessageTransfered{}
+	for _, sentryServer := range s.sentryServers {
+		mTrs := sentryServer.MessagesTransfered()
+		reply = append(reply, mTrs...)
+	}
+
+	return reply
+}
+
+func (s *Ethereum) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
+	var reply map[string]*diagnostics.PeerStatistics = make(map[string]*diagnostics.PeerStatistics)
 	for _, sentryServer := range s.sentryServers {
 		peers := sentryServer.DiagnosticsPeersData()
-		reply = append(reply, peers...)
+
+		//mTrs := sentryServer.MessagesTransfered()
+
+		for key, value := range peers {
+			reply[key] = value
+		}
 	}
 
 	return reply
