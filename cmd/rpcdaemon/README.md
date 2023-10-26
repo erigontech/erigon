@@ -117,7 +117,7 @@ If the healthcheck is successful it will return a 200 status code.
 If the healthcheck fails for any reason a status 500 will be returned.  This is true if one of the criteria requested
 fails its check.
 
-You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the 
+You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the
 checks.
 
 Available Options:
@@ -185,6 +185,24 @@ Next options available (by `--prune` flag):
 By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
 
 Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it requires `h`.
+
+### The --http.url flag
+
+the `--http.url` flag is an optional flag which allows one to bind the HTTP server to a socket, for example, `tcp6://:8545` or `unix:///erigon_http.socket`
+
+If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both be ignored.
+
+note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
+
+### IPC endpoint (geth compatible)
+
+erigon supports the geth-style unix socket IPC. you can enable this with `--socket.enable` flag,
+and setting the `--socket.url` flag. For instance, if you wanted the socket to exist at `/var/run/erigon.ipc`,
+you would do `--socket.url=unix:///var/run/erigon.ipc`
+
+you can also use `--socket.url=tcp://<addr>:<port>` to serve the raw jsonrpc2 protocol over tcp
+
+the socket will inherit the namespaces from `http.api`
 
 ### RPC Implementation Status
 
