@@ -166,4 +166,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.SilkwormPathFlag,
 
 	&utils.TrustedSetupFile,
+
+	&utils.DisableTxPoolGossipFlag,
 }

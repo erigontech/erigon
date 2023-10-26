@@ -20,12 +20,13 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -834,6 +835,11 @@ var (
 		Name:  "silkworm.path",
 		Usage: "Path to the silkworm_api library (enables embedded Silkworm execution)",
 		Value: "",
+	}
+
+	DisableTxPoolGossipFlag = cli.BoolFlag{
+		Name:  "disable.txpool.gossip",
+		Usage: "Disable transaction pool gossip.",
 	}
 )
 
@@ -1648,6 +1654,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
+	}
+
+	if ctx.IsSet(DisableTxPoolGossipFlag.Name) {
+		cfg.DisableTxPoolGossip = ctx.Bool(DisableTxPoolGossipFlag.Name)
 	}
 }
 

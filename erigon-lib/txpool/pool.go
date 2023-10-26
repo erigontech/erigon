@@ -1696,6 +1696,14 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 
 				notifyMiningAboutNewSlots()
 
+				if p.cfg.NoTxGossip {
+					// drain newTxs for emptying newTx channel
+					// newTx channel will be filled only with local transactions
+					// early return to avoid outbound transaction propagation
+					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					return
+				}
+
 				var localTxTypes []byte
 				var localTxSizes []uint32
 				var localTxHashes types.Hashes
@@ -1764,6 +1772,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
 			if len(newPeers) == 0 {
+				continue
+			}
+			if p.cfg.NoTxGossip {
+				// avoid transaction gossiping for new peers
+				log.Debug("[txpool] tx gossip disabled", "state", "sync new peers")
 				continue
 			}
 			t := time.Now()
@@ -2112,6 +2125,20 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		}
 		return true
 	})
+}
+
+// disables adding remote transactions
+type TxPoolDropRemote struct {
+	*TxPool
+}
+
+func NewTxPoolDropRemote(txPool *TxPool) *TxPoolDropRemote {
+	return &TxPoolDropRemote{TxPool: txPool}
+}
+
+func (p *TxPoolDropRemote) AddRemoteTxs(ctx context.Context, newTxs types.TxSlots) {
+	// disable adding remote transactions
+	// consume remote tx from fetch
 }
 
 var PoolChainConfigKey = []byte("chain_config")
