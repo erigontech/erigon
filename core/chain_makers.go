@@ -424,9 +424,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		parent = block
 	}
 
-	//if ethconfig.EnableHistoryV4InTest {
-	//	//domains.ClearRam(true)
-	//}
+	if ethconfig.EnableHistoryV4InTest {
+		domains.ClearRam(true)
+	}
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
