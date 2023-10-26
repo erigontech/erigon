@@ -335,7 +335,12 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 
 		devnet.Logger(ctx).Info("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
-		signedTransaction, err := types.SignTx(transaction, signer, accounts.SigKey(fromAddress))
+		signerKey := accounts.SigKey(fromAddress)
+		if signerKey == nil {
+			return nil, fmt.Errorf("devnet.signEIP1559TxsHigherThanBaseFee failed to SignTx: private key not found for address %s", fromAddress)
+		}
+
+		signedTransaction, err := types.SignTx(transaction, signer, signerKey)
 		if err != nil {
 			return nil, err
 		}
