@@ -256,14 +256,18 @@ func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()
 
-	if strings.HasPrefix(node.Name(), "bor") && node.IsBlockProducer() && node.Account() != nil {
+	if strings.HasPrefix(node.GetName(), "bor") && node.IsBlockProducer() && node.Account() != nil {
 		// TODO configurable voting power
 		h.addValidator(node.Account().Address, 1000, 0)
 	}
 }
 
 func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
-	if !strings.HasPrefix(node.Name(), "bor") && node.IsBlockProducer() {
+	if h.validatorSet == nil {
+		panic("Heimdall devnet service: unexpected empty validator set! Call addValidator() before starting nodes.")
+	}
+
+	if !strings.HasPrefix(node.GetName(), "bor") && node.IsBlockProducer() {
 		h.Lock()
 		defer h.Unlock()
 

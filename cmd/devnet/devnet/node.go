@@ -2,10 +2,8 @@ package devnet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"sync"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	p2p_enode "github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	enode "github.com/ledgerwatch/erigon/turbo/node"
@@ -26,13 +23,13 @@ import (
 
 type Node interface {
 	requests.RequestGenerator
-	Name() string
+	GetName() string
 	ChainID() *big.Int
 	GetHttpPort() int
 	GetEnodeURL() string
 	Account() *accounts.Account
 	IsBlockProducer() bool
-	Configure(baseNode args.Node, nodeNumber int) (interface{}, error)
+	Configure(baseNode args.Node, nodeNumber int) error
 }
 
 type NodeSelector interface {
@@ -62,7 +59,7 @@ func HTTPHost(n Node) string {
 type node struct {
 	sync.Mutex
 	requests.RequestGenerator
-	args     interface{}
+	config   Node
 	wg       *sync.WaitGroup
 	network  *Network
 	startErr chan error
@@ -104,46 +101,32 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) Configure(args.Node, int) (interface{}, error) {
-	return nil, errors.New("N/A")
+func (n *node) Configure(args.Node, int) error {
+	return nil
 }
 
 func (n *node) IsBlockProducer() bool {
-	_, isBlockProducer := n.args.(args.BlockProducer)
-	return isBlockProducer
+	return n.config.IsBlockProducer()
 }
 
 func (n *node) Account() *accounts.Account {
-	if miner, ok := n.args.(args.BlockProducer); ok {
-		return miner.Account()
-	}
-
-	return nil
+	return n.config.Account()
 }
 
-func (n *node) Name() string {
-	if named, ok := n.args.(interface{ Name() string }); ok {
-		return named.Name()
-	}
-
-	return ""
+func (n *node) GetName() string {
+	return n.config.GetName()
 }
 
 func (n *node) ChainID() *big.Int {
-	if n.ethCfg != nil {
-		return n.ethCfg.Genesis.Config.ChainID
-	}
-
-	return nil
+	return n.config.ChainID()
 }
 
 func (n *node) GetHttpPort() int {
-	return n.nodeCfg.HTTPPort
+	return n.config.GetHttpPort()
 }
 
 func (n *node) GetEnodeURL() string {
-	port := n.nodeCfg.P2P.ListenPort()
-	return p2p_enode.NewV4(&n.nodeCfg.P2P.PrivateKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
+	return n.config.GetEnodeURL()
 }
 
 // run configures, creates and serves an erigon node

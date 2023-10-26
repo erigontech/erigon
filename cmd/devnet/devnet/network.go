@@ -93,23 +93,20 @@ func (nw *Network) Start(ctx context.Context) error {
 			}
 			base.StaticPeers = strings.Join(nw.peers, ",")
 
-			argsObj, err := nodeConfig.Configure(base, i)
+			err := nodeConfig.Configure(base, i)
 			if err != nil {
 				nw.Stop()
 				return err
 			}
 
-			nodePort := nodeConfig.GetHttpPort()
-			nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort)
-
-			node, err := nw.createNode(nodeAddr, argsObj)
+			node, err := nw.createNode(nodeConfig)
 			if err != nil {
 				nw.Stop()
 				return err
 			}
 
 			nw.Nodes[i] = node
-			nw.namedNodes[node.Name()] = node
+			nw.namedNodes[node.GetName()] = node
 			nw.peers = append(nw.peers, nodeConfig.GetEnodeURL())
 
 			for _, service := range nw.Services {
@@ -135,11 +132,13 @@ func (nw *Network) Start(ctx context.Context) error {
 
 var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
 
-func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
+func (nw *Network) createNode(config Node) (Node, error) {
+	nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, config.GetHttpPort())
+
 	n := &node{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
-		cfg,
+		config,
 		&nw.wg,
 		nw,
 		make(chan error),
@@ -186,13 +185,13 @@ func (nw *Network) startNode(n Node) error {
 
 	node := n.(*node)
 
-	args, err := args.AsArgs(node.args)
+	args, err := args.AsArgs(node.config)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		nw.Logger.Info("Running node", "name", node.Name(), "args", args)
+		nw.Logger.Info("Running node", "name", node.GetName(), "args", args)
 
 		// catch any errors and avoid panics if an error occurs
 		defer func() {
@@ -201,17 +200,17 @@ func (nw *Network) startNode(n Node) error {
 				return
 			}
 
-			nw.Logger.Error("catch panic", "node", node.Name(), "err", panicResult, "stack", dbg.Stack())
+			nw.Logger.Error("catch panic", "node", node.GetName(), "err", panicResult, "stack", dbg.Stack())
 			nw.Stop()
 			os.Exit(1)
 		}()
 
 		// cli flags are not thread safe and assume only one copy of a flag
 		// variable is needed per process - which does not work here
-		app := erigonapp.MakeApp(node.Name(), node.run, copyFlags(erigoncli.DefaultFlags))
+		app := erigonapp.MakeApp(node.GetName(), node.run, copyFlags(erigoncli.DefaultFlags))
 
 		if err := app.Run(args); err != nil {
-			nw.Logger.Warn("App run returned error", "node", node.Name(), "err", err)
+			nw.Logger.Warn("App run returned error", "node", node.GetName(), "err", err)
 		}
 	}()
 

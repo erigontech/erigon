@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/params"
 	"math/big"
 	"net"
 	"path/filepath"
@@ -56,8 +57,7 @@ type Node struct {
 	NodeKeyHex string            `arg:"--nodekeyhex" json:"nodekeyhex,omitempty"`
 }
 
-func (node *Node) configure(base Node, nodeNumber int) error {
-
+func (node *Node) Configure(base Node, nodeNumber int) error {
 	if len(node.Name) == 0 {
 		node.Name = fmt.Sprintf("%s-%d", base.Chain, nodeNumber)
 	}
@@ -105,8 +105,16 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	return nil
 }
 
+func (node *Node) GetName() string {
+	return node.Name
+}
+
 func (node *Node) ChainID() *big.Int {
-	return &big.Int{}
+	config := params.ChainConfigByChainName(node.Chain)
+	if config == nil {
+		return nil
+	}
+	return config.ChainID
 }
 
 func (node *Node) GetHttpPort() int {
@@ -130,10 +138,10 @@ type BlockProducer struct {
 	account         *accounts.Account
 }
 
-func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, error) {
-	err := m.configure(baseNode, nodeNumber)
+func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) error {
+	err := m.Node.Configure(baseNode, nodeNumber)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	switch m.Chain {
@@ -141,12 +149,12 @@ func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, e
 		if m.DevPeriod == 0 {
 			m.DevPeriod = 30
 		}
-		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+		m.account = accounts.NewAccount(m.GetName() + "-etherbase")
 		core.DevnetEtherbase = m.account.Address
 		core.DevnetSignPrivateKey = m.account.SigKey()
 
 	case networkname.BorDevnetChainName:
-		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+		m.account = accounts.NewAccount(m.GetName() + "-etherbase")
 
 		if len(m.HttpApi) == 0 {
 			m.HttpApi = "admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots,bor"
@@ -157,11 +165,7 @@ func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, e
 		m.Etherbase = m.account.Address.Hex()
 	}
 
-	return m, nil
-}
-
-func (n *BlockProducer) Name() string {
-	return n.Node.Name
+	return nil
 }
 
 func (n *BlockProducer) Account() *accounts.Account {
@@ -177,19 +181,6 @@ type NonBlockProducer struct {
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
-}
-
-func (n *NonBlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, error) {
-	err := n.configure(baseNode, nodeNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	return n, nil
-}
-
-func (n *NonBlockProducer) Name() string {
-	return n.Node.Name
 }
 
 func (n *NonBlockProducer) IsBlockProducer() bool {
