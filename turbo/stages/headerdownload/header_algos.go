@@ -634,7 +634,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		}
 	}
 	if blocksToTTD > 0 {
-		hd.logger.Info("Estimated to reaching TTD", "blocks", blocksToTTD)
+		hd.logger.Trace("Estimated to reaching TTD", "blocks", blocksToTTD)
 	}
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()

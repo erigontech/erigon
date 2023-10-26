@@ -144,7 +144,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 			return err
 		}
 	}
-	err = sync.Run(db, tx, initialCycle)
+	_, err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	miningBatch := membatchwithdb.NewMemoryBatch(tx, tmpDir)
 	defer miningBatch.Rollback()
 
-	if err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
+	if _, err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -528,6 +528,7 @@ func NewDefaultStages(ctx context.Context,
 func NewPipelineStages(ctx context.Context,
 	db kv.RwDB,
 	cfg *ethconfig.Config,
+	p2pCfg p2p.Config,
 	controlServer *sentry.MultiClient,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
@@ -546,10 +547,29 @@ func NewPipelineStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
+	var loopBreakCheck func(int) bool
+
+	if dbg.StageSyncLimit() > 0 {
+		previousBreakCheck := loopBreakCheck
+		loopBreakCheck = func(loopCount int) bool {
+			if loopCount > dbg.StageSyncLimit() {
+				return true
+			}
+
+			if previousBreakCheck != nil {
+				return previousBreakCheck(loopCount)
+			}
+
+			return false
+		}
+	}
+
 	return stagedsync.PipelineStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, silkworm),
+		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
+		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, loopBreakCheck),
+		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, loopBreakCheck),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,

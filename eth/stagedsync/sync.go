@@ -285,9 +285,11 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	return nil
 }
 
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+
+	hasMore := false
 
 	for !s.IsDone() {
 		var badBlockUnwind bool
@@ -297,7 +299,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 					continue
 				}
 				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
-					return err
+					return false, err
 				}
 			}
 			s.prevUnwindPoint = s.unwindPoint
@@ -307,7 +309,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			}
 			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-				return err
+				return false, err
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
@@ -323,7 +325,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return false, libcommon.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -334,16 +336,17 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		}
 
 		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
-			return err
+			return false, err
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return false, libcommon.ErrStopped
 		}
 
 		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
 			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
+			hasMore = true
 			break
 		}
 
@@ -351,11 +354,11 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	}
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
+		return false, err
 	}
 
 	s.currentStage = 0
-	return nil
+	return hasMore, nil
 }
 
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
