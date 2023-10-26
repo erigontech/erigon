@@ -18,7 +18,7 @@ func TestValidatorSlashing(t *testing.T) {
 	require.NoError(t, state.SlashValidator(1, nil))
 	require.NoError(t, state.SlashValidator(2, nil))
 
-	exit, err := state.BeaconState.ValidatorExitEpoch(1)
+	exit, err := state.ValidatorExitEpoch(1)
 	require.NoError(t, err)
 	require.NotEqual(t, exit, uint64(math.MaxUint64))
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -13,7 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (*state.CachingBeaconState, error) {
+func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (abstract.BeaconState, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {

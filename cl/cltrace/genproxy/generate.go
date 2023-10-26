@@ -22,7 +22,7 @@ import (
 
 func main() {
 	x, err := Generate("github.com/ledgerwatch/erigon/cl/cltrace", "cltrace", "BeaconStateProxy", []string{
-		"github.com/ledgerwatch/erigon/cl/abstract.BeaconState",
+		"github.com/ledgerwatch/erigon/cl/abstract.BeaconStateUncopiable",
 	})
 	if err != nil {
 		panic(err)

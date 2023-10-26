@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -55,7 +56,7 @@ type ConsensusClientCliCfg struct {
 	EngineAPIPort         int           `json:"engine_api_port"`
 	JwtSecret             []byte
 
-	InitalState *state.CachingBeaconState
+	InitalState abstract.BeaconState
 	Dirs        datadir.Dirs
 }
 

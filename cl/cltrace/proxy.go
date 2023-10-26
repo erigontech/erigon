@@ -4,6 +4,7 @@ package cltrace
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -282,6 +283,24 @@ func (this *BeaconStateProxy) BlockRoots() (ret0 solid.HashVectorSSZ) {
 	ret0, ok = rets[0].(solid.HashVectorSSZ)
 	if rets[0] != nil && !ok {
 		panic(fmt.Sprintf("%+v is not a valid solid.HashVectorSSZ value", rets[0]))
+	}
+	return ret0
+}
+
+func (this *BeaconStateProxy) Clone() (ret0 clonable.Clonable) {
+	args := []any{}
+	rets, intercept := this.Handler.Invoke("Clone", args)
+	_ = rets
+	if !intercept {
+		ret0 = this.Underlying.Clone()
+		return
+	}
+
+	var ok bool
+
+	ret0, ok = rets[0].(clonable.Clonable)
+	if rets[0] != nil && !ok {
+		panic(fmt.Sprintf("%+v is not a valid clonable.Clonable value", rets[0]))
 	}
 	return ret0
 }
@@ -2629,6 +2648,32 @@ func (this *BeaconStateProxy) ValidatorMinPreviousInclusionDelayAttestation(arg0
 	ret0, ok = rets[0].(*solid.PendingAttestation)
 	if rets[0] != nil && !ok {
 		panic(fmt.Sprintf("%+v is not a valid *solid.PendingAttestation value", rets[0]))
+	}
+	ret1, ok = rets[1].(error)
+	if rets[1] != nil && !ok {
+		panic(fmt.Sprintf("%+v is not a valid error value", rets[1]))
+	}
+	return ret0, ret1
+}
+
+func (this *BeaconStateProxy) ValidatorPublicKey(arg0 int) (ret0 common.Bytes48, ret1 error) {
+	args := []any{
+		arg0,
+	}
+	rets, intercept := this.Handler.Invoke("ValidatorPublicKey", args)
+	_ = rets
+	if !intercept {
+		ret0, ret1 = this.Underlying.ValidatorPublicKey(
+			arg0,
+		)
+		return
+	}
+
+	var ok bool
+
+	ret0, ok = rets[0].(common.Bytes48)
+	if rets[0] != nil && !ok {
+		panic(fmt.Sprintf("%+v is not a valid common.Bytes48 value", rets[0]))
 	}
 	ret1, ok = rets[1].(error)
 	if rets[1] != nil && !ok {

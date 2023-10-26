@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
@@ -33,7 +34,11 @@ type CachingBeaconState struct {
 	previousStateRoot           common.Hash
 }
 
-func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
+func New(cfg *clparams.BeaconChainConfig) abstract.BeaconState {
+	return NewCaching(cfg)
+}
+
+func NewCaching(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}

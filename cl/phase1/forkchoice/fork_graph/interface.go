@@ -2,9 +2,9 @@ package fork_graph
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
 /*
@@ -18,9 +18,9 @@ import (
 * to analyze and manipulate the state of the blockchain.
  */
 type ForkGraph interface {
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (abstract.BeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
-	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (abstract.BeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)

@@ -18,12 +18,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
@@ -64,7 +64,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
 	log.Info("[Phase1] Running Caplin")
 	// Either start from genesis or a checkpoint
-	var state *state.CachingBeaconState
+	var state abstract.BeaconState
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {

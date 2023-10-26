@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -40,7 +41,7 @@ type forkGraphDisk struct {
 	headers   map[libcommon.Hash]*cltypes.BeaconBlockHeader // set of headers
 	badBlocks map[libcommon.Hash]struct{}                   // blocks that are invalid and that leads to automatic fail of extension.
 	// current state data
-	currentState          *state.CachingBeaconState
+	currentState          abstract.BeaconState
 	currentStateBlockRoot libcommon.Hash
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints map[libcommon.Hash]solid.Checkpoint
@@ -61,7 +62,7 @@ func getBeaconStateFilename(blockRoot libcommon.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
 
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs abstract.BeaconState, err error) {
 	var file afero.File
 	file, err = f.fs.Open(getBeaconStateFilename(blockRoot))
 
@@ -108,7 +109,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
-func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, blockRoot libcommon.Hash) (err error) {
+func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs abstract.BeaconState, blockRoot libcommon.Hash) (err error) {
 	// Truncate and then grow the buffer to the size of the state.
 	encodingSizeSSZ := bs.EncodingSizeSSZ()
 	f.sszBuffer.Grow(encodingSizeSSZ)
@@ -153,7 +154,7 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 }
 
 // Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) ForkGraph {
+func NewForkGraphDisk(anchorState abstract.BeaconState, aferoFs afero.Fs) ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -194,7 +195,7 @@ func (f *forkGraphDisk) AnchorSlot() uint64 {
 }
 
 // Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (abstract.BeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -282,7 +283,7 @@ func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaco
 	return obj, has
 }
 
-func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (abstract.BeaconState, error) {
 	if f.currentStateBlockRoot == blockRoot {
 		if alwaysCopy {
 			ret, err := f.currentState.Copy()

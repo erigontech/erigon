@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 )
@@ -45,11 +46,12 @@ func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	return nil
 }
 
-func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
-	copied := New(b.BeaconConfig())
+func (b *CachingBeaconState) Copy() (bs abstract.BeaconState, err error) {
+	copied := NewCaching(b.BeaconConfig())
 	err = b.CopyInto(copied)
 	if err != nil {
 		return nil, err
 	}
+
 	return copied, nil
 }

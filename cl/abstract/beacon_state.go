@@ -2,12 +2,18 @@ package abstract
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 type BeaconState interface {
+	BeaconStateUncopiable
+	BeaconStateCopying
+}
+
+type BeaconStateUncopiable interface {
 	BeaconStateBasic
 	BeaconStateExtension
 	BeaconStateUpgradable
@@ -54,6 +60,9 @@ type BeaconStateSSZ interface {
 	DecodeSSZ(buf []byte, version int) error
 	EncodingSizeSSZ() (size int)
 	HashSSZ() (out [32]byte, err error)
+
+	ssz.Unmarshaler
+	ssz.Marshaler
 }
 
 type BeaconStateMutator interface {
@@ -143,6 +152,7 @@ type BeaconStateExtra interface {
 	EpochParticipationForValidatorIndex(isCurrentEpoch bool, index int) cltypes.ParticipationFlags
 	GetBlockRootAtSlot(slot uint64) (common.Hash, error)
 	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
+	ValidatorPublicKey(index int) (common.Bytes48, error)
 }
 
 type BeaconStateMinimal interface {
@@ -188,6 +198,6 @@ type BeaconStateMinimal interface {
 
 // TODO figure this out
 type BeaconStateCopying interface {
-	//CopyInto(dst *raw.BeaconState) error
-	//Copy() (*raw.BeaconState, error)
+	//CopyInto(dst BeaconState) error
+	Copy() (BeaconState, error)
 }

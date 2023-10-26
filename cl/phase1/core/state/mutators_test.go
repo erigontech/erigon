@@ -3,6 +3,7 @@ package state_test
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -14,7 +15,7 @@ const (
 	testExitEpoch = 53
 )
 
-func getTestStateBalances(t *testing.T) *state2.CachingBeaconState {
+func getTestStateBalances(t *testing.T) abstract.BeaconState {
 	numVals := uint64(2048)
 	b := state2.New(&clparams.MainnetBeaconConfig)
 	for i := uint64(0); i < numVals; i++ {

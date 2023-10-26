@@ -9,13 +9,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -32,7 +32,7 @@ type Cfg struct {
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
 	executionClient execution_client.ExecutionEngine
-	state           *state.CachingBeaconState
+	state           abstract.BeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	beaconDB        persistence.BeaconChainDatabase
@@ -56,7 +56,7 @@ func ClStagesCfg(
 	rpc *rpc.BeaconRpcP2P,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
-	state *state.CachingBeaconState,
+	state abstract.BeaconState,
 	executionClient execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,

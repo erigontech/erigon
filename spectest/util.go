@@ -2,12 +2,14 @@ package spectest
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
+
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"io/fs"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
@@ -50,7 +52,7 @@ func ReadSszOld(root fs.FS, obj ssz.Unmarshaler, version clparams2.StateVersion,
 	return ReadSsz(root, version, name, obj)
 }
 
-func ReadBeaconState(root fs.FS, version clparams2.StateVersion, name string) (*state.CachingBeaconState, error) {
+func ReadBeaconState(root fs.FS, version clparams2.StateVersion, name string) (abstract.BeaconState, error) {
 	sszSnappy, err := fs.ReadFile(root, name)
 	if err != nil {
 		return nil, err

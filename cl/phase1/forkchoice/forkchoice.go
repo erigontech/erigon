@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -69,14 +70,14 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(ctx context.Context, anchorState abstract.BeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
 	}
 	anchorCheckpoint := solid.NewCheckpointFromParameters(
 		anchorRoot,
-		state2.Epoch(anchorState.BeaconState),
+		state2.Epoch(anchorState),
 	)
 
 	eth2Roots, err := lru.New[libcommon.Hash, libcommon.Hash](checkpointsPerCache)

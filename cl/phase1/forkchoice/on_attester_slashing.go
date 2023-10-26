@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -103,7 +104,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	return nil
 }
 
-func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
+func getIndexedAttestationPublicKeys(b abstract.BeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
 		return nil, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")

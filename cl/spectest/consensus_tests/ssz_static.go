@@ -1,11 +1,12 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/spectest"
+
+	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -38,7 +39,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		require.NoError(t, err)
 		expectedRoot := libcommon.HexToHash(root.Root)
 		object := ref.Clone().(unmarshalerMarshalerHashable)
-		_, isBeaconState := object.(*state.CachingBeaconState)
+		_, isBeaconState := object.(abstract.BeaconState)
 
 		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
 		require.NoError(t, err)
