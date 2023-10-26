@@ -343,6 +343,7 @@ func TestBeaconState_SetEpochParticipationForValidatorIndex(t *testing.T) {
 	state := GetTestState()
 	isCurrentEpoch := true
 	index := 0
-	state.SetEpochParticipationForValidatorIndex(isCurrentEpoch, index, cltypes.ParticipationFlags(1))
+	f := cltypes.ParticipationFlags(1)
+	state.SetEpochParticipationForValidatorIndex(isCurrentEpoch, index, &f)
 	assert.Equal(t, uint8(1), state.currentEpochParticipation.Get(index))
 }

@@ -197,14 +197,14 @@ func (b *BeaconState) IncrementSlashingSegmentAt(index int, delta uint64) {
 	b.slashings.Set(index, b.SlashingSegmentAt(index)+delta)
 }
 
-func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
+func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags *cltypes.ParticipationFlags) {
 	if isCurrentEpoch {
 		b.markLeaf(CurrentEpochParticipationLeafIndex)
-		b.currentEpochParticipation.Set(index, byte(flags))
+		b.currentEpochParticipation.Set(index, byte(*flags))
 		return
 	}
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation.Set(index, byte(flags))
+	b.previousEpochParticipation.Set(index, byte(*flags))
 }
 
 func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) {
@@ -219,8 +219,8 @@ func (b *BeaconState) ResetEpochParticipation() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 }
 
-func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
-	b.justificationBits = justificationBits
+func (b *BeaconState) SetJustificationBits(justificationBits *cltypes.JustificationBits) {
+	b.justificationBits = *justificationBits
 	b.markLeaf(JustificationBitsLeafIndex)
 }
 
@@ -301,30 +301,30 @@ func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error
 	return nil
 }
 
-func (b *BeaconState) SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
+func (b *BeaconState) SetCurrentEpochParticipationFlags(flags *cltypes.ParticipationFlagsList) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochParticipation.Clear()
-	for _, v := range flags {
+	for _, v := range *flags {
 		b.currentEpochParticipation.Append(byte(v))
 	}
 }
 
-func (b *BeaconState) SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
+func (b *BeaconState) SetPreviousEpochParticipationFlags(flags *cltypes.ParticipationFlagsList) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochParticipation.Clear()
-	for _, v := range flags {
+	for _, v := range *flags {
 		b.previousEpochParticipation.Append(byte(v))
 	}
 }
 
-func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+func (b *BeaconState) AddCurrentEpochParticipationFlags(flags *cltypes.ParticipationFlags) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochParticipation.Append(byte(flags))
+	b.currentEpochParticipation.Append(byte(*flags))
 }
 
-func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+func (b *BeaconState) AddPreviousEpochParticipationFlags(flags *cltypes.ParticipationFlags) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation.Append(byte(flags))
+	b.previousEpochParticipation.Append(byte(*flags))
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {

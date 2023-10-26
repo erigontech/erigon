@@ -5,16 +5,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltrace"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/clvm"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 )
@@ -56,6 +58,15 @@ type forkGraphDisk struct {
 	// reusable buffers
 	sszBuffer       bytes.Buffer
 	sszSnappyBuffer bytes.Buffer
+
+	tracer *cltrace.StateTracer
+}
+
+func (f *forkGraphDisk) transitionState(s abstract.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
+	if err := f.tracer.TransitionState(s, block, fullValidation); err != nil {
+		return err
+	}
+	return nil
 }
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {
@@ -185,6 +196,7 @@ func NewForkGraphDisk(anchorState abstract.BeaconState, aferoFs afero.Fs) ForkGr
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
 		anchorSlot:  anchorState.Slot(),
+		tracer:      cltrace.NewStateTracer(clvm.NewEncoder(io.Discard)),
 	}
 	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
 	return f
@@ -228,7 +240,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	// Execute the state
-	if invalidBlockErr := transition.TransitionState(newState, signedBlock, fullValidation); invalidBlockErr != nil {
+	if invalidBlockErr := f.transitionState(newState, signedBlock, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
 		f.badBlocks[blockRoot] = struct{}{}
@@ -326,7 +338,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (abs
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
+		if err := f.transitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
 			return nil, err
 		}
 	}

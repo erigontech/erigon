@@ -2,10 +2,13 @@ package cltypes
 
 import (
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 const JustificationBitsLength = 4
+
+var _ ssz2.SizedObjectSSZ = (*JustificationBits)(nil)
 
 type JustificationBits [JustificationBitsLength]bool // Bit vector of size 4
 
@@ -27,23 +30,23 @@ func (j *JustificationBits) DecodeSSZ(b []byte, _ int) error {
 	return nil
 }
 
-func (j *JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {
+func (j JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, j.Byte()), nil
 }
 
-func (j *JustificationBits) Clone() clonable.Clonable {
+func (j JustificationBits) Clone() clonable.Clonable {
 	return &JustificationBits{}
 }
 
-func (*JustificationBits) EncodingSizeSSZ() int {
+func (JustificationBits) EncodingSizeSSZ() int {
 	return 1
 }
 
-func (*JustificationBits) Static() bool {
+func (JustificationBits) Static() bool {
 	return true
 }
 
-func (j *JustificationBits) HashSSZ() (out [32]byte, err error) {
+func (j JustificationBits) HashSSZ() (out [32]byte, err error) {
 	out[0] = j.Byte()
 	return
 }

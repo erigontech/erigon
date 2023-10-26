@@ -28,8 +28,12 @@ func (e *encoder) NextCycle() error {
 	return nil
 }
 
+func (e *encoder) Discard() error {
+	e.b.Reset()
+	return nil
+}
 func (e *encoder) Encode(xs ...Instruction) {
-	for i, x := range xs {
+	for _, x := range xs {
 		e.b.Write(x.Opcode())
 		e.b.WriteByte('(')
 		args := x.Arguments()
@@ -40,9 +44,7 @@ func (e *encoder) Encode(xs ...Instruction) {
 			}
 		}
 		e.b.WriteByte(')')
-		if i != len(xs)-1 {
-			e.b.WriteByte(' ')
-		}
+		e.b.WriteByte(' ')
 	}
 	return
 }

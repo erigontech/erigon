@@ -55,7 +55,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 		s.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits
-	s.SetJustificationBits(justificationBits)
+	s.SetJustificationBits(&justificationBits)
 	return nil
 }
 

@@ -1,8 +1,9 @@
 package clvm
 
 type Encoder interface {
-	Encode(xs ...Instruction)
 	NextCycle() error
+	Encode(xs ...Instruction)
+	Discard() error
 }
 
 type Decoder interface {

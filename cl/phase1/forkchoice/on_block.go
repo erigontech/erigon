@@ -94,7 +94,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
-	lastProcessedState.SetJustificationBits(justificationBits)
+	lastProcessedState.SetJustificationBits(&justificationBits)
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())

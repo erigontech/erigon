@@ -17,8 +17,10 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().AltairForkVersion)
 	b.SetFork(fork)
 	// Process new fields
-	b.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, b.ValidatorLength()))
-	b.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, b.ValidatorLength()))
+	l1 := make(cltypes.ParticipationFlagsList, b.ValidatorLength())
+	l2 := make(cltypes.ParticipationFlagsList, b.ValidatorLength())
+	b.SetPreviousEpochParticipationFlags(&l1)
+	b.SetCurrentEpochParticipationFlags(&l2)
 	b.SetInactivityScores(make([]uint64, b.ValidatorLength()))
 	// Change version
 	b.SetVersion(clparams.AltairVersion)

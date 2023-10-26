@@ -1,9 +1,11 @@
 package ssz2
 
 import (
+	"encoding"
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
 
@@ -65,18 +67,6 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	// Iterate over each element in the schema
 	for i, element := range schema {
 		switch obj := element.(type) {
-		case uint64:
-			// If the element is a uint64, encode it using SSZ and append it to the dst
-			dst = append(dst, ssz.Uint64SSZ(obj)...)
-			currentOffset += 8
-		case *uint64:
-			// If the element is a pointer to uint64, dereference it, encode it using SSZ, and append it to the dst
-			dst = append(dst, ssz.Uint64SSZ(*obj)...)
-			currentOffset += 8
-		case []byte:
-			// If the element is a byte slice, append it to the dst
-			dst = append(dst, obj...)
-			currentOffset += len(obj)
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			startSize := len(dst)
@@ -92,6 +82,45 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 				dynamicComponents = append(dynamicComponents, obj)
 			}
 			currentOffset += len(dst) - startSize
+		case ssz.EncodableSSZ:
+			data, err := obj.EncodeSSZ(make([]byte, 0, obj.EncodingSizeSSZ()))
+			if err != nil {
+				return nil, err
+			}
+			dst = append(dst, data...)
+			currentOffset += len(data)
+		case encoding.BinaryMarshaler:
+			data, err := obj.MarshalBinary()
+			if err != nil {
+				return nil, err
+			}
+			dst = append(dst, data...)
+			currentOffset += len(data)
+
+		case common.Hash:
+			dst = append(dst, obj[:]...)
+			currentOffset += len(obj)
+		case int:
+			dst = append(dst, ssz.Uint64SSZ(uint64(obj))...)
+			currentOffset += 8
+		case bool:
+			dst = append(dst, ssz.BoolSSZ(obj))
+			currentOffset += 8
+		case uint64:
+			// If the element is a uint64, encode it using SSZ and append it to the dst
+			dst = append(dst, ssz.Uint64SSZ(obj)...)
+			currentOffset += 8
+		case *uint64:
+			// If the element is a pointer to uint64, dereference it, encode it using SSZ, and append it to the dst
+			dst = append(dst, ssz.Uint64SSZ(*obj)...)
+			currentOffset += 8
+		case byte:
+			dst = append(dst, obj)
+			currentOffset += 1
+		case []byte:
+			// If the element is a byte slice, append it to the dst
+			dst = append(dst, obj...)
+			currentOffset += len(obj)
 		default:
 			// If the element does not match any supported types, panic with an error message
 			panic(fmt.Sprintf("u must suffer from dementia, pls read the doc of this method (aka. comments), bad schema component %d", i))

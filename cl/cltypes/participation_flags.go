@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -13,6 +14,31 @@ func (f ParticipationFlags) Add(index int) ParticipationFlags {
 func (f ParticipationFlags) HasFlag(index int) bool {
 	flag := ParticipationFlags(utils.PowerOf2(uint64(index)))
 	return f&flag == flag
+}
+func (f *ParticipationFlags) DecodeSSZ(b []byte, _ int) error {
+	*f = ParticipationFlags(b[0])
+	return nil
+}
+
+func (f ParticipationFlags) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, byte(f)), nil
+}
+
+func (f ParticipationFlags) Clone() clonable.Clonable {
+	return f
+}
+
+func (ParticipationFlags) EncodingSizeSSZ() int {
+	return 1
+}
+
+func (ParticipationFlags) Static() bool {
+	return true
+}
+
+func (f ParticipationFlags) HashSSZ() (out [32]byte, err error) {
+	out[0] = byte(f)
+	return
 }
 
 type ParticipationFlagsList []ParticipationFlags

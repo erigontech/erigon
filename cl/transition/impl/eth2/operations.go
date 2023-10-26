@@ -174,11 +174,14 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 			return nil
 		}
 		// Append validator
-		s.AddValidator(state.ValidatorFromDeposit(s.BeaconConfig(), deposit), amount)
+		validator := state.ValidatorFromDeposit(s.BeaconConfig(), deposit)
+		s.AddValidator(validator, amount)
 		// Altair forward
 		if s.Version() >= clparams.AltairVersion {
-			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
+
+			flagZero := cltypes.ParticipationFlags(0)
+			s.AddCurrentEpochParticipationFlags(&flagZero)
+			s.AddPreviousEpochParticipationFlags(&flagZero)
 			s.AddInactivityScore(0)
 		}
 		return nil
@@ -546,7 +549,8 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {
 				continue
 			}
-			s.SetEpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex), flagParticipation.Add(flagIndex))
+			flagWithAdd := flagParticipation.Add(flagIndex)
+			s.SetEpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex), &flagWithAdd)
 			proposerRewardNumerator += baseReward * weight
 		}
 	}

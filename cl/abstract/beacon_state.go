@@ -92,9 +92,9 @@ type BeaconStateMutator interface {
 	SetValidatorBalance(index int, balance uint64) error
 	SetRandaoMixAt(index int, mix common.Hash)
 	SetSlashingSegmentAt(index int, segment uint64)
-	SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags)
+	SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags *cltypes.ParticipationFlags)
 
-	SetJustificationBits(justificationBits cltypes.JustificationBits)
+	SetJustificationBits(justificationBits *cltypes.JustificationBits)
 	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
 	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint)
 	SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint)
@@ -105,8 +105,8 @@ type BeaconStateMutator interface {
 	SetNextWithdrawalValidatorIndex(index uint64)
 	SetInactivityScores(scores []uint64)
 	SetValidatorInactivityScore(index int, score uint64) error
-	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
-	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
+	SetCurrentEpochParticipationFlags(flags *cltypes.ParticipationFlagsList)
+	SetPreviousEpochParticipationFlags(flags *cltypes.ParticipationFlagsList)
 	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
@@ -114,8 +114,8 @@ type BeaconStateMutator interface {
 	AddHistoricalSummary(summary *cltypes.HistoricalSummary)
 	AddHistoricalRoot(root common.Hash)
 	AddInactivityScore(score uint64)
-	AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags)
-	AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags)
+	AddCurrentEpochParticipationFlags(flags *cltypes.ParticipationFlags)
+	AddPreviousEpochParticipationFlags(flags *cltypes.ParticipationFlags)
 	AddPreviousEpochParticipationAt(index int, delta byte)
 	AddCurrentEpochAtteastation(attestation *solid.PendingAttestation)
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)

@@ -2,14 +2,16 @@ package eth2_test
 
 import (
 	_ "embed"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltrace"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/clvm"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -20,9 +22,11 @@ var capellaBlock []byte
 var capellaState []byte
 
 func TestBlockProcessing(t *testing.T) {
+	//file, _ := os.OpenFile("trace.tmp", os.O_RDWR|os.O_CREATE, 0o644)
+	tracer := cltrace.NewStateTracer(clvm.NewEncoder(io.Discard))
 	s := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(s, capellaState, int(clparams.CapellaVersion)))
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block, capellaBlock, int(clparams.CapellaVersion)))
-	require.NoError(t, transition.TransitionState(s, block, true)) // All checks already made in transition state
+	require.NoError(t, tracer.TransitionState(s, block, true)) // All checks already made in transition state
 }
