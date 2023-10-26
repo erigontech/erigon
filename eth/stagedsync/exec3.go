@@ -914,7 +914,6 @@ Loop:
 	//dumpPlainStateDebug(applyTx, doms)
 
 	if !useExternalTx && applyTx != nil {
-		fmt.Printf("[dbg] externalTx v3 commit %d\n", blockNum)
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
