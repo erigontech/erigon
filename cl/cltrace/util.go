@@ -5,6 +5,11 @@ import "github.com/ledgerwatch/erigon/cl/abstract"
 type InvocationHandler interface {
 	Invoke(method string, args []any) (retvals []any, intercept bool)
 }
+type InvocationHandlerFunc func(method string, args []any) (retvals []any, intercept bool)
+
+func (i InvocationHandlerFunc) Invoke(method string, args []any) (retvals []any, intercept bool) {
+	return i(method, args)
+}
 
 var _ abstract.BeaconState = (*BeaconStateProxy)(nil)
 
