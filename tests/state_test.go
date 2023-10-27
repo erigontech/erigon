@@ -41,11 +41,18 @@ func TestStateZk(t *testing.T) {
 	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
+func TestStatestEIP(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stEIP*`)
+	testState(t, st)
+}
 func TestStateVM(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^VMTests*`)
 	st.whitelist(`^stPreCompiledContracts*`)
+	st.whitelist(`^stCreate2*`)
 	testState(t, st)
 }
 func TestStateStaticCall(t *testing.T) {
@@ -63,12 +70,17 @@ func TestStateAll(t *testing.T) {
 	st := new(testMatcher)
 	// another Test*State targets are running this tests
 	st.skipLoad(`^stZero`)
+
 	st.skipLoad(`^stStaticCall`)
 	st.skipLoad(`^stQuadraticComplexityTest`)
 	st.skipLoad(`^stAttackTest`)
 	st.skipLoad(`^stBadOpcode`)
+
 	st.skipLoad(`^VMTests`)
 	st.skipLoad(`^stPreCompiledContracts`)
+	st.skipLoad(`^stCreate2`)
+
+	st.skipLoad(`^stEIP`)
 	testState(t, st)
 }
 
