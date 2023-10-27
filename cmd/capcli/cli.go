@@ -537,6 +537,10 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(d.Datadir)
 
 	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
+	if err != nil {
+		return err
+	}
+
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
