@@ -35,20 +35,105 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func TestState(t *testing.T) {
+func TestStateZk(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stZero*`)
+	testState(t, st)
+}
+func TestStateStack(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stStack*`)
+	testState(t, st)
+}
+func TestStateMemory(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stMemory*`)
+	testState(t, st)
+}
+func TestStateEIP(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stEIP*`)
+	testState(t, st)
+}
+func TestStateRandom(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stRandom*`)
+	testState(t, st)
+}
+func TestStateRevert(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stRevert*`)
+	testState(t, st)
+}
+func TestStateVM(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^VMTests*`)
+	st.whitelist(`^stPreCompiledContracts*`)
+	st.whitelist(`^stCreate2*`)
+	testState(t, st)
+}
+func TestStateStaticCall(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stStaticCall*`)
+	st.whitelist(`^stQuadraticComplexityTest*`)
+	st.whitelist(`^stAttackTest*`)
+	st.whitelist(`^stBadOpcode*`)
+	testState(t, st)
+}
+
+func TestStateAll(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	// another Test*State targets are running this tests
+	st.skipLoad(`^stZero`)
+
+	st.skipLoad(`^stStaticCall`)
+	st.skipLoad(`^stQuadraticComplexityTest`)
+	st.skipLoad(`^stAttackTest`)
+	st.skipLoad(`^stBadOpcode`)
+
+	st.skipLoad(`^VMTests`)
+	st.skipLoad(`^stPreCompiledContracts`)
+	st.skipLoad(`^stCreate2`)
+
+	st.skipLoad(`^stEIP`)
+
+	st.skipLoad(`^stMemory`)
+
+	st.skipLoad(`^stRandom`)
+
+	st.skipLoad(`^stRevert`)
+
+	st.skipLoad(`^stStack`)
+	testState(t, st)
+}
+
+func testState(t *testing.T, st *testMatcher) {
+	t.Helper()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
-	t.Parallel()
-
-	st := new(testMatcher)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
+	//st.slow(`^/modexp`)
+	//st.slow(`^stQuadraticComplexityTest/`)
+
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
 	if ethconfig.EnableHistoryV3InTest {
 		//TODO: AlexSharov - need to fix this test
 	}
@@ -100,7 +185,8 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
 	} else {
-		t.Log("EVM operation log:\n" + buf.String())
+		//enable it if need extensive logging
+		//t.Log("EVM operation log:\n" + buf.String())
 	}
 	//t.Logf("EVM output: 0x%x", tracer.Output())
 	//t.Logf("EVM error: %v", tracer.Error())
