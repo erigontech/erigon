@@ -35,6 +35,11 @@ func ReadChunk(r io.Reader) (buf []byte, t DataType, err error) {
 	}
 	t = DataType(prefix[0])
 	prefix[0] = 0
+
+	bufLen := binary.BigEndian.Uint64(prefix)
+	if bufLen == 0 {
+		return
+	}
 	buf = make([]byte, binary.BigEndian.Uint64(prefix))
 	if _, err = r.Read(buf); err != nil {
 		return

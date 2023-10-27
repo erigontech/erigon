@@ -73,6 +73,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
 			strings.Contains(str, "inited with remoteAddr")
 		if skip {
+			log.Trace(str)
 			break
 		}
 		log.Debug(str)
@@ -82,13 +83,14 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//strings.Contains(str, "banning ip <nil>") ||
 		//strings.Contains(str, "spurious timer") { // suppress useless errors
 		if skip {
+			log.Trace(str)
 			break
 		}
-
 		log.Info(str)
 	case lg.Warning:
 		str := r.String()
-		skip := strings.Contains(str, "EOF")
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "requested chunk too long")
 
 		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 		//	break
@@ -105,9 +107,6 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
 		//	break
 		//}
-		if strings.Contains(str, "requested chunk too long") { // suppress useless errors
-			break
-		}
 		//if strings.Contains(str, "reservation cancelled") { // suppress useless errors
 		//	break
 		//}
@@ -116,38 +115,35 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//}
 
 		if skip {
+			log.Trace(str)
 			break
 		}
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
 		skip := strings.Contains(str, "EOF")
-
 		if skip {
+			log.Trace(str)
 			break
 		}
 		log.Error(str)
 	case lg.Critical:
 		str := r.String()
-		skip := strings.Contains(str, "EOF") || strings.Contains(str, "torrent closed")
-		//if strings.Contains(str, "don't want conns") { // suppress useless errors
-		//	break
-		//}
-
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "torrent closed") ||
+			strings.Contains(str, "don't want conns")
 		if skip {
+			log.Trace(str)
 			break
 		}
 		log.Error(str)
 	default:
 		str := r.String()
-		skip := false
-		if strings.Contains(str, "unhandled response status") { // suppress useless errors
-			break
-		}
+		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status")
 		if skip {
+			log.Trace(str)
 			break
 		}
-
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
 }
