@@ -73,6 +73,9 @@ func TestStateVM(t *testing.T) {
 	st := new(testMatcher)
 	st.whitelist(`^VMTests*`)
 	st.whitelist(`^stPreCompiled*`)
+	st.whitelist(`^stTransition*`)
+	st.whitelist(`^stSStore*`)
+	st.whitelist(`^stArg*`)
 	testState(t, st)
 }
 func TestStateCall(t *testing.T) {
@@ -99,7 +102,10 @@ func TestStateAll(t *testing.T) {
 	st.skipLoad(`^stBad`)
 
 	st.skipLoad(`^VMTests`)
+	st.skipLoad(`^stTransition`)
+	st.skipLoad(`^stSStore`)
 	st.skipLoad(`^stPreCompiled`)
+	st.skipLoad(`^stArg`)
 
 	st.skipLoad(`^stCreate`)
 	st.skipLoad(`^stRevert`)
