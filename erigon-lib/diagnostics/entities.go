@@ -20,15 +20,6 @@ type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
 
-type MessageTransfered struct {
-	PeerID    string `json:"peerId"`
-	Cap       string `json:"cap"`
-	MsgType   string `json:"msgType"`
-	Size      uint64 `json:"size"`
-	Inbound   bool   `json:"inbound"`
-	Timestamp string `json:"timestamp"`
-}
-
 type PeerStatistics struct {
 	BytesIn      uint64
 	BytesOut     uint64

@@ -42,17 +42,6 @@ func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.Er
 		w.Header().Set("Content-Type", "application/json")
 		writePeers(w, ctx, node)
 	})
-
-	metricsMux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-		writeMessages(w, ctx, node)
-	})
-}
-
-func writeMessages(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {
-	messagesArray := node.Backend().DiagnosticsMessagesData()
-	json.NewEncoder(w).Encode(messagesArray)
 }
 
 func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {

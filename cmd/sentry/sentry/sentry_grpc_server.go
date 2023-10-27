@@ -352,7 +352,6 @@ func runPeer(
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 	logger log.Logger,
-	saveTransferedMessage func(peerID string, cap string, msgType string, size uint64, inbound bool),
 ) *p2p.PeerError {
 	protocol := cap.Version
 	printTime := time.Now().Add(time.Minute)
@@ -540,7 +539,6 @@ func runPeer(
 
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
-		//saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType.String(), uint64(msg.Size), true)
 		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
 
 		msg.Discard()
@@ -649,7 +647,6 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					ss.send,
 					ss.hasSubscribers,
 					logger,
-					ss.saveTransferedMessage,
 				)
 				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return err
@@ -709,19 +706,6 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
-
-	transferedMesages []*diagnostics.MessageTransfered
-}
-
-func (ss *GrpcServer) saveTransferedMessage(peerID string, cap string, msgType string, size uint64, inbound bool) {
-	ss.transferedMesages = append(ss.transferedMesages, &diagnostics.MessageTransfered{
-		PeerID:    peerID,
-		Cap:       cap,
-		MsgType:   msgType,
-		Size:      size,
-		Inbound:   inbound,
-		Timestamp: time.Now().String(),
-	})
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
@@ -1076,12 +1060,6 @@ func (ss *GrpcServer) DiagnosticsPeersData() map[string]*diagnostics.PeerStatist
 
 	peers := ss.P2pServer.DiagnosticsPeersInfo()
 	return peers
-}
-
-func (ss *GrpcServer) MessagesTransfered() []*diagnostics.MessageTransfered {
-	mTrs := ss.transferedMesages
-	ss.transferedMesages = []*diagnostics.MessageTransfered{}
-	return mTrs
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {

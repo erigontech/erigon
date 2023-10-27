@@ -1216,22 +1216,10 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	return &reply, nil
 }
 
-func (s *Ethereum) DiagnosticsMessagesData() []*diagnostics.MessageTransfered {
-	reply := []*diagnostics.MessageTransfered{}
-	for _, sentryServer := range s.sentryServers {
-		mTrs := sentryServer.MessagesTransfered()
-		reply = append(reply, mTrs...)
-	}
-
-	return reply
-}
-
 func (s *Ethereum) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
 	var reply map[string]*diagnostics.PeerStatistics = make(map[string]*diagnostics.PeerStatistics)
 	for _, sentryServer := range s.sentryServers {
 		peers := sentryServer.DiagnosticsPeersData()
-
-		//mTrs := sentryServer.MessagesTransfered()
 
 		for key, value := range peers {
 			reply[key] = value
