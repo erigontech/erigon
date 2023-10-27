@@ -282,7 +282,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.commitment = map[string][]byte{}
 	if resetCommitment {
 		sd.Commitment.updates.List(true)
-		sd.Commitment.patriciaTrie.Reset()
+		sd.Commitment.Reset()
 	}
 
 	sd.storage = btree2.NewMap[string, []byte](128)

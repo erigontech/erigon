@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -317,11 +317,11 @@ Loop:
 			if ok && unwindTo != blockNumWithCommitment {
 				unwindTo = blockNumWithCommitment // not all blocks have commitment
 			}
-			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
-			if err != nil {
-				return err
-			}
-			unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
+			//unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+			//if err != nil {
+			//	return err
+			//}
+			//unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)

@@ -825,6 +825,11 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
+		if len(branchData) > 2 {
+			if err := hph.root.Decode(branchData[2:]); err != nil {
+				return false, fmt.Errorf("unwrap root: %w", err)
+			}
+		}
 		return false, nil
 	}
 	if len(branchData) == 0 {
@@ -1362,6 +1367,10 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			branchNodeUpdates[string(updateKey)] = branchData
 		}
 	}
+	if ex, ok := branchNodeUpdates[""]; ok {
+		fmt.Printf("root prefix already updated by active rows: %x\n", ex)
+	}
+	branchNodeUpdates[""] = append([]byte{0, 1, 0, 1}, hph.root.Encode()...)
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
@@ -1455,6 +1464,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 			branchNodeUpdates[string(updateKey)] = branchData
 		}
 	}
+	branchNodeUpdates[""] = append([]byte{0, 1, 0, 1}, hph.root.Encode()...)
 
 	rootHash, err = hph.RootHash()
 	if err != nil {

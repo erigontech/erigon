@@ -1396,44 +1396,71 @@ func TestDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	var preval1, preval2 []byte
-	maxTx := uint64(16)
-	d.aggregationStep = maxTx
+	d.aggregationStep = 16
+	maxTx := d.aggregationStep * 3
 
-	dc := d.MakeContext()
-	defer dc.Close()
-	dc.StartWrites()
-	defer dc.FinishWrites()
+	writeKeys := func(t *testing.T, dc *DomainContext, maxTx uint64) {
+		t.Helper()
+		dc.StartWrites()
+		defer dc.FinishWrites()
+		var preval1, preval2, preval3 []byte
+		for i := uint64(0); i < maxTx; i++ {
+			dc.SetTxNum(i)
+			if i&-i != i {
+				if i > 16 {
+					continue
+				}
+				if i%6 == 0 {
+					err = dc.DeleteWithPrev([]byte("key3"), nil, preval3)
+					require.NoError(t, err)
+					preval3 = nil
 
-	for i := 0; i < int(maxTx); i++ {
-		v1 := []byte(fmt.Sprintf("value1.%d", i))
-		v2 := []byte(fmt.Sprintf("value2.%d", i))
+					continue
+				}
+				v1 := []byte(fmt.Sprintf("value3.%d", i))
+				err = dc.PutWithPrev([]byte("key3"), nil, v1, preval3)
+				preval3 = v1
+				continue
+			}
+			v1 := []byte(fmt.Sprintf("value1.%d", i))
+			v2 := []byte(fmt.Sprintf("value2.%d", i))
 
-		dc.SetTxNum(uint64(i))
-		err = dc.PutWithPrev([]byte("key1"), nil, v1, preval1)
+			err = dc.PutWithPrev([]byte("key1"), nil, v1, preval1)
+			require.NoError(t, err)
+
+			err = dc.PutWithPrev([]byte("key2"), nil, v2, preval2)
+			require.NoError(t, err)
+
+			preval1, preval2 = v1, v2
+		}
+		err = dc.Rotate().Flush(ctx, tx)
 		require.NoError(t, err)
-
-		err = dc.PutWithPrev([]byte("key2"), nil, v2, preval2)
-		require.NoError(t, err)
-
-		preval1, preval2 = v1, v2
 	}
 
-	err = dc.Rotate().Flush(ctx, tx)
-	require.NoError(t, err)
-	dc.Close()
+	dc := d.MakeContext()
+	writeKeys(t, dc, maxTx)
 
-	dc = d.MakeContext()
 	dc.StartWrites()
-	err = dc.Unwind(ctx, tx, 0, 5, maxTx, math.MaxUint64, nil)
+	err = dc.Unwind(ctx, tx, 0, 9, maxTx, math.MaxUint64, nil)
 	require.NoError(t, err)
 	dc.FinishWrites()
 	dc.Close()
 
-	require.NoError(t, err)
+	//db2, d2 := testDbAndDomain(t, log.New())
+	//defer d2.Close()
+	//
+	//tx2, err := db2.BeginRw(ctx)
+	//require.NoError(t, err)
+	//defer tx.Rollback()
+	//
+	//dc2 := d2.MakeContext()
+	//defer dc2.Close()
+	//
+	//dc2.IteratePrefix(tx2, []byte("key1"), func(k, v []byte) error {
+
 	ct := d.MakeContext()
-	err = ct.IteratePrefix(tx, []byte("key1"), func(k, v []byte) error {
-		fmt.Printf("%s: %s\n", k, v)
+	err = ct.IteratePrefix(tx, nil, func(k, v []byte) error {
+		fmt.Printf("%s: %x\n", k, v)
 		return nil
 	})
 	require.NoError(t, err)

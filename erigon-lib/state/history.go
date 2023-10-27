@@ -1029,14 +1029,18 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 }
 
 type HistoryRecord struct {
-	TxNum  uint64
-	Value  []byte
-	PValue []byte
+	TxNum uint64
+	Value []byte
 }
 
-func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, 0, int(txNumUnindTo+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
-	//it, err := hc.IdxRange(key, int(txNumUnindTo), -1, order.Asc, -1, roTx)
+func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnwindTo uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
+	stepSize := hc.ic.ii.aggregationStep
+	var fromTx, toTx int
+	if txNumUnwindTo > stepSize {
+		fromTx = int(txNumUnwindTo - stepSize)
+	}
+	toTx = int(txNumUnwindTo + stepSize)
+	it, err := hc.IdxRange(key, fromTx, toTx, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
 	}
@@ -1050,7 +1054,7 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 		if err != nil {
 			return nil, false, err
 		}
-		if txn < txNumUnindTo {
+		if txn < txNumUnwindTo {
 			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
 			//fmt.Printf("seen %x @tx %d\n", key, txn)
 			continue
@@ -1064,10 +1068,10 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 		}
 		//fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
 
-		if txn == txNumUnindTo {
+		if txn == txNumUnwindTo {
 			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
 		}
-		if txn > txNumUnindTo {
+		if txn > txNumUnwindTo {
 			tnums[2] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
 			break
 		}
@@ -1083,21 +1087,21 @@ func (hc *HistoryContext) ifUnwindKey(key []byte, txNumUnindTo uint64, roTx kv.T
 		}
 		tnums[0].Value = common.Copy(v)
 
-		if tnums[1] != nil {
-			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
-			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
-			return toRestore, true, nil
-		}
 		if tnums[2] != nil {
-			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
+			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value}
 			//fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
 			return toRestore, true, nil
 		}
-		//fmt.Printf("toRestore %x @%d [0] %x\n", key, toRestore.TxNum, toRestore.Value)
+		if tnums[1] != nil {
+			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value}
+			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
+			return toRestore, true, nil
+		}
+		//fmt.Printf("toRestore NONE del=false %x\n", key)
 		// actual value is in domain and no need to delete
 		return nil, false, nil
 	}
-	//fmt.Printf("toRestore NONE %x @%d ->%x [1] %+v [2] %+v\n", key, tnums[0].TxNum, tnums[0].Value, tnums[1], tnums[2])
+	//fmt.Printf("toRestore NONE del=true %x\n", key)
 	return nil, true, nil
 }
 

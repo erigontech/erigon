@@ -1429,110 +1429,65 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 // context Flush should be managed by caller.
 func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64, f func(step uint64, k, v []byte) error) error {
 	d := dc.d
-	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
-	if err != nil {
-		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
-	}
-	defer keysCursorForDeletes.Close()
-	keysCursor, err := rwTx.RwCursorDupSort(d.keysTable)
-	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
-	}
-	defer keysCursor.Close()
-
-	var k, v []byte
-	var valsC kv.RwCursor
-	var valsCDup kv.RwCursorDupSort
-
-	if d.domainLargeValues {
-		valsC, err = rwTx.RwCursor(d.valsTable)
-		if err != nil {
-			return err
-		}
-		defer valsC.Close()
-	} else {
-		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
-		if err != nil {
-			return err
-		}
-		defer valsCDup.Close()
-	}
-
 	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step, d.domainLargeValues)
+	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
+	if err != nil {
+		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
+	}
 
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^step)
+	seen := make(map[string]struct{})
+	restored := dc.newWriter(dc.d.dirs.Tmp, true, false)
 
-	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
-		if !bytes.Equal(v, stepBytes) {
-			continue
+	dc.SetTxNum(txNumUnindTo)
+	for histRng.HasNext() {
+		k, v, err := histRng.Next()
+		if err != nil {
+			return err
 		}
+		//fmt.Printf("[%s]unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
+		if err := restored.addValue(k, nil, v); err != nil {
+			return err
+		}
+		seen[string(k)] = struct{}{}
+	}
 
+	state, err := dc.IteratePrefix2(rwTx, nil, nil, -1)
+	if err != nil {
+		return err
+	}
+	for state.HasNext() {
+		k, v, err := state.Next()
+		if err != nil {
+			return err
+		}
+		//fmt.Printf("[%s]un-iter %x ->'%x'\n", dc.d.filenameBase, k, v)
 		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txNumUnindTo-1, rwTx)
 		if err != nil {
 			return fmt.Errorf("unwind key %s %x: %w", d.filenameBase, k, err)
 		}
+		if !needDelete && toRestore == nil {
+			toRestore = &HistoryRecord{Value: v}
+		}
 		if toRestore != nil {
-			dc.SetTxNum(toRestore.TxNum)
-			if err := dc.PutWithPrev(k, nil, toRestore.Value, toRestore.PValue); err != nil {
-				return err
+			_, ok := seen[string(k)]
+			if !ok {
+				if err := restored.addValue(k, nil, toRestore.Value); err != nil {
+					return err
+				}
+				//} else {
+				//fmt.Printf(" skip unwind %x\n", k)
 			}
+
 			//fmt.Printf("[domain][%s][toTx=%d] restore %x to txNum %d -> '%x'\n", d.filenameBase, txNumUnindTo, k, toRestore.TxNum, toRestore.Value)
 		}
-		if !needDelete {
-			continue
-		}
-
-		if d.domainLargeValues {
-			kk, vv, err := valsC.SeekExact(common.Append(k, stepBytes))
-			if err != nil {
-				return err
-			}
-			if f != nil {
-				if err := f(step, kk, vv); err != nil {
-					return err
-				}
-			}
-			if kk != nil {
-				//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
-				if err = valsC.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-		} else {
-			vv, err := valsCDup.SeekBothRange(k, stepBytes)
-			if err != nil {
-				return err
-			}
-			if f != nil {
-				if err := f(step, k, vv); err != nil {
-					return err
-				}
-			}
-			//fmt.Printf("[domain][%s] rm small value %x v %x\n", d.filenameBase, k, vv)
-			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
-				return err
-			}
-		}
-
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return err
-		}
-		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
-			return err
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, limit, logEvery); err != nil {
+	if err := dc.Prune(ctx, rwTx, step, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
 	}
-	return nil
+	return restored.flush(ctx, rwTx)
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
