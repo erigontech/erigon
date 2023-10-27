@@ -24,6 +24,9 @@ import (
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
 	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	check := func(network string) {

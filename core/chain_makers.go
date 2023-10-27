@@ -378,6 +378,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 			// Write state changes to db
 			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+				panic(err)
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
