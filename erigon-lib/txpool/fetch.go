@@ -436,11 +436,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -448,59 +443,75 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if req == nil {
 			return nil
 		}
-
-		var unwindTxs, minedTxs types2.TxSlots
-		for _, change := range req.ChangeBatch {
-			if change.Direction == remote.Direction_FORWARD {
-				minedTxs.Resize(uint(len(change.Txs)))
-				for i := range change.Txs {
-					minedTxs.Txs[i] = &types2.TxSlot{}
-					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-						return err
-					}); err != nil && !errors.Is(err, context.Canceled) {
-						f.logger.Warn("stream.Recv", "err", err)
-						continue
-					}
-				}
-			}
-			if change.Direction == remote.Direction_UNWIND {
-				for i := range change.Txs {
-					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						utx := &types2.TxSlot{}
-						sender := make([]byte, 20)
-						_, err2 := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-						if err2 != nil {
-							return err2
-						}
-						if utx.Type == types2.BlobTxType {
-							knownBlobTxn, err2 := f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
-							if err2 != nil {
-								return err2
-							}
-							// Get the blob tx from cache; ignore altogether if it isn't there
-							if knownBlobTxn != nil {
-								unwindTxs.Append(knownBlobTxn.Tx, sender, false)
-							}
-						} else {
-							unwindTxs.Append(utx, sender, false)
-						}
-						return err
-					}); err != nil && !errors.Is(err, context.Canceled) {
-						f.logger.Warn("stream.Recv", "err", err)
-						continue
-					}
-				}
-			}
+		if err := f.handleStateChangesRequest(ctx, req); err != nil {
+			f.logger.Warn("[fetch] onNewBlock", "err", err)
 		}
 
-		if err := f.db.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
-		}); err != nil && !errors.Is(err, context.Canceled) {
-			f.logger.Warn("onNewBlock", "err", err)
-		}
-		if f.wg != nil {
+		if f.wg != nil { // to help tests
 			f.wg.Done()
 		}
 	}
+}
+
+func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
+	var unwindTxs, minedTxs types2.TxSlots
+	for _, change := range req.ChangeBatch {
+		if change.Direction == remote.Direction_FORWARD {
+			minedTxs.Resize(uint(len(change.Txs)))
+			for i := range change.Txs {
+				minedTxs.Txs[i] = &types2.TxSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					return err
+				}); err != nil && !errors.Is(err, context.Canceled) {
+					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					continue // 1 tx handling error must not stop batch processing
+				}
+			}
+			continue
+		}
+
+		// change.Direction == remote.Direction_UNWIND
+		for i := range change.Txs {
+			if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
+				utx := &types2.TxSlot{}
+				sender := make([]byte, 20)
+				_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+				if err != nil {
+					return err
+				}
+				if utx.Type == types2.BlobTxType {
+					var knownBlobTxn *metaTx
+					var err error
+					//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
+					if err := f.db.View(ctx, func(tx kv.Tx) error {
+						knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
+						if err != nil {
+							return err
+						}
+						return nil
+					}); err != nil {
+						return err
+					}
+					// Get the blob tx from cache; ignore altogether if it isn't there
+					if knownBlobTxn != nil {
+						unwindTxs.Append(knownBlobTxn.Tx, sender, false)
+					}
+				} else {
+					unwindTxs.Append(utx, sender, false)
+				}
+				return nil
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+				continue // 1 tx handling error must not stop batch processing
+			}
+		}
+	}
+
+	if err := f.db.View(ctx, func(tx kv.Tx) error {
+		return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
+	}); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }
