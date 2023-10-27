@@ -43,9 +43,8 @@ func TestProviderRegistration(t *testing.T) {
 	provider := &testProvider{}
 	diagnostics.RegisterProvider(provider, diagnostics.TypeOf(testInfo{}), log.Root())
 
-	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)
-
 	// diagnostics receiver
+	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)
 	diagnostics.StartProviders(ctx, diagnostics.TypeOf(testInfo{}), log.Root())
 
 	for info := range ch {
