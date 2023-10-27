@@ -84,9 +84,8 @@ func testState(t *testing.T, st *testMatcher) {
 		//TODO: AlexSharov - need to fix this test
 	}
 
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
-		t.Parallel()
-		_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
