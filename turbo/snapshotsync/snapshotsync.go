@@ -24,6 +24,16 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+type CaplinMode int
+
+const (
+
+	// CaplinModeNone - no caplin mode
+	NoCaplin   CaplinMode = 1
+	OnlyCaplin CaplinMode = 2
+	AlsoCaplin CaplinMode = 3
+)
+
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.DownloadRequest {
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.AllSnapshotTypes))}
 	for _, r := range downloadRequest {
@@ -72,7 +82,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -130,6 +140,12 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
 				continue
 			}
+		}
+		if caplin == NoCaplin && strings.Contains(p.Name, "beaconblocks") {
+			continue
+		}
+		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") {
+			continue
 		}
 
 		_, exists := existingFilesMap[p.Name]
