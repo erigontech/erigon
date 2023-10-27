@@ -59,7 +59,7 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 			return true
 		}
 	}
-	return rules.IsShanghai || rules.IsAgra
+	return rules.IsShanghai
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the
@@ -141,7 +141,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		eofJt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
-	case evm.ChainRules().IsShanghai || evm.ChainRules().IsAgra:
+	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet

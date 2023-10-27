@@ -83,11 +83,6 @@ func (sn *BorEventSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.IdxBorTxnHash.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxBorTxnHash.Close()
-		sn.IdxBorTxnHash = nil
-	}
 	return nil
 }
 
@@ -153,11 +148,6 @@ func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
 	sn.idx, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	if sn.idx.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idx.Close()
-		sn.idx = nil
 	}
 	return nil
 }
@@ -383,7 +373,7 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 	return nil
 }
 
-// DumpBorSpans - [from, to)
+// DumpBorEvents - [from, to)
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1160,7 +1150,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			m.notifier.OnNewSnapshot()
 			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
 		}
-		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+		for _, t := range []snaptype.Type{snaptype.BorEvents} {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}

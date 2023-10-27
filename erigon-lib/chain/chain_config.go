@@ -199,6 +199,9 @@ func (c *Config) IsShanghai(time uint64) bool {
 }
 
 // IsAgra returns whether num is either equal to the Agra fork block or greater.
+// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
+// Also Agra is activated based on the block number rather than the timestamp.
+// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
 func (c *Config) IsAgra(num uint64) bool {
 	if c == nil || c.Bor == nil {
 		return false
@@ -220,7 +223,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := calcConfig(c.BurntContract, num)
+	addr := borKeyValueConfigHelper(c.BurntContract, num)
 	return &addr
 }
 
@@ -539,11 +542,11 @@ func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return calcConfig(c.BackupMultiplier, number)
+	return borKeyValueConfigHelper(c.BackupMultiplier, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return calcConfig(c.Period, number)
+	return borKeyValueConfigHelper(c.Period, number)
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
@@ -558,56 +561,29 @@ func (c *BorConfig) IsIndore(number uint64) bool {
 	return isForked(c.IndoreBlock, number)
 }
 
-func (c *BorConfig) IsAgra(number uint64) bool {
-	return isForked(c.AgraBlock, number)
-}
-
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
 }
 
-func calcConfig[T uint64 | common.Address](field map[string]T, number uint64) T {
-	keys := make([]string, 0, len(field))
-	for k := range field {
-		keys = append(keys, k)
+func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
+	fieldUint := make(map[uint64]T)
+	for k, v := range field {
+		keyUint, err := strconv.ParseUint(k, 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		fieldUint[keyUint] = v
 	}
 
-	sort.Strings(keys)
+	keys := common.SortedKeys(fieldUint)
 
 	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-
-		if number >= valUint && number < valUintNext {
-			return field[keys[i]]
+		if number >= keys[i] && number < keys[i+1] {
+			return fieldUint[keys[i]]
 		}
 	}
 
-	return field[keys[len(keys)-1]]
-}
-
-func borKeyValueConfigHelper(field map[string]uint64, number uint64) uint64 {
-	keys := sortMapKeys(field)
-	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-
-		if number >= valUint && number < valUintNext {
-			return field[keys[i]]
-		}
-	}
-
-	return field[keys[len(keys)-1]]
-}
-
-func sortMapKeys(m map[string]uint64) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	return keys
+	return fieldUint[keys[len(keys)-1]]
 }
 
 type sprint struct {
@@ -649,11 +625,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                    *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon          bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul    bool
-	IsBerlin, IsLondon, IsShanghai, IsAgra, IsCancun, IsPrague bool
-	IsAura                                                     bool
+	ChainID                                                 *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
+	IsAura                                                  bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -674,8 +650,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time),
-		IsAgra:             c.IsAgra(num),
+		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,

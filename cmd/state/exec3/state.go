@@ -286,7 +286,6 @@ func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
 func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	panic("")
 }
-func (cr ChainReader) BorSpan(spanId uint64) []byte { panic("") }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
