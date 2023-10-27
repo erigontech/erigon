@@ -68,6 +68,7 @@ func TestStateRandom(t *testing.T) {
 func TestStateRevert(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
+	st.whitelist(`^stCreate*`)
 	st.whitelist(`^stRevert*`)
 	testState(t, st)
 }
@@ -76,7 +77,6 @@ func TestStateVM(t *testing.T) {
 	st := new(testMatcher)
 	st.whitelist(`^VMTests*`)
 	st.whitelist(`^stPreCompiledContracts*`)
-	st.whitelist(`^stCreate2*`)
 	testState(t, st)
 }
 func TestStateStaticCall(t *testing.T) {
@@ -102,7 +102,7 @@ func TestStateAll(t *testing.T) {
 
 	st.skipLoad(`^VMTests`)
 	st.skipLoad(`^stPreCompiledContracts`)
-	st.skipLoad(`^stCreate2`)
+	st.skipLoad(`^stCreate`)
 
 	st.skipLoad(`^stEIP`)
 
