@@ -35,20 +35,20 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func TestZkState(t *testing.T) {
+func TestStateZk(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
-func TestTimeConsumingState(t *testing.T) {
+func TestStateTimeConsuming(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stTimeConsuming*`)
 	st.whitelist(`^VMTests*`)
 	testState(t, st)
 }
-func TestTransitionState(t *testing.T) {
+func TestStateTransition(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stTransactionTest*`)
@@ -56,7 +56,7 @@ func TestTransitionState(t *testing.T) {
 	testState(t, st)
 }
 
-func TestState(t *testing.T) {
+func TestStateAll(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	// another Test*State targets are running this tests
