@@ -21,12 +21,12 @@ type PeerStatisticsGetter interface {
 }
 
 type MessageTransfered struct {
-	PeerID    string
-	Cap       string
-	MsgType   string
-	Size      uint64
-	Inbound   bool
-	Timestamp string
+	PeerID    string `json:"peerId"`
+	Cap       string `json:"cap"`
+	MsgType   string `json:"msgType"`
+	Size      uint64 `json:"size"`
+	Inbound   bool   `json:"inbound"`
+	Timestamp string `json:"timestamp"`
 }
 
 type PeerStatistics struct {

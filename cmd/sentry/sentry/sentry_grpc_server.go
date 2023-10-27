@@ -540,7 +540,7 @@ func runPeer(
 
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
-		//saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType, uint64(msg.Size), true)
+		//saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType.String(), uint64(msg.Size), true)
 		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
 
 		msg.Discard()
