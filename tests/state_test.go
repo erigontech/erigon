@@ -35,15 +35,46 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func TestZkState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stZero*`)
+	testState(t, st)
+}
+func TestTimeConsumingState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stTimeConsuming*`)
+	st.whitelist(`^VMTests*`)
+	testState(t, st)
+}
+func TestTransitionState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stTransactionTest*`)
+	st.whitelist(`^stArgsZeroOneBalance*`)
+	testState(t, st)
+}
+
 func TestState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	// another Test*State targets are running this tests
+	st.skipLoad(`^stZero`)
+	st.skipLoad(`^stTimeConsuming`)
+	st.skipLoad(`^stTransactionTest`)
+	st.skipLoad(`^VMTests`)
+	st.skipLoad(`^stArgsZeroOneBalance`)
+	testState(t, st)
+}
+
+func testState(t *testing.T, st *testMatcher) {
+	t.Helper()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
-	t.Parallel()
-
-	st := new(testMatcher)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
