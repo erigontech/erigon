@@ -392,9 +392,6 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
-		msgType := "unknown"
-		msgCap := cap.String()
-
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
@@ -402,7 +399,6 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
-			msgType = "GetBlockHeaders"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -413,7 +409,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
-			msgType = "BlockHeaders"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -424,7 +419,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
-			msgType = "GetBlockBodies"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -434,7 +428,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
-			msgType = "BlockBodies"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -445,7 +438,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
-			msgType = "GetNodeData"
 			if protocol >= direct.ETH67 {
 				msg.Discard()
 				return p2p.NewPeerError(p2p.PeerErrorMessageObsolete, p2p.DiscSubprotocolError, nil, fmt.Sprintf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol))
@@ -460,7 +452,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
-			msgType = "GetReceipts"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -471,7 +462,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
-			msgType = "Receipts"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -482,7 +472,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
-			msgType = "NewBlockHashes"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -493,7 +482,6 @@ func runPeer(
 			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
-			msgType = "NewBlock"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -504,7 +492,6 @@ func runPeer(
 			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
-			msgType = "NewPooledTransactionHashes"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -515,7 +502,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
-			msgType = "GetPooledTransactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -526,7 +512,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
-			msgType = "Transactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -537,7 +522,6 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
-			msgType = "PooledTransactions"
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -554,8 +538,10 @@ func runPeer(
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 
+		msgType := eth.ToProto[protocol][msg.Code]
+		msgCap := cap.String()
 		//saveTransferedMessage(peerInfo.peer.ID().String(), msgCap, msgType, uint64(msg.Size), true)
-		peerInfo.peer.CountBytesTransfered(msgType, msgCap, uint64(msg.Size), true)
+		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)

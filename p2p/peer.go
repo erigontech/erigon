@@ -275,16 +275,16 @@ func convertToCamelCase(input string) string {
 }
 
 func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes uint64, inbound bool) {
-	msgType = convertToCamelCase(msgType)
+	messageType := convertToCamelCase(msgType)
 
 	if inbound {
 		p.BytesIn += bytes
 		p.CapBytesIn[msgCap] += bytes
-		p.TypeBytesIn[msgType] += bytes
+		p.TypeBytesIn[messageType] += bytes
 	} else {
 		p.BytesOut += bytes
 		p.CapBytesOut[msgCap] += bytes
-		p.TypeBytesOut[msgType] += bytes
+		p.TypeBytesOut[messageType] += bytes
 	}
 }
 
