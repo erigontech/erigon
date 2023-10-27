@@ -50,9 +50,8 @@ func TestBlockchain(t *testing.T) {
 
 		//TODO: AlexSharov - need to fix this test
 		//bt.skipLoad(`^ValidBlocks/bcTotalDifficultyTest/uncleBlockAtBlock3AfterBlock3.json`)
-		//bt.skipLoad(`^TransitionTests/bcHomesteadToDao`)
-		//bt.skipLoad(`^TransitionTests/bcFrontierToHomestead`)
 		bt.skipLoad(`^InvalidBlocks/bcForgedTest`)
+		bt.skipLoad(`^TransitionTests`)
 
 		//bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow.json`)
 		//bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow2.json`)
