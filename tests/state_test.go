@@ -41,6 +41,12 @@ func TestStateZk(t *testing.T) {
 	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
+func TestStateMemory(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stMemory*`)
+	testState(t, st)
+}
 func TestStatestEIP(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
@@ -81,6 +87,8 @@ func TestStateAll(t *testing.T) {
 	st.skipLoad(`^stCreate2`)
 
 	st.skipLoad(`^stEIP`)
+
+	st.skipLoad(`^stMemory`)
 	testState(t, st)
 }
 
