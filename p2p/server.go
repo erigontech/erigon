@@ -33,6 +33,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -1180,6 +1181,7 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 	for _, peer := range srv.Peers() {
 		if peer != nil {
 			infos = append(infos, peer.Info())
+			peer.ResetDiagnosticsCounters()
 		}
 	}
 	// Sort the result array alphabetically by node identifier
@@ -1190,5 +1192,19 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 			}
 		}
 	}
+	return infos
+}
+
+// PeersInfo returns an array of metadata objects describing connected peers.
+func (srv *Server) DiagnosticsPeersInfo() map[string]*diagnostics.PeerStatistics {
+	// Gather all the generic and sub-protocol specific infos
+	infos := make(map[string]*diagnostics.PeerStatistics)
+	for _, peer := range srv.Peers() {
+		if peer != nil {
+			infos[peer.ID().String()] = peer.DiagInfo()
+			peer.ResetDiagnosticsCounters()
+		}
+	}
+
 	return infos
 }
