@@ -35,99 +35,15 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func TestStateZk(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stZero*`)
-	testState(t, st)
-}
-func TestStateMemory(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stMemory*`)
-	st.whitelist(`^stSt ack*`)
-	testState(t, st)
-}
-func TestStateEIP(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stEIP*`)
-	testState(t, st)
-}
-func TestStateRandom(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stRandom*`)
-	testState(t, st)
-}
-func TestStateRevert(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stCreate*`)
-	st.whitelist(`^stRevert*`)
-	st.whitelist(`^stReturn*`)
-	testState(t, st)
-}
-func TestStateVM(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^VMTests*`)
-	st.whitelist(`^stPreCompiled*`)
-	st.whitelist(`^stTransition*`)
-	st.whitelist(`^stSStore*`)
-	st.whitelist(`^stArg*`)
-	testState(t, st)
-}
-func TestStateCall(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stStatic*`)
-	st.whitelist(`^stCall*`)
-	st.whitelist(`^stQuadratic*`)
-	st.whitelist(`^stAttack*`)
-	st.whitelist(`^stBad*`)
-	testState(t, st)
-}
-
-func TestStateAll(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	// another Test*State targets are running this tests
-	st.skipLoad(`^stZero`)
-
-	st.skipLoad(`^stStatic`)
-	st.skipLoad(`^stCall`)
-	st.skipLoad(`^stQuadratic`)
-	st.skipLoad(`^stAttack`)
-	st.skipLoad(`^stBad`)
-
-	st.skipLoad(`^VMTests`)
-	st.skipLoad(`^stTransition`)
-	st.skipLoad(`^stSStore`)
-	st.skipLoad(`^stPreCompiled`)
-	st.skipLoad(`^stArg`)
-
-	st.skipLoad(`^stCreate`)
-	st.skipLoad(`^stRevert`)
-	st.skipLoad(`^stReturn`)
-
-	st.skipLoad(`^stEIP`)
-
-	st.skipLoad(`^stMemory`)
-	st.skipLoad(`^stStack`)
-
-	st.skipLoad(`^stRandom`)
-
-	testState(t, st)
-}
-
-func testState(t *testing.T, st *testMatcher) {
-	t.Helper()
+func TestState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
+	//t.Parallel()
+
+	st := new(testMatcher)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
