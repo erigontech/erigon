@@ -45,6 +45,7 @@ func TestStateVM(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^VMTests*`)
+	st.whitelist(`^stPreCompiledContracts*`)
 	testState(t, st)
 }
 func TestStateStaticCall(t *testing.T) {
@@ -64,9 +65,10 @@ func TestStateAll(t *testing.T) {
 	st.skipLoad(`^stZero`)
 	st.skipLoad(`^stStaticCall`)
 	st.skipLoad(`^stQuadraticComplexityTest`)
-	st.skipLoad(`^VMTests`)
 	st.skipLoad(`^stAttackTest`)
 	st.skipLoad(`^stBadOpcode`)
+	st.skipLoad(`^VMTests`)
+	st.skipLoad(`^stPreCompiledContracts`)
 	testState(t, st)
 }
 
@@ -82,7 +84,7 @@ func testState(t *testing.T, st *testMatcher) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	//st.slow(`^stPreCompiledContracts/modexp`)
+	//st.slow(`^/modexp`)
 	//st.slow(`^stQuadraticComplexityTest/`)
 
 	// Very time consuming
