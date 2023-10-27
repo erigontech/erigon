@@ -78,7 +78,7 @@ type EthGetTransactionCount struct {
 func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
 	var result hexutil2.Uint64
 
-	if err := reqGen.callCli(&result, Methods.ETHBlockNumber); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHBlockNumber); err != nil {
 		return 0, err
 	}
 
@@ -88,7 +88,7 @@ func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
 func (reqGen *requestGenerator) GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error) {
 	var result Block
 
-	if err := reqGen.callCli(&result, Methods.ETHGetBlockByNumber, blockNum, withTxs); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHGetBlockByNumber, blockNum, withTxs); err != nil {
 		return nil, err
 	}
 
@@ -98,7 +98,7 @@ func (reqGen *requestGenerator) GetBlockByNumber(blockNum rpc.BlockNumber, withT
 func (req *requestGenerator) GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	var result string
 
-	if err := req.callCli(&result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
+	if err := req.rpcCall(&result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
 		return libcommon.Hash{}, err
 	}
 

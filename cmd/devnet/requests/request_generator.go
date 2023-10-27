@@ -151,7 +151,7 @@ var Methods = struct {
 	ETHCall:                  "eth_call",
 }
 
-func (req *requestGenerator) call(method RPCMethod, body string, response interface{}) callResult {
+func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response interface{}) callResult {
 	start := time.Now()
 	targetUrl := "http://" + req.target
 	err := post(req.client, targetUrl, string(method), body, response, req.logger)
@@ -167,14 +167,14 @@ func (req *requestGenerator) call(method RPCMethod, body string, response interf
 	}
 }
 
-func (req *requestGenerator) callCli(result interface{}, method RPCMethod, args ...interface{}) error {
-	cli, err := req.cli(context.Background())
+func (req *requestGenerator) rpcCall(result interface{}, method RPCMethod, args ...interface{}) error {
+	client, err := req.rpcClient(context.Background())
 
 	if err != nil {
 		return err
 	}
 
-	return cli.Call(result, string(method), args...)
+	return client.Call(result, string(method), args...)
 }
 
 type PingResult callResult
@@ -237,7 +237,7 @@ func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 	}
 }
 
-func (req *requestGenerator) cli(ctx context.Context) (*rpc.Client, error) {
+func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error) {
 	if req.requestClient == nil {
 		var err error
 		req.requestClient, err = rpc.DialContext(ctx, "http://"+req.target, req.logger)
