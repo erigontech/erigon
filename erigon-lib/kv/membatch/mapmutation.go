@@ -222,7 +222,7 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 }
 
 func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
-	if m.db == nil {
+	if tx == nil {
 		return nil
 	}
 	m.mu.Lock()
