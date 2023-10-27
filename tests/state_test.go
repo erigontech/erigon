@@ -41,18 +41,19 @@ func TestStateZk(t *testing.T) {
 	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
-func TestStateTimeConsuming(t *testing.T) {
+func TestStateVM(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist(`^stTimeConsuming*`)
 	st.whitelist(`^VMTests*`)
 	testState(t, st)
 }
-func TestStateTransition(t *testing.T) {
+func TestStateStaticCall(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist(`^stTransactionTest*`)
-	st.whitelist(`^stArgsZeroOneBalance*`)
+	st.whitelist(`^stStaticCall*`)
+	st.whitelist(`^stQuadraticComplexityTest*`)
+	st.whitelist(`^stAttackTest*`)
+	st.whitelist(`^stBadOpcode*`)
 	testState(t, st)
 }
 
@@ -61,10 +62,11 @@ func TestStateAll(t *testing.T) {
 	st := new(testMatcher)
 	// another Test*State targets are running this tests
 	st.skipLoad(`^stZero`)
-	st.skipLoad(`^stTimeConsuming`)
-	st.skipLoad(`^stTransactionTest`)
+	st.skipLoad(`^stStaticCall`)
+	st.skipLoad(`^stQuadraticComplexityTest`)
 	st.skipLoad(`^VMTests`)
-	st.skipLoad(`^stArgsZeroOneBalance`)
+	st.skipLoad(`^stAttackTest`)
+	st.skipLoad(`^stBadOpcode`)
 	testState(t, st)
 }
 
@@ -80,6 +82,12 @@ func testState(t *testing.T, st *testMatcher) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
+	//st.slow(`^stPreCompiledContracts/modexp`)
+	//st.slow(`^stQuadraticComplexityTest/`)
+
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
 	if ethconfig.EnableHistoryV3InTest {
 		//TODO: AlexSharov - need to fix this test
 	}
