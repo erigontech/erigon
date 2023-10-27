@@ -22,6 +22,11 @@ type Info interface {
 	Type() Type
 }
 
+func TypeOf(i Info) Type {
+	t := reflect.TypeOf(i)
+	return Type(t)
+}
+
 type Provider interface {
 	StartDiagnostics(ctx context.Context) error
 }
@@ -88,31 +93,31 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	defer func() {
 		if rec := recover(); rec != nil {
 			err := fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-			logger.Warn("Diagnostic provider failed to stert", "type", infoType, "err", err)
+			logger.Warn("Diagnostic provider failed", "type", infoType, "err", err)
 		}
 	}()
 
 	if err := provider.StartDiagnostics(ctx); err != nil {
-		logger.Warn("Diagnostic provider failed to stert", "type", infoType, "err", err)
+		logger.Warn("Diagnostic provider failed", "type", infoType, "err", err)
 	}
 }
 
-func SendDiagnostic[I Info](ctx context.Context, info I) error {
+func Send[I Info](ctx context.Context, info I) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
 	cval := ctx.Value(ckChan)
-	if c, ok := cval.(chan<- I); ok {
+	if c, ok := cval.(chan I); ok {
 		c <- info
 	} else {
-		return fmt.Errorf("Unexpected channel type: %T", cval)
+		return fmt.Errorf("unexpected channel type: %T", cval)
 	}
 
 	return nil
 }
 
-func DiagnosticContext[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
+func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
 	ch := make(chan I, buffer)
 	ctx = context.WithValue(ctx, ckChan, ch)
 	ctx, cancel := context.WithCancel(ctx)
