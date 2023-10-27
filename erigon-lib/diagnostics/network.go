@@ -16,6 +16,8 @@
 
 package diagnostics
 
+import "reflect"
+
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -23,4 +25,8 @@ type PeerStatisticsGetter interface {
 type PeerStatistics struct {
 	BytesIn  uint64
 	BytesOut uint64
+}
+
+func (p PeerStatistics) Type() Type {
+	return Type(reflect.TypeOf(p))
 }
