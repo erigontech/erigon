@@ -47,10 +47,22 @@ func TestStateMemory(t *testing.T) {
 	st.whitelist(`^stMemory*`)
 	testState(t, st)
 }
-func TestStatestEIP(t *testing.T) {
+func TestStateEIP(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stEIP*`)
+	testState(t, st)
+}
+func TestStateRandom(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stRandom*`)
+	testState(t, st)
+}
+func TestStateRevert(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+	st.whitelist(`^stRevert*`)
 	testState(t, st)
 }
 func TestStateVM(t *testing.T) {
@@ -89,6 +101,10 @@ func TestStateAll(t *testing.T) {
 	st.skipLoad(`^stEIP`)
 
 	st.skipLoad(`^stMemory`)
+
+	st.skipLoad(`^stRandom`)
+
+	st.skipLoad(`^stRevert`)
 	testState(t, st)
 }
 
