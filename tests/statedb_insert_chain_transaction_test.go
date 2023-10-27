@@ -431,10 +431,6 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountCreateIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
-
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -515,10 +511,6 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountUpdateIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
-
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -608,9 +600,6 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
