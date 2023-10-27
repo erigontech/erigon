@@ -41,16 +41,11 @@ func TestStateZk(t *testing.T) {
 	st.whitelist(`^stZero*`)
 	testState(t, st)
 }
-func TestStateStack(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	st.whitelist(`^stStack*`)
-	testState(t, st)
-}
 func TestStateMemory(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^stMemory*`)
+	st.whitelist(`^stSt ack*`)
 	testState(t, st)
 }
 func TestStateEIP(t *testing.T) {
@@ -70,22 +65,24 @@ func TestStateRevert(t *testing.T) {
 	st := new(testMatcher)
 	st.whitelist(`^stCreate*`)
 	st.whitelist(`^stRevert*`)
+	st.whitelist(`^stReturn*`)
 	testState(t, st)
 }
 func TestStateVM(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
 	st.whitelist(`^VMTests*`)
-	st.whitelist(`^stPreCompiledContracts*`)
+	st.whitelist(`^stPreCompiled*`)
 	testState(t, st)
 }
-func TestStateStaticCall(t *testing.T) {
+func TestStateCall(t *testing.T) {
 	t.Parallel()
 	st := new(testMatcher)
-	st.whitelist(`^stStaticCall*`)
-	st.whitelist(`^stQuadraticComplexityTest*`)
-	st.whitelist(`^stAttackTest*`)
-	st.whitelist(`^stBadOpcode*`)
+	st.whitelist(`^stStatic*`)
+	st.whitelist(`^stCall*`)
+	st.whitelist(`^stQuadratic*`)
+	st.whitelist(`^stAttack*`)
+	st.whitelist(`^stBad*`)
 	testState(t, st)
 }
 
@@ -95,24 +92,26 @@ func TestStateAll(t *testing.T) {
 	// another Test*State targets are running this tests
 	st.skipLoad(`^stZero`)
 
-	st.skipLoad(`^stStaticCall`)
-	st.skipLoad(`^stQuadraticComplexityTest`)
-	st.skipLoad(`^stAttackTest`)
-	st.skipLoad(`^stBadOpcode`)
+	st.skipLoad(`^stStatic`)
+	st.skipLoad(`^stCall`)
+	st.skipLoad(`^stQuadratic`)
+	st.skipLoad(`^stAttack`)
+	st.skipLoad(`^stBad`)
 
 	st.skipLoad(`^VMTests`)
-	st.skipLoad(`^stPreCompiledContracts`)
+	st.skipLoad(`^stPreCompiled`)
+
 	st.skipLoad(`^stCreate`)
+	st.skipLoad(`^stRevert`)
+	st.skipLoad(`^stReturn`)
 
 	st.skipLoad(`^stEIP`)
 
 	st.skipLoad(`^stMemory`)
+	st.skipLoad(`^stStack`)
 
 	st.skipLoad(`^stRandom`)
 
-	st.skipLoad(`^stRevert`)
-
-	st.skipLoad(`^stStack`)
 	testState(t, st)
 }
 
