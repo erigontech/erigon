@@ -131,6 +131,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
 	} else {
+		//enable it if need extensive logging
 		//t.Log("EVM operation log:\n" + buf.String())
 	}
 	//t.Logf("EVM output: 0x%x", tracer.Output())
