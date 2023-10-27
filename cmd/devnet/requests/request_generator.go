@@ -3,9 +3,11 @@ package requests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -152,10 +154,14 @@ var Methods = struct {
 }
 
 func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response interface{}) callResult {
+	ctx := context.Background()
+	req.reqID++
 	start := time.Now()
 	targetUrl := "http://" + req.target
-	err := post(req.client, targetUrl, string(method), body, response, req.logger)
-	req.reqID++
+
+	err := retryConnects(ctx, func(ctx context.Context) error {
+		return post(ctx, req.client, targetUrl, string(method), body, response, req.logger)
+	})
 
 	return callResult{
 		RequestBody: body,
@@ -168,13 +174,55 @@ func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response
 }
 
 func (req *requestGenerator) rpcCall(result interface{}, method RPCMethod, args ...interface{}) error {
-	client, err := req.rpcClient(context.Background())
-
+	ctx := context.Background()
+	client, err := req.rpcClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	return client.Call(result, string(method), args...)
+	return retryConnects(ctx, func(ctx context.Context) error {
+		return client.CallContext(ctx, result, string(method), args...)
+	})
+}
+
+const connectionTimeout = time.Second * 5
+
+func isConnectionError(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Op == "dial"
+	}
+	return false
+}
+
+func retryConnects(ctx context.Context, op func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+	defer cancel()
+	return retry(ctx, op, isConnectionError, time.Millisecond*200, nil)
+}
+
+func retry(ctx context.Context, op func(context.Context) error, isRecoverableError func(error) bool, delay time.Duration, lastErr error) error {
+	err := op(ctx)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) && lastErr != nil {
+		return lastErr
+	}
+	if !isRecoverableError(err) {
+		return err
+	}
+
+	delayTimer := time.NewTimer(delay)
+	select {
+	case <-delayTimer.C:
+		return retry(ctx, op, isRecoverableError, delay, err)
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return err
+		}
+		return ctx.Err()
+	}
 }
 
 type PingResult callResult
@@ -231,7 +279,6 @@ func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 		client: &http.Client{
 			Timeout: time.Second * 10,
 		},
-		reqID:  1,
 		logger: logger,
 		target: target,
 	}
@@ -241,7 +288,6 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 	if req.requestClient == nil {
 		var err error
 		req.requestClient, err = rpc.DialContext(ctx, "http://"+req.target, req.logger)
-
 		if err != nil {
 			return nil, err
 		}
@@ -250,14 +296,23 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 	return req.requestClient, nil
 }
 
-func post(client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {
+func post(ctx context.Context, client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {
 	start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request)) // nolint:bodyclose
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(request))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
+
+	r, err := client.Do(req) // nolint:bodyclose
 	if err != nil {
 		return fmt.Errorf("client failed to make post request: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		closeErr := Body.Close()
+
+	defer func(body io.ReadCloser) {
+		closeErr := body.Close()
 		if closeErr != nil {
 			logger.Warn("body close", "err", closeErr)
 		}
@@ -288,11 +343,12 @@ func post(client *http.Client, url, method, request string, response interface{}
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
 func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error) {
-	var err error
-
 	if req.subscriptionClient == nil {
-		req.subscriptionClient, err = rpc.DialWebsocket(ctx, "ws://"+req.target, "", req.logger)
-
+		err := retryConnects(ctx, func(ctx context.Context) error {
+			var err error
+			req.subscriptionClient, err = rpc.DialWebsocket(ctx, "ws://"+req.target, "", req.logger)
+			return err
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial websocket: %v", err)
 		}

@@ -2,11 +2,9 @@ package devnet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"math/big"
-	"net"
 	"os"
 	"reflect"
 	"strings"
@@ -15,7 +13,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -219,47 +216,6 @@ func (nw *Network) startNode(n Node) error {
 	}
 
 	return nil
-}
-
-func isConnectionError(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return opErr.Op == "dial"
-	}
-	return false
-}
-
-// getEnode returns the enode of the netowrk node
-func getEnode(n Node) (string, error) {
-	reqCount := 0
-
-	for {
-		nodeInfo, err := n.AdminNodeInfo()
-
-		if err != nil {
-			if r, ok := n.(*node); ok {
-				if !r.running() {
-					return "", err
-				}
-			}
-
-			if isConnectionError(err) && (reqCount < 10) {
-				reqCount++
-				time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
-				continue
-			}
-
-			return "", err
-		}
-
-		enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
-
-		if err != nil {
-			return "", err
-		}
-
-		return enode, nil
-	}
 }
 
 func (nw *Network) Stop() {
