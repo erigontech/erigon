@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -239,9 +238,9 @@ func TestEncoding(t *testing.T) {
 		id   ID
 		want []byte
 	}{
-		{ID{Hash: checksumToBytes(0), Next: 0}, common.Hex2Bytes("c6840000000080")},
-		{ID{Hash: checksumToBytes(0xdeadbeef), Next: 0xBADDCAFE}, common.Hex2Bytes("ca84deadbeef84baddcafe,")},
-		{ID{Hash: checksumToBytes(math.MaxUint32), Next: math.MaxUint64}, common.Hex2Bytes("ce84ffffffff88ffffffffffffffff")},
+		{ID{Hash: checksumToBytes(0), Next: 0}, libcommon.Hex2Bytes("c6840000000080")},
+		{ID{Hash: checksumToBytes(0xdeadbeef), Next: 0xBADDCAFE}, libcommon.Hex2Bytes("ca84deadbeef84baddcafe,")},
+		{ID{Hash: checksumToBytes(math.MaxUint32), Next: math.MaxUint64}, libcommon.Hex2Bytes("ce84ffffffff88ffffffffffffffff")},
 	}
 	for i, tt := range tests {
 		have, err := rlp.EncodeToBytes(tt.id)

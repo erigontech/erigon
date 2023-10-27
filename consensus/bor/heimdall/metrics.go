@@ -2,9 +2,8 @@ package heimdall
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"time"
-
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 type (

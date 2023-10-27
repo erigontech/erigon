@@ -11,7 +11,7 @@ import (
 )
 
 // bench9 tests eth_getProof
-func Bench9(erigonURL, gethURL string, needCompare bool) {
+func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -26,12 +26,10 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		fmt.Printf("Could not get block number: %v\n", res.Err)
-		return
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
 	}
 	if blockNumber.Error != nil {
-		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-		return
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
@@ -46,8 +44,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
-			fmt.Printf("Could not get accountRange (Erigon): %v\n", res.Err)
-			return
+			return fmt.Errorf("Could not get accountRange (Erigon): %v\n", res.Err)
 		}
 
 		if sr.Error != nil {
@@ -74,8 +71,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 			}
 			res = reqGen.Erigon("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
 			if res.Err != nil {
-				fmt.Printf("Could not get getProof (Erigon): %v\n", res.Err)
-				return
+				return fmt.Errorf("Could not get getProof (Erigon): %v\n", res.Err)
 			}
 			if proof.Error != nil {
 				fmt.Printf("Error getting getProof (Erigon): %d %s\n", proof.Error.Code, proof.Error.Message)
@@ -86,8 +82,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 				reqGen.reqID++
 				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
 				if res.Err != nil {
-					fmt.Printf("Could not get getProof (geth): %v\n", res.Err)
-					return
+					return fmt.Errorf("Could not get getProof (geth): %v\n", res.Err)
 				}
 				if gethProof.Error != nil {
 					fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)
@@ -100,4 +95,5 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 			}
 		}
 	}
+	return nil
 }

@@ -17,9 +17,11 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -570,9 +572,12 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 
 	// Verify that the gas limit is <= 2^63-1
 	gasCap := uint64(0x7fffffffffffffff)
-
 	if header.GasLimit > gasCap {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, gasCap)
+	}
+
+	if header.WithdrawalsHash != nil {
+		return consensus.ErrUnexpectedWithdrawals
 	}
 
 	// All basic checks passed, verify cascading fields
@@ -634,10 +639,6 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
-	}
-
-	if header.WithdrawalsHash != nil {
-		return consensus.ErrUnexpectedWithdrawals
 	}
 
 	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
@@ -737,10 +738,25 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 
 		c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 
-		initialHeaders := make([]*types.Header, 0, 128)
+		g := errgroup.Group{}
+		g.SetLimit(estimate.AlmostAllCPUs())
+		defer g.Wait()
+
+		batchSize := 128 // must be < inmemorySignatures
+		initialHeaders := make([]*types.Header, 0, batchSize)
 
 		for i := uint64(1); i <= number; i++ {
 			header := chain.GetHeaderByNumber(i)
+			{
+				// `snap.apply` bottleneck - is recover of signer.
+				// to speedup: recover signer in background goroutines and save in `sigcache`
+				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				snap := snap
+				g.Go(func() error {
+					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					return nil
+				})
+			}
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
 				snap, err = snap.apply(initialHeaders, c.logger)
@@ -1030,9 +1046,11 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
-	var err error
-
 	headerNumber := header.Number.Uint64()
+
+	if withdrawals != nil || header.WithdrawalsHash != nil {
+		return nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
@@ -1044,14 +1062,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 		if c.blockReader != nil {
 			// commit states
-			if err = c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
-	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
+	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
@@ -1093,6 +1111,11 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	// stateSyncData := []*types.StateSyncData{}
 
 	headerNumber := header.Number.Uint64()
+
+	if withdrawals != nil || header.WithdrawalsHash != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 

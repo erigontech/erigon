@@ -23,12 +23,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
@@ -50,7 +50,9 @@ type Cfg struct {
 
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
+	WebSeedS3Tokens                 []string
 	DownloadTorrentFilesFromWebseed bool
+	ChainName                       string
 
 	Dirs datadir.Dirs
 }
@@ -58,6 +60,9 @@ type Cfg struct {
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
+
+	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
+	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -81,7 +86,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers []string, webseeds string) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string) (*Cfg, error) {
 	torrentConfig := Default()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
@@ -100,9 +105,9 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	}
 
 	// debug
-	//	torrentConfig.Debug = false
-	torrentConfig.Logger.WithFilterLevel(verbosity)
-	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
+	//torrentConfig.Debug = true
+	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
+	torrentConfig.Logger.SetHandlers(adapterHandler{})
 
 	if len(staticPeers) > 0 {
 		torrentConfig.NoDHT = false
@@ -140,27 +145,31 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		//staticPeers
 	}
 
-	webseedUrlsOrFiles := common.CliString2Array(webseeds)
-	webseedUrls := make([]*url.URL, 0, len(webseedUrlsOrFiles))
-	webseedFiles := make([]string, 0, len(webseedUrlsOrFiles))
+	webseedUrlsOrFiles := webseeds
+	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
+	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
+	webseedS3Providers := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
+		if strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
+			webseedS3Providers = append(webseedS3Providers, webseed)
+			continue
+		}
 		uri, err := url.ParseRequestURI(webseed)
 		if err != nil {
 			if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
-				webseedFiles = append(webseedFiles, webseed)
+				webseedFileProviders = append(webseedFileProviders, webseed)
 			}
 			continue
 		}
-		webseedUrls = append(webseedUrls, uri)
+		webseedHttpProviders = append(webseedHttpProviders, uri)
 	}
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
-		webseedFiles = append(webseedFiles, localCfgFile)
+		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
-
-	return &Cfg{Dirs: dirs,
+	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedUrls, WebSeedFiles: webseedFiles,
+		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
 	}, nil
 }
 

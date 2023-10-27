@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -162,7 +162,7 @@
     },
     "001-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -323,7 +323,7 @@
     },
     "002-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -484,7 +484,7 @@
     },
     "003-fork=Shanghai-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -645,7 +645,7 @@
     },
     "004-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -812,7 +812,7 @@
     },
     "005-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -979,7 +979,7 @@
     },
     "006-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1146,7 +1146,7 @@
     },
     "007-fork=Shanghai-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1313,7 +1313,7 @@
     },
     "008-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1502,7 +1502,7 @@
     },
     "009-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1691,7 +1691,7 @@
     },
     "010-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1880,7 +1880,7 @@
     },
     "011-fork=Cancun-selfdestruct_contract_initial_balance=0-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2069,7 +2069,7 @@
     },
     "012-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2264,7 +2264,7 @@
     },
     "013-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=DELEGATECALL-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2459,7 +2459,7 @@
     },
     "014-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2654,7 +2654,7 @@
     },
     "015-fork=Cancun-selfdestruct_contract_initial_balance=1-call_times=1-call_opcode=CALLCODE-create_opcode=CREATE2": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },

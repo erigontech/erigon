@@ -1,7 +1,7 @@
 {
     "000-fork=Shanghai-tx_in_withdrawals_block": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -31,7 +31,53 @@
             {
                 "rlp": "0xf9029ef90217a08a333fad2b42ff063107bb84b198ac771a5b22198cc94d62b8f4bab4914509b5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa01152e1850f7a20f6afa4b5e5966010e07c9105c04edc713e5753e01c97c94426a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800188016345785d8a0000800c80a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a0a485a3bd07e29cb8234b5f093d5216eb8b965fb2693c66fea254f6cacef97a6ff865f86380843b9aca00825208940000000000000000000000000000000000000100808026a0e319535da2cae2d72ddb352054535d000c23acdc7cad9d828891253f3850d0d2a032fe4444149b609e2ffa621e23e179b12028309fdb8cb0a5c1bbc58135299af1c0dbda808094a94f5374fce5edbc8e2a8697c15331677e6ebf0b825209",
                 "expectException": "Transaction without funds",
-                "blocknumber": "1"
+                "rlp_decoded": {
+                    "blockHeader": {
+                        "parentHash": "0x8a333fad2b42ff063107bb84b198ac771a5b22198cc94d62b8f4bab4914509b5",
+                        "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                        "coinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+                        "stateRoot": "0x1152e1850f7a20f6afa4b5e5966010e07c9105c04edc713e5753e01c97c94426",
+                        "transactionsTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                        "receiptTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                        "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                        "difficulty": "0x00",
+                        "number": "0x01",
+                        "gasLimit": "0x016345785d8a0000",
+                        "gasUsed": "0x00",
+                        "timestamp": "0x0c",
+                        "extraData": "0x",
+                        "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        "nonce": "0x0000000000000000",
+                        "baseFeePerGas": "0x07",
+                        "withdrawalsRoot": "0xa485a3bd07e29cb8234b5f093d5216eb8b965fb2693c66fea254f6cacef97a6f",
+                        "hash": "0x92d764bca1c2535ce981819b338bae5109125a89c5d4b58b3fb0bd0be80f4b89"
+                    },
+                    "transactions": [
+                        {
+                            "type": "0x00",
+                            "chainId": "0x01",
+                            "nonce": "0x00",
+                            "gasPrice": "0x3b9aca00",
+                            "gasLimit": "0x5208",
+                            "to": "0x0000000000000000000000000000000000000100",
+                            "value": "0x00",
+                            "data": "0x",
+                            "v": "0x26",
+                            "r": "0xe319535da2cae2d72ddb352054535d000c23acdc7cad9d828891253f3850d0d2",
+                            "s": "0x32fe4444149b609e2ffa621e23e179b12028309fdb8cb0a5c1bbc58135299af1",
+                            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                        }
+                    ],
+                    "uncleHeaders": [],
+                    "withdrawals": [
+                        {
+                            "index": "0x00",
+                            "validatorIndex": "0x00",
+                            "address": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                            "amount": "0x5209"
+                        }
+                    ]
+                }
             }
         ],
         "lastblockhash": "0x8a333fad2b42ff063107bb84b198ac771a5b22198cc94d62b8f4bab4914509b5",
@@ -55,7 +101,7 @@
     },
     "001-fork=Shanghai-tx_after_withdrawals_block": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -186,7 +232,7 @@
     },
     "002-fork=Cancun-tx_in_withdrawals_block": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -219,7 +265,56 @@
             {
                 "rlp": "0xf902c1f9023aa093ba43976ae2b42938748d0dc8bac627e08d39b94334f071426217e432b139bfa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0682e97201201372e19a26af611381a7beec0f241a58f183a8d6433f5632bd67da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800188016345785d8a0000800c80a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a0a485a3bd07e29cb8234b5f093d5216eb8b965fb2693c66fea254f6cacef97a6f8080a00000000000000000000000000000000000000000000000000000000000000000f865f86380843b9aca00825208940000000000000000000000000000000000000100808026a0e319535da2cae2d72ddb352054535d000c23acdc7cad9d828891253f3850d0d2a032fe4444149b609e2ffa621e23e179b12028309fdb8cb0a5c1bbc58135299af1c0dbda808094a94f5374fce5edbc8e2a8697c15331677e6ebf0b825209",
                 "expectException": "Transaction without funds",
-                "blocknumber": "1"
+                "rlp_decoded": {
+                    "blockHeader": {
+                        "parentHash": "0x93ba43976ae2b42938748d0dc8bac627e08d39b94334f071426217e432b139bf",
+                        "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                        "coinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+                        "stateRoot": "0x682e97201201372e19a26af611381a7beec0f241a58f183a8d6433f5632bd67d",
+                        "transactionsTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                        "receiptTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                        "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                        "difficulty": "0x00",
+                        "number": "0x01",
+                        "gasLimit": "0x016345785d8a0000",
+                        "gasUsed": "0x00",
+                        "timestamp": "0x0c",
+                        "extraData": "0x",
+                        "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        "nonce": "0x0000000000000000",
+                        "baseFeePerGas": "0x07",
+                        "withdrawalsRoot": "0xa485a3bd07e29cb8234b5f093d5216eb8b965fb2693c66fea254f6cacef97a6f",
+                        "blobGasUsed": "0x00",
+                        "excessBlobGas": "0x00",
+                        "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        "hash": "0x6ef6a053154da7e067734d8b7066e8784eb979005a969a02858c9ee6c26f0c04"
+                    },
+                    "transactions": [
+                        {
+                            "type": "0x00",
+                            "chainId": "0x01",
+                            "nonce": "0x00",
+                            "gasPrice": "0x3b9aca00",
+                            "gasLimit": "0x5208",
+                            "to": "0x0000000000000000000000000000000000000100",
+                            "value": "0x00",
+                            "data": "0x",
+                            "v": "0x26",
+                            "r": "0xe319535da2cae2d72ddb352054535d000c23acdc7cad9d828891253f3850d0d2",
+                            "s": "0x32fe4444149b609e2ffa621e23e179b12028309fdb8cb0a5c1bbc58135299af1",
+                            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                        }
+                    ],
+                    "uncleHeaders": [],
+                    "withdrawals": [
+                        {
+                            "index": "0x00",
+                            "validatorIndex": "0x00",
+                            "address": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                            "amount": "0x5209"
+                        }
+                    ]
+                }
             }
         ],
         "lastblockhash": "0x93ba43976ae2b42938748d0dc8bac627e08d39b94334f071426217e432b139bf",
@@ -255,7 +350,7 @@
     },
     "003-fork=Cancun-tx_after_withdrawals_block": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },

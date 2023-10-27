@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"

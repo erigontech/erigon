@@ -2,9 +2,9 @@ package rawdb
 
 import (
 	"encoding/json"
+	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/math"
 )
 
 type BeaconDataConfig struct {

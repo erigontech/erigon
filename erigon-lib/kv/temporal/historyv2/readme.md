@@ -50,7 +50,7 @@ AccountChangeSet is serialized in the following manner in order to facilitate bi
 ### Keys
 The number of keys N (uint32, 4 bytes)
 Contiguous array of keys (N*32 bytes)
-### Values lengthes
+### Values lengths
  Contiguous array of accumulating value indexes:
 len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})
 (4*N bytes since the lengths are treated as uint32).
@@ -61,5 +61,5 @@ Value | Type | Comment
 ------------ | ------------- | -------------
 num of keys | uint32 |
 address hashes | [num of keys][32]byte | [num of keys]common.Hash
-values lengthes | [num of keys]uint32
+values lengths | [num of keys]uint32
 values | [num of keys][]byte

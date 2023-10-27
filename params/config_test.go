@@ -21,7 +21,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestCheckCompatible(t *testing.T) {
@@ -97,4 +101,35 @@ func TestCheckCompatible(t *testing.T) {
 			t.Errorf("error mismatch:\nstored: %v\nnew: %v\nhead: %v\nerr: %v\nwant: %v", test.stored, test.new, test.head, err, test.wantErr)
 		}
 	}
+}
+
+func TestGetBurntContract(t *testing.T) {
+	// Ethereum
+	assert.Nil(t, MainnetChainConfig.GetBurntContract(0))
+	assert.Nil(t, MainnetChainConfig.GetBurntContract(10_000_000))
+
+	// Gnosis Chain
+	addr := GnosisChainConfig.GetBurntContract(19_040_000)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
+	addr = GnosisChainConfig.GetBurntContract(19_040_001)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
+
+	// Mumbai
+	addr = MumbaiChainConfig.GetBurntContract(22_640_000)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(22_640_001)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41_824_607)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41_824_608)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41_824_609)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
 }

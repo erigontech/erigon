@@ -162,8 +162,26 @@ func producingNodeArgs(dataDir string, nodeNumber int) []string {
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
 	accountSlotsArg, _ := parameterFromArgument("--txpool.accountslots", "16")
+	withHeimdallMilestonesArg, _ := parameterFromArgument("--bor.milestone", "false")
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, mine, httpApi, ws, natArg, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg, accountSlotsArg}
+	return []string{
+		buildDirArg,
+		dataDirArg,
+		chainType,
+		privateApiAddr,
+		httpPortArg,
+		authrpcPortArg,
+		mine,
+		httpApi,
+		ws,
+		natArg,
+		devPeriod,
+		consoleVerbosity,
+		p2pProtocol,
+		downloaderArg,
+		accountSlotsArg,
+		withHeimdallMilestonesArg,
+	}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
@@ -182,6 +200,24 @@ func nonProducingNodeArgs(dataDir string, nodeNumber int, enode string) []string
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 	natArg, _ := parameterFromArgument("--nat", "none")
 	ws := wsArg
+	withHeimdallMilestonesArg, _ := parameterFromArgument("--bor.milestone", "false")
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, httpApi, ws, natArg, staticPeers, noDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
+	return []string{
+		buildDirArg,
+		dataDirArg,
+		chainType,
+		privateApiAddr,
+		httpPortArg,
+		authrpcPortArg,
+		httpApi,
+		ws,
+		natArg,
+		staticPeers,
+		noDiscover,
+		consoleVerbosity,
+		torrentPort,
+		p2pProtocol,
+		downloaderArg,
+		withHeimdallMilestonesArg,
+	}
 }

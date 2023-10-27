@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -171,6 +172,18 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+}
+
+func (config *Config) ListenPort() int {
+	_, portStr, err := net.SplitHostPort(config.ListenAddr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // Server manages all peer connections.
@@ -542,15 +555,19 @@ func (srv *Server) setupLocalNode() error {
 		return err
 	}
 	srv.nodedb = db
+
 	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey, srv.logger)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
-	srv.updateLocalNodeStaticAddrCache()
+
 	// TODO: check conflicts
 	for _, p := range srv.Protocols {
 		for _, e := range p.Attributes {
 			srv.localnode.Set(e)
 		}
 	}
+
+	srv.updateLocalNodeStaticAddrCache()
+
 	switch srv.NAT.(type) {
 	case nil:
 		// No NAT interface, do nothing.
@@ -616,6 +633,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
+	srv.updateLocalNodeStaticAddrCache()
 
 	// Discovery V4
 	var unhandled chan discover.ReadPacket
@@ -718,6 +736,8 @@ func (srv *Server) setupListening(ctx context.Context) error {
 	// Update the local node record and map the TCP listening port if NAT is configured.
 	if tcp, ok := listener.Addr().(*net.TCPAddr); ok {
 		srv.localnode.Set(enr.TCP(tcp.Port))
+		srv.updateLocalNodeStaticAddrCache()
+
 		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
