@@ -435,15 +435,34 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	{
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+
 		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-			if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
+					return err
+				}
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
+					if err != nil {
+						return err
+					}
+					if len(firstNonGenesisHeader) > 0 {
+						logger.Info("Prunning old blocks", "progress", binary.BigEndian.Uint64(firstNonGenesisHeader))
+					}
+				default:
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	for i := from; i < to; i += every {
