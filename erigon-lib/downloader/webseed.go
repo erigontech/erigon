@@ -36,7 +36,6 @@ type WebSeeds struct {
 	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
 	downloadTorrentFile bool
 
-	chainName string
 	logger    log.Logger
 	verbosity log.Lvl
 }
