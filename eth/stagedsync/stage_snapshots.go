@@ -90,7 +90,8 @@ func StageSnapshotsCfg(db kv.RwDB,
 	}
 
 	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
-		cfg.snapshotUploader = &snapshotUploader{version: "v1", cfg: &cfg, uploadFs: uploadFs}
+
+		cfg.snapshotUploader = &snapshotUploader{version: dbg.SnapshotVersion(), cfg: &cfg, uploadFs: uploadFs}
 
 		freezingCfg := cfg.blockReader.FreezingCfg()
 

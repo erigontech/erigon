@@ -1197,6 +1197,7 @@ func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 }
 
 type BlockRetire struct {
+	maxScheduledBlock     atomic.Uint64
 	working               atomic.Bool
 	needSaveFilesListInDB atomic.Bool
 
@@ -1344,29 +1345,44 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
-	ok := br.working.CompareAndSwap(false, true)
-	if !ok {
-		// go-routine is still working
+	if maxBlockNum > br.maxScheduledBlock.Load() {
+		br.maxScheduledBlock.Store(maxBlockNum)
+	}
+
+	if !br.working.CompareAndSwap(false, true) {
 		return
 	}
+
 	go func() {
+
 		defer br.working.Store(false)
 
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
-		if ok {
-			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+		for {
+			if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+				minBlockNum = frozen
 			}
-		}
 
-		if includeBor {
-			blockFrom, blockTo, ok = CanRetire(maxBlockNum, br.blockReader.FrozenBorBlocks())
-			if ok {
-				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+			blockFrom, blockTo, blocksOk := CanRetire(br.maxScheduledBlock.Load(), minBlockNum)
+
+			var borBlockFrom, borBlockTo uint64
+			var borOk bool
+
+			if includeBor {
+				borBlockFrom, borBlockTo, borOk = CanRetire(br.maxScheduledBlock.Load(), br.blockReader.FrozenBorBlocks())
+			}
+
+			if !(blocksOk || borOk) {
+				return
+			}
+
+			if blocksOk {
+				if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+					br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+				}
+			}
+
+			if borOk {
+				if err := br.RetireBorBlocks(ctx, borBlockFrom, borBlockTo, lvl, seedNewSnapshots); err != nil {
 					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 				}
 			}
@@ -1579,6 +1595,12 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 	return result
 }
 
+var bufPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 16*4096)
+	},
+}
+
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (expectedCount int, err error) {
@@ -1590,12 +1612,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	numBuf := make([]byte, 8)
-	parseCtx := types2.NewTxParseContext(*chainID)
-	parseCtx.WithSender(false)
-	slot := types2.TxSlot{}
-	var sender [20]byte
-	parse := func(v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
-		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+
+	parse := func(ctx *types2.TxParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+		var sender [20]byte
+		slot := types2.TxSlot{}
+
+		if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 			return valueBuf, err
 		}
 		if len(senders) > 0 {
@@ -1608,8 +1630,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
 	}
-	valueBuf := make([]byte, 16*4096)
-	addSystemTx := func(tx kv.Tx, txId uint64) error {
+
+	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -1622,8 +1644,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 			return nil
 		}
 
-		parseCtx.WithSender(false)
-		valueBuf, err = parse(tv, valueBuf, nil, 0)
+		ctx.WithSender(false)
+
+		valueBuf := bufPool.Get().([]byte)
+		defer bufPool.Put(valueBuf) //nolint
+
+		valueBuf, err = parse(ctx, tv, valueBuf, nil, 0)
 		if err != nil {
 			return err
 		}
@@ -1668,30 +1694,89 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 			return false, err
 		}
 
-		j := 0
+		workers := estimate.AlmostAllCPUs()
 
-		if err := addSystemTx(tx, body.BaseTxId); err != nil {
+		if workers > 3 {
+			workers = workers / 3 * 2
+		}
+
+		if workers > int(body.TxAmount-2) {
+			if int(body.TxAmount-2) > 1 {
+				workers = int(body.TxAmount - 2)
+			} else {
+				workers = 1
+			}
+		}
+
+		parsers := errgroup.Group{}
+		parsers.SetLimit(workers)
+
+		valueBufs := make([][]byte, workers)
+		parseCtxs := make([]*types2.TxParseContext, workers)
+
+		for i := 0; i < workers; i++ {
+			valueBuf := bufPool.Get().([]byte)
+			defer bufPool.Put(valueBuf)
+			valueBufs[i] = valueBuf
+			parseCtxs[i] = types2.NewTxParseContext(*chainID)
+		}
+
+		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId); err != nil {
 			return false, err
 		}
+
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+
+		collected := -1
+		collectorLock := sync.Mutex{}
+		collections := sync.NewCond(&collectorLock)
+
+		var j int
+
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(_, tv []byte) error {
-			parseCtx.WithSender(len(senders) == 0)
-			valueBuf, err = parse(tv, valueBuf, senders, j)
-			if err != nil {
-				return fmt.Errorf("%w, block: %d", err, blockNum)
-			}
-			// first tx byte => sender adress => tx rlp
-			if err := collect(valueBuf); err != nil {
-				return err
-			}
+			tx := j
 			j++
+
+			parsers.Go(func() error {
+				parseCtx := parseCtxs[tx%workers]
+
+				parseCtx.WithSender(len(senders) == 0)
+				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
+
+				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
+
+				if err != nil {
+					return fmt.Errorf("%w, block: %d", err, blockNum)
+				}
+
+				collectorLock.Lock()
+				defer collectorLock.Unlock()
+
+				for collected < tx-1 {
+					collections.Wait()
+				}
+
+				// first tx byte => sender adress => tx rlp
+				if err := collect(valueBuf); err != nil {
+					return err
+				}
+
+				collected = tx
+				collections.Broadcast()
+
+				return nil
+			})
 
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("ForAmount: %w", err)
 		}
 
-		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+		if err := parsers.Wait(); err != nil {
+			return false, fmt.Errorf("ForAmount parser: %w", err)
+		}
+
+		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
 			return false, err
 		}
 

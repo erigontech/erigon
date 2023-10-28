@@ -144,6 +144,9 @@ type CaplinSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
+
+	// allows for pruning segments - this is the min availible segment
+	segmentsMin atomic.Uint64
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -251,7 +254,7 @@ func (s *CaplinSnapshots) idxAvailability() uint64 {
 }
 
 func (s *CaplinSnapshots) ReopenFolder() error {
-	files, _, err := SegmentsCaplin(s.dir)
+	files, _, err := SegmentsCaplin(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"golang.org/x/exp/slices"
 )
@@ -99,8 +100,15 @@ var (
 )
 
 func FileName(from, to uint64, fileType string) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+	version := "v1"
+
+	if v := dbg.SnapshotVersion(); len(v) > 0 {
+		version = v
+	}
+
+	return fmt.Sprintf("%s-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
+
 func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
 func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
 func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
