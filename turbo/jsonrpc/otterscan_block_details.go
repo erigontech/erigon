@@ -3,11 +3,13 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -26,32 +28,9 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, false)
-	if err != nil {
-		return nil, err
-	}
-	getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
-	if err != nil {
-		return nil, err
-	}
-	feesRes, err := api.delegateBlockFees(ctx, tx, b, senders, chainConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	response := map[string]interface{}{}
-	response["block"] = getBlockRes
-	response["issuance"] = getIssuanceRes
-	response["totalFees"] = hexutil.Uint64(feesRes)
-	return response, nil
+	return api.getBlockDetailsImpl(ctx, tx, b, number, senders)
 }
 
-// TODO: remove duplication with GetBlockDetails
 func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -71,21 +50,30 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	if b == nil {
 		return nil, nil
 	}
+	number := rpc.BlockNumber(b.Number().Int64())
 
+	return api.getBlockDetailsImpl(ctx, tx, b, number, senders)
+}
+
+func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Tx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]interface{}, error) {
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, rpc.BlockNumber(b.Number().Int64()), false)
+	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
 	if err != nil {
 		return nil, err
 	}
-	getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
+	getIssuanceRes, err := delegateIssuance(tx, b, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-	feesRes, err := api.delegateBlockFees(ctx, tx, b, senders, chainConfig)
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, b, senders)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %v", err)
+	}
+	feesRes, err := delegateBlockFees(ctx, tx, b, senders, chainConfig, receipts)
 	if err != nil {
 		return nil, err
 	}

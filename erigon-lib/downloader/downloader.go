@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -79,18 +78,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	//if dir.Exist(filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat")) { // migration from prev versions
-	//	from, to := filepath.Join(cfg.Dirs.Snap, "db", "mdbx.dat"), filepath.Join(cfg.Dirs.Downloader, "mdbx.dat")
-	//	if err := os.Rename(from, to); err != nil {
-	//		//fall back to copy-file if folders are on different disks
-	//		if err := copyFile(from, to); err != nil {
-	//			return nil, err
-	//		}
-	//	}
-	//}
-
+func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
 	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -114,7 +102,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity},
+		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, chainName: cfg.ChainName},
 		logger:            logger,
 		verbosity:         verbosity,
 	}
@@ -131,7 +119,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedS3Tokens, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -160,9 +148,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 		defer d.wg.Done()
 
 		// Torrents that are already taken care of
-		torrentMap := map[metainfo.Hash]struct{}{}
-		// First loop drops torrents that were downloaded or are already complete
-		// This improves efficiency of download by reducing number of active torrent (empirical observation)
+		//// First loop drops torrents that were downloaded or are already complete
+		//// This improves efficiency of download by reducing number of active torrent (empirical observation)
 		//for torrents := d.torrentClient.Torrents(); len(torrents) > 0; torrents = d.torrentClient.Torrents() {
 		//	select {
 		//	case <-d.ctx.Done():
@@ -209,7 +196,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		//atomic.StoreUint64(&d.stats.DroppedCompleted, 0)
 		//atomic.StoreUint64(&d.stats.DroppedTotal, 0)
 		//d.addTorrentFilesFromDisk(false)
-		maps.Clear(torrentMap)
 		for {
 			torrents := d.torrentClient.Torrents()
 			select {
@@ -218,24 +204,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 			for _, t := range torrents {
-				if _, already := torrentMap[t.InfoHash()]; already {
-					continue
-				}
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-t.GotInfo():
-				}
 				if t.Complete.Bool() {
-					torrentMap[t.InfoHash()] = struct{}{}
 					continue
 				}
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
 				}
 				t.AllowDataDownload()
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-t.GotInfo():
+				}
 				t.DownloadAll()
-				torrentMap[t.InfoHash()] = struct{}{}
 				d.wg.Add(1)
 				go func(t *torrent.Torrent) {
 					defer d.wg.Done()
@@ -352,7 +333,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+					peersOfThisFile := make(map[torrent.PeerID]struct{}, 16)
+					for _, peer := range t.PeerConns() {
+						peersOfThisFile[peer.PeerID] = struct{}{}
+					}
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 				}
 			}
 		default:
@@ -484,11 +469,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
-	wsUrls, ok := d.webseeds.ByFileName(ts.DisplayName)
-	if ok {
-		ts.Webseeds = append(ts.Webseeds, wsUrls...)
-	}
-	err = addTorrentFile(ctx, ts, d.torrentClient)
+	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -571,11 +552,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		ws, ok := d.webseeds.ByFileName(ts.DisplayName)
-		if ok {
-			ts.Webseeds = append(ts.Webseeds, ws...)
-		}
-		err := addTorrentFile(d.ctx, ts, d.torrentClient)
+		err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
 		if err != nil {
 			return err
 		}
@@ -592,7 +569,6 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
 	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
 }
-
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()
 	defer d.statsLock.RUnlock()
@@ -634,9 +610,9 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	db, err = mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
-		SyncPeriod(15 * time.Second).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
+		PageSize(uint64(8 * datasize.KB)).
 		Path(dbDir).
 		Open(ctx)
 	if err != nil {

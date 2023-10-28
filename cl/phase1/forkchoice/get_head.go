@@ -29,10 +29,10 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		return libcommon.Hash{}, 0, err
 	}
 	// Filter all validators deemed as bad
-	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.validators, justificationState.epoch)
+	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState, justificationState.epoch)
 	for {
 		// Filter out current head children.
-		unfilteredChildren := f.forkGraph.GetChildren(f.headHash)
+		unfilteredChildren := f.children(f.headHash)
 		children := []libcommon.Hash{}
 		for _, child := range unfilteredChildren {
 			if _, ok := blocks[child]; ok {
@@ -75,10 +75,10 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 }
 
 // filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
-func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []*checkpointValidator, epoch uint64) []uint64 {
-	filtered := make([]uint64, 0, len(validatorSet))
-	for validatorIndex, validator := range validatorSet {
-		if !validator.active(epoch) || validator.slashed {
+func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointState, epoch uint64) []uint64 {
+	filtered := make([]uint64, 0, c.validatorSetSize)
+	for validatorIndex := 0; validatorIndex < c.validatorSetSize; validatorIndex++ {
+		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}
 		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {
@@ -98,14 +98,13 @@ func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, stat
 	if !has {
 		return 0
 	}
-	validators := state.validators
 	// Compute attestation score
 	var attestationScore uint64
 	for _, validatorIndex := range indicies {
 		if f.Ancestor(f.latestMessages[validatorIndex].Root, header.Slot) != root {
 			continue
 		}
-		attestationScore += validators[validatorIndex].balance
+		attestationScore += state.balances[validatorIndex]
 	}
 	if f.proposerBoostRoot == (libcommon.Hash{}) {
 		return attestationScore
@@ -134,7 +133,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	if !has {
 		return false
 	}
-	children := f.forkGraph.GetChildren(blockRoot)
+	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
 		isAnyViable := false
@@ -157,7 +156,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 		return false
 	}
 
-	genesisEpoch := f.forkGraph.Config().GenesisEpoch
+	genesisEpoch := f.beaconCfg.GenesisEpoch
 	if (f.justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(f.justifiedCheckpoint)) &&
 		(f.finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(f.finalizedCheckpoint)) {
 		blocks[blockRoot] = header

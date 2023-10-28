@@ -19,6 +19,7 @@ package debug
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
 	"os"
@@ -31,7 +32,6 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 

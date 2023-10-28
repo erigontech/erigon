@@ -21,14 +21,14 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
-func CalcExcessBlobGas(parent *types.Header) uint64 {
+func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
 	var excessBlobGas, blobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
 		excessBlobGas = *parent.ExcessBlobGas
@@ -37,10 +37,10 @@ func CalcExcessBlobGas(parent *types.Header) uint64 {
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < fixedgas.TargetBlobGasPerBlock {
+	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - fixedgas.TargetBlobGasPerBlock
+	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -99,8 +99,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(params.MinBlobGasPrice), uint256.NewInt(params.BlobGasPriceUpdateFraction), excessBlobGas)
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction()), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

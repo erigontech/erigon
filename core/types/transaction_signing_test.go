@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -116,7 +115,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		tx, err := DecodeTransaction(common.Hex2Bytes(test.txRlp))
+		tx, err := DecodeTransaction(libcommon.Hex2Bytes(test.txRlp))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue

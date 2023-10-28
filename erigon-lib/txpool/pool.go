@@ -130,8 +130,8 @@ type metaTx struct {
 	minedBlockNum             uint64
 }
 
-func newMetaTx(slot *types.TxSlot, isLocal bool, timestmap uint64) *metaTx {
-	mt := &metaTx{Tx: slot, worstIndex: -1, bestIndex: -1, timestamp: timestmap}
+func newMetaTx(slot *types.TxSlot, isLocal bool, timestamp uint64) *metaTx {
+	mt := &metaTx{Tx: slot, worstIndex: -1, bestIndex: -1, timestamp: timestamp}
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -218,13 +218,17 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
+	agraBlock               *uint64
+	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	maxBlobsPerBlock        uint64
 	logger                  log.Logger
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime, cancunTime *big.Int, logger log.Logger) (*TxPool, error) {
-	var err error
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
+) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
@@ -265,6 +269,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
+		maxBlobsPerBlock:        maxBlobsPerBlock,
 		logger:                  logger,
 	}
 
@@ -274,6 +279,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		shanghaiTimeU64 := shanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
+	}
+	if agraBlock != nil {
+		if !agraBlock.IsUint64() {
+			return nil, errors.New("agraBlock overflow")
+		}
+		agraBlockU64 := agraBlock.Uint64()
+		res.agraBlock = &agraBlockU64
 	}
 	if cancunTime != nil {
 		if !cancunTime.IsUint64() {
@@ -604,7 +616,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		return false, 0, nil // Too early
 	}
 
-	isShanghai := p.isShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	best := p.pending.best
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
@@ -724,7 +736,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
 }
 
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isShanghai := p.isShanghai()
+	isShanghai := p.isShanghai() || p.isAgra()
 	if isShanghai {
 		if txn.DataLen > fixedgas.MaxInitCodeSize {
 			return txpoolcfg.InitCodeTooLarge
@@ -741,7 +753,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > fixedgas.MaxBlobsPerBlock {
+		if blobCount > p.maxBlobsPerBlock {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -875,6 +887,42 @@ func (p *TxPool) isShanghai() bool {
 	activated := uint64(now) >= shanghaiTime
 	if activated {
 		p.isPostShanghai.Swap(true)
+	}
+	return activated
+}
+
+func (p *TxPool) isAgra() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostAgra.Load()
+	if set {
+		return true
+	}
+	if p.agraBlock == nil {
+		return false
+	}
+	agraBlock := *p.agraBlock
+
+	// a zero here means Agra is always active
+	if agraBlock == 0 {
+		p.isPostAgra.Swap(true)
+		return true
+	}
+
+	tx, err := p._chainDB.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+
+	head_block, err := chain.CurrentBlockNumber(tx)
+	if head_block == nil || err != nil {
+		return false
+	}
+	// A new block is built on top of the head block, so when the head is agraBlock-1,
+	// the new block should use the Agra rules.
+	activated := (*head_block + 1) >= agraBlock
+	if activated {
+		p.isPostAgra.Swap(true)
 	}
 	return activated
 }
@@ -1102,7 +1150,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	for i, txn := range newTxs.Txs {
 		if found, ok := byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
-			// In case if the transation is stuck, "poke" it to rebroadcast
+			// In case if the transition is stuck, "poke" it to rebroadcast
 			if collect && newTxs.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.Tx.Type, found.Tx.Size, found.Tx.IDHash[:])
 			}
@@ -1249,7 +1297,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 		feecapThreshold.Div(feecapThreshold, u256.N100)
 		if mt.Tx.Tip.Cmp(tipThreshold) < 0 || mt.Tx.FeeCap.Cmp(feecapThreshold) < 0 {
 			// Both tip and feecap need to be larger than previously to replace the transaction
-			// In case if the transation is stuck, "poke" it to rebroadcast
+			// In case if the transition is stuck, "poke" it to rebroadcast
 			if mt.subPool&IsLocal != 0 && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.Tx.Type, found.Tx.Size, found.Tx.IDHash[:])
 			}
@@ -2103,7 +2151,7 @@ func (sc *sendersBatch) printDebug(prefix string) {
 }
 
 // sendersBatch stores in-memory senders-related objects - which are different from DB (updated/dirty)
-// flushing to db periodicaly. it doesn't play as read-cache (because db is small and memory-mapped - doesn't need cache)
+// flushing to db periodically. it doesn't play as read-cache (because db is small and memory-mapped - doesn't need cache)
 // non thread-safe
 type sendersBatch struct {
 	senderIDs     map[common.Address]uint64
@@ -2181,7 +2229,7 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 // "recalculate all ephemeral fields of all transactions" by algo
 //   - for all senders - iterate over all transactions in nonce growing order
 //
-// Performane decisions:
+// Performances decisions:
 //   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
 //   - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
 type BySenderAndNonce struct {

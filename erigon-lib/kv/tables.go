@@ -27,7 +27,7 @@ import (
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
-// 6.1 - Canonical/NonCanonical/BadBlock transations now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
+// 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
 var DBSchemaVersion = types.VersionReply{Major: 6, Minor: 1, Patch: 0}
 
 // ChaindataTables
@@ -430,10 +430,21 @@ const (
 	BeaconBlocks = "BeaconBlock"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
-	// [slot] => [Finalized block root]
-	FinalizedBlockRoots = "FinalizedBlockRoots"
-	// [Root (block root/state root/eth1 root)] => Slot
-	RootSlotIndex = "RootSlotIndex"
+
+	// [slot] => [Canonical block root]
+	CanonicalBlockRoots = "CanonicalBlockRoots"
+	// [Root (block root] => Slot
+	BlockRootToSlot = "BlockRootToSlot"
+	// [Block Root] => [State Root]
+	BlockRootToStateRoot = "BlockRootToStateRoot"
+	StateRootToBlockRoot = "StateRootToBlockRoot"
+	// [Block Root] => [Parent Root]
+	BlockRootToParentRoot = "BlockRootToParentRoot"
+
+	HighestFinalized = "HighestFinalized" // hash -> transaction/receipt lookup metadata
+
+	// BlockRoot => Beacon Block Header
+	BeaconBlockHeaders = "BeaconBlockHeaders"
 
 	// LightClientStore => LightClientStore object
 	// LightClientFinalityUpdate => latest finality update
@@ -469,6 +480,7 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 	PlainStateVersion           = []byte("PlainStateVersion")
 
+	HighestFinalizedKey         = []byte("HighestFinalized")
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
@@ -586,8 +598,13 @@ var ChaindataTables = []string{
 	// Beacon stuff
 	BeaconState,
 	BeaconBlocks,
-	FinalizedBlockRoots,
-	RootSlotIndex,
+	CanonicalBlockRoots,
+	BlockRootToSlot,
+	BlockRootToStateRoot,
+	StateRootToBlockRoot,
+	BlockRootToParentRoot,
+	BeaconBlockHeaders,
+	HighestFinalized,
 	Attestetations,
 	LightClient,
 	LightClientUpdates,

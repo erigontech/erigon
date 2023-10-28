@@ -8,7 +8,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -84,7 +83,7 @@ func legacyDeriveSha(list DerivableList) libcommon.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.CopyBytes(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), libcommon.CopyBytes(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }

@@ -1,9 +1,9 @@
 package span
 
 import (
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 // NetworkNameVals is a map of network name to validator set for tests/devnets

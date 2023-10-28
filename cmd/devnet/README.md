@@ -9,7 +9,7 @@ The devnet code performs 3 main functions:
 * It allows for the specification of a series of scenarios which will be run against the nodes on that internal network
 * It can optionally run a `support` connection which allows the nodes on the network to be connected to the Erigon diagnostic system
 
-The specification of both nodes and scenarios for the devenet is done by specifying configuraion objects.  These objects are currently build in code using go `structs` but are cabable of being read as configuration.
+The specification of both nodes and scenarios for the devenet is done by specifying configuration objects.  These objects are currently build in code using go `structs` but are capable of being read as configuration.
 
 ## Devnet runtime start-up
 
@@ -28,7 +28,7 @@ The devnet runs as a single `go` process which can be started with the following
 
 ## Network Configuration
 
-Networks configurations are currently specified in code in `main.go` in the `selectNetwork` function.  This contains a series of `structs` with the following structue, for eample:
+Networks configurations are currently specified in code in `main.go` in the `selectNetwork` function.  This contains a series of `structs` with the following structure, for example:
 
 ```go
 		return &devnet.Network{
@@ -55,11 +55,11 @@ Networks configurations are currently specified in code in `main.go` in the `sel
 		}, nil	
 ```
 
-Base IP's and addresses are iterated for each node in the network - to ensure that when the network starts there are no port clashes as the entire nework operates in a single process, hence shares a common host.  Individual nodes will be configured with a default set of command line arguments dependent on type. To see the default arguments per node look at the `args\node.go` file where these are specified as tags on the struct members.
+Base IP's and addresses are iterated for each node in the network - to ensure that when the network starts there are no port clashes as the entire network operates in a single process, hence shares a common host.  Individual nodes will be configured with a default set of command line arguments dependent on type. To see the default arguments per node look at the `args\node.go` file where these are specified as tags on the struct members.
 
 ## Scenario Configuration
 
-Scenarios are similarly specified in code in `main.go` in the `action` function.  This is the initial configration:
+Scenarios are similarly specified in code in `main.go` in the `action` function.  This is the initial configuration:
 
 ```go
     scenarios.Scenario{
@@ -74,9 +74,9 @@ Scenarios are similarly specified in code in `main.go` in the `action` function.
     })
 ```
 
-Scenarios are created a groups of steps which are created by regestering a `step` handler too see an example of this take a look at the `commands\ping.go` file which adds a ping rpc method (see `PingErigonRpc` above).
+Scenarios are created a groups of steps which are created by registering a `step` handler too see an example of this take a look at the `commands\ping.go` file which adds a ping rpc method (see `PingErigonRpc` above).
 
-This illustrates the registratio process.  The `init` function in the file registers the method with the `scenarios` package - which uses the function name as the default step name.  Others can be added with additional string arguments fo the `StepHandler` call where they will treated as regular expressions to be matched when processing scenario steps.
+This illustrates the registration process.  The `init` function in the file registers the method with the `scenarios` package - which uses the function name as the default step name.  Others can be added with additional string arguments fo the `StepHandler` call where they will treated as regular expressions to be matched when processing scenario steps.
 
 ```go
 func init() {

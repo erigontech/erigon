@@ -13,7 +13,7 @@ import (
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
-	return f.forkGraph.Config().GenesisSlot + ((f.time - f.forkGraph.GenesisTime()) / f.forkGraph.Config().SecondsPerSlot)
+	return f.beaconCfg.GenesisSlot + ((f.time - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
@@ -22,8 +22,29 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint = justifiedCheckpoint
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Epoch() {
+		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint = finalizedCheckpoint
+
 	}
+}
+
+func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
+	// get rid of checkpoint states
+	for k := range f.checkpointStates {
+		checkpoint := solid.Checkpoint(k)
+		if checkpoint.Epoch() <= newFinalized.Epoch() {
+			delete(f.checkpointStates, k)
+			continue
+		}
+	}
+	// get rid of children
+	for k, children := range f.childrens {
+		if children.parentSlot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
+			delete(f.childrens, k)
+			continue
+		}
+	}
+	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
@@ -38,12 +59,12 @@ func (f *ForkChoiceStore) updateUnrealizedCheckpoints(justifiedCheckpoint, final
 
 // computeEpochAtSlot calculates the epoch at a given slot number.
 func (f *ForkChoiceStore) computeEpochAtSlot(slot uint64) uint64 {
-	return slot / f.forkGraph.Config().SlotsPerEpoch
+	return slot / f.beaconCfg.SlotsPerEpoch
 }
 
 // computeStartSlotAtEpoch calculates the starting slot of a given epoch.
 func (f *ForkChoiceStore) computeStartSlotAtEpoch(epoch uint64) uint64 {
-	return epoch * f.forkGraph.Config().SlotsPerEpoch
+	return epoch * f.beaconCfg.SlotsPerEpoch
 }
 
 // computeSlotsSinceEpochStart calculates the number of slots since the start of the epoch of a given slot.
@@ -70,11 +91,11 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 // getCheckpointState computes and caches checkpoint states.
 func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	// check if it can be found in cache.
-	if state, ok := f.checkpointStates.Get(checkpointComparable(checkpoint)); ok {
+	if state, ok := f.checkpointStates[checkpointComparable(checkpoint)]; ok {
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
-	baseState, _, err := f.forkGraph.GetState(checkpoint.BlockRoot(), true)
+	baseState, err := f.forkGraph.GetState(checkpoint.BlockRoot(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -96,9 +117,9 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		validators[idx] = v
 		return true
 	})
-	checkpointState := newCheckpointState(f.forkGraph.Config(), validators,
+	checkpointState := newCheckpointState(f.beaconCfg, f.anchorPublicKeys, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
-	f.checkpointStates.Add(checkpointComparable(checkpoint), checkpointState)
+	f.checkpointStates[checkpointComparable(checkpoint)] = checkpointState
 	return checkpointState, nil
 }

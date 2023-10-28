@@ -8,11 +8,11 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )

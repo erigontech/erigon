@@ -27,6 +27,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -345,13 +346,14 @@ func handShake(
 func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
-	protocol uint,
+	cap p2p.Cap,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 	logger log.Logger,
 ) *p2p.PeerError {
+	protocol := cap.Version
 	printTime := time.Now().Add(time.Minute)
 	peerPrinted := false
 	defer func() {
@@ -383,6 +385,7 @@ func runPeer(
 		if err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
 		}
+
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
@@ -533,6 +536,11 @@ func runPeer(
 		default:
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
+
+		msgType := eth.ToProto[protocol][msg.Code]
+		msgCap := cap.String()
+		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
+
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
 	}
@@ -624,14 +632,16 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
-				if err != nil {
+				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
+
+				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
 				err = runPeer(
 					ctx,
 					peerID,
-					protocol,
+					cap,
 					rw,
 					peerInfo,
 					ss.send,
@@ -730,6 +740,11 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
+
+		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
+		msgType := eth.ToProto[cap.Version][msgcode]
+		peerInfo.peer.CountBytesTransfered(msgType.String(), cap.String(), uint64(len(data)), false)
+
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			peerInfo.Remove(p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
@@ -1036,6 +1051,15 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 	}
 
 	return &reply, nil
+}
+
+func (ss *GrpcServer) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
+	if ss.P2pServer == nil {
+		return map[string]*diagnostics.PeerStatistics{}
+	}
+
+	peers := ss.P2pServer.DiagnosticsPeersInfo()
+	return peers
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {

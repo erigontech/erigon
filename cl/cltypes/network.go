@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 type Metadata struct {
@@ -22,7 +21,7 @@ func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
-	ret = common.BlockNumberLength * 2
+	ret = 8 * 2
 	if m.Syncnets != nil {
 		ret += 8
 	}
@@ -50,7 +49,7 @@ func (p *Ping) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (p *Ping) EncodingSizeSSZ() int {
-	return common.BlockNumberLength
+	return 8
 }
 
 func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
@@ -76,7 +75,7 @@ func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, v int) error {
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
-	return 3 * common.BlockNumberLength
+	return 3 * 8
 }
 
 func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {

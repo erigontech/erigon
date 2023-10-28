@@ -72,12 +72,31 @@ func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBeaconBl
 	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg)}
 }
 
+func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := s.Block.Body.HashSSZ()
+	if err != nil {
+		panic(err)
+	}
+	return &SignedBeaconBlockHeader{
+		Signature: s.Signature,
+		Header: &BeaconBlockHeader{
+			Slot:          s.Block.Slot,
+			ProposerIndex: s.Block.ProposerIndex,
+			ParentRoot:    s.Block.ParentRoot,
+			Root:          s.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		},
+	}
+}
+
 func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
 	return &BeaconBlock{Body: NewBeaconBody(beaconCfg)}
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
-	return &BeaconBody{beaconCfg: beaconCfg}
+	return &BeaconBody{
+		beaconCfg: beaconCfg,
+	}
 }
 
 // Version returns beacon block version.
@@ -154,6 +173,8 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
+
+	b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err

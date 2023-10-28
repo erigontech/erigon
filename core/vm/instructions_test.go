@@ -117,9 +117,9 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
-		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
+		x := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.X))
+		y := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.Y))
+		expected := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.Expected))
 		stack.Push(x)
 		stack.Push(y)
 		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
@@ -230,10 +230,10 @@ func TestAddMod(t *testing.T) {
 	// in 256 bit repr, fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.x))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
-		z := new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
-		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
+		x := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.x))
+		y := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.y))
+		z := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.z))
+		expected := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.expected))
 		stack.Push(z)
 		stack.Push(y)
 		stack.Push(x)
@@ -305,7 +305,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	// convert args
 	byteArgs := make([][]byte, len(args))
 	for i, arg := range args {
-		byteArgs[i] = common.Hex2Bytes(arg)
+		byteArgs[i] = libcommon.Hex2Bytes(arg)
 	}
 	pc := uint64(0)
 	b.ResetTimer()
@@ -540,7 +540,7 @@ func TestOpMstore(t *testing.T) {
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
-	stack.PushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
+	stack.PushN(*new(uint256.Int).SetBytes(libcommon.Hex2Bytes(v)), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
@@ -585,7 +585,7 @@ func TestOpTstore(t *testing.T) {
 		contractRef    = contractRef{caller}
 		contract       = NewContract(contractRef, to, u256.Num0, 0, false)
 		scopeContext   = ScopeContext{mem, stack, contract}
-		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
+		value          = libcommon.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
 	env.interpreter = evmInterpreter

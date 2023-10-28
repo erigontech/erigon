@@ -19,6 +19,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"strconv"
 	"testing"
@@ -28,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"

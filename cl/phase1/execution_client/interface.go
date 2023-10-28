@@ -22,4 +22,6 @@ type ExecutionEngine interface {
 	// Range methods
 	GetBodiesByRange(start, count uint64) ([]*types.RawBody, error)
 	GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error)
+	// Snapshots
+	FrozenBlocks() uint64
 }

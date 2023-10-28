@@ -8,6 +8,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -21,9 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const maxMessageLength = 18 * datasize.MB
@@ -67,7 +67,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
 		errBytes, _ := io.ReadAll(rd)
-		log.Debug("received range req error", "err", string(errBytes))
+		log.Trace("received range req error", "err", string(errBytes), "raw", string(message.Data))
 		return nil, message.Peer.Pid, nil
 	}
 
@@ -137,7 +137,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 		return nil, "", err
 	}
 
-	data := common.CopyBytes(buffer.Bytes())
+	data := libcommon.CopyBytes(buffer.Bytes())
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data, count)
 }
 
@@ -151,7 +151,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
-	data := common.CopyBytes(buffer.Bytes())
+	data := libcommon.CopyBytes(buffer.Bytes())
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
 }
 

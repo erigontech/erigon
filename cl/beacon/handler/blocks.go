@@ -2,16 +2,16 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"io"
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 )
 
 type headerResponse struct {
@@ -25,7 +25,7 @@ type getHeadersRequest struct {
 	ParentRoot *libcommon.Hash `json:"root,omitempty"`
 }
 
-func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
 	switch {
 	case blockId.head():
 		root, _, err = a.forkchoiceStore.GetHead()
@@ -37,7 +37,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *s
 	case blockId.justified():
 		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
 	case blockId.genesis():
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, 0)
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
@@ -45,7 +45,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *s
 			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("genesis block not found")
 		}
 	case blockId.getSlot() != nil:
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(ctx, tx, *blockId.getSlot())
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.getSlot())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
@@ -63,7 +63,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx *sql.Tx, blockId *s
 
 func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx          *sql.Tx
+		tx          kv.Tx
 		blockId     *segmentID
 		root        libcommon.Hash
 		blkHeader   *cltypes.SignedBeaconBlockHeader
@@ -73,7 +73,7 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -119,7 +119,7 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 
 func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx          *sql.Tx
+		tx          kv.Tx
 		blockId     *segmentID
 		root        libcommon.Hash
 		blkHeader   *cltypes.SignedBeaconBlockHeader
@@ -129,7 +129,7 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -176,7 +176,7 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 
 func (a *ApiHandler) getBlockRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx          *sql.Tx
+		tx          kv.Tx
 		blockId     *segmentID
 		root        libcommon.Hash
 		blockSlot   uint64
@@ -185,7 +185,7 @@ func (a *ApiHandler) getBlockRoot(r *http.Request) (data any, finalized *bool, v
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err = a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
@@ -204,7 +204,7 @@ func (a *ApiHandler) getBlockRoot(r *http.Request) (data any, finalized *bool, v
 
 	// check if the root exist
 	var blk *cltypes.SignedBeaconBlockHeader
-	blk, isCanonical, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, a.indiciesDB, root)
+	blk, isCanonical, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return

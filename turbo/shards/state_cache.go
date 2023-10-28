@@ -4,15 +4,13 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/metrics"
-
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -424,8 +422,8 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	AccRead.Inc()
 	var key AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -453,8 +451,8 @@ func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
 // GetDeletedAccount attempts to retrieve the last version of account before it was deleted
 func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 	key := &AccountItem{}
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -475,8 +473,8 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
 	StRead.Inc()
 	var key StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -500,8 +498,8 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 // Second return value is true if such item is found
 func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool) {
 	var key CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -554,8 +552,8 @@ func (sc *StateCache) readQueuesLen() (res int) {
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
 func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -603,8 +601,8 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash libcommon.Hash, incarna
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -683,8 +681,8 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del boo
 // SetAccountWrite adds given account to the cache, marking it as written (cannot be evicted)
 func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -699,8 +697,8 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 // SetAccountDelete is very similar to SetAccountWrite with the difference that there no set value
 func (sc *StateCache) SetAccountDelete(address []byte) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -713,8 +711,8 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 
 func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, location []byte, value []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -732,8 +730,8 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 // hack to set hashed addr - we don't have another one in trie stage
 func (sc *StateCache) DeprecatedSetStorageRead(addrHash libcommon.Hash, incarnation uint64, locHash libcommon.Hash, val []byte) {
 	var i StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	copy(i.addrHash[:], addrHash.Bytes())
 	i.incarnation = incarnation
 	i.locHash.SetBytes(locHash.Bytes())
@@ -785,8 +783,8 @@ func (sc *StateCache) DeprecatedSetStorageWrite(addrHash libcommon.Hash, incarna
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -802,8 +800,8 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 
 func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -824,8 +822,8 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 
 func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, location []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -845,8 +843,8 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 
 func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byte) {
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -859,8 +857,8 @@ func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byt
 
 func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -872,8 +870,8 @@ func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []byte) {
 	// Check if this is going to be modification of the existing entry
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -890,8 +888,8 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	// Check if this is going to be modification of the existing entry
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
