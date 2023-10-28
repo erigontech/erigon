@@ -441,6 +441,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				defer func(t time.Time) { fmt.Printf("snapshots_cmd.go:444: %s\n", time.Since(t)) }(time.Now())
 				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
 					return err
 				}
