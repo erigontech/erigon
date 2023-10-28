@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -338,6 +339,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		return err
 	}
 	defer tx.Rollback()
+	var w bytes.Buffer
+	snappyWriter := snappy.NewBufferedWriter(&w)
+	defer snappyWriter.Close()
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
@@ -354,16 +358,19 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			}
 			continue
 		}
-		var buf bytes.Buffer
-		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, &buf); err != nil {
+		snappyWriter.Reset(&w)
+		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, snappyWriter); err != nil {
 			return err
 		}
-		word := buf.Bytes()
+		if err := snappyWriter.Flush(); err != nil {
+			return err
+		}
+		word := w.Bytes()
 
 		if err := sn.AddWord(word); err != nil {
 			return err
 		}
-
+		w.Reset()
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
