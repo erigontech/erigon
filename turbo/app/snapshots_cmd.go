@@ -401,7 +401,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, true, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true)
 	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
 	if err := blockSnapshots.ReopenFolder(); err != nil {
