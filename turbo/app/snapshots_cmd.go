@@ -436,7 +436,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
 	{
-		logEvery := time.NewTicker(20 * time.Second)
+		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
 		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
