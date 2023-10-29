@@ -21,12 +21,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/bits"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -680,9 +682,30 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if err = rs.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
-		return err
+
+	var errcount int
+
+	for {
+		err = os.Rename(rs.tmpFilePath, rs.indexFile)
+
+		if err != nil {
+			switch {
+			case errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission):
+				if errcount == 10 {
+					return err
+				}
+				errcount++
+				time.Sleep(10 * time.Millisecond)
+				continue
+
+			default:
+				return err
+			}
+		}
+
+		break
 	}
+
 	return nil
 }
 
