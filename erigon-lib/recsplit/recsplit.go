@@ -21,14 +21,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/bits"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -558,6 +556,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
+
+	rs.logger.Debug("[index] created", "file", rs.tmpFilePath, "fs", rs.indexF)
+
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	// Write minimal app-specific dataID in this index file
@@ -683,29 +684,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	var errcount int
-
-	for {
-		err = os.Rename(rs.tmpFilePath, rs.indexFile)
-
-		if err != nil {
-			log.Warn("[index] rename", "file", rs.tmpFilePath, "err", err, "count", errcount)
-
-			switch {
-			case errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission):
-				if errcount == 10 {
-					return err
-				}
-				errcount++
-				time.Sleep(10 * time.Millisecond)
-				continue
-
-			default:
-				return err
-			}
-		}
-
-		break
+	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
+		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
+		return err
 	}
 
 	return nil
