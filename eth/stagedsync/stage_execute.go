@@ -468,6 +468,15 @@ Loop:
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			// Recreate tx because Silkworm has just done commit or abort on passed one
+			tx, tx_err := cfg.db.BeginRw(context.Background())
+			if tx_err != nil {
+				return tx_err
+			}
+			defer tx.Rollback()
+			// Recreate memory batch because underlying tx has changed
+			batch.Close()
+			batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
@@ -507,7 +516,7 @@ Loop:
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
 			currentStateGas = 0
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
