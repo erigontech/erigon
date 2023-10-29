@@ -1384,7 +1384,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
 				panic(err)
 			}
-			_allSnapshotsSingleton.LogStat()
+			_allSnapshotsSingleton.LogStat("all")
 			if err := _allBorSnapshotsSingleton.ReopenFolder(); err != nil {
 				panic(err)
 			}
@@ -1444,7 +1444,7 @@ func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.
 			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
 				panic(err)
 			}
-			_allSnapshotsSingleton.LogStat()
+			_allSnapshotsSingleton.LogStat("all:singleton")
 			//db.View(context.Background(), func(tx kv.Tx) error {
 			//	_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 			//		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)

@@ -261,7 +261,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	allSnapshots.LogStat()
+	allSnapshots.LogStat("cmd")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
 		return err

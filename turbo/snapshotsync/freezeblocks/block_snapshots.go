@@ -352,10 +352,10 @@ func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
 func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
-func (s *RoSnapshots) LogStat() {
+func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	s.logger.Info("[snapshots] Blocks Stat",
+	s.logger.Info(fmt.Sprintf("[snapshots:%s] Blocks Stat", label),
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -1288,7 +1288,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if err := snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen: %w", err)
 	}
-	snapshots.LogStat()
+	snapshots.LogStat("retire")
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
@@ -1304,7 +1304,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if err := snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen: %w", err)
 	}
-	snapshots.LogStat()
+	snapshots.LogStat("retire:reopen")
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
@@ -1391,8 +1391,12 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 }
 
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	if br.working.Load() {
+		return nil
+	}
+
 	snapshots := br.snapshots()
-	snapshots.LogStat()
+	snapshots.LogStat("missed-idx")
 
 	// Create .idx files
 	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
@@ -1416,7 +1420,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 			if err := snapshots.ReopenFolder(); err != nil {
 				return err
 			}
-			snapshots.LogStat()
+			snapshots.LogStat("missed-idx:reopen")
 			if notifier != nil {
 				notifier.OnNewSnapshot()
 			}
@@ -2416,7 +2420,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		if err := snapshots.ReopenFolder(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-		snapshots.LogStat()
+		snapshots.LogStat("merge")
 		if m.notifier != nil { // notify about new snapshots of any size
 			m.notifier.OnNewSnapshot()
 			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
