@@ -41,6 +41,7 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if buf == nil {
 		return nil, nil
 	}
+
 	lzReader := lz4.NewReader(bytes.NewReader(buf))
 	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
 }

@@ -146,6 +146,9 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
+	if executionBlock == nil {
+		return nil, fmt.Errorf("execution block %d not found", blockPointer)
+	}
 	// Read the 4th chunk
 	chunk2, err := executionBlock.EncodeSSZ(nil)
 	if err != nil {

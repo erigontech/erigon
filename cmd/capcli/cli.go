@@ -64,6 +64,7 @@ var CLI struct {
 	DumpSnapshots     DumpSnapshots     `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots    CheckSnapshots    `cmd:"" help:"check snapshot folder against content of chain data"`
 	DownloadSnapshots DownloadSnapshots `cmd:"" help:"download snapshots from webseed"`
+	LoopSnapshots     LoopSnapshots     `cmd:"" help:"loop over snapshots"`
 }
 
 type chainCfg struct {
@@ -527,6 +528,58 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	return nil
 }
 
+type LoopSnapshots struct {
+	chainCfg
+	outputFolder
+
+	Slot uint64 `name:"slot" help:"slot to check"`
+}
+
+func (c *LoopSnapshots) Run(ctx *Context) error {
+	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+
+	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+
+	br := &snapshot_format.MockBlockReader{}
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
+	start := time.Now()
+	for i := c.Slot; i < to; i++ {
+		snReader.ReadBlock(i)
+	}
+	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
+	return nil
+}
+
 type DownloadSnapshots struct {
 	chainCfg
 	outputFolder
@@ -584,5 +637,4 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 	return snapshotsync.WaitForDownloader("CapCliDownloader", ctx, false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root())), nil, params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
-
 }

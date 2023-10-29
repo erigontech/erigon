@@ -359,6 +359,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			continue
 		}
 		lzWriter.Reset(&w)
+		lzWriter.CompressionLevel = 1
 		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, lzWriter); err != nil {
 			return err
 		}
