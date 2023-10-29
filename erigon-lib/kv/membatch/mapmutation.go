@@ -3,6 +3,7 @@ package membatch
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -222,8 +223,8 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 }
 
 func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
-	if m.db == nil {
-		return nil
+	if tx == nil {
+		return errors.New("rwTx needed")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
