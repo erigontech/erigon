@@ -12,7 +12,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -24,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pierrec/lz4"
 )
 
 type BeaconBlockSegment struct {
@@ -340,8 +340,8 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	}
 	defer tx.Rollback()
 	var w bytes.Buffer
-	snappyWriter := snappy.NewBufferedWriter(&w)
-	defer snappyWriter.Close()
+	lzWriter := lz4.NewWriter(&w)
+	defer lzWriter.Close()
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
@@ -358,11 +358,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			}
 			continue
 		}
-		snappyWriter.Reset(&w)
-		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, snappyWriter); err != nil {
+		lzWriter.Reset(&w)
+		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, lzWriter); err != nil {
 			return err
 		}
-		if err := snappyWriter.Flush(); err != nil {
+		if err := lzWriter.Flush(); err != nil {
 			return err
 		}
 		word := w.Bytes()

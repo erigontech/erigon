@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/chunk_encoding"
@@ -188,24 +187,16 @@ func ReadRawBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderB
 		return nil, fmt.Errorf("malformed beacon block, invalid chunk 1 type %d, expected: %d", dT1, chunk_encoding.ChunkDataType)
 	}
 	plainSSZ = append(plainSSZ, chunk1...)
-	// Read the attestation chunk (2nd chunk)
-	chunk2, dT2, err := chunk_encoding.ReadChunk(snappy.NewReader(r))
+
+	// Read the 3rd chunk
+	chunk2, dT2, err := chunk_encoding.ReadChunk(r)
 	if err != nil {
 		return nil, err
 	}
 	if dT2 != chunk_encoding.ChunkDataType {
-		return nil, fmt.Errorf("malformed beacon block, invalid chunk 2 type %d, expected: %d", dT2, chunk_encoding.ChunkDataType)
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 3 type %d, expected: %d", dT2, chunk_encoding.ChunkDataType)
 	}
 	plainSSZ = append(plainSSZ, chunk2...)
-	// Read the 3rd chunk
-	chunk3, dT3, err := chunk_encoding.ReadChunk(r)
-	if err != nil {
-		return nil, err
-	}
-	if dT3 != chunk_encoding.ChunkDataType {
-		return nil, fmt.Errorf("malformed beacon block, invalid chunk 3 type %d, expected: %d", dT3, chunk_encoding.ChunkDataType)
-	}
-	plainSSZ = append(plainSSZ, chunk3...)
 	if v <= clparams.AltairVersion {
 		return plainSSZ, nil
 	}
@@ -219,24 +210,24 @@ func ReadRawBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderB
 		return nil, err
 	}
 	// Read the 4th chunk
-	chunk4, err := executionBlock.EncodeSSZ(nil)
+	chunk3, err := executionBlock.EncodeSSZ(nil)
 	if err != nil {
 		return nil, err
 	}
-	plainSSZ = append(plainSSZ, chunk4...)
+	plainSSZ = append(plainSSZ, chunk3...)
 	if v <= clparams.BellatrixVersion {
 		return plainSSZ, nil
 	}
 
 	// Read the 5h chunk
-	chunk5, dT5, err := chunk_encoding.ReadChunk(r)
+	chunk4, dT4, err := chunk_encoding.ReadChunk(r)
 	if err != nil {
 		return nil, err
 	}
-	if dT5 != chunk_encoding.ChunkDataType {
-		return nil, fmt.Errorf("malformed beacon block, invalid chunk 5 type %d, expected: %d", dT5, chunk_encoding.ChunkDataType)
+	if dT4 != chunk_encoding.ChunkDataType {
+		return nil, fmt.Errorf("malformed beacon block, invalid chunk 5 type %d, expected: %d", dT4, chunk_encoding.ChunkDataType)
 	}
-	plainSSZ = append(plainSSZ, chunk5...)
+	plainSSZ = append(plainSSZ, chunk4...)
 
 	return plainSSZ, nil
 }

@@ -3,10 +3,10 @@ package freezeblocks
 import (
 	"bytes"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	"github.com/pierrec/lz4"
 )
 
 type BeaconSnapshotReader interface {
@@ -41,7 +41,8 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if buf == nil {
 		return nil, nil
 	}
-	return snapshot_format.ReadBlockFromSnapshot(snappy.NewReader(bytes.NewReader(buf)), r.eth1Getter, r.cfg)
+	lzReader := lz4.NewReader(bytes.NewReader(buf))
+	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
 }
 
 func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
