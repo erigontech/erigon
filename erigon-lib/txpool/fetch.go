@@ -482,14 +482,10 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 				}
 				if utx.Type == types2.BlobTxType {
 					var knownBlobTxn *metaTx
-					var err error
 					//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
 					if err := f.db.View(ctx, func(tx kv.Tx) error {
 						knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
-						if err != nil {
-							return err
-						}
-						return nil
+						return err
 					}); err != nil {
 						return err
 					}
