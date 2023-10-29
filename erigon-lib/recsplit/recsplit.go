@@ -687,7 +687,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	for {
 		err = os.Rename(rs.tmpFilePath, rs.indexFile)
-
+		log.Warn("[index] rename", "file", rs.tmpFilePath, "err", err, "count", errcount)
 		if err != nil {
 			switch {
 			case errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission):
