@@ -468,38 +468,36 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 					continue // 1 tx handling error must not stop batch processing
 				}
 			}
-			continue
-		}
-
-		// change.Direction == remote.Direction_UNWIND
-		for i := range change.Txs {
-			if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-				utx := &types2.TxSlot{}
-				sender := make([]byte, 20)
-				_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-				if err != nil {
-					return err
-				}
-				if utx.Type == types2.BlobTxType {
-					var knownBlobTxn *metaTx
-					//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
-					if err := f.db.View(ctx, func(tx kv.Tx) error {
-						knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
-						return err
-					}); err != nil {
+		} else if change.Direction == remote.Direction_UNWIND {
+			for i := range change.Txs {
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
+					utx := &types2.TxSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
 						return err
 					}
-					// Get the blob tx from cache; ignore altogether if it isn't there
-					if knownBlobTxn != nil {
-						unwindTxs.Append(knownBlobTxn.Tx, sender, false)
+					if utx.Type == types2.BlobTxType {
+						var knownBlobTxn *metaTx
+						//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
+						if err := f.db.View(ctx, func(tx kv.Tx) error {
+							knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
+							return err
+						}); err != nil {
+							return err
+						}
+						// Get the blob tx from cache; ignore altogether if it isn't there
+						if knownBlobTxn != nil {
+							unwindTxs.Append(knownBlobTxn.Tx, sender, false)
+						}
+					} else {
+						unwindTxs.Append(utx, sender, false)
 					}
-				} else {
-					unwindTxs.Append(utx, sender, false)
+					return nil
+				}); err != nil && !errors.Is(err, context.Canceled) {
+					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					continue // 1 tx handling error must not stop batch processing
 				}
-				return nil
-			}); err != nil && !errors.Is(err, context.Canceled) {
-				f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
-				continue // 1 tx handling error must not stop batch processing
 			}
 		}
 	}
