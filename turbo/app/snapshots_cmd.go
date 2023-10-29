@@ -401,7 +401,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, true, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true)
 	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
 	if err := blockSnapshots.ReopenFolder(); err != nil {
@@ -435,11 +435,41 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
+	{
+		logEvery := time.NewTicker(10 * time.Second)
+		defer logEvery.Stop()
+
+		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
+					return err
+				}
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
+					if err != nil {
+						return err
+					}
+					if len(firstNonGenesisHeader) > 0 {
+						logger.Info("Prunning old blocks", "progress", binary.BigEndian.Uint64(firstNonGenesisHeader))
+					}
+				default:
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil); err != nil {
 			panic(err)
 		}
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
