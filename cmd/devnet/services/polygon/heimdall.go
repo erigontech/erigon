@@ -280,7 +280,9 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
 
 		if err != nil {
+			h.Unlock()
 			h.unsubscribe()
+			h.Lock()
 			h.logger.Error("Failed to deploy state sender", "err", err)
 			return
 		}
@@ -324,7 +326,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.rootChainAddress)
 			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.syncSenderAddress)
 
-			go h.startStateSyncSubacription()
+			go h.startStateSyncSubscription()
 			go h.startChildHeaderSubscription(deployCtx)
 			go h.startRootHeaderBlockSubscription()
 		}()
