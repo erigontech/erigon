@@ -2185,6 +2185,8 @@ type Range struct {
 func (r Range) From() uint64 { return r.from }
 func (r Range) To() uint64   { return r.to }
 
+var MergeSteps = []uint64{500_000, 100_000, 10_000}
+
 func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
@@ -2192,7 +2194,7 @@ func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 			continue
 		}
 
-		for _, span := range []uint64{500_000, 100_000, 10_000} {
+		for _, span := range MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}

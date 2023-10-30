@@ -1072,7 +1072,7 @@ func (*BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 			continue
 		}
 
-		for _, span := range []uint64{500_000, 100_000, 10_000} {
+		for _, span := range MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
