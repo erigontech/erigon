@@ -122,7 +122,7 @@ func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
 
 func IsCorrectFileName(name string) bool {
 	parts := strings.Split(name, "-")
-	return len(parts) == 4 && parts[3] != "v1"
+	return len(parts) == 4
 }
 
 func IsCorrectHistoryFileName(name string) bool {
