@@ -58,11 +58,11 @@ func TestBorKeyValueConfigHelper(t *testing.T) {
 
 	burntContract := map[string]common.Address{
 		"22640000": address1,
-		"41824608": address2,
+		"41874000": address2,
 	}
 	assert.Equal(t, borKeyValueConfigHelper(burntContract, 22640000), address1)
 	assert.Equal(t, borKeyValueConfigHelper(burntContract, 22640000+1), address1)
-	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41824608-1), address1)
-	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41824608), address2)
-	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41824608+1), address2)
+	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41874000-1), address1)
+	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41874000), address2)
+	assert.Equal(t, borKeyValueConfigHelper(burntContract, 41874000+1), address2)
 }
