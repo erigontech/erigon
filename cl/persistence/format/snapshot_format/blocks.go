@@ -135,7 +135,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (clparams.StateVersion, error) {
 	metadataSlab := make([]byte, 33)
 	// Metadata section is just the current hardfork of the block. TODO(give it a useful purpose)
-	v, err := readMetadataForBlock(r, metadataSlab[:])
+	v, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return v, err
 	}
