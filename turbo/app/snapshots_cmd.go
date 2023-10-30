@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -127,11 +126,6 @@ var (
 		Name:  "every",
 		Usage: "Do operation every N blocks",
 		Value: 1_000,
-	}
-	SnapshotSegmentSizeFlag = cli.Uint64Flag{
-		Name:  "segment.size",
-		Usage: "Amount of blocks in each segment",
-		Value: snaptype.Erigon2SegmentSize,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
