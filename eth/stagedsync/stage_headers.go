@@ -130,6 +130,8 @@ func HeadersPOW(
 ) error {
 	var err error
 
+	startTime := time.Now()
+
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
@@ -194,6 +196,7 @@ Loop:
 			if err := s.Update(tx, startProgress); err != nil {
 				return err
 			}
+			s.state.posTransition = &startProgress
 			break
 		}
 
@@ -321,7 +324,16 @@ Loop:
 		return libcommon.ErrStopped
 	}
 	// We do not print the following line if the stage was interrupted
-	logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+
+	if s.state.posTransition != nil {
+		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.state.posTransition)
+	} else {
+		headers := headerInserter.GetHighest() - startProgress
+		secs := time.Since(startTime).Seconds()
+		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
+			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
+	}
 
 	return nil
 }

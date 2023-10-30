@@ -64,6 +64,9 @@ func BodiesForward(
 	logger log.Logger,
 ) error {
 	var doUpdate bool
+
+	startTime := time.Now()
+
 	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 		doUpdate = true
@@ -291,7 +294,10 @@ func BodiesForward(
 		return libcommon.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+		blocks := bodyProgress - s.BlockNumber
+		secs := time.Since(startTime).Seconds()
+		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress,
+			"blocks", blocks, "in", secs, "blk/sec", uint64(float64(blocks)/secs))
 	}
 	return nil
 }
@@ -313,6 +319,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
 		"delivered", totalDelivered,
+		"blk/sec", totalDelivered/uint64(logInterval/time.Second),
 		"cache", libcommon.ByteCount(uint64(bodyCacheSize)),
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),

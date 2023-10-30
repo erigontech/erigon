@@ -17,6 +17,7 @@ type Sync struct {
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
+	posTransition   *uint64
 
 	stages       []*Stage
 	unwindOrder  []*Stage
@@ -346,7 +347,24 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 
 		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
 			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
-			hasMore = true
+			if s.posTransition != nil {
+				ptx := tx
+
+				if ptx == nil {
+					if tx, err := db.BeginRw(context.Background()); err == nil {
+						ptx = tx
+						defer tx.Rollback()
+					}
+				}
+
+				if ptx != nil {
+					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
+						hasMore = progress < *s.posTransition
+					}
+				}
+			} else {
+				hasMore = true
+			}
 			break
 		}
 
