@@ -78,11 +78,3 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 	return cr.BlockReader.FrozenBlocks()
 }
-
-func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {
-	spanBytes, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
-	if err != nil {
-		log.Error("BorSpan failed", "err", err)
-	}
-	return spanBytes
-}

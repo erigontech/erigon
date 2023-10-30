@@ -84,6 +84,3 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	panic("")
 }
-func (cr ChainReader) BorSpan(spanId uint64) []byte {
-	panic("")
-}
