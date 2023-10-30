@@ -72,9 +72,6 @@ func maxBlockNum(preverified Preverified) uint64 {
 		}
 		onlyName := fileName[:len(fileName)-len(ext)]
 		parts := strings.Split(onlyName, "-")
-		if parts[0] != "v1" {
-			panic("not implemented")
-		}
 		if parts[3] != "headers" {
 			continue
 		}

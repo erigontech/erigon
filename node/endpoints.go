@@ -19,8 +19,10 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,13 +32,17 @@ import (
 )
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
-func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler http.Handler) (*http.Server, net.Addr, error) {
+func StartHTTPEndpoint(urlEndpoint string, timeouts rpccfg.HTTPTimeouts, handler http.Handler) (*http.Server, net.Addr, error) {
 	// start the HTTP listener
 	var (
 		listener net.Listener
 		err      error
 	)
-	if listener, err = net.Listen("tcp", endpoint); err != nil {
+	socketUrl, err := url.Parse(urlEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("malformatted http listen url %s: %w", urlEndpoint, err)
+	}
+	if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
 		return nil, nil, err
 	}
 	// make sure timeout values are meaningful
