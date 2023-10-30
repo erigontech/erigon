@@ -49,9 +49,6 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				})
 			}
 		} else {
-			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2SegmentSize {
-				continue
-			}
 			if r.Bor {
 				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
