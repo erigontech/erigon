@@ -2,11 +2,23 @@ package freezeblocks
 
 import (
 	"bytes"
+	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	"github.com/pierrec/lz4"
 )
+
+var buffersPool = sync.Pool{
+	New: func() interface{} { return &bytes.Buffer{} },
+}
+
+var lz4ReaderPool = sync.Pool{
+	New: func() interface{} {
+		return lz4.NewReader(nil)
+	},
+}
 
 type BeaconSnapshotReader interface {
 	// ReadBlock reads the block at the given slot.
@@ -40,7 +52,18 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if buf == nil {
 		return nil, nil
 	}
-	return snapshot_format.ReadBlockFromSnapshot(bytes.NewReader(buf), r.eth1Getter, r.cfg)
+
+	// Use pooled buffers and readers to avoid allocations.
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+	buffer.Write(buf)
+
+	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
+	defer lz4ReaderPool.Put(lzReader)
+	lzReader.Reset(buffer)
+
+	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
 }
 
 func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
