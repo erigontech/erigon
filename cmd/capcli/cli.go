@@ -580,7 +580,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
