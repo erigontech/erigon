@@ -1233,8 +1233,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
-	if blockFrom%500_000 == 0 {
-		maxJump = 500_000
+	if blockFrom%snaptype.Erigon2SegmentSize == 0 {
+		maxJump = snaptype.Erigon2SegmentSize
 	} else if blockFrom%100_000 == 0 {
 		maxJump = 100_000
 	} else if blockFrom%10_000 == 0 {
@@ -1243,8 +1243,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	//roundedTo1K := (to / 1_000) * 1_000
 	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
-	case jump >= 500_000:
-		blockTo = blockFrom + 500_000
+	case jump >= snaptype.Erigon2SegmentSize:
+		blockTo = blockFrom + snaptype.Erigon2SegmentSize
 	case jump >= 100_000:
 		blockTo = blockFrom + 100_000
 	case jump >= 10_000:
