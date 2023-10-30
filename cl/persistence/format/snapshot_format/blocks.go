@@ -16,14 +16,6 @@ var buffersPool = sync.Pool{
 	New: func() interface{} { return &bytes.Buffer{} },
 }
 
-var metadataSlabs = sync.Pool{
-	New: func() interface{} {
-		// 33 bytes is the size of the metadata slab
-		// body root + version
-		return &[33]byte{}
-	},
-}
-
 type ExecutionBlockReaderByNumber interface {
 	BlockByNumber(number uint64) (*cltypes.Eth1Block, error)
 }
@@ -141,8 +133,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 }
 
 func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (clparams.StateVersion, error) {
-	metadataSlab := metadataSlabs.Get().(*[33]byte)
-	defer metadataSlabs.Put(metadataSlab)
+	metadataSlab := make([]byte, 33)
 	// Metadata section is just the current hardfork of the block. TODO(give it a useful purpose)
 	v, err := readMetadataForBlock(r, metadataSlab[:])
 	if err != nil {
