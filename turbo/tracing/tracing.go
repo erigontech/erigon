@@ -2,6 +2,8 @@ package tracing
 
 import (
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/live"
+
 	"github.com/urfave/cli/v2"
 )
 

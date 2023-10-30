@@ -229,7 +229,12 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 }
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
-func (args *TraceCallParam) ToTransaction(msg types.Message) (types.Transaction, error) {
+func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
+	msg, err := args.ToMessage(globalGasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
+
 	var tx types.Transaction
 	switch {
 	case args.MaxFeePerGas != nil:
@@ -1050,7 +1055,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	txn, err := args.ToTransaction(msg)
+	txn, err := args.ToTransaction(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,7 +1190,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
 		}
 
-		txns[i], err = args.ToTransaction(msgs[i])
+		txns[i], err = args.ToTransaction(api.gasCap, baseFee)
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to txn: %w", err)
 		}

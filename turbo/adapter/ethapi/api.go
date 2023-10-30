@@ -158,10 +158,15 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 }
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
-func (args *CallArgs) ToTransaction(msg types.Message) (types.Transaction, error) {
+func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
 	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
 	if overflow {
 		return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+	}
+
+	msg, err := args.ToMessage(globalGasCap, baseFee)
+	if err != nil {
+		return nil, err
 	}
 
 	var tx types.Transaction

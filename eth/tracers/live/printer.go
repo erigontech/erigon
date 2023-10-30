@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	register("printer", newPrinter)
+	register("livePrinter", newPrinter)
 }
 
 type Printer struct{}

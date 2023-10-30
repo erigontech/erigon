@@ -309,7 +309,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 
-	transaction, err := args.ToTransaction(msg)
+	transaction, err := args.ToTransaction(api.GasCap, baseFee)
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
@@ -489,7 +489,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				return err
 			}
 
-			transaction, err := txn.ToTransaction(msg)
+			transaction, err := txn.ToTransaction(api.GasCap, blockCtx.BaseFee)
 			if err != nil {
 				stream.WriteNil()
 				return err
