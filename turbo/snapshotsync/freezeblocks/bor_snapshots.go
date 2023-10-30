@@ -192,7 +192,7 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 		notifier.OnNewSnapshot()
 	}
 	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.SegmentsMax())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
