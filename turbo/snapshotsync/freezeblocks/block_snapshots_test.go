@@ -59,7 +59,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 
 func TestFindMergeRange(t *testing.T) {
 	t.Run("big", func(t *testing.T) {
-		merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, nil)
+		merger := NewMerger("x", 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, nil)
 		var ranges []Range
 		for i := 0; i < 24; i++ {
 			ranges = append(ranges, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
@@ -93,7 +93,7 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) > 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
@@ -108,7 +108,7 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) == 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)

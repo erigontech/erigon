@@ -191,7 +191,7 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
+	merger := NewBorMerger(tmpDir, workers, lvl, br.mergeSteps, db, chainConfig, notifier, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
 	if len(rangesToMerge) == 0 {
 		return nil
@@ -1059,20 +1059,21 @@ type BorMerger struct {
 	chainDB         kv.RoDB
 	notifier        services.DBEventNotifier
 	logger          log.Logger
+	mergeSteps      []uint64
 }
 
-func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BorMerger {
-	return &BorMerger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, mergeSteps []uint64, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BorMerger {
+	return &BorMerger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, mergeSteps: mergeSteps, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
 
-func (*BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+func (m *BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		if r.to-r.from >= snaptype.Erigon2MergeLimit { // is complete .seg
 			continue
 		}
 
-		for _, span := range MergeSteps {
+		for _, span := range m.mergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
