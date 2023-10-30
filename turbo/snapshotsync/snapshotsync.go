@@ -49,7 +49,7 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				})
 			}
 		} else {
-			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2SegmentSize {
+			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2MergeLimit {
 				continue
 			}
 			if r.Bor {
