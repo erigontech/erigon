@@ -59,7 +59,6 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
-		d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response))
 		list = append(list, response)
 	}
 	for _, webSeedProviderURL := range s3Providers {
@@ -73,7 +72,6 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 			d.logger.Debug("[snapshots.webseed] get from S3 provider", "err", err)
 			continue
 		}
-		d.logger.Debug("[snapshots.webseed] get from S3 provider", "urls", len(response))
 		list = append(list, response)
 	}
 	// add to list files from disk
@@ -82,10 +80,6 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
-		}
-		d.logger.Debug("[snapshots.webseed] get from File provider", "urls", len(response))
-		if len(diskProviders) > 0 {
-			d.logger.Log(d.verbosity, "[snapshots] see webseed.toml file", "files", webSeedFile)
 		}
 		list = append(list, response)
 	}
@@ -198,6 +192,7 @@ func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url
 	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("webseed.http: host=%s, url=%s, %w", webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath(), err)
 	}
+	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "host", webSeedProviderUrl.Hostname(), "url", webSeedProviderUrl.EscapedPath())
 	return response, nil
 }
 func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.WebSeedsFromProvider, error) {
@@ -244,6 +239,7 @@ func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.W
 	if err := toml.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("webseed.s3: bucket=%s, %w", bucketName, err)
 	}
+	d.logger.Debug("[snapshots.webseed] get from S3 provider", "urls", len(response), "bucket", bucketName)
 	return response, nil
 }
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
@@ -265,27 +261,25 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([
 	if err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
-	if err = validateTorrentBytes(res, url.Path); err != nil {
+	if err = validateTorrentBytes(res); err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
 	return res, nil
 }
-func validateTorrentBytes(b []byte, url string) error {
+func validateTorrentBytes(b []byte) error {
 	var mi metainfo.MetaInfo
-	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
-		return fmt.Errorf("invalid bytes received from url %s, err=%w", url, err)
-	}
-	return nil
+	return bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi)
 }
 func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
 	_, fileName := filepath.Split(webSeedProviderPath)
 	data, err := os.ReadFile(webSeedProviderPath)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %d", fileName, err)
+		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %w", fileName, err)
 	}
 	response := snaptype.WebSeedsFromProvider{}
 	if err := toml.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %d", fileName, err)
+		return nil, fmt.Errorf("webseed.readWebSeedsFile: file=%s, %w", fileName, err)
 	}
+	d.logger.Debug("[snapshots.webseed] get from File provider", "urls", len(response), "file", fileName)
 	return response, nil
 }
