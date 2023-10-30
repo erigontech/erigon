@@ -1202,12 +1202,10 @@ type BlockRetire struct {
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
-
-	mergeSteps []uint64
 }
 
-func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, mergeSteps []uint64, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, mergeSteps: mergeSteps, db: db, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
@@ -1286,8 +1284,8 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewMerger(tmpDir, workers, lvl, br.mergeSteps, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
+	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.SegmentsMax())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
@@ -2174,30 +2172,42 @@ type Merger struct {
 	chainDB         kv.RoDB
 	notifier        services.DBEventNotifier
 	logger          log.Logger
-	mergeSteps      []uint64
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, mergeSteps []uint64, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, mergeSteps: mergeSteps, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
 
 type Range struct {
 	from, to uint64
 }
 
-func (r Range) From() uint64 { return r.from }
-func (r Range) To() uint64   { return r.to }
+func (r Range) From() uint64             { return r.from }
+func (r Range) To() uint64               { return r.to }
+func (r Range) IsRecent(max uint64) bool { return max-r.to < snaptype.Erigon2MergeLimit }
+
+type Ranges []Range
+
+func (r Ranges) String() string {
+	return fmt.Sprintf("%d", r)
+}
 
 var MergeSteps = []uint64{500_000, 100_000, 10_000}
+var RecentMergeSteps = []uint64{100_000, 10_000}
 
-func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		if r.to-r.from >= snaptype.Erigon2MergeLimit { // is complete .seg
-			continue
+		isRecent := r.IsRecent(maxBlockNum)
+		mergeLimit, mergeSteps := uint64(snaptype.Erigon2RecentMergeLimit), MergeSteps
+		if isRecent {
+			mergeLimit, mergeSteps = snaptype.Erigon2MergeLimit, RecentMergeSteps
 		}
 
-		for _, span := range m.mergeSteps {
+		if r.to-r.from >= mergeLimit {
+			continue
+		}
+		for _, span := range mergeSteps {
 			if r.to%span != 0 {
 				continue
 			}

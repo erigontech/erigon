@@ -58,19 +58,53 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 }
 
 func TestFindMergeRange(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, nil)
 	t.Run("big", func(t *testing.T) {
-		merger := NewMerger("x", 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, nil)
 		var ranges []Range
 		for i := 0; i < 24; i++ {
 			ranges = append(ranges, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
 		}
-		found := merger.FindMergeRanges(ranges)
+		found := merger.FindMergeRanges(ranges, uint64(24*100_000))
 
-		var expect []Range
-		for i := 0; i < 4; i++ {
-			expect = append(expect, Range{from: uint64(i * snaptype.Erigon2MergeLimit), to: uint64((i + 1) * snaptype.Erigon2MergeLimit)})
+		expect := []Range{
+			{0, 500_000},
+			{500_000, 1_000_000},
+			{1_000_000, 1_500_000},
 		}
 		require.Equal(t, expect, found)
+	})
+
+	t.Run("small", func(t *testing.T) {
+		var ranges Ranges
+		for i := 0; i < 240; i++ {
+			ranges = append(ranges, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
+		}
+		found := merger.FindMergeRanges(ranges, uint64(240*10_000))
+
+		expect := Ranges{
+			{0, 500_000},
+			{500_000, 1_000_000},
+			{1_000_000, 1_500_000},
+			{1_500_000, 1_600_000},
+			{1_600_000, 1_700_000},
+			{1_700_000, 1_800_000},
+			{1_800_000, 1_900_000},
+			{1_900_000, 2_000_000},
+			{2_000_000, 2_100_000},
+			{2_100_000, 2_200_000},
+			{2_200_000, 2_300_000},
+			{2_300_000, 2_400_000},
+		}
+		require.Equal(t, expect.String(), Ranges(found).String())
+	})
+
+	t.Run("IsRecent", func(t *testing.T) {
+		require.False(t, Range{400_000, 500_000}.IsRecent(1_000_000))
+		require.False(t, Range{499_000, 500_000}.IsRecent(1_000_000))
+		require.False(t, Range{498_000, 599_000}.IsRecent(1_000_000))
+		require.True(t, Range{500_000, 501_000}.IsRecent(1_000_000))
+
+		require.False(t, Range{500_000, 501_000}.IsRecent(1_100_000))
 	})
 
 }
@@ -93,8 +127,8 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
-		ranges := merger.FindMergeRanges(s.Ranges())
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) > 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
@@ -108,8 +142,8 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
-		ranges := merger.FindMergeRanges(s.Ranges())
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) == 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
