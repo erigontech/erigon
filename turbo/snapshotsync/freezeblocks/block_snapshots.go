@@ -1294,9 +1294,10 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 			notifier.OnNewSnapshot()
 		}
 
-		downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */))
 		if seedNewSnapshots != nil {
+			downloadRequest := []services.DownloadRequest{
+				services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */),
+			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
 			}
