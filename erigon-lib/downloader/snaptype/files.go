@@ -44,6 +44,8 @@ const (
 	BeaconBlocks
 )
 
+var BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
 func (ft Type) String() string {
 	switch ft {
 	case Headers:
@@ -90,7 +92,7 @@ const (
 
 func (it IdxType) String() string { return string(it) }
 
-var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
+var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")

@@ -953,7 +953,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 		}
 	}()
 
-	for _, t := range snaptype.AllSnapshotTypes {
+	for _, t := range snaptype.BlockSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
 			if segment.T != t {
@@ -1059,7 +1059,7 @@ MainLoop:
 		if f.From == f.To {
 			continue
 		}
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.From, f.To, t))
 			if !dir2.FileExist(p) {
 				continue MainLoop
@@ -1284,34 +1284,34 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
+	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
+	onMerge := func(r Range) error {
+		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+			notifier.OnNewSnapshot()
+		}
+
+		downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */))
+		if seedNewSnapshots != nil {
+			if err := seedNewSnapshots(downloadRequest); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	onDelete := func(files []string) error {
+		//TODO: add Downloader API to delete files
+		return nil
+	}
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
 		return err
 	}
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
 
-	downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
-	for i := range rangesToMerge {
-		r := &services.Range{From: rangesToMerge[i].from, To: rangesToMerge[i].to}
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
-	}
-
-	if seedNewSnapshots != nil {
-		if err := seedNewSnapshots(downloadRequest); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -2170,12 +2170,11 @@ type Merger struct {
 	tmpDir          string
 	chainConfig     *chain.Config
 	chainDB         kv.RoDB
-	notifier        services.DBEventNotifier
 	logger          log.Logger
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
 
 type Range struct {
@@ -2304,7 +2303,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -2316,7 +2315,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return err
 		}
 
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
@@ -2336,11 +2335,20 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
 		snapshots.LogStat()
-		if m.notifier != nil { // notify about new snapshots of any size
-			m.notifier.OnNewSnapshot()
-			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
+
+		if err := onMerge(r); err != nil {
+			return err
 		}
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
+			if len(toMerge[t]) == 0 {
+				continue
+			}
+			if err := onDelete(toMerge[t]); err != nil {
+				return err
+			}
+		}
+		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
+		for _, t := range snaptype.BlockSnapshotTypes {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}

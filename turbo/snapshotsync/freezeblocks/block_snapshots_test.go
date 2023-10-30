@@ -58,7 +58,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 }
 
 func TestFindMergeRange(t *testing.T) {
-	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, nil)
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	t.Run("big", func(t *testing.T) {
 		var ranges []Range
 		for i := 0; i < 24; i++ {
@@ -113,7 +113,7 @@ func TestMergeSnapshots(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
-		for _, snT := range snaptype.AllSnapshotTypes {
+		for _, snT := range snaptype.BlockSnapshotTypes {
 			createTestSegmentFile(t, from, to, snT, dir, logger)
 		}
 	}
@@ -127,10 +127,14 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
+			return nil
+		}, func(l []string) error {
+			return nil
+		})
 		require.NoError(err)
 	}
 
@@ -142,10 +146,14 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
+			return nil
+		}, func(l []string) error {
+			return nil
+		})
 		require.NoError(err)
 	}
 
