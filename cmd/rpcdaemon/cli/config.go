@@ -124,7 +124,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "enable http server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, "https.addr", nodecfg.DefaultHTTPHost, "rpc HTTPS server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", nodecfg.DefaultHTTPPort+363, "rpc HTTPS server listening port")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http+363 if not set")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsURL, "https.url", "", "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsCertfile, "https.cert", "", "certificate for rpc HTTPS server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpsKeyFile, "https.key", "", "key file for rpc HTTPS server")
@@ -652,6 +652,9 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		cfg.HttpsServerEnabled = true
 	}
 	if cfg.HttpsServerEnabled {
+		if cfg.HttpsPort == 0 {
+			cfg.HttpsPort = cfg.HttpPort + 363
+		}
 		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
