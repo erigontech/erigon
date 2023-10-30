@@ -660,7 +660,7 @@ func TestHisory_Unwind(t *testing.T) {
 			require.NoError(err)
 			require.True(needDel)
 			if rec != nil {
-				fmt.Printf("txn %d v=%x|prev %x\n", rec.TxNum, rec.Value, rec.PValue)
+				fmt.Printf("txn %d v=%x\n", rec.TxNum, rec.Value)
 			}
 		}
 
