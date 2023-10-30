@@ -7,9 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/turbo/debug"
+
 	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/c2h5oh/datasize"
@@ -82,6 +85,16 @@ type outputFolder struct {
 
 type withSentinel struct {
 	Sentinel string `help:"sentinel url" default:"localhost:7777"`
+}
+
+type withPPROF struct {
+	Pprof bool `help:"enable pprof" default:"false"`
+}
+
+func (w *withPPROF) withProfile() {
+	if w.Pprof {
+		debug.StartPProf("localhost:6060", metrics.Setup("localhost:6060", log.Root()))
+	}
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
@@ -449,6 +462,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 type CheckSnapshots struct {
 	chainCfg
 	outputFolder
+	withPPROF
 
 	Slot uint64 `name:"slot" help:"slot to check"`
 }
@@ -458,9 +472,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	c.withProfile()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain)
-
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
@@ -531,11 +545,14 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 type LoopSnapshots struct {
 	chainCfg
 	outputFolder
+	withPPROF
 
 	Slot uint64 `name:"slot" help:"slot to check"`
 }
 
 func (c *LoopSnapshots) Run(ctx *Context) error {
+	c.withProfile()
+
 	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
