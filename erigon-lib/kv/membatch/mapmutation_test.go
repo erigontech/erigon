@@ -27,4 +27,6 @@ func TestMapmutation_Flush_Close(t *testing.T) {
 	require.NoError(t, err)
 	err = batch.Flush(context.Background(), tx)
 	require.NoError(t, err)
+	batch.Close()
+	batch.Close()
 }
