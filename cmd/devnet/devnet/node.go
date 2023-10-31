@@ -29,7 +29,7 @@ type Node interface {
 	GetEnodeURL() string
 	Account() *accounts.Account
 	IsBlockProducer() bool
-	Configure(baseNode args.Node, nodeNumber int) error
+	Configure(baseNode args.NodeArgs, nodeNumber int) error
 }
 
 type NodeSelector interface {
@@ -43,7 +43,7 @@ func (f NodeSelectorFunc) Test(ctx context.Context, node Node) bool {
 }
 
 func HTTPHost(n Node) string {
-	if n, ok := n.(*node); ok {
+	if n, ok := n.(*devnetNode); ok {
 		host := n.nodeCfg.Http.HttpListenAddress
 
 		if host == "" {
@@ -56,10 +56,10 @@ func HTTPHost(n Node) string {
 	return ""
 }
 
-type node struct {
+type devnetNode struct {
 	sync.Mutex
 	requests.RequestGenerator
-	config   Node
+	nodeArgs Node
 	wg       *sync.WaitGroup
 	network  *Network
 	startErr chan error
@@ -68,7 +68,7 @@ type node struct {
 	ethNode  *enode.ErigonNode
 }
 
-func (n *node) Stop() {
+func (n *devnetNode) Stop() {
 	var toClose *enode.ErigonNode
 
 	n.Lock()
@@ -85,13 +85,13 @@ func (n *node) Stop() {
 	n.done()
 }
 
-func (n *node) running() bool {
+func (n *devnetNode) running() bool {
 	n.Lock()
 	defer n.Unlock()
 	return n.startErr == nil && n.ethNode != nil
 }
 
-func (n *node) done() {
+func (n *devnetNode) done() {
 	n.Lock()
 	defer n.Unlock()
 	if n.wg != nil {
@@ -101,36 +101,36 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) Configure(args.Node, int) error {
+func (n *devnetNode) Configure(args.NodeArgs, int) error {
 	return nil
 }
 
-func (n *node) IsBlockProducer() bool {
-	return n.config.IsBlockProducer()
+func (n *devnetNode) IsBlockProducer() bool {
+	return n.nodeArgs.IsBlockProducer()
 }
 
-func (n *node) Account() *accounts.Account {
-	return n.config.Account()
+func (n *devnetNode) Account() *accounts.Account {
+	return n.nodeArgs.Account()
 }
 
-func (n *node) GetName() string {
-	return n.config.GetName()
+func (n *devnetNode) GetName() string {
+	return n.nodeArgs.GetName()
 }
 
-func (n *node) ChainID() *big.Int {
-	return n.config.ChainID()
+func (n *devnetNode) ChainID() *big.Int {
+	return n.nodeArgs.ChainID()
 }
 
-func (n *node) GetHttpPort() int {
-	return n.config.GetHttpPort()
+func (n *devnetNode) GetHttpPort() int {
+	return n.nodeArgs.GetHttpPort()
 }
 
-func (n *node) GetEnodeURL() string {
-	return n.config.GetEnodeURL()
+func (n *devnetNode) GetEnodeURL() string {
+	return n.nodeArgs.GetEnodeURL()
 }
 
 // run configures, creates and serves an erigon node
-func (n *node) run(ctx *cli.Context) error {
+func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux

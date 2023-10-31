@@ -60,7 +60,7 @@ func (nw *Network) Start(ctx context.Context) error {
 		}
 	}
 
-	baseNode := args.Node{
+	baseNode := args.NodeArgs{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
 		Port:           nw.BasePort,
@@ -81,7 +81,7 @@ func (nw *Network) Start(ctx context.Context) error {
 	metricsNode := cliCtx.Int("metrics.node")
 	nw.namedNodes = map[string]Node{}
 
-	for i, nodeConfig := range nw.Nodes {
+	for i, nodeArgs := range nw.Nodes {
 		{
 			base := baseNode
 			if metricsEnabled && metricsNode == i {
@@ -90,13 +90,13 @@ func (nw *Network) Start(ctx context.Context) error {
 			}
 			base.StaticPeers = strings.Join(nw.peers, ",")
 
-			err := nodeConfig.Configure(base, i)
+			err := nodeArgs.Configure(base, i)
 			if err != nil {
 				nw.Stop()
 				return err
 			}
 
-			node, err := nw.createNode(nodeConfig)
+			node, err := nw.createNode(nodeArgs)
 			if err != nil {
 				nw.Stop()
 				return err
@@ -104,7 +104,7 @@ func (nw *Network) Start(ctx context.Context) error {
 
 			nw.Nodes[i] = node
 			nw.namedNodes[node.GetName()] = node
-			nw.peers = append(nw.peers, nodeConfig.GetEnodeURL())
+			nw.peers = append(nw.peers, nodeArgs.GetEnodeURL())
 
 			for _, service := range nw.Services {
 				service.NodeCreated(ctx, node)
@@ -129,13 +129,13 @@ func (nw *Network) Start(ctx context.Context) error {
 
 var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
 
-func (nw *Network) createNode(config Node) (Node, error) {
-	nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, config.GetHttpPort())
+func (nw *Network) createNode(nodeArgs Node) (Node, error) {
+	nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodeArgs.GetHttpPort())
 
-	n := &node{
+	n := &devnetNode{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
-		config,
+		nodeArgs,
 		&nw.wg,
 		nw,
 		make(chan error),
@@ -180,9 +180,9 @@ func copyFlags(flags []cli.Flag) []cli.Flag {
 func (nw *Network) startNode(n Node) error {
 	nw.wg.Add(1)
 
-	node := n.(*node)
+	node := n.(*devnetNode)
 
-	args, err := args.AsArgs(node.config)
+	args, err := args.AsArgs(node.nodeArgs)
 	if err != nil {
 		return err
 	}

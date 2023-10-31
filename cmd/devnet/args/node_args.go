@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 )
 
-type Node struct {
+type NodeArgs struct {
 	requests.RequestGenerator `arg:"-"`
 	Name                      string `arg:"-"`
 	BuildDir                  string `arg:"positional" default:"./build/bin/devnet" json:"builddir"`
@@ -57,7 +57,7 @@ type Node struct {
 	NodeKeyHex string            `arg:"--nodekeyhex" json:"nodekeyhex,omitempty"`
 }
 
-func (node *Node) Configure(base Node, nodeNumber int) error {
+func (node *NodeArgs) Configure(base NodeArgs, nodeNumber int) error {
 	if len(node.Name) == 0 {
 		node.Name = fmt.Sprintf("%s-%d", base.Chain, nodeNumber)
 	}
@@ -105,11 +105,11 @@ func (node *Node) Configure(base Node, nodeNumber int) error {
 	return nil
 }
 
-func (node *Node) GetName() string {
+func (node *NodeArgs) GetName() string {
 	return node.Name
 }
 
-func (node *Node) ChainID() *big.Int {
+func (node *NodeArgs) ChainID() *big.Int {
 	config := params.ChainConfigByChainName(node.Chain)
 	if config == nil {
 		return nil
@@ -117,17 +117,17 @@ func (node *Node) ChainID() *big.Int {
 	return config.ChainID
 }
 
-func (node *Node) GetHttpPort() int {
+func (node *NodeArgs) GetHttpPort() int {
 	return node.HttpPort
 }
 
-func (node *Node) GetEnodeURL() string {
+func (node *NodeArgs) GetEnodeURL() string {
 	port := node.Port
 	return enode.NewV4(&node.NodeKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
 }
 
 type BlockProducer struct {
-	Node
+	NodeArgs
 	Mine            bool   `arg:"--mine" flag:"true"`
 	Etherbase       string `arg:"--miner.etherbase"`
 	DevPeriod       int    `arg:"--dev.period"`
@@ -138,8 +138,8 @@ type BlockProducer struct {
 	account         *accounts.Account
 }
 
-func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) error {
-	err := m.Node.Configure(baseNode, nodeNumber)
+func (m *BlockProducer) Configure(baseNode NodeArgs, nodeNumber int) error {
+	err := m.NodeArgs.Configure(baseNode, nodeNumber)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (n *BlockProducer) IsBlockProducer() bool {
 }
 
 type NonBlockProducer struct {
-	Node
+	NodeArgs
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
