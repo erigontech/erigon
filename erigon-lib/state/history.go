@@ -2032,6 +2032,7 @@ func (hi *HistoryChangesIterDB) advance() (err error) {
 	}
 	return hi.advanceSmallVals()
 }
+
 func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
@@ -2070,7 +2071,30 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			seek = append(next, hi.startTxKey[:]...)
 			continue
 		}
-		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
+		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
+			// stuck on the same key, move to first key larger than seek
+			for {
+				k, v, err = hi.valsC.Next()
+				if err != nil {
+					return err
+				}
+				if k == nil {
+					hi.nextKey = nil
+					return nil
+				}
+				fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
+				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
+					break
+				}
+			}
+		}
+		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+
+		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
+			if len(seek) != len(k) {
+				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
+				continue
+			}
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
