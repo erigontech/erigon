@@ -89,10 +89,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
-	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
-	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 
@@ -110,16 +106,28 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().Float64Var(&ethconfig.Defaults.RPCTxFeeCap, utils.RPCGlobalTxFeeCapFlag.Name, utils.RPCGlobalTxFeeCapFlag.Value, utils.RPCGlobalTxFeeCapFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake for GRPC")
+	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake for GRPC")
+	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake for GRPC")
+
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpServerEnabled, "http.enabled", true, "enable http server")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP server listening port")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpURL, "http.url", "", "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP-RPC server listening port")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
-	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP")
+	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
+
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "enable http server")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, "https.addr", nodecfg.DefaultHTTPHost, "rpc HTTPS server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http+363 if not set")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsURL, "https.url", "", "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsCertfile, "https.cert", "", "certificate for rpc HTTPS server")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsKeyFile, "https.key", "", "key file for rpc HTTPS server")
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.SocketServerEnabled, "socket.enabled", false, "Enable IPC server")
 	rootCmd.PersistentFlags().StringVar(&cfg.SocketListenUrl, "socket.url", "unix:///var/run/erigon.sock", "IPC server listening url. prefix supported are tcp, unix")
@@ -610,24 +618,25 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		logger.Info("Socket Endpoint opened", "url", socketUrl)
 	}
 
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
+	var wsHandler http.Handler
+	if cfg.WebsocketEnabled {
+		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger)
+	}
+	graphQLHandler := graphql.CreateHandler(defaultAPIList)
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
+	if err != nil {
+		return err
+	}
+
 	if cfg.HttpServerEnabled {
-		httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-		var wsHandler http.Handler
-		if cfg.WebsocketEnabled {
-			wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger)
-		}
-
-		graphQLHandler := graphql.CreateHandler(defaultAPIList)
-
-		apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
-		if err != nil {
-			return err
-		}
 		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
-		listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
+		listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, &node.HttpEndpointConfig{
+			Timeouts: cfg.HTTPTimeouts,
+		}, apiHandler)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api: %w", err)
 		}
@@ -637,6 +646,34 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 			defer cancel()
 			_ = listener.Shutdown(shutdownCtx)
 			logger.Info("HTTP endpoint closed", "url", httpAddr)
+		}()
+	}
+	if cfg.HttpsURL != "" {
+		cfg.HttpsServerEnabled = true
+	}
+	if cfg.HttpsServerEnabled {
+		if cfg.HttpsPort == 0 {
+			cfg.HttpsPort = cfg.HttpPort + 363
+		}
+		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		if cfg.HttpsURL != "" {
+			httpsEndpoint = cfg.HttpsURL
+		}
+		listener, httpAddr, err := node.StartHTTPEndpoint(httpsEndpoint, &node.HttpEndpointConfig{
+			Timeouts: cfg.HTTPTimeouts,
+			HTTPS:    true,
+			CertFile: cfg.HttpsCertfile,
+			KeyFile:  cfg.HttpsKeyFile,
+		}, apiHandler)
+		if err != nil {
+			return fmt.Errorf("could not start RPC api: %w", err)
+		}
+		info = append(info, "https.url", httpAddr)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = listener.Shutdown(shutdownCtx)
+			logger.Info("HTTPS endpoint closed", "url", httpAddr)
 		}()
 	}
 
@@ -797,7 +834,9 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.L
 		return nil, nil, "", err
 	}
 
-	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
+	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, &node.HttpEndpointConfig{
+		Timeouts: cfg.AuthRpcTimeouts,
+	}, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}

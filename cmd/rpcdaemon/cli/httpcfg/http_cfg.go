@@ -30,6 +30,13 @@ type HttpCfg struct {
 	AuthRpcVirtualHost []string
 	HttpCompression    bool
 
+	HttpsServerEnabled bool
+	HttpsURL           string
+	HttpsListenAddress string
+	HttpsPort          int
+	HttpsCertfile      string
+	HttpsKeyFile       string
+
 	AuthRpcPort    int
 	PrivateApiAddr string
 
