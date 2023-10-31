@@ -7,9 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/turbo/debug"
+
 	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/c2h5oh/datasize"
@@ -64,6 +67,7 @@ var CLI struct {
 	DumpSnapshots     DumpSnapshots     `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots    CheckSnapshots    `cmd:"" help:"check snapshot folder against content of chain data"`
 	DownloadSnapshots DownloadSnapshots `cmd:"" help:"download snapshots from webseed"`
+	LoopSnapshots     LoopSnapshots     `cmd:"" help:"loop over snapshots"`
 }
 
 type chainCfg struct {
@@ -81,6 +85,16 @@ type outputFolder struct {
 
 type withSentinel struct {
 	Sentinel string `help:"sentinel url" default:"localhost:7777"`
+}
+
+type withPPROF struct {
+	Pprof bool `help:"enable pprof" default:"false"`
+}
+
+func (w *withPPROF) withProfile() {
+	if w.Pprof {
+		debug.StartPProf("localhost:6060", metrics.Setup("localhost:6060", log.Root()))
+	}
 }
 
 func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
@@ -442,12 +456,13 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2SegmentSize, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
 	chainCfg
 	outputFolder
+	withPPROF
 
 	Slot uint64 `name:"slot" help:"slot to check"`
 }
@@ -457,9 +472,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	c.withProfile()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	log.Info("Started the checking process", "chain", c.Chain)
-
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
@@ -480,7 +495,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2SegmentSize) * snaptype.Erigon2SegmentSize
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -524,6 +539,61 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		}
 		log.Info("Successfully checked", "slot", i)
 	}
+	return nil
+}
+
+type LoopSnapshots struct {
+	chainCfg
+	outputFolder
+	withPPROF
+
+	Slot uint64 `name:"slot" help:"slot to check"`
+}
+
+func (c *LoopSnapshots) Run(ctx *Context) error {
+	c.withProfile()
+
+	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+
+	br := &snapshot_format.MockBlockReader{}
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
+	start := time.Now()
+	for i := c.Slot; i < to; i++ {
+		snReader.ReadBlock(i)
+	}
+	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
 	return nil
 }
 
@@ -584,5 +654,4 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 	return snapshotsync.WaitForDownloader("CapCliDownloader", ctx, false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root())), nil, params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
-
 }
