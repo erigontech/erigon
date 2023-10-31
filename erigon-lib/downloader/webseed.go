@@ -42,7 +42,7 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, s3tokens, urls, files)
-	d.downloadTorrentFilesFromProviders(ctx, rootDir)
+	//d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
