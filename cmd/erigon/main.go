@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/mmap"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +29,8 @@ import (
 )
 
 func main() {
+	println(datasize.ByteSize(mmap.TotalMemory()).HumanReadable())
+	return
 	defer func() {
 		panicResult := recover()
 		if panicResult == nil {
