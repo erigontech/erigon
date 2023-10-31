@@ -153,6 +153,16 @@ var ChiadoBootnodes = []string{
 	"enode://595160631241ea41b187b85716f9f9572a266daa940d74edbe3b83477264ce284d69208e61cf50e91641b1b4f9a03fa8e60eb73d435a84cf4616b1c969bc2512@3.69.35.13:30303",
 }
 
+var GnosisDencun1DevnetBootnodes = []string{
+	"enode://b92f149e8ca1e3595ba4bacb4ae95296489ffad1a053a0d6e4647c553b9789c4093bc3060084882a7c07764a726171dcc73747d5fb5f0e26b1143f15eb2946eb@139.177.203.36:30303",
+	"enode://07e38eb53773cd18dc1396b124f1766169f1a1d92d66bcd9e934c71a0420dfa1336eba719ed1ece6f414324179a6d88eda8086978e260c65c274f0498fc8d705@139.144.172.146:30303",
+	"enode://9589d95bb0d1c1bcb962a62ba38febae14333eb7c3e25aa78bcc6fb4e3e5b8379457e377c4c5527213ade606749c46f90d2d510dedd00e811410576fce0fcdd1@139.144.172.174:30303",
+	"enode://226796ddfef515cdbfe68630ef56d52eda7862fe82b7e5343db4ef6ea63fbf6213dee96f40c7861c214fef51d832d3c8d6431b7a24c1eeb22732077e7cbc4de4@139.177.203.93:30303",
+	"enode://c526f47d6b916bd4a2d1c7846353b42e4b6247e9ba56bf60552f671be7e5e5abbf1763f898156ba0379b07c1fb167acfffd99538f3b303237941eba05167c6ee@139.144.172.166:30303",
+	"enode://33710f01cfa05f70d9d1b6357353ea434fa67b40c6fac66a9501faa352e1e1a02386f722162dbee83a78ad6b48c657fcb99b4f5a3b0decb9e51745db6cd8f001@139.177.203.86:30303",
+	"enode://2e949981c492a4ea72149f91f050dc4923658386e70bcf7322250f5e66df6574ed04adc7526ca5f606d99fa486b4240ce8f0ee9286d600d2b128b706a3411f19@139.177.203.38:30303",
+}
+
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
@@ -191,6 +201,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.ChiadoChainName:
 		return ChiadoBootnodes
+	case networkname.GnosisDencun1DevnetName:
+		return GnosisDencun1DevnetBootnodes
 	default:
 		return []string{}
 	}
