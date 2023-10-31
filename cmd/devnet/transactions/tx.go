@@ -41,7 +41,7 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	}
 
 	if expectedPendingSize >= 0 && pendingSize != expectedPendingSize {
-		logger.Error("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
+		logger.Debug("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
 		return
 	}
 
@@ -51,7 +51,7 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	}
 
 	if expectedBaseFeeSize >= 0 && baseFeeSize != expectedBaseFeeSize {
-		logger.Error("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
+		logger.Debug("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
 	}
 
 	logger.Info("Subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
