@@ -69,7 +69,11 @@ func TestFindMergeRange(t *testing.T) {
 		expect := []Range{
 			{0, 500_000},
 			{500_000, 1_000_000},
-			{1_000_000, 1_500_000},
+			{1_000_000, 1_100_000},
+			{1_100_000, 1_200_000},
+			{1_200_000, 1_300_000},
+			{1_300_000, 1_400_000},
+			{1_400_000, 1_500_000},
 		}
 		require.Equal(t, expect, found)
 	})
@@ -119,7 +123,7 @@ func TestMergeSnapshots(t *testing.T) {
 		}
 	}
 
-	N := uint64(7)
+	N := uint64(17)
 	createFile(0, snaptype.Erigon2MergeLimit)
 	for i := uint64(snaptype.Erigon2MergeLimit); i < snaptype.Erigon2MergeLimit+N*100_000; i += 100_000 {
 		createFile(i, i+100_000)
