@@ -460,7 +460,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	for i := from; i < to; i += every {
-		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil); err != nil {
+		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
