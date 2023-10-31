@@ -1,10 +1,15 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/spectest"
+	"bytes"
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -59,6 +64,24 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		haveEncoded, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
 		require.EqualValues(t, haveEncoded, encoded)
+		// Now let it do the encoding in snapshot format
+		if blk, ok := object.(*cltypes.SignedBeaconBlock); ok {
+			var b bytes.Buffer
+			require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
+			var br snapshot_format.MockBlockReader
+			if blk.Version() >= clparams.BellatrixVersion {
+				br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}
+
+			}
+
+			blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
+			require.NoError(t, err)
+
+			haveRoot, err := blk2.HashSSZ()
+			require.NoError(t, err)
+			require.EqualValues(t, expectedRoot, haveRoot)
+		}
+
 		return nil
 	})
 }

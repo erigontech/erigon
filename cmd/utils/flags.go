@@ -20,12 +20,13 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -304,7 +305,12 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
-		Usage: "HTTP-RPC server (enabled by default). Use --http=false to disable it",
+		Usage: "JSON-RPC server (enabled by default). Use --http=false to disable it",
+		Value: true,
+	}
+	HTTPServerEnabledFlag = cli.BoolFlag{
+		Name:  "http.enabled",
+		Usage: "JSON-RPC HTTP server (enabled by default). Use --http.enabled=false to disable it",
 		Value: true,
 	}
 	HTTPListenAddrFlag = cli.StringFlag{

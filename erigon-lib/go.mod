@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.20
 
 require (
-	github.com/erigontech/mdbx-go v0.27.19
+	github.com/erigontech/mdbx-go v0.27.20
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231019214918-3eb2303a41f3
 	github.com/ledgerwatch/interfaces v0.0.0-20231011121315-f58b806039f0
 	github.com/ledgerwatch/log/v3 v3.9.0
@@ -31,12 +31,12 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.6
 	github.com/holiman/uint256 v1.2.3
-	github.com/matryer/moq v0.3.2
+	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.1.0
-	github.com/prometheus/client_golang v1.12.2
-	github.com/prometheus/client_model v0.2.0
-	github.com/prometheus/common v0.35.0
+	github.com/prometheus/client_golang v1.17.0
+	github.com/prometheus/client_model v0.5.0
+	github.com/prometheus/common v0.44.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
@@ -100,7 +100,7 @@ require (
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
@@ -123,7 +123,7 @@ require (
 	github.com/pion/webrtc/v3 v3.1.42 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/prometheus/procfs v0.7.3 // indirect
+	github.com/prometheus/procfs v0.11.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/valyala/fastrand v1.1.0 // indirect

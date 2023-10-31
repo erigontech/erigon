@@ -16,15 +16,8 @@
 
 package diagnostics
 
-type PeerStatisticsGetter interface {
-	GetPeersStatistics() map[string]*PeerStatistics
-}
+import "reflect"
 
-type PeerStatistics struct {
-	BytesIn      uint64
-	BytesOut     uint64
-	CapBytesIn   map[string]uint64
-	CapBytesOut  map[string]uint64
-	TypeBytesIn  map[string]uint64
-	TypeBytesOut map[string]uint64
+func (p PeerStatistics) Type() Type {
+	return Type(reflect.TypeOf(p))
 }

@@ -244,6 +244,10 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		heightForks = append(heightForks, *config.Aura.PosdaoTransition)
 	}
 
+	if config.Bor != nil && config.Bor.AgraBlock != nil {
+		heightForks = append(heightForks, config.Bor.AgraBlock.Uint64())
+	}
+
 	// Sort the fork block numbers & times to permit chronological XOR
 	slices.Sort(heightForks)
 	slices.Sort(timeForks)

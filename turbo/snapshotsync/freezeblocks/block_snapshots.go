@@ -121,11 +121,7 @@ func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.idxHeaderHash.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idxHeaderHash.Close()
-		sn.idxHeaderHash = nil
-	}
+
 	return nil
 }
 
@@ -182,11 +178,6 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.idxBodyNumber.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idxBodyNumber.Close()
-		sn.idxBodyNumber = nil
-	}
 	return nil
 }
 
@@ -229,23 +220,26 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxTxnHash.Close()
-		sn.IdxTxnHash = nil
-	}
+
+	/*
+		// Historically we had several times when:
+		//  - erigon downloaded new version of .seg file
+		//  - or didn't finish download and start indexing
+		// this was a "quick-fix protection" against this cases
+		// but now we have other protections for this cases
+		// let's try to remove this one - because it's not compatible with "copy datadir" and "restore datadir from backup" scenarios
+		if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
+			log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
+			//Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+			sn.IdxTxnHash.Close()
+			sn.IdxTxnHash = nil
+		}
+	*/
 
 	fileName = snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.Transactions2Block.String())
 	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
-		log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash2BlockNum.FileName())
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxTxnHash2BlockNum.Close()
-		sn.IdxTxnHash2BlockNum = nil
 	}
 	return nil
 }
@@ -1118,6 +1112,28 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return res
 }
 
+func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, missingSnapshots, err
+	}
+
+	{
+		var l []snaptype.FileInfo
+		var m []Range
+		for _, f := range list {
+			if f.T != snaptype.BeaconBlocks {
+				continue
+			}
+			l = append(l, f)
+		}
+		l, m = noGaps(noOverlaps(l))
+		res = append(res, l...)
+		missingSnapshots = append(missingSnapshots, m...)
+	}
+	return res, missingSnapshots, nil
+}
+
 func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
@@ -1186,10 +1202,12 @@ type BlockRetire struct {
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
+
+	mergeSteps []uint64
 }
 
-func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, mergeSteps []uint64, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, mergeSteps: mergeSteps, db: db, notifier: notifier, logger: logger}
 }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
@@ -1217,8 +1235,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
-	if blockFrom%500_000 == 0 {
-		maxJump = 500_000
+	if blockFrom%snaptype.Erigon2MergeLimit == 0 {
+		maxJump = snaptype.Erigon2MergeLimit
 	} else if blockFrom%100_000 == 0 {
 		maxJump = 100_000
 	} else if blockFrom%10_000 == 0 {
@@ -1227,8 +1245,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	//roundedTo1K := (to / 1_000) * 1_000
 	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
-	case jump >= 500_000:
-		blockTo = blockFrom + 500_000
+	case jump >= snaptype.Erigon2MergeLimit:
+		blockTo = blockFrom + snaptype.Erigon2MergeLimit
 	case jump >= 100_000:
 		blockTo = blockFrom + 100_000
 	case jump >= 10_000:
@@ -1258,7 +1276,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1268,7 +1286,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
+	merger := NewMerger(tmpDir, workers, lvl, br.mergeSteps, db, chainConfig, notifier, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
 	if len(rangesToMerge) == 0 {
 		return nil
@@ -1525,10 +1543,6 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
-	stat, err := os.Stat(sn.Path)
-	if err != nil {
-		return false
-	}
 	dir, _ := filepath.Split(sn.Path)
 	fName := snaptype.IdxFileName(sn.From, sn.To, sn.T.String())
 	var result = true
@@ -1538,21 +1552,11 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		if err != nil {
 			return false
 		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
-		}
 		idx.Close()
 	case snaptype.Transactions:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
-		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
 		}
 		idx.Close()
 
@@ -1560,11 +1564,6 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		idx, err = recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
-		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
 		}
 		idx.Close()
 	}
@@ -2014,71 +2013,6 @@ RETRY:
 	return nil
 }
 
-func BeaconBlocksIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(segmentFilePath)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BeaconBlocks.String()))
-
-	var baseSpanId uint64
-	if blockFrom > zerothSpanEnd {
-		baseSpanId = 1 + (blockFrom-zerothSpanEnd-1)/spanLength
-	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      d.Count() > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
-		BaseDataID: baseSpanId,
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g.Reset(0)
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
-
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
 func HeadersIdx(ctx context.Context, chainConfig *chain.Config, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
@@ -2240,10 +2174,11 @@ type Merger struct {
 	chainDB         kv.RoDB
 	notifier        services.DBEventNotifier
 	logger          log.Logger
+	mergeSteps      []uint64
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, mergeSteps []uint64, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, mergeSteps: mergeSteps, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
 
 type Range struct {
@@ -2253,14 +2188,16 @@ type Range struct {
 func (r Range) From() uint64 { return r.from }
 func (r Range) To() uint64   { return r.to }
 
-func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+var MergeSteps = []uint64{500_000, 100_000, 10_000}
+
+func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		if r.to-r.from >= snaptype.Erigon2SegmentSize { // is complete .seg
+		if r.to-r.from >= snaptype.Erigon2MergeLimit { // is complete .seg
 			continue
 		}
 
-		for _, span := range []uint64{500_000, 100_000, 10_000} {
+		for _, span := range m.mergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
