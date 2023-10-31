@@ -2373,6 +2373,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	}
 	defer f.Close()
 
+	_, fName := filepath.Split(targetFile)
+	m.logger.Debug("[snapshots] merge", "file", fName)
+
 	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
 			g := d.MakeGetter()
