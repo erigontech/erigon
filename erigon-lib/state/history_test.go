@@ -857,6 +857,8 @@ func TestIterateChanged2(t *testing.T) {
 		}
 		testCases := []testCase{
 			{txNum: 0, k: "0100000000000001", v: ""},
+			{txNum: 99, k: "00000000000063", v: ""},
+			{txNum: 199, k: "00000000000063", v: "d1ce000000000383"},
 			{txNum: 900, k: "0100000000000001", v: "ff00000000000383"},
 			{txNum: 1000, k: "0100000000000001", v: "ff000000000003e7"},
 		}
@@ -1050,5 +1052,122 @@ func TestScanStaticFilesH(t *testing.T) {
 	h.integrityCheck = func(fromStep, toStep uint64) bool { return false }
 	h.scanStateFiles(files)
 	require.Equal(t, 0, h.files.Len())
+
+}
+
+func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
+	tb.Helper()
+	db, h := testDbAndHistory(tb, largeValues, logger)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	hc := h.MakeContext()
+	defer hc.Close()
+	hc.StartWrites()
+	defer hc.FinishWrites()
+
+	keys := [][]byte{
+		common.FromHex("00"),
+		common.FromHex("01"),
+		keyCommitmentState,
+		common.FromHex("a4dba136b5541817a78b160dd140190d9676d0f0"),
+		// common.FromHex("8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d"),
+		common.FromHex(""),
+		// []byte("cedce3c4eb5e0eedd505c33fd0f8c06d1ead96e63d6b3a27b5186e4901dce59e"),
+	}
+
+	txs := uint64(1000)
+	var prevVal [5][]byte
+	var flusher flusher
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		hc.SetTxNum(txNum)
+
+		for ik, k := range keys {
+			var v [8]byte
+			binary.BigEndian.PutUint64(v[:], txNum)
+			// if ik == 0 && txNum%33 == 0 {
+			// 	continue
+			// }
+			err = hc.AddPrevValue([]byte(k), nil, prevVal[ik])
+			require.NoError(tb, err)
+
+			prevVal[ik] = v[:]
+		}
+
+		// if txNum%33 == 0 {
+		// 	err = hc.AddPrevValue([]byte(keys[0]), nil, nil)
+		// 	require.NoError(tb, err)
+		// }
+
+		if flusher != nil {
+			err = flusher.Flush(ctx, tx)
+			require.NoError(tb, err)
+			flusher = nil
+		}
+		if txNum%10 == 0 {
+			flusher = hc.Rotate()
+		}
+	}
+	if flusher != nil {
+		err = flusher.Flush(ctx, tx)
+		require.NoError(tb, err)
+	}
+	err = hc.Rotate().Flush(ctx, tx)
+	require.NoError(tb, err)
+	err = tx.Commit()
+	require.NoError(tb, err)
+
+	return db, h, txs
+}
+
+func Test_HistoryIterate(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+
+		collateAndMergeHistory(t, db, h, txs)
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		var keys, vals []string
+		ic := h.MakeContext()
+		defer ic.Close()
+
+		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
+		require.NoError(err)
+
+		for iter.HasNext() {
+			k, v, err := iter.Next()
+			require.NoError(err)
+			keys = append(keys, fmt.Sprintf("%x", k))
+			vals = append(vals, fmt.Sprintf("%x", v))
+		}
+
+		writtenKeys := []string{
+			string(""),
+			string("00"),
+			string("01"),
+			fmt.Sprintf("%x", keyCommitmentState),
+			// string("8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d"),
+			string("a4dba136b5541817a78b160dd140190d9676d0f0"),
+		}
+		require.Equal(writtenKeys, keys)
+
+	}
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := writeSomeHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := writeSomeHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
 
 }

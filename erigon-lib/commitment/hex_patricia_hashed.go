@@ -815,21 +815,25 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) (bool, error) {
-	branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
+	if len(key) == 0 {
+		key = []byte("root")
+	}
+	branchData, err := hph.branchFn(key)
 	if err != nil {
 		return false, err
 	}
 	if hph.trace {
 		fmt.Printf("unfoldBranchNode [%x] depth %d, afterMap[%016b] touchMap[%016b]\n", hph.currentKey[:hph.currentKeyLen], depth, hph.afterMap[row], hph.touchMap[row])
 	}
-	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
+	if !hph.rootChecked && hph.currentKeyLen == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
-		if len(branchData) > 2 {
-			if err := hph.root.Decode(branchData[2:]); err != nil {
-				return false, fmt.Errorf("unwrap root: %w", err)
-			}
-		}
+		//if len(branchData) > 2 {
+		//	if err := hph.root.Decode(branchData[2:]); err != nil {
+		//		return false, fmt.Errorf("unwrap root: %w", err)
+		//	}
+		//}
 		return false, nil
 	}
 	if len(branchData) == 0 {
@@ -1364,13 +1368,13 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		if branchData, updateKey, err := hph.fold(); err != nil {
 			return nil, nil, fmt.Errorf("final fold: %w", err)
 		} else if branchData != nil {
+			if len(updateKey) == 0 {
+				updateKey = []byte("root")
+			}
 			branchNodeUpdates[string(updateKey)] = branchData
 		}
 	}
-	if ex, ok := branchNodeUpdates[""]; ok {
-		fmt.Printf("root prefix already updated by active rows: %x\n", ex)
-	}
-	branchNodeUpdates[""] = append([]byte{0, 1, 0, 1}, hph.root.Encode()...)
+	//branchNodeUpdates["root"] = append([]byte{0, 1, 0, 1}, hph.root.Encode()...)
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
@@ -1828,6 +1832,9 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 func hexToCompact(key []byte) []byte {
+	if len(key) == 0 {
+		return key
+	}
 	zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
 	bufLen := keyLen/2 + 1 // always > 0
 	buf := make([]byte, bufLen)

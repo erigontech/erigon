@@ -507,9 +507,9 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 		return rootHash, nil, err
 	}
 
-	if len(touchedKeys) > 1 {
-		d.patriciaTrie.Reset()
-	}
+	//if len(touchedKeys) > 1 {
+	//	d.patriciaTrie.Reset()
+	//}
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	d.patriciaTrie.SetTrace(trace)

@@ -922,15 +922,16 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			} else {
 				mergedOnce = true
 			}
-			//fmt.Printf("multi-way %s [%d] %x\n", ii.indexKeysTable, ci1.endTxNum, ci1.key)
+			// fmt.Printf("multi-way %s [%d] %x\n", ii.indexKeysTable, ci1.endTxNum, ci1.key)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(nil)
 				ci1.val, _ = ci1.dg.Next(nil)
-				//fmt.Printf("heap next push %s [%d] %x\n", ii.indexKeysTable, ci1.endTxNum, ci1.key)
+				// fmt.Printf("heap next push %s [%d] %x\n", ii.indexKeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
 		}
 		if keyBuf != nil {
+			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
 			if err = write.AddWord(keyBuf); err != nil {
 				return nil, err
 			}
@@ -939,9 +940,13 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 			}
 		}
 		keyBuf = append(keyBuf[:0], lastKey...)
+		if keyBuf == nil {
+			keyBuf = []byte{}
+		}
 		valBuf = append(valBuf[:0], lastVal...)
 	}
 	if keyBuf != nil {
+		// fmt.Printf("put %x->%x\n", keyBuf, valBuf)
 		if err = write.AddWord(keyBuf); err != nil {
 			return nil, err
 		}
@@ -1090,6 +1095,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 						return nil, nil, err
 					}
 				}
+				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.Next(nil)
