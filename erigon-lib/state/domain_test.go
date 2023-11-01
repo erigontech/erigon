@@ -30,6 +30,8 @@ import (
 	"time"
 
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/holiman/uint256"
@@ -1387,87 +1389,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	}
 }
 
-func TestDomain_Unwind(t *testing.T) {
-	db, d := testDbAndDomain(t, log.New())
-	ctx := context.Background()
-	defer d.Close()
-
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.aggregationStep = 16
-	maxTx := d.aggregationStep * 3
-
-	writeKeys := func(t *testing.T, dc *DomainContext, maxTx uint64) {
-		t.Helper()
-		dc.StartWrites()
-		defer dc.FinishWrites()
-		var preval1, preval2, preval3 []byte
-		for i := uint64(0); i < maxTx; i++ {
-			dc.SetTxNum(i)
-			if i&-i != i {
-				if i > 16 {
-					continue
-				}
-				if i%6 == 0 {
-					err = dc.DeleteWithPrev([]byte("key3"), nil, preval3)
-					require.NoError(t, err)
-					preval3 = nil
-
-					continue
-				}
-				v1 := []byte(fmt.Sprintf("value3.%d", i))
-				err = dc.PutWithPrev([]byte("key3"), nil, v1, preval3)
-				preval3 = v1
-				continue
-			}
-			v1 := []byte(fmt.Sprintf("value1.%d", i))
-			v2 := []byte(fmt.Sprintf("value2.%d", i))
-
-			err = dc.PutWithPrev([]byte("key1"), nil, v1, preval1)
-			require.NoError(t, err)
-
-			err = dc.PutWithPrev([]byte("key2"), nil, v2, preval2)
-			require.NoError(t, err)
-
-			preval1, preval2 = v1, v2
-		}
-		err = dc.Rotate().Flush(ctx, tx)
-		require.NoError(t, err)
-	}
-
-	dc := d.MakeContext()
-	writeKeys(t, dc, maxTx)
-
-	dc.StartWrites()
-	err = dc.Unwind(ctx, tx, 0, 9, maxTx, math.MaxUint64, nil)
-	require.NoError(t, err)
-	dc.FinishWrites()
-	dc.Close()
-
-	//db2, d2 := testDbAndDomain(t, log.New())
-	//defer d2.Close()
-	//
-	//tx2, err := db2.BeginRw(ctx)
-	//require.NoError(t, err)
-	//defer tx.Rollback()
-	//
-	//dc2 := d2.MakeContext()
-	//defer dc2.Close()
-	//
-	//dc2.IteratePrefix(tx2, []byte("key1"), func(k, v []byte) error {
-
-	ct := d.MakeContext()
-	err = ct.IteratePrefix(tx, nil, func(k, v []byte) error {
-		fmt.Printf("%s: %x\n", k, v)
-		return nil
-	})
-	require.NoError(t, err)
-	ct.Close()
-	return
-}
-
 type upd struct {
 	txNum uint64
 	value []byte
@@ -1699,5 +1620,243 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
+	}
+}
+
+func TestDomain_Unwind(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	defer d.Close()
+	defer db.Close()
+	ctx := context.Background()
+
+	d.aggregationStep = 16
+	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
+	maxTx := d.aggregationStep - 2
+
+	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
+		dc := d.MakeContext()
+		defer dc.Close()
+		t.Helper()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		dc.StartWrites()
+		defer dc.FinishWrites()
+		var preval1, preval2, preval3, preval4 []byte
+		for i := uint64(0); i < maxTx; i++ {
+			dc.SetTxNum(i)
+			if i%3 == 0 {
+				if i%12 == 0 {
+					err = dc.DeleteWithPrev([]byte("key3"), nil, preval3)
+					require.NoError(t, err)
+					preval3 = nil
+
+					continue
+				}
+				v3 := []byte(fmt.Sprintf("value3.%d", i))
+				err = dc.PutWithPrev([]byte("key3"), nil, v3, preval3)
+				preval3 = v3
+				continue
+			}
+			v1 := []byte(fmt.Sprintf("value1.%d", i))
+			v2 := []byte(fmt.Sprintf("value2.%d", i))
+			nv3 := []byte(fmt.Sprintf("valuen3.%d", i))
+
+			err = dc.PutWithPrev([]byte("key1"), nil, v1, preval1)
+			require.NoError(t, err)
+
+			err = dc.PutWithPrev([]byte("key2"), nil, v2, preval2)
+			require.NoError(t, err)
+			err = dc.PutWithPrev([]byte("k4"), nil, nv3, preval4)
+			require.NoError(t, err)
+
+			preval1, preval2, preval4 = v1, v2, nv3
+		}
+		err = dc.Rotate().Flush(ctx, tx)
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+	}
+
+	unwindAndCompare := func(t *testing.T, d *Domain, db kv.RwDB, unwindTo uint64) {
+		t.Helper()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		dc := d.MakeContext()
+		dc.StartWrites()
+		defer dc.FinishWrites()
+
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, math.MaxUint64, math.MaxUint64)
+		require.NoError(t, err)
+		dc.Close()
+		tx.Commit()
+
+		tmpDb, expected := testDbAndDomain(t, log.New())
+		defer expected.Close()
+		defer tmpDb.Close()
+		writeKeys(t, expected, tmpDb, unwindTo)
+
+		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
+		t.Run("DomainRangeLatest"+suf, func(t *testing.T) {
+			t.Helper()
+
+			etx, err := tmpDb.BeginRo(ctx)
+			defer etx.Rollback()
+			require.NoError(t, err)
+
+			utx, err := db.BeginRo(ctx)
+			defer utx.Rollback()
+			require.NoError(t, err)
+
+			ectx := expected.MakeContext()
+			defer ectx.Close()
+			uc := d.MakeContext()
+			defer uc.Close()
+			et, err := ectx.DomainRangeLatest(etx, nil, nil, -1)
+			require.NoError(t, err)
+
+			ut, err := uc.DomainRangeLatest(utx, nil, nil, -1)
+			require.NoError(t, err)
+
+			compareIterators(t, et, ut)
+
+		})
+		t.Run("DomainRange"+suf, func(t *testing.T) {
+			t.Helper()
+
+			etx, err := tmpDb.BeginRo(ctx)
+			defer etx.Rollback()
+			require.NoError(t, err)
+
+			utx, err := db.BeginRo(ctx)
+			defer utx.Rollback()
+			require.NoError(t, err)
+
+			ectx := expected.MakeContext()
+			defer ectx.Close()
+			uc := d.MakeContext()
+			defer uc.Close()
+			et, err := ectx.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			require.NoError(t, err)
+
+			ut, err := uc.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			require.NoError(t, err)
+
+			compareIterators(t, et, ut)
+
+		})
+		t.Run("WalkAsOf"+suf, func(t *testing.T) {
+			t.Helper()
+			t.Skip()
+
+			etx, err := tmpDb.BeginRo(ctx)
+			defer etx.Rollback()
+			require.NoError(t, err)
+
+			utx, err := db.BeginRo(ctx)
+			defer utx.Rollback()
+			require.NoError(t, err)
+
+			ectx := expected.MakeContext()
+			defer ectx.Close()
+			uc := d.MakeContext()
+			defer uc.Close()
+
+			et, err := ectx.hc.WalkAsOf(unwindTo-1, nil, nil, etx, -1)
+			require.NoError(t, err)
+
+			ut, err := uc.hc.WalkAsOf(unwindTo-1, nil, nil, utx, -1)
+			require.NoError(t, err)
+
+			compareIterators(t, et, ut)
+		})
+		t.Run("HistoryRange"+suf, func(t *testing.T) {
+			t.Helper()
+
+			etx, err := tmpDb.BeginRo(ctx)
+			defer etx.Rollback()
+			require.NoError(t, err)
+
+			utx, err := db.BeginRo(ctx)
+			defer utx.Rollback()
+			require.NoError(t, err)
+
+			ectx := expected.MakeContext()
+			defer ectx.Close()
+			uc := d.MakeContext()
+			defer uc.Close()
+
+			et, err := ectx.hc.HistoryRange(int(unwindTo), -1, order.Asc, -1, etx)
+			require.NoError(t, err)
+
+			ut, err := uc.hc.HistoryRange(int(unwindTo), -1, order.Asc, -1, utx)
+			require.NoError(t, err)
+
+			compareIterators(t, et, ut)
+		})
+		t.Run("IteratePrefix2"+suf, func(t *testing.T) {
+			t.Helper()
+
+			etx, err := tmpDb.BeginRo(ctx)
+			defer etx.Rollback()
+			require.NoError(t, err)
+
+			utx, err := db.BeginRo(ctx)
+			defer utx.Rollback()
+			require.NoError(t, err)
+
+			ectx := expected.MakeContext()
+			defer ectx.Close()
+			uc := d.MakeContext()
+			defer uc.Close()
+			et, err := ectx.IteratePrefix2(etx, nil, nil, -1)
+			require.NoError(t, err)
+
+			ut, err := uc.IteratePrefix2(utx, nil, nil, -1)
+			require.NoError(t, err)
+
+			for {
+				ek, ev, err1 := et.Next()
+				uk, uv, err2 := ut.Next()
+				require.EqualValues(t, err1, err2)
+				require.EqualValues(t, ek, uk)
+				require.EqualValues(t, ev, uv)
+				if !et.HasNext() {
+					require.False(t, ut.HasNext())
+					break
+				}
+			}
+
+		})
+	}
+
+	writeKeys(t, d, db, maxTx)
+	//unwindAndCompare(t, d, db, 14)
+	unwindAndCompare(t, d, db, 11)
+	unwindAndCompare(t, d, db, 10)
+	unwindAndCompare(t, d, db, 8)
+	unwindAndCompare(t, d, db, 6)
+	unwindAndCompare(t, d, db, 5)
+	unwindAndCompare(t, d, db, 2)
+	unwindAndCompare(t, d, db, 0)
+
+	return
+}
+
+func compareIterators(t *testing.T, et, ut iter.KV) {
+	t.Helper()
+
+	for {
+		ek, ev, err1 := et.Next()
+		uk, uv, err2 := ut.Next()
+		require.EqualValues(t, err1, err2)
+		require.EqualValues(t, ek, uk)
+		require.EqualValues(t, ev, uv)
+		if !et.HasNext() {
+			require.False(t, ut.HasNext())
+			break
+		}
 	}
 }

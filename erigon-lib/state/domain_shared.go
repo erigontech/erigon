@@ -132,16 +132,16 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 		return err
 	}
 
-	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
+	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
 	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
@@ -257,7 +257,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			txn = firstTxInBlock
 		}
 		if sd.trace {
-			fmt.Printf("[commitment] block tx range -%d |%d| %d\n", txsFromBlockBeginning, txn, lastTxInBlock-txn)
+			fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
 		}
 	} else {
 		blockNum = bn

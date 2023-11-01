@@ -1427,7 +1427,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64, f func(step uint64, k, v []byte) error) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64) error {
 	d := dc.d
 	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step, d.domainLargeValues)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
@@ -1438,7 +1438,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	seen := make(map[string]struct{})
 	restored := dc.newWriter(dc.d.dirs.Tmp, true, false)
 
-	dc.SetTxNum(txNumUnindTo)
+	dc.SetTxNum(txNumUnindTo - 1) // todo what if we actually had to decrease current step to provide correct update?
 	for histRng.HasNext() {
 		k, v, err := histRng.Next()
 		if err != nil {
@@ -1451,40 +1451,81 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		seen[string(k)] = struct{}{}
 	}
 
-	state, err := dc.IteratePrefix2(rwTx, nil, nil, -1)
+	keysCursor, err := dc.keysCursor(rwTx)
 	if err != nil {
 		return err
 	}
-	for state.HasNext() {
-		k, v, err := state.Next()
+	keysCursorForDeletes, err := rwTx.RwCursorDupSort(d.keysTable)
+	if err != nil {
+		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
+	}
+	defer keysCursorForDeletes.Close()
+
+	var valsC kv.RwCursor
+	var valsCDup kv.RwCursorDupSort
+	if d.domainLargeValues {
+		valsC, err = rwTx.RwCursor(d.valsTable)
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("[%s]un-iter %x ->'%x'\n", dc.d.filenameBase, k, v)
-		toRestore, needDelete, err := dc.hc.ifUnwindKey(k, txNumUnindTo-1, rwTx)
+		defer valsC.Close()
+	} else {
+		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
 		if err != nil {
-			return fmt.Errorf("unwind key %s %x: %w", d.filenameBase, k, err)
+			return err
 		}
-		if !needDelete && toRestore == nil {
-			toRestore = &HistoryRecord{Value: v}
+		defer valsCDup.Close()
+	}
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^step)
+	var k, v []byte
+
+	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
+		if !bytes.Equal(v, stepBytes) {
+			continue
 		}
-		if toRestore != nil {
-			_, ok := seen[string(k)]
-			if !ok {
-				if err := restored.addValue(k, nil, toRestore.Value); err != nil {
+		if _, replaced := seen[string(k)]; !replaced {
+			continue
+		}
+
+		if d.domainLargeValues {
+			kk, _, err := valsC.SeekExact(common.Append(k, stepBytes))
+			if err != nil {
+				return err
+			}
+			if kk != nil {
+				//fmt.Printf("[domain][%s] rm large value %x v %x\n", d.filenameBase, kk, vv)
+				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
-				//} else {
-				//fmt.Printf(" skip unwind %x\n", k)
 			}
-
-			//fmt.Printf("[domain][%s][toTx=%d] restore %x to txNum %d -> '%x'\n", d.filenameBase, txNumUnindTo, k, toRestore.TxNum, toRestore.Value)
+		} else {
+			_, err := valsCDup.SeekBothRange(k, stepBytes)
+			if err != nil {
+				return err
+			}
+			//fmt.Printf("[domain][%s] rm small value %x v %x\n", d.filenameBase, k, vv)
+			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
+				return err
+			}
 		}
+
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.Prune(ctx, rwTx, step, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
 	}
 	return restored.flush(ctx, rwTx)

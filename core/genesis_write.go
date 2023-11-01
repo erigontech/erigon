@@ -28,9 +28,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	state2 "github.com/ledgerwatch/erigon-lib/state"

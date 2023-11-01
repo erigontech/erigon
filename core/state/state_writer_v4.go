@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -35,7 +36,10 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 			return err
 		}
 	}
-	value, origValue := accounts.SerialiseV3(account), accounts.SerialiseV3(original)
+	value, origValue := accounts.SerialiseV3(account), []byte{}
+	if original.Initialised {
+		origValue = accounts.SerialiseV3(original)
+	}
 	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, value, origValue)
 }
 

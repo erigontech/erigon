@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/btree"
@@ -225,6 +226,7 @@ type DomainCommitted struct {
 	mode         CommitmentMode
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
+	justRestored atomic.Bool
 	discard      bool
 }
 
@@ -232,7 +234,6 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 	return &DomainCommitted{
 		Domain:       d,
 		mode:         mode,
-		trace:        false,
 		shortenKeys:  true,
 		updates:      NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
@@ -341,6 +342,7 @@ func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 		if err := hext.SetState(cs.trieState); err != nil {
 			return 0, 0, fmt.Errorf("failed restore state : %w", err)
 		}
+		d.justRestored.Store(true)
 		if d.trace {
 			rh, err := hext.RootHash()
 			if err != nil {
@@ -507,9 +509,9 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 		return rootHash, nil, err
 	}
 
-	//if len(touchedKeys) > 1 {
-	//	d.patriciaTrie.Reset()
-	//}
+	if !d.justRestored.Load() {
+		d.patriciaTrie.Reset()
+	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	d.patriciaTrie.SetTrace(trace)
@@ -530,6 +532,7 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 	default:
 		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
+	d.justRestored.Store(false)
 
 	return rootHash, branchNodeUpdates, err
 }
