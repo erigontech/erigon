@@ -178,15 +178,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var withdrawals []*types.Withdrawal
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
-	}
-
-	if withdrawals != nil {
-		wh := types.DeriveSha(types.Withdrawals(withdrawals))
-		header.WithdrawalsHash = &wh
-	}
-
-	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
-		return nil, err
+		if withdrawals != nil {
+			wh := types.DeriveSha(types.Withdrawals(withdrawals))
+			header.WithdrawalsHash = &wh
+		}
+		if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+			return nil, err
+		}
 	}
 
 	if version >= clparams.DenebVersion {
