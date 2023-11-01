@@ -162,7 +162,7 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName = snaptype.SegmentFileName(1_100_000, 1_200_000, snaptype.Transactions)
+	expectedFileName = snaptype.SegmentFileName(1_800_000, 1_900_000, snaptype.Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
