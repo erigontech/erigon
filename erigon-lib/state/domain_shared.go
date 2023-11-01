@@ -15,6 +15,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -191,6 +192,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx) ([]b
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchStorage)
 	}
 
+	sd.Commitment.Reset()
 	return sd.ComputeCommitment(ctx, true, false)
 }
 
@@ -199,36 +201,26 @@ func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blo
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	fromTx := uint64(0)
-	toTx := uint64(math2.MaxUint64)
+	fromTx, toTx := uint64(0), uint64(math2.MaxUint64)
 	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
 	if err != nil {
 		return 0, err
 	}
 	if !ok {
-		//TODO: implement me!
+		snapTxNum := utils.Max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
+		bn, txn, err = rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return 0, err
+		}
+		toTx := utils.Max64(snapTxNum, txn)
+		sd.SetBlockNum(bn)
+		sd.SetTxNum(ctx, toTx)
+		newRh, err := sd.rebuildCommitment(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 	}
-
-	// startingBlock := sd.BlockNum()
-	// startingTxnum := sd.TxNum()
-	// if bn != startingBlock || txn != startingTxnum {
-	// 	sd.Commitment.Reset()
-	// 	snapTxNum := utils.Min64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
-	// 	toTx := utils.Max64(snapTxNum, startingTxnum)
-	// 	if toTx > 0 {
-	// 		sd.SetTxNum(ctx, toTx)
-	// 		newRh, err := sd.rebuildCommitment(ctx, tx)
-	// 		if err != nil {
-	// 			return 0, err
-	// 		}
-	// 		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
-	// 	}
-	// 	bn, txn, err = rawdbv3.TxNums.Last(tx)
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-	// 	latestTxn := utils.Max64(txn, snapTxNum)
-	// }
 
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
 	if ok {
@@ -247,12 +239,14 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if sd.trace {
 			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
 		}
-		if txn == lastTxInBlock {
+		if txn == lastTxInBlock || txn+1 == lastTxInBlock {
 			blockNum++
+			txn = lastTxInBlock + 1
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
-			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			txsFromBlockBeginning = txn - firstTxInBlock
+			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
+			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
 		} else {
 			txn = firstTxInBlock
 		}
