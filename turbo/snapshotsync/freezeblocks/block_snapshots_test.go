@@ -95,6 +95,7 @@ func TestFindMergeRange(t *testing.T) {
 			{2_200_000, 2_300_000},
 			{2_300_000, 2_400_000},
 		}
+
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
 
