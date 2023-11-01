@@ -28,7 +28,26 @@ func WriteChunk(w io.Writer, buf []byte, t DataType) error {
 	return nil
 }
 
-func ReadChunk(r io.Reader) (buf []byte, t DataType, err error) {
+func ReadChunk(r io.Reader, out io.Writer) (t DataType, err error) {
+	prefix := make([]byte, 8)
+	if _, err := r.Read(prefix); err != nil {
+		return DataType(0), err
+	}
+	t = DataType(prefix[0])
+	prefix[0] = 0
+
+	bufLen := binary.BigEndian.Uint64(prefix)
+	if bufLen == 0 {
+		return
+	}
+
+	if _, err = io.CopyN(out, r, int64(bufLen)); err != nil {
+		return
+	}
+	return
+}
+
+func ReadChunkToBytes(r io.Reader) (b []byte, t DataType, err error) {
 	prefix := make([]byte, 8)
 	if _, err := r.Read(prefix); err != nil {
 		return nil, DataType(0), err
@@ -40,8 +59,9 @@ func ReadChunk(r io.Reader) (buf []byte, t DataType, err error) {
 	if bufLen == 0 {
 		return
 	}
-	buf = make([]byte, binary.BigEndian.Uint64(prefix))
-	if _, err = r.Read(buf); err != nil {
+	b = make([]byte, bufLen)
+
+	if _, err = r.Read(b); err != nil {
 		return
 	}
 	return

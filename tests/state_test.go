@@ -29,10 +29,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestState(t *testing.T) {

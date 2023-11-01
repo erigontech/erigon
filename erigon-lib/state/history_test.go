@@ -1136,7 +1136,7 @@ func Test_HistoryIterate(t *testing.T) {
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		var keys, vals []string
+		var keys []string
 		ic := h.MakeContext()
 		defer ic.Close()
 
@@ -1144,10 +1144,10 @@ func Test_HistoryIterate(t *testing.T) {
 		require.NoError(err)
 
 		for iter.HasNext() {
-			k, v, err := iter.Next()
+			k, _, err := iter.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
-			vals = append(vals, fmt.Sprintf("%x", v))
+			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
 		writtenKeys := []string{

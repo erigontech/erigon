@@ -57,6 +57,24 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 	}
 }
 
+func TestFindMergeRange(t *testing.T) {
+	t.Run("big", func(t *testing.T) {
+		merger := NewMerger("x", 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, nil)
+		var ranges []Range
+		for i := 0; i < 24; i++ {
+			ranges = append(ranges, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+		}
+		found := merger.FindMergeRanges(ranges)
+
+		var expect []Range
+		for i := 0; i < 4; i++ {
+			expect = append(expect, Range{from: uint64(i * snaptype.Erigon2MergeLimit), to: uint64((i + 1) * snaptype.Erigon2MergeLimit)})
+		}
+		require.Equal(t, expect, found)
+	})
+
+}
+
 func TestMergeSnapshots(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -67,15 +85,15 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	N := uint64(7)
-	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+	createFile(0, snaptype.Erigon2MergeLimit)
+	for i := uint64(snaptype.Erigon2MergeLimit); i < snaptype.Erigon2MergeLimit+N*100_000; i += 100_000 {
 		createFile(i, i+100_000)
 	}
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) > 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
@@ -90,7 +108,7 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil, logger)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) == 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)

@@ -78,11 +78,12 @@ func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValu
 	}
 	return events
 }
-func (cr Reader) BorSpan(spanId uint64) []byte {
-	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
-	if err != nil {
-		log.Error("BorSpan failed", "err", err)
-		return nil
-	}
-	return span
-}
+
+//func (cr Reader) BorSpan(spanId uint64) []byte {
+//	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
+//	if err != nil {
+//		log.Error("BorSpan failed", "err", err)
+//		return nil
+//	}
+//	return span
+//}

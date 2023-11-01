@@ -653,10 +653,11 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	if block == nil {
 		return nil
 	}
+	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
 	if histV3 {
-		_, _ = engine.Author(block.HeaderNoCopy())
 		return nil
 	}
+
 	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {

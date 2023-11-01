@@ -2,8 +2,10 @@ package devnet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"sync"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	p2p_enode "github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	enode "github.com/ledgerwatch/erigon/turbo/node"
@@ -25,8 +28,11 @@ type Node interface {
 	requests.RequestGenerator
 	Name() string
 	ChainID() *big.Int
+	GetHttpPort() int
+	GetEnodeURL() string
 	Account() *accounts.Account
 	IsBlockProducer() bool
+	Configure(baseNode args.Node, nodeNumber int) (interface{}, error)
 }
 
 type NodeSelector interface {
@@ -98,6 +104,10 @@ func (n *node) done() {
 	}
 }
 
+func (n *node) Configure(args.Node, int) (interface{}, error) {
+	return nil, errors.New("N/A")
+}
+
 func (n *node) IsBlockProducer() bool {
 	_, isBlockProducer := n.args.(args.BlockProducer)
 	return isBlockProducer
@@ -125,6 +135,15 @@ func (n *node) ChainID() *big.Int {
 	}
 
 	return nil
+}
+
+func (n *node) GetHttpPort() int {
+	return n.nodeCfg.HTTPPort
+}
+
+func (n *node) GetEnodeURL() string {
+	port := n.nodeCfg.P2P.ListenPort()
+	return p2p_enode.NewV4(&n.nodeCfg.P2P.PrivateKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
 }
 
 // run configures, creates and serves an erigon node

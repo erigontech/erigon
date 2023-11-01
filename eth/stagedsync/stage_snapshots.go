@@ -120,7 +120,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, snapshotsync.NoCaplin, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
 

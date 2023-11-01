@@ -1634,9 +1634,9 @@ func TestDomain_Unwind(t *testing.T) {
 	maxTx := d.aggregationStep - 2
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
+		t.Helper()
 		dc := d.MakeContext()
 		defer dc.Close()
-		t.Helper()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -1655,6 +1655,7 @@ func TestDomain_Unwind(t *testing.T) {
 				}
 				v3 := []byte(fmt.Sprintf("value3.%d", i))
 				err = dc.PutWithPrev([]byte("key3"), nil, v3, preval3)
+				require.NoError(t, err)
 				preval3 = v3
 				continue
 			}

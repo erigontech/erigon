@@ -1,11 +1,16 @@
 package args
 
 import (
+	"crypto/ecdsa"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"net"
 	"path/filepath"
 	"strconv"
+
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
@@ -44,7 +49,11 @@ type Node struct {
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
 	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
+
+	NodeKey    *ecdsa.PrivateKey `arg:"-"`
+	NodeKeyHex string            `arg:"--nodekeyhex" json:"nodekeyhex,omitempty"`
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
@@ -62,13 +71,18 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 
 	node.StaticPeers = base.StaticPeers
 
+	var err error
+	node.NodeKey, err = crypto.GenerateKey()
+	if err != nil {
+		return err
+	}
+	node.NodeKeyHex = hex.EncodeToString(crypto.FromECDSA(node.NodeKey))
+
 	node.Metrics = base.Metrics
 	node.MetricsPort = base.MetricsPort
 	node.MetricsAddr = base.MetricsAddr
 
 	node.Snapshots = base.Snapshots
-
-	var err error
 
 	node.PrivateApiAddr, _, err = portFromBase(base.PrivateApiAddr, nodeNumber, 1)
 
@@ -86,11 +100,22 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 
 	node.Port = base.Port + nodeNumber
 
+	node.WithHeimdallMilestones = base.WithHeimdallMilestones
+
 	return nil
 }
 
-func (node Node) ChainID() *big.Int {
+func (node *Node) ChainID() *big.Int {
 	return &big.Int{}
+}
+
+func (node *Node) GetHttpPort() int {
+	return node.HttpPort
+}
+
+func (node *Node) GetEnodeURL() string {
+	port := node.Port
+	return enode.NewV4(&node.NodeKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
 }
 
 type BlockProducer struct {
@@ -105,11 +130,10 @@ type BlockProducer struct {
 	account         *accounts.Account
 }
 
-func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (m *BlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, error) {
 	err := m.configure(baseNode, nodeNumber)
-
 	if err != nil {
-		return -1, nil, err
+		return nil, err
 	}
 
 	switch m.Chain {
@@ -131,18 +155,18 @@ func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{
 		m.Etherbase = m.account.Address.Hex()
 	}
 
-	return m.HttpPort, m, nil
+	return m, nil
 }
 
-func (n BlockProducer) Name() string {
+func (n *BlockProducer) Name() string {
 	return n.Node.Name
 }
 
-func (n BlockProducer) Account() *accounts.Account {
+func (n *BlockProducer) Account() *accounts.Account {
 	return n.account
 }
 
-func (n BlockProducer) IsBlockProducer() bool {
+func (n *BlockProducer) IsBlockProducer() bool {
 	return true
 }
 
@@ -153,25 +177,24 @@ type NonBlockProducer struct {
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
 }
 
-func (n NonBlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (n *NonBlockProducer) Configure(baseNode Node, nodeNumber int) (interface{}, error) {
 	err := n.configure(baseNode, nodeNumber)
-
 	if err != nil {
-		return -1, nil, err
+		return nil, err
 	}
 
-	return n.HttpPort, n, nil
+	return n, nil
 }
 
-func (n NonBlockProducer) Name() string {
+func (n *NonBlockProducer) Name() string {
 	return n.Node.Name
 }
 
-func (n NonBlockProducer) IsBlockProducer() bool {
+func (n *NonBlockProducer) IsBlockProducer() bool {
 	return false
 }
 
-func (n NonBlockProducer) Account() *accounts.Account {
+func (n *NonBlockProducer) Account() *accounts.Account {
 	return nil
 }
 

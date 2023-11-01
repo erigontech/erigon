@@ -357,8 +357,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
-		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
-		Dirs:    cfg.Dirs,
+		Enabled:           ctx.Bool(utils.HTTPEnabledFlag.Name),
+		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
+		Dirs:              cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
@@ -332,7 +334,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					DataDir:            dataDir,
 					Chain:              networkname.BorDevnetChainName,
 					Logger:             logger,
-					BasePort:           30303,
+					BasePort:           40303,
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        baseRpcHost,
 					BaseRPCPort:        baseRpcPort,
@@ -344,7 +346,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -352,7 +354,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -364,11 +366,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 		} else {
 			var heimdallGrpc string
 			var services []devnet.Service
+			var withMilestones = utils.WithHeimdallMilestones.Value
 
 			checkpointOwner := accounts.NewAccount("checkpoint-owner")
 
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
+				// milestones are not supported yet on the local heimdall
+				withMilestones = false
 
 				if sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name)); sprintSize > 0 {
 					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
@@ -389,17 +394,18 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					DataDir:            dataDir,
 					Chain:              networkname.BorDevnetChainName,
 					Logger:             logger,
-					BasePort:           30303,
+					BasePort:           40303,
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        baseRpcHost,
 					BaseRPCPort:        baseRpcPort,
 					BorStateSyncDelay:  5 * time.Second,
+					BorWithMilestones:  &withMilestones,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -407,7 +413,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -415,7 +421,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},
-						/*args.BlockProducer{
+						/*&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -423,7 +429,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							},
 							AccountSlots: 200,
 						},*/
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -439,14 +445,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePort:           30403,
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        baseRpcHost,
-					BaseRPCPort:        baseRpcPort,
+					BaseRPCPort:        baseRpcPort + 1000,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
 						checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
 					},
 					Nodes: []devnet.Node{
-						args.BlockProducer{
+						&args.BlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
@@ -456,7 +462,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							DevPeriod:    5,
 							AccountSlots: 200,
 						},
-						args.NonBlockProducer{
+						&args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "3",
@@ -482,14 +488,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					account_services.NewFaucet(networkname.DevChainName, faucetSource),
 				},
 				Nodes: []devnet.Node{
-					args.BlockProducer{
+					&args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
-					args.NonBlockProducer{
+					&args.NonBlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
