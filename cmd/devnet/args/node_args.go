@@ -49,7 +49,7 @@ type NodeArgs struct {
 	MetricsAddr               string `arg:"--metrics.addr" json:"metrics.addr,omitempty"`
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
-	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	HeimdallGrpcAddr          string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
 	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 
@@ -124,6 +124,11 @@ func (node *NodeArgs) GetHttpPort() int {
 func (node *NodeArgs) GetEnodeURL() string {
 	port := node.Port
 	return enode.NewV4(&node.NodeKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
+}
+
+func (node *NodeArgs) EnableMetrics(port int) {
+	node.Metrics = true
+	node.MetricsPort = port
 }
 
 type BlockProducer struct {
