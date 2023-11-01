@@ -485,7 +485,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	fmt.Println(blockReader.FrozenBlocks())
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
@@ -622,7 +621,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// intiialize engine backend
 	var engine *execution_client.ExecutionClientDirect
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, freezeblocks.MergeSteps, backend.chainDB, backend.notifications.Events, logger)
 
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 

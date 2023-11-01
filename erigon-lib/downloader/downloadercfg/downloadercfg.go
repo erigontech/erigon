@@ -29,6 +29,7 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
@@ -59,7 +60,7 @@ type Cfg struct {
 
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
-	torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
+	torrentConfig.PieceHashersPerTorrent = cmp.Max(1, runtime.NumCPU()-1)
 
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
