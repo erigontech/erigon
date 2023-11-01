@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -98,7 +99,9 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	}()
 
 	if err := provider.StartDiagnostics(ctx); err != nil {
-		logger.Warn("Diagnostic provider failed", "type", infoType, "err", err)
+		if !errors.Is(err, context.Canceled) {
+			logger.Warn("Diagnostic provider failed", "type", infoType, "err", err)
+		}
 	}
 }
 
@@ -109,7 +112,12 @@ func Send[I Info](ctx context.Context, info I) error {
 
 	cval := ctx.Value(ckChan)
 	if c, ok := cval.(chan I); ok {
-		c <- info
+		select {
+		case c <- info:
+		default:
+			// drop the diagnostic message if the receiver is busy
+			// so the sender is not blocked on non critcal actions
+		}
 	} else {
 		return fmt.Errorf("unexpected channel type: %T", cval)
 	}
@@ -123,7 +131,11 @@ func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I
 	ctx, cancel := context.WithCancel(ctx)
 
 	return ctx, ch, func() {
-		close(ch)
+		if ch != nil {
+			toClose := ch
+			ch = nil
+			close(toClose)
+		}
 		cancel()
 	}
 }
