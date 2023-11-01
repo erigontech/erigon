@@ -1625,7 +1625,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	case networkname.DevChainName:
 		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 1337
+			cfg.NetworkID = params.NetworkIDByChainName(chain)
 		}
 
 		// Create new developer account or reuse existing one
