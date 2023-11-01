@@ -55,6 +55,7 @@ const (
 	bucketIPLimit, bucketSubnet = 2, 24 // at most 2 addresses from the same /24
 	tableIPLimit, tableSubnet   = 10, 24
 
+	minRefreshInterval = 30 * time.Second
 	refreshInterval    = 30 * time.Minute
 	revalidateInterval = 5 * time.Second
 	copyNodesInterval  = 30 * time.Second
@@ -245,6 +246,14 @@ func (tab *Table) loop() {
 	// Start initial refresh.
 	go tab.doRefresh(refreshDone)
 
+	var minRefreshTimer *time.Timer
+
+	defer func() {
+		if minRefreshTimer != nil {
+			minRefreshTimer.Stop()
+		}
+	}()
+
 loop:
 	for {
 		select {
@@ -270,6 +279,12 @@ loop:
 			go tab.doRevalidate(revalidateDone)
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
+			if tab.len() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
+					minRefreshTimer = nil
+					tab.refresh()
+				})
+			}
 			revalidateDone = nil
 		case <-copyNodes.C:
 			go tab.copyLiveNodes()

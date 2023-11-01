@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
@@ -50,7 +51,7 @@ func RegisterProvider(provider Provider, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 	defer providerMutex.Unlock()
 
-	reg, _ := providers[infoType]
+	reg := providers[infoType]
 
 	if reg != nil {
 		for _, p := range reg.providers {
@@ -73,13 +74,10 @@ func RegisterProvider(provider Provider, infoType Type, logger log.Logger) {
 func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 
-	reg, _ := providers[infoType]
+	reg := providers[infoType]
 
 	toStart := make([]Provider, len(reg.providers))
-
-	for i, provider := range reg.providers {
-		toStart[i] = provider
-	}
+	copy(toStart, reg.providers)
 
 	reg.context = ctx
 
@@ -107,16 +105,23 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 
 func Send[I Info](ctx context.Context, info I) error {
 	if ctx.Err() != nil {
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
+
 		return ctx.Err()
 	}
 
 	cval := ctx.Value(ckChan)
-	if c, ok := cval.(chan I); ok {
-		select {
-		case c <- info:
-		default:
-			// drop the diagnostic message if the receiver is busy
-			// so the sender is not blocked on non critcal actions
+
+	if cp, ok := cval.(*atomic.Pointer[chan I]); ok {
+		if c := (*cp).Load(); c != nil {
+			select {
+			case *c <- info:
+			default:
+				// drop the diagnostic message if the receiver is busy
+				// so the sender is not blocked on non critcal actions
+			}
 		}
 	} else {
 		return fmt.Errorf("unexpected channel type: %T", cval)
@@ -126,16 +131,20 @@ func Send[I Info](ctx context.Context, info I) error {
 }
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
-	ch := make(chan I, buffer)
-	ctx = context.WithValue(ctx, ckChan, ch)
+	c := make(chan I, buffer)
+	cp := atomic.Pointer[chan I]{}
+	cp.Store(&c)
+
+	ctx = context.WithValue(ctx, ckChan, &cp)
 	ctx, cancel := context.WithCancel(ctx)
 
-	return ctx, ch, func() {
-		if ch != nil {
-			toClose := ch
-			ch = nil
-			close(toClose)
-		}
+	return ctx, *cp.Load(), func() {
 		cancel()
+
+		if cp.CompareAndSwap(&c, nil) {
+			ch := c
+			c = nil
+			close(ch)
+		}
 	}
 }
