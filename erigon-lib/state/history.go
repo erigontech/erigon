@@ -2040,17 +2040,15 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		// firstKey, _, err := hi.valsC.First()
-		// if err != nil {
-		// 	return err
-		// }
-		// firstKey :=
-		// if firstKey == nil {
-		// 	hi.nextKey = nil
-		// 	return nil
-		// }
-		// seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
-		seek = common.Copy(hi.startTxKey[:])
+		firstKey, _, err := hi.valsC.First()
+		if err != nil {
+			return err
+		}
+		if firstKey == nil {
+			hi.nextKey = nil
+			return nil
+		}
+		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
@@ -2059,9 +2057,6 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 		}
 
 		seek = append(next, hi.startTxKey[:]...)
-	}
-	for k, v, err := hi.valsC.First(); k != nil && err == nil; k, v, err = hi.valsC.Next() {
-		fmt.Printf("first [seek=%x] %x %x\n", seek, k, v)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
@@ -2087,13 +2082,13 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 					hi.nextKey = nil
 					return nil
 				}
-				fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
+				//fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
 				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
 					break
 				}
 			}
 		}
-		fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
 
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
 			if len(seek) != len(k) {
