@@ -499,8 +499,6 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 		from--
 	}
 
-	hd.logger.Debug("[downloader] Request skeleton", "anchors", len(hd.anchors), "highestInDb", hd.highestInDb, "from", from, "length", length)
-
 	return &HeaderRequest{Number: from, Length: length, Skip: stride, Reverse: false}
 }
 
