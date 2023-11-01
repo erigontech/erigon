@@ -35,7 +35,7 @@ const (
 )
 
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.DownloadRequest {
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.AllSnapshotTypes))}
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path != "" {
 			if r.TorrentHash != "" {
@@ -50,13 +50,13 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 			}
 		} else {
 			if r.Bor {
-				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+				for _, t := range snaptype.BorSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
 				}
 			} else {
-				for _, t := range snaptype.AllSnapshotTypes {
+				for _, t := range snaptype.BlockSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
