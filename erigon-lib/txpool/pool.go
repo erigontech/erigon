@@ -1731,7 +1731,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							localTxHashes = append(localTxHashes, hash...)
 
 							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
-							if t != types.BlobTxType && len(slotRlp) < txMaxBroadcastSize {
+							if t != types.BlobTxType {
 								localTxRlps = append(localTxRlps, slotRlp)
 								broadCastedHashes = append(broadCastedHashes, hash...)
 							}
