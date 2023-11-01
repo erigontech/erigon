@@ -1933,6 +1933,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 			if err != nil {
 				return nil, false, fmt.Errorf("GetLatest value: %w", err)
 			}
+			if len(v) >= 8 {
+				v = v[8:]
+			}
 		}
 
 		//LatestStateReadDB.UpdateDuration(t)
