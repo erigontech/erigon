@@ -8,12 +8,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"io"
 	"math/big"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -432,6 +433,8 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
+	hd.logger.Debug("[downloader] Request header", "numer", anchor.blockHeight-1, "length", 192)
+
 	// Request ancestors
 	request = &HeaderRequest{
 		Anchor:  anchor,
@@ -482,7 +485,7 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime time.T
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	hd.logger.Debug("[downloader] Request skeleton", "anchors", len(hd.anchors), "highestInDb", hd.highestInDb)
+
 	var stride uint64
 	if hd.initialCycle {
 		stride = 192
@@ -495,6 +498,9 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	} else {
 		from--
 	}
+
+	hd.logger.Debug("[downloader] Request skeleton", "anchors", len(hd.anchors), "highestInDb", hd.highestInDb, "from", from, "length", length)
+
 	return &HeaderRequest{Number: from, Length: length, Skip: stride, Reverse: false}
 }
 
