@@ -69,13 +69,9 @@ func TestFindMergeRange(t *testing.T) {
 		expect := []Range{
 			{0, 500_000},
 			{500_000, 1_000_000},
-			{1_000_000, 1_100_000},
-			{1_100_000, 1_200_000},
-			{1_200_000, 1_300_000},
-			{1_300_000, 1_400_000},
-			{1_400_000, 1_500_000},
+			{1_000_000, 1_500_000},
 		}
-		require.Equal(t, expect, found)
+		require.Equal(t, Ranges(expect).String(), Ranges(found).String())
 	})
 
 	t.Run("small", func(t *testing.T) {
