@@ -275,13 +275,16 @@ loop:
 			}
 			waiting, refreshDone = nil, nil
 		case <-revalidate.C:
-			revalidateDone = make(chan struct{})
-			go tab.doRevalidate(revalidateDone)
+			if revalidateDone == nil {
+				revalidateDone = make(chan struct{})
+				go tab.doRevalidate(revalidateDone)
+			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
-			if tab.len() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
 					minRefreshTimer = nil
+					tab.seedRand()
 					tab.refresh()
 				})
 			}
@@ -289,9 +292,11 @@ loop:
 		case <-tableMainenance.C:
 			live := tab.live()
 			tab.log.Debug("[p2p] Discovery table", "len", tab.len(), "live", tab.live())
-			if live == 0 {
-				tab.seedRand()
-				tab.refresh()
+			if live != 0 {
+				if revalidateDone == nil {
+					revalidateDone = make(chan struct{})
+					go tab.doRevalidate(revalidateDone)
+				}
 			} else {
 				go tab.copyLiveNodes()
 			}
