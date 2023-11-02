@@ -55,13 +55,13 @@ const (
 	bucketIPLimit, bucketSubnet = 2, 24 // at most 2 addresses from the same /24
 	tableIPLimit, tableSubnet   = 10, 24
 
-	minRefreshInterval = 30 * time.Second
-	refreshInterval    = 30 * time.Minute
-	revalidateInterval = 5 * time.Second
-	copyNodesInterval  = 30 * time.Second
-	seedMinTableTime   = 5 * time.Minute
-	seedCount          = 30
-	seedMaxAge         = 5 * 24 * time.Hour
+	minRefreshInterval  = 30 * time.Second
+	refreshInterval     = 30 * time.Minute
+	revalidateInterval  = 5 * time.Second
+	maintenanceInterval = 30 * time.Second
+	seedMinTableTime    = 5 * time.Minute
+	seedCount           = 30
+	seedMaxAge          = 5 * 24 * time.Hour
 )
 
 // Table is the 'node table', a Kademlia-like index of neighbor nodes. The table keeps
@@ -231,17 +231,17 @@ func (tab *Table) refresh() <-chan struct{} {
 // loop schedules runs of doRefresh, doRevalidate and copyLiveNodes.
 func (tab *Table) loop() {
 	var (
-		revalidate     = time.NewTimer(tab.revalidateInterval)
-		refresh        = time.NewTicker(refreshInterval)
-		copyNodes      = time.NewTicker(copyNodesInterval)
-		refreshDone    = make(chan struct{})           // where doRefresh reports completion
-		revalidateDone chan struct{}                   // where doRevalidate reports completion
-		waiting        = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
+		revalidate      = time.NewTimer(tab.revalidateInterval)
+		refresh         = time.NewTicker(refreshInterval)
+		tableMainenance = time.NewTicker(maintenanceInterval)
+		refreshDone     = make(chan struct{})           // where doRefresh reports completion
+		revalidateDone  chan struct{}                   // where doRevalidate reports completion
+		waiting         = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
 	)
 	defer debug.LogPanic()
 	defer refresh.Stop()
 	defer revalidate.Stop()
-	defer copyNodes.Stop()
+	defer tableMainenance.Stop()
 
 	// Start initial refresh.
 	go tab.doRefresh(refreshDone)
@@ -286,7 +286,8 @@ loop:
 				})
 			}
 			revalidateDone = nil
-		case <-copyNodes.C:
+		case <-tableMainenance.C:
+			tab.log.Trace("[p2p] V4 Discovery table", "len", tab.len(), tab.live())
 			go tab.copyLiveNodes()
 		case <-tab.closeReq:
 			break loop
@@ -456,6 +457,21 @@ func (tab *Table) len() (n int) {
 	for _, b := range &tab.buckets {
 		n += len(b.entries)
 	}
+	return n
+}
+
+func (tab *Table) live() (n int) {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	for _, b := range &tab.buckets {
+		for _, e := range b.entries {
+			if e.livenessChecks > 0 {
+				n++
+			}
+		}
+	}
+
 	return n
 }
 
