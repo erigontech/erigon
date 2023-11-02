@@ -284,7 +284,7 @@ loop:
 			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
 					minRefreshTimer = nil
-					tab.seedRand()
+					tab.net.lookupRandom()
 					tab.refresh()
 				})
 			}
