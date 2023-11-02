@@ -590,7 +590,11 @@ func (t *UDPv4) handleUnhandled(unhandled chan<- ReadPacket) {
 				fromId := enode.PubkeyEncoded(fromKey).ID()
 
 				t.log.Trace("Unsolicited packet", "from", fromId, "addr", u.Addr)
-				t.sendPing(fromId, u.Addr, nil)
+				t.sendPing(fromId, u.Addr, func() {
+					if key, err := v4wire.DecodePubkey(crypto.S256(), fromKey); err == nil {
+						t.LookupPubkey(key)
+					}
+				})
 			} else {
 				t.log.Trace("Unsolicited packet handling fialed", "addr", u.Addr, "err", err)
 			}
