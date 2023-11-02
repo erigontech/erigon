@@ -2,10 +2,8 @@ package devnet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"sync"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	p2p_enode "github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	enode "github.com/ledgerwatch/erigon/turbo/node"
@@ -26,13 +23,13 @@ import (
 
 type Node interface {
 	requests.RequestGenerator
-	Name() string
+	GetName() string
 	ChainID() *big.Int
 	GetHttpPort() int
 	GetEnodeURL() string
 	Account() *accounts.Account
 	IsBlockProducer() bool
-	Configure(baseNode args.Node, nodeNumber int) (interface{}, error)
+	Configure(baseNode args.NodeArgs, nodeNumber int) error
 }
 
 type NodeSelector interface {
@@ -46,7 +43,7 @@ func (f NodeSelectorFunc) Test(ctx context.Context, node Node) bool {
 }
 
 func HTTPHost(n Node) string {
-	if n, ok := n.(*node); ok {
+	if n, ok := n.(*devnetNode); ok {
 		host := n.nodeCfg.Http.HttpListenAddress
 
 		if host == "" {
@@ -59,10 +56,10 @@ func HTTPHost(n Node) string {
 	return ""
 }
 
-type node struct {
+type devnetNode struct {
 	sync.Mutex
 	requests.RequestGenerator
-	args     interface{}
+	nodeArgs Node
 	wg       *sync.WaitGroup
 	network  *Network
 	startErr chan error
@@ -71,7 +68,7 @@ type node struct {
 	ethNode  *enode.ErigonNode
 }
 
-func (n *node) Stop() {
+func (n *devnetNode) Stop() {
 	var toClose *enode.ErigonNode
 
 	n.Lock()
@@ -88,13 +85,13 @@ func (n *node) Stop() {
 	n.done()
 }
 
-func (n *node) running() bool {
+func (n *devnetNode) running() bool {
 	n.Lock()
 	defer n.Unlock()
 	return n.startErr == nil && n.ethNode != nil
 }
 
-func (n *node) done() {
+func (n *devnetNode) done() {
 	n.Lock()
 	defer n.Unlock()
 	if n.wg != nil {
@@ -104,50 +101,36 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) Configure(args.Node, int) (interface{}, error) {
-	return nil, errors.New("N/A")
-}
-
-func (n *node) IsBlockProducer() bool {
-	_, isBlockProducer := n.args.(args.BlockProducer)
-	return isBlockProducer
-}
-
-func (n *node) Account() *accounts.Account {
-	if miner, ok := n.args.(args.BlockProducer); ok {
-		return miner.Account()
-	}
-
+func (n *devnetNode) Configure(args.NodeArgs, int) error {
 	return nil
 }
 
-func (n *node) Name() string {
-	if named, ok := n.args.(interface{ Name() string }); ok {
-		return named.Name()
-	}
-
-	return ""
+func (n *devnetNode) IsBlockProducer() bool {
+	return n.nodeArgs.IsBlockProducer()
 }
 
-func (n *node) ChainID() *big.Int {
-	if n.ethCfg != nil {
-		return n.ethCfg.Genesis.Config.ChainID
-	}
-
-	return nil
+func (n *devnetNode) Account() *accounts.Account {
+	return n.nodeArgs.Account()
 }
 
-func (n *node) GetHttpPort() int {
-	return n.nodeCfg.HTTPPort
+func (n *devnetNode) GetName() string {
+	return n.nodeArgs.GetName()
 }
 
-func (n *node) GetEnodeURL() string {
-	port := n.nodeCfg.P2P.ListenPort()
-	return p2p_enode.NewV4(&n.nodeCfg.P2P.PrivateKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
+func (n *devnetNode) ChainID() *big.Int {
+	return n.nodeArgs.ChainID()
+}
+
+func (n *devnetNode) GetHttpPort() int {
+	return n.nodeArgs.GetHttpPort()
+}
+
+func (n *devnetNode) GetEnodeURL() string {
+	return n.nodeArgs.GetEnodeURL()
 }
 
 // run configures, creates and serves an erigon node
-func (n *node) run(ctx *cli.Context) error {
+func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux

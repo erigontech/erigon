@@ -235,18 +235,24 @@ func (m *Mapmutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	m.puts = map[string]map[string][]byte{}
 	m.size = 0
 	m.count = 0
-	m.clean()
 	return nil
 }
 
 func (m *Mapmutation) Close() {
+	if m.clean == nil {
+		return
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts = map[string]map[string][]byte{}
 	m.size = 0
 	m.count = 0
 	m.size = 0
+
 	m.clean()
+	m.clean = nil
+
 }
 func (m *Mapmutation) Commit() error { panic("not db txn, use .Flush method") }
 func (m *Mapmutation) Rollback()     { panic("not db txn, use .Close method") }

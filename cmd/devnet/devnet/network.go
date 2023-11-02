@@ -2,11 +2,9 @@ package devnet
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"math/big"
-	"net"
 	"os"
 	"reflect"
 	"strings"
@@ -15,7 +13,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -63,7 +60,7 @@ func (nw *Network) Start(ctx context.Context) error {
 		}
 	}
 
-	baseNode := args.Node{
+	baseNode := args.NodeArgs{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
 		Port:           nw.BasePort,
@@ -84,7 +81,7 @@ func (nw *Network) Start(ctx context.Context) error {
 	metricsNode := cliCtx.Int("metrics.node")
 	nw.namedNodes = map[string]Node{}
 
-	for i, nodeConfig := range nw.Nodes {
+	for i, nodeArgs := range nw.Nodes {
 		{
 			base := baseNode
 			if metricsEnabled && metricsNode == i {
@@ -93,24 +90,21 @@ func (nw *Network) Start(ctx context.Context) error {
 			}
 			base.StaticPeers = strings.Join(nw.peers, ",")
 
-			argsObj, err := nodeConfig.Configure(base, i)
+			err := nodeArgs.Configure(base, i)
 			if err != nil {
 				nw.Stop()
 				return err
 			}
 
-			nodePort := nodeConfig.GetHttpPort()
-			nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort)
-
-			node, err := nw.createNode(nodeAddr, argsObj)
+			node, err := nw.createNode(nodeArgs)
 			if err != nil {
 				nw.Stop()
 				return err
 			}
 
 			nw.Nodes[i] = node
-			nw.namedNodes[node.Name()] = node
-			nw.peers = append(nw.peers, nodeConfig.GetEnodeURL())
+			nw.namedNodes[node.GetName()] = node
+			nw.peers = append(nw.peers, nodeArgs.GetEnodeURL())
 
 			for _, service := range nw.Services {
 				service.NodeCreated(ctx, node)
@@ -135,11 +129,13 @@ func (nw *Network) Start(ctx context.Context) error {
 
 var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
 
-func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
-	n := &node{
+func (nw *Network) createNode(nodeArgs Node) (Node, error) {
+	nodeAddr := fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodeArgs.GetHttpPort())
+
+	n := &devnetNode{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
-		cfg,
+		nodeArgs,
 		&nw.wg,
 		nw,
 		make(chan error),
@@ -184,15 +180,15 @@ func copyFlags(flags []cli.Flag) []cli.Flag {
 func (nw *Network) startNode(n Node) error {
 	nw.wg.Add(1)
 
-	node := n.(*node)
+	node := n.(*devnetNode)
 
-	args, err := args.AsArgs(node.args)
+	args, err := args.AsArgs(node.nodeArgs)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		nw.Logger.Info("Running node", "name", node.Name(), "args", args)
+		nw.Logger.Info("Running node", "name", node.GetName(), "args", args)
 
 		// catch any errors and avoid panics if an error occurs
 		defer func() {
@@ -201,17 +197,17 @@ func (nw *Network) startNode(n Node) error {
 				return
 			}
 
-			nw.Logger.Error("catch panic", "node", node.Name(), "err", panicResult, "stack", dbg.Stack())
+			nw.Logger.Error("catch panic", "node", node.GetName(), "err", panicResult, "stack", dbg.Stack())
 			nw.Stop()
 			os.Exit(1)
 		}()
 
 		// cli flags are not thread safe and assume only one copy of a flag
 		// variable is needed per process - which does not work here
-		app := erigonapp.MakeApp(node.Name(), node.run, copyFlags(erigoncli.DefaultFlags))
+		app := erigonapp.MakeApp(node.GetName(), node.run, copyFlags(erigoncli.DefaultFlags))
 
 		if err := app.Run(args); err != nil {
-			nw.Logger.Warn("App run returned error", "node", node.Name(), "err", err)
+			nw.Logger.Warn("App run returned error", "node", node.GetName(), "err", err)
 		}
 	}()
 
@@ -220,47 +216,6 @@ func (nw *Network) startNode(n Node) error {
 	}
 
 	return nil
-}
-
-func isConnectionError(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return opErr.Op == "dial"
-	}
-	return false
-}
-
-// getEnode returns the enode of the netowrk node
-func getEnode(n Node) (string, error) {
-	reqCount := 0
-
-	for {
-		nodeInfo, err := n.AdminNodeInfo()
-
-		if err != nil {
-			if r, ok := n.(*node); ok {
-				if !r.running() {
-					return "", err
-				}
-			}
-
-			if isConnectionError(err) && (reqCount < 10) {
-				reqCount++
-				time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
-				continue
-			}
-
-			return "", err
-		}
-
-		enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
-
-		if err != nil {
-			return "", err
-		}
-
-		return enode, nil
-	}
 }
 
 func (nw *Network) Stop() {

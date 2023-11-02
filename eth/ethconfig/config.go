@@ -102,7 +102,8 @@ var Defaults = Config{
 		Produce:    true,
 	},
 
-	SilkwormEnabled: false,
+	// applies if SilkwormPath is set
+	SilkwormExecution: true,
 }
 
 func init() {
@@ -178,8 +179,6 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	P2PEnabled bool
-
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
 
@@ -253,8 +252,10 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormEnabled bool
-	SilkwormPath    string
+	SilkwormPath      string
+	SilkwormExecution bool
+	SilkwormRpcDaemon bool
+	SilkwormSentry    bool
 }
 
 type Sync struct {
