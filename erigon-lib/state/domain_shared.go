@@ -206,13 +206,6 @@ func max64(a, b uint64) uint64 {
 	return b
 }
 
-func min64(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	fromTx, toTx := uint64(0), uint64(math2.MaxUint64)
 	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
