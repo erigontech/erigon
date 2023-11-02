@@ -901,15 +901,13 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
-	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, balance, nil /* code */)
-			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
-		}
-	}
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, evmtypes.BalanceChangeSuicideRefund)
+	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, evmtypes.BalanceChangeSuicideRefund)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
+	if interpreter.evm.Config().Tracer != nil {
+		interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
+		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
+	}
 	return nil, errStopToken
 }
 
@@ -921,15 +919,13 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
 	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
-			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
-		}
-	}
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, evmtypes.BalanceChangeSuicideWithdraw)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, evmtypes.BalanceChangeSuicideRefund)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+	if interpreter.evm.Config().Tracer != nil {
+		interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
+		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
+	}
 	return nil, errStopToken
 }
 
