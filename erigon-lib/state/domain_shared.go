@@ -15,7 +15,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-	"github.com/ledgerwatch/erigon/cl/utils"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -200,6 +199,20 @@ func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blo
 	return sd.Commitment.SeekCommitment(tx, sinceTx, untilTx, sd.aggCtx.commitment)
 }
 
+func max64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min64(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	fromTx, toTx := uint64(0), uint64(math2.MaxUint64)
 	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
@@ -207,12 +220,12 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		return 0, err
 	}
 	if !ok {
-		snapTxNum := utils.Max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
+		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
 		bn, txn, err = rawdbv3.TxNums.Last(tx)
 		if err != nil {
 			return 0, err
 		}
-		toTx := utils.Max64(snapTxNum, txn)
+		toTx := max64(snapTxNum, txn)
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(ctx, toTx)
 		newRh, err := sd.rebuildCommitment(ctx, tx)
