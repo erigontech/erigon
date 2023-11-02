@@ -291,7 +291,16 @@ loop:
 			revalidateDone = nil
 		case <-tableMainenance.C:
 			live := tab.live()
-			tab.log.Debug("[p2p] Discovery table", "len", tab.len(), "live", tab.live())
+			errs := tab.errors()
+
+			vals := []interface{}{"len", tab.len(), "live", tab.live()}
+
+			for err, count := range errs {
+				vals = append(vals, err, count)
+			}
+
+			tab.log.Debug("[p2p] Discovery table", vals...)
+
 			if live != 0 {
 				if revalidateDone == nil {
 					revalidateDone = make(chan struct{})
@@ -370,11 +379,14 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	remoteSeq, rErr := tab.net.ping(unwrapNode(last))
 
 	// Also fetch record if the node replied and returned a higher sequence number.
-	if last.Seq() < remoteSeq {
-		if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
-			tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
-		} else {
-			last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
+	if rErr == nil {
+		if last.Seq() < remoteSeq {
+			if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
+				rErr = err
+				tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
+			} else {
+				last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks, errors: last.errors}
+			}
 		}
 	}
 
@@ -387,7 +399,10 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 		tab.log.Trace("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)
 		tab.bumpInBucket(b, last)
 		return
+	} else {
+		last.addError(rErr)
 	}
+
 	// No reply received, pick a replacement or delete the node if there aren't
 	// any replacements.
 	if r := tab.replace(b, last); r != nil {
@@ -484,6 +499,23 @@ func (tab *Table) live() (n int) {
 	}
 
 	return n
+}
+
+func (tab *Table) errors() map[string]int {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	errs := map[string]int{}
+
+	for _, b := range &tab.buckets {
+		for _, e := range b.entries {
+			for err, count := range e.errors {
+				errs[err] = errs[err] + count
+			}
+		}
+	}
+
+	return errs
 }
 
 // bucketLen returns the number of nodes in the bucket for the given ID.
