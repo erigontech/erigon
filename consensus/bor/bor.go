@@ -1214,12 +1214,6 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	// wiggle was already accounted for in header.Time, this is just for logging
 	wiggle := time.Duration(successionNumber) * time.Duration(c.config.CalculateBackupMultiplier(number)) * time.Second
 
-	// temp for testing
-	if wiggle > 0 {
-		wiggle = 500 * time.Millisecond
-	}
-	// temp for testing
-
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeBor, BorRLP(header, c.config))
 	if err != nil {
