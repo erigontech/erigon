@@ -48,7 +48,7 @@ var (
 )
 
 const (
-	respTimeout    = 1500 * time.Millisecond
+	respTimeout    = 750 * time.Millisecond
 	expiration     = 20 * time.Second
 	bondExpiration = 24 * time.Hour
 
@@ -77,6 +77,7 @@ type UDPv4 struct {
 
 	addReplyMatcher chan *replyMatcher
 	gotreply        chan reply
+	unhandled       chan UnhandledPacket
 	replyTimeout    time.Duration
 	pingBackDelay   time.Duration
 	closeCtx        context.Context
@@ -141,6 +142,7 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 		db:              ln.Database(),
 		gotreply:        make(chan reply),
 		addReplyMatcher: make(chan *replyMatcher),
+		unhandled:       make(chan UnhandledPacket),
 		replyTimeout:    cfg.ReplyTimeout,
 		pingBackDelay:   cfg.PingBackDelay,
 		closeCtx:        closeCtx,
@@ -159,7 +161,8 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 
 	t.wg.Add(2)
 	go t.loop()
-	go t.readLoop(cfg.Unhandled)
+	go t.readLoop()
+	go t.handleUnhandled(cfg.Unhandled)
 	return t, nil
 }
 
@@ -175,6 +178,11 @@ func (t *UDPv4) Close() {
 		t.conn.Close()
 		t.wg.Wait()
 		t.tab.close()
+		if t.unhandled != nil {
+			ch := t.unhandled
+			t.unhandled = nil
+			close(ch)
+		}
 	})
 }
 
@@ -542,12 +550,9 @@ func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []
 }
 
 // readLoop runs in its own goroutine. it handles incoming UDP packets.
-func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
+func (t *UDPv4) readLoop() {
 	defer t.wg.Done()
 	defer debug.LogPanic()
-	if unhandled != nil {
-		defer close(unhandled)
-	}
 
 	buf := make([]byte, maxPacketSize)
 	for {
@@ -563,10 +568,33 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 			}
 			return
 		}
-		if t.handlePacket(from, buf[:nbytes]) != nil && unhandled != nil {
+		if err := t.handlePacket(from, buf[:nbytes]); err != nil && t.unhandled != nil {
 			select {
-			case unhandled <- ReadPacket{buf[:nbytes], from}:
+			case t.unhandled <- UnhandledPacket{ReadPacket: ReadPacket{buf[:nbytes], from}, Reason: err}:
 			default:
+			}
+		}
+	}
+}
+
+func (t *UDPv4) handleUnhandled(unhandled chan<- ReadPacket) {
+	if unhandled != nil {
+		defer close(unhandled)
+	}
+
+	for u := range t.unhandled {
+		switch {
+		case errors.Is(u.Reason, errUnsolicitedReply):
+			_, fromKey, _, err := v4wire.Decode(u.Data)
+			if err != nil {
+				fromId := enode.PubkeyEncoded(fromKey).ID()
+
+				t.log.Trace("Unsolicited packet", "from", fromId, "addr", u.Addr)
+				t.sendPing(fromId, u.Addr, nil)
+			}
+		default:
+			if unhandled != nil {
+				unhandled <- u.ReadPacket
 			}
 		}
 	}

@@ -96,3 +96,8 @@ type ReadPacket struct {
 	Data []byte
 	Addr *net.UDPAddr
 }
+
+type UnhandledPacket struct {
+	ReadPacket
+	Reason error
+}
