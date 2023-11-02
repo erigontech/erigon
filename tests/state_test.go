@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 )
 
@@ -56,9 +55,8 @@ func TestState(t *testing.T) {
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
-	if ethconfig.EnableHistoryV3InTest {
-		//TODO: AlexSharov - need to fix this test
-	}
+	//if ethconfig.EnableHistoryV3InTest {
+	//}
 
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
@@ -106,7 +104,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	w.Flush()
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
-	} else {
+		//} else {
 		//enable it if need extensive logging
 		//t.Log("EVM operation log:\n" + buf.String())
 	}
