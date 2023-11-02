@@ -287,7 +287,7 @@ loop:
 			}
 			revalidateDone = nil
 		case <-tableMainenance.C:
-			tab.log.Trace("[p2p] V4 Discovery table", "len", tab.len(), tab.live())
+			tab.log.Debug("[p2p] V4 Discovery table", "len", tab.len(), tab.live())
 			go tab.copyLiveNodes()
 		case <-tab.closeReq:
 			break loop

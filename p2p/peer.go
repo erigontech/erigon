@@ -511,6 +511,8 @@ type protoRW struct {
 	logger log.Logger
 }
 
+var traceMsg = false
+
 func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	if msg.Code >= rw.Length {
 		return NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("not handled code=%d", msg.Code))
@@ -524,10 +526,12 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	case <-rw.wstart:
 		err = rw.w.WriteMsg(msg)
 
-		if err != nil {
-			rw.logger.Trace("Write failed", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size, "err", err)
-		} else {
-			rw.logger.Trace("Wrote", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size)
+		if traceMsg {
+			if err != nil {
+				rw.logger.Trace("Write failed", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size, "err", err)
+			} else {
+				rw.logger.Trace("Wrote", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size)
+			}
 		}
 
 		// Report write status back to Peer.run. It will initiate
@@ -546,7 +550,9 @@ func (rw *protoRW) ReadMsg() (Msg, error) {
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset
-		rw.logger.Trace("Read", "cap", rw.cap(), "msg", msg.Code, "size", msg.Size)
+		if traceMsg {
+			rw.logger.Trace("Read", "cap", rw.cap(), "msg", msg.Code, "size", msg.Size)
+		}
 		return msg, nil
 	case <-rw.closed:
 		return Msg{}, io.EOF
