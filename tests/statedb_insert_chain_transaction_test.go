@@ -13,8 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -346,9 +344,6 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 }
 
 func TestAccountDeployIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]

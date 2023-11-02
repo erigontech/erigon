@@ -225,7 +225,17 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if err != nil {
 			return 0, err
 		}
+		if bytes.Equal(newRh, commitment.EmptyRootHash) {
+			sd.SetBlockNum(0)
+			sd.SetTxNum(ctx, 0)
+			return 0, nil
+		}
 		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
+	}
+	if bn == 0 && txn == 0 {
+		sd.SetBlockNum(bn)
+		sd.SetTxNum(ctx, txn)
+		return 0, nil
 	}
 
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)

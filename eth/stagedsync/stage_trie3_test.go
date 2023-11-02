@@ -5,18 +5,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
-	t.Skip("TODO: fix me")
 	ctx := context.Background()
 	dirs := datadir.New(t.TempDir())
 	v3, db, agg := temporal.NewTestDB(t, dirs, nil)
@@ -49,10 +49,10 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	ac := agg.MakeContext()
-	defer ac.Close()
 	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
+	domains.SetBlockNum(blocksTotal)
+	domains.SetTxNum(ctx, blocksTotal-1) // generated 1tx per block
 
 	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
 	require.NoError(t, err)
@@ -62,7 +62,6 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	domains.Close()
-	ac.Close()
 
 	require.NoError(t, tx.Commit())
 	tx = nil

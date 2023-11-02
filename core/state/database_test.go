@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -443,9 +442,6 @@ func TestCreate2Polymorth(t *testing.T) {
 }
 
 func TestReorgOverSelfDestruct(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -594,9 +590,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 }
 
 func TestReorgOverStateChange(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1345,9 +1338,6 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 }
 
 func TestRecreateAndRewind(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
