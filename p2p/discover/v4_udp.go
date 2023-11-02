@@ -586,11 +586,13 @@ func (t *UDPv4) handleUnhandled(unhandled chan<- ReadPacket) {
 		switch {
 		case errors.Is(u.Reason, errUnsolicitedReply):
 			_, fromKey, _, err := v4wire.Decode(u.Data)
-			if err != nil {
+			if err == nil {
 				fromId := enode.PubkeyEncoded(fromKey).ID()
 
 				t.log.Trace("Unsolicited packet", "from", fromId, "addr", u.Addr)
 				t.sendPing(fromId, u.Addr, nil)
+			} else {
+				t.log.Trace("Unsolicited packet handling fialed", "addr", u.Addr, "err", err)
 			}
 		default:
 			if unhandled != nil {
