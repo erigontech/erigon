@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
@@ -44,6 +43,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -571,9 +572,8 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	}
 
 	// Verify that the gas limit is <= 2^63-1
-	gasCap := uint64(0x7fffffffffffffff)
-	if header.GasLimit > gasCap {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, gasCap)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 
 	if header.WithdrawalsHash != nil {
