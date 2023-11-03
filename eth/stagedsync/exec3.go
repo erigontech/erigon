@@ -1028,6 +1028,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
+	doms.SetBlockNum(header.Number.Uint64())
 	rh, err := doms.ComputeCommitment(context.Background(), true, false)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)

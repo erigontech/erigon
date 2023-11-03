@@ -156,13 +156,12 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := sd.Flush(ctx, rwTx); err != nil {
+
+	sd.ClearRam(true)
+	if _, err := sd.SeekCommitment(ctx, rwTx); err != nil {
 		return err
 	}
-	sd.ClearRam(true)
-
-	_, err := sd.SeekCommitment(ctx, rwTx)
-	return err
+	return sd.Flush(ctx, rwTx)
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx) ([]byte, error) {
@@ -713,9 +712,10 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Equal(stated, merged) {
-			continue
-		}
+		// this updates ensures that if commitment is present, each brunches are also present in commitment state at that moment with costs of storage
+		//if bytes.Equal(stated, merged) {
+		//      continue
+		//}
 		if trace {
 			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}

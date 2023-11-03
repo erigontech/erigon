@@ -1451,7 +1451,6 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 			branchNodeUpdates[string(updateKey)] = branchData
 		}
 	}
-	branchNodeUpdates[""] = append([]byte{0, 1, 0, 1}, hph.root.Encode()...)
 
 	rootHash, err = hph.RootHash()
 	if err != nil {

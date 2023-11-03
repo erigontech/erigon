@@ -329,15 +329,14 @@ var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	domains := libstate.NewSharedDomains(tx)
 	defer domains.Close()
-	//bn, _, ok, err := domains.SeekCommitment2(tx, 0, u.UnwindPoint)
+	//txTo, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	//if err != nil {
-	//	return err
+	//      return err
 	//}
+	//bn, _, ok, err := domains.SeekCommitment2(tx, 0, txTo)
 	//if ok && bn != u.UnwindPoint {
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
-
-	rs := state.NewStateV3(domains, logger)
 
 	//unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
 	//if err != nil {
@@ -346,6 +345,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	//if u.UnwindPoint < unwindToLimit {
 	//	return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	//}
+	rs := state.NewStateV3(domains, logger)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)

@@ -197,6 +197,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstat
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	rs.domains.SetTxNum(ctx, txTask.TxNum)
+	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)

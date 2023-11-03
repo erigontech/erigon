@@ -574,6 +574,38 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *
 		return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
 	}
 	if !ok {
+		//idx, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(untilTx+d.aggregationStep), order.Asc, -1, tx)
+		//if err != nil {
+		//      return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
+		//}
+		//topTxNum := uint64(0)
+		//for idx.HasNext() {
+		//      tn, err := idx.Next()
+		//      if err != nil {
+		//              return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
+		//      }
+		//      if tn < sinceTx {
+		//              continue
+		//      }
+		//      if tn <= untilTx {
+		//              if d.trace {
+		//                      fmt.Printf("[commitment] Seek found committed txn %d\n", tn)
+		//              }
+		//              topTxNum = tn
+		//              continue
+		//      }
+		//      if tn > untilTx {
+		//              topTxNum = tn
+		//              break
+		//      }
+		//}
+		//latestState, ok, err = cd.hc.GetNoStateWithRecent(keyCommitmentState, topTxNum, tx)
+		//if err != nil {
+		//      return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
+		//}
+		//if !ok {
+		//      return 0, 0, false, nil
+		//}
 		return 0, 0, false, nil
 	}
 	blockNum, txNum, err = d.Restore(latestState)
