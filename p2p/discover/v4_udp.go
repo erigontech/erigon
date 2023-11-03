@@ -47,6 +47,12 @@ var (
 	errLowPort          = errors.New("low port")
 )
 
+var (
+	errExpiredStr          = errExpired.Error()
+	errUnsolicitedReplyStr = errUnsolicitedReply.Error()
+	errUnknownNodeStr      = errUnknownNode.Error()
+)
+
 const (
 	respTimeout    = 750 * time.Millisecond
 	expiration     = 20 * time.Second
@@ -75,14 +81,14 @@ type UDPv4 struct {
 	closeOnce   sync.Once
 	wg          sync.WaitGroup
 
-	addReplyMatcher chan *replyMatcher
-	gotreply        chan reply
-	unhandled       chan UnhandledPacket
-	replyTimeout    time.Duration
-	pingBackDelay   time.Duration
-	closeCtx        context.Context
-	cancelCloseCtx  context.CancelFunc
-
+	addReplyMatcher     chan *replyMatcher
+	gotreply            chan reply
+	unhandled           chan UnhandledPacket
+	replyTimeout        time.Duration
+	pingBackDelay       time.Duration
+	closeCtx            context.Context
+	cancelCloseCtx      context.CancelFunc
+	errors              map[string]uint
 	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
 }
 
@@ -131,28 +137,28 @@ type reply struct {
 	matched chan<- bool
 }
 
-func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+func ListenV4(ctx context.Context, protocol string, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	cfg = cfg.withDefaults(respTimeout)
 	closeCtx, cancel := context.WithCancel(ctx)
 	t := &UDPv4{
-		conn:            c,
-		priv:            cfg.PrivateKey,
-		netrestrict:     cfg.NetRestrict,
-		localNode:       ln,
-		db:              ln.Database(),
-		gotreply:        make(chan reply),
-		addReplyMatcher: make(chan *replyMatcher),
-		unhandled:       make(chan UnhandledPacket),
-		replyTimeout:    cfg.ReplyTimeout,
-		pingBackDelay:   cfg.PingBackDelay,
-		closeCtx:        closeCtx,
-		cancelCloseCtx:  cancel,
-		log:             cfg.Log,
-
+		conn:                c,
+		priv:                cfg.PrivateKey,
+		netrestrict:         cfg.NetRestrict,
+		localNode:           ln,
+		db:                  ln.Database(),
+		gotreply:            make(chan reply),
+		addReplyMatcher:     make(chan *replyMatcher),
+		unhandled:           make(chan UnhandledPacket),
+		replyTimeout:        cfg.ReplyTimeout,
+		pingBackDelay:       cfg.PingBackDelay,
+		closeCtx:            closeCtx,
+		cancelCloseCtx:      cancel,
+		log:                 cfg.Log,
+		errors:              map[string]uint{},
 		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
-	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
+	tab, err := newTable(t, protocol, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +175,14 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 // Self returns the local node.
 func (t *UDPv4) Self() *enode.Node {
 	return t.localNode.Node()
+}
+
+func (t *UDPv4) Version() string {
+	return "v4"
+}
+
+func (t *UDPv4) Errors() map[string]uint {
+	return t.errors
 }
 
 // Close shuts down the socket and aborts any running queries.
@@ -711,9 +725,11 @@ func (t *UDPv4) verifyPing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	senderKey, err := v4wire.DecodePubkey(crypto.S256(), fromKey)
 	if err != nil {
+		t.errors[err.Error()] = t.errors[err.Error()] + 1
 		return err
 	}
 	if v4wire.Expired(req.Expiration) {
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
 		return errExpired
 	}
 	h.senderKey = senderKey
@@ -753,9 +769,11 @@ func (t *UDPv4) verifyPong(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 	req := h.Packet.(*v4wire.Pong)
 
 	if v4wire.Expired(req.Expiration) {
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
 		return errExpired
 	}
 	if !t.handleReply(fromID, from.IP, req) {
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
 		return errUnsolicitedReply
 	}
 	t.localNode.UDPEndpointStatement(from, &net.UDPAddr{IP: req.To.IP, Port: int(req.To.UDP)})
@@ -769,6 +787,7 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 	req := h.Packet.(*v4wire.Findnode)
 
 	if v4wire.Expired(req.Expiration) {
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
@@ -778,6 +797,7 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 		// and UDP port of the target as the source address. The recipient of the findnode
 		// packet would then send a neighbors packet (which is a much bigger packet than
 		// findnode) to the victim.
+		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
 		return errUnknownNode
 	}
 	return nil
@@ -815,9 +835,11 @@ func (t *UDPv4) verifyNeighbors(h *packetHandlerV4, from *net.UDPAddr, fromID en
 	req := h.Packet.(*v4wire.Neighbors)
 
 	if v4wire.Expired(req.Expiration) {
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
 		return errExpired
 	}
 	if !t.handleReply(fromID, from.IP, h.Packet) {
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
 		return errUnsolicitedReply
 	}
 	return nil
@@ -829,26 +851,32 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 	req := h.Packet.(*v4wire.ENRRequest)
 
 	if v4wire.Expired(req.Expiration) {
+		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
+		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
 		return errUnknownNode
 	}
 	return nil
 }
 
 func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, mac []byte) {
-	//nolint:errcheck
-	t.send(from, fromID, &v4wire.ENRResponse{
+	_, err := t.send(from, fromID, &v4wire.ENRResponse{
 		ReplyTok: mac,
 		Record:   *t.localNode.Node().Record(),
 	})
+
+	if err != nil {
+		t.errors[err.Error()] = t.errors[err.Error()] + 1
+	}
 }
 
 // ENRRESPONSE/v4
 
 func (t *UDPv4) verifyENRResponse(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, fromKey v4wire.Pubkey) error {
 	if !t.handleReply(fromID, from.IP, h.Packet) {
+		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
 		return errUnsolicitedReply
 	}
 	return nil

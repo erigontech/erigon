@@ -58,7 +58,7 @@ const (
 	minRefreshInterval  = 30 * time.Second
 	refreshInterval     = 30 * time.Minute
 	revalidateInterval  = 5 * time.Second
-	maintenanceInterval = 30 * time.Second
+	maintenanceInterval = 60 * time.Second
 	seedMinTableTime    = 5 * time.Minute
 	seedCount           = 30
 	seedMaxAge          = 5 * 24 * time.Hour
@@ -85,6 +85,12 @@ type Table struct {
 	closed     chan struct{}
 
 	nodeAddedHook func(*node) // for testing
+
+	// diagnostics
+	errors      map[string]uint
+	dbseeds     int
+	revalidates int
+	protocol    string
 }
 
 // transport is implemented by the UDP transports.
@@ -94,6 +100,8 @@ type transport interface {
 	lookupRandom() []*enode.Node
 	lookupSelf() []*enode.Node
 	ping(*enode.Node) (seq uint64, err error)
+	Version() string
+	Errors() map[string]uint
 }
 
 // bucket contains nodes, ordered by their last activity. the entry
@@ -106,24 +114,25 @@ type bucket struct {
 
 func newTable(
 	t transport,
+	protocol string,
 	db *enode.DB,
 	bootnodes []*enode.Node,
 	revalidateInterval time.Duration,
 	logger log.Logger,
 ) (*Table, error) {
 	tab := &Table{
-		net:        t,
-		db:         db,
-		refreshReq: make(chan chan struct{}),
-		initDone:   make(chan struct{}),
-		closeReq:   make(chan struct{}),
-		closed:     make(chan struct{}),
-		rand:       mrand.New(mrand.NewSource(0)), // nolint: gosec
-		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
-
+		net:                t,
+		db:                 db,
+		refreshReq:         make(chan chan struct{}),
+		initDone:           make(chan struct{}),
+		closeReq:           make(chan struct{}),
+		closed:             make(chan struct{}),
+		rand:               mrand.New(mrand.NewSource(0)), // nolint: gosec
+		ips:                netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
+		errors:             map[string]uint{},
 		revalidateInterval: revalidateInterval,
-
-		log: logger,
+		protocol:           protocol,
+		log:                logger,
 	}
 	if err := tab.setFallbackNodes(bootnodes); err != nil {
 		return nil, err
@@ -291,13 +300,20 @@ loop:
 			revalidateDone = nil
 		case <-tableMainenance.C:
 			live := tab.live()
-			errs := tab.errors()
 
-			vals := []interface{}{"len", tab.len(), "live", tab.live()}
+			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(), "len", tab.len(), "live", tab.live(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
 
-			for err, count := range errs {
-				vals = append(vals, err, count)
-			}
+			func() {
+				tab.mutex.Lock()
+				defer tab.mutex.Unlock()
+				for err, count := range tab.errors {
+					vals = append(vals, err, count)
+				}
+
+				for err, count := range tab.net.Errors() {
+					vals = append(vals, err, count)
+				}
+			}()
 
 			tab.log.Debug("[p2p] Discovery table", vals...)
 
@@ -352,7 +368,10 @@ func (tab *Table) doRefresh(done chan struct{}) {
 }
 
 func (tab *Table) loadSeedNodes() {
-	seeds := wrapNodes(tab.db.QuerySeeds(seedCount, seedMaxAge))
+	dbseeds := tab.db.QuerySeeds(seedCount, seedMaxAge)
+	tab.dbseeds = len(dbseeds)
+
+	seeds := wrapNodes(dbseeds)
 	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
 	seeds = append(seeds, tab.nursery...)
 	for i := range seeds {
@@ -368,6 +387,8 @@ func (tab *Table) loadSeedNodes() {
 func (tab *Table) doRevalidate(done chan<- struct{}) {
 	defer debug.LogPanic()
 	defer func() { done <- struct{}{} }()
+
+	tab.revalidates++
 
 	last, bi := tab.nodeToRevalidate()
 	if last == nil {
@@ -385,7 +406,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 				rErr = err
 				tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
 			} else {
-				last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks, errors: last.errors}
+				last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
 			}
 		}
 	}
@@ -400,7 +421,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 		tab.bumpInBucket(b, last)
 		return
 	} else {
-		last.addError(rErr)
+		tab.addError(rErr)
 	}
 
 	// No reply received, pick a replacement or delete the node if there aren't
@@ -501,21 +522,11 @@ func (tab *Table) live() (n int) {
 	return n
 }
 
-func (tab *Table) errors() map[string]int {
+func (tab *Table) addError(err error) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
-
-	errs := map[string]int{}
-
-	for _, b := range &tab.buckets {
-		for _, e := range b.entries {
-			for err, count := range e.errors {
-				errs[err] = errs[err] + count
-			}
-		}
-	}
-
-	return errs
+	str := err.Error()
+	tab.errors[str] = tab.errors[str] + 1
 }
 
 // bucketLen returns the number of nodes in the bucket for the given ID.

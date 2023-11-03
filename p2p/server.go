@@ -27,6 +27,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,6 +69,8 @@ const (
 
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
+
+	serverStatsLogInterval = 60 * time.Second
 )
 
 var errServerStopped = errors.New("server stopped")
@@ -229,6 +232,7 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
+	errors         map[string]uint
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -651,7 +655,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(ctx, conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -669,9 +673,9 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		}
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(ctx, sconn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(ctx, conn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			return err
@@ -789,6 +793,9 @@ func (srv *Server) run() {
 		trusted[n.ID()] = true
 	}
 
+	logTimer := time.NewTicker(serverStatsLogInterval)
+	defer logTimer.Stop()
+
 running:
 	for {
 		select {
@@ -852,6 +859,18 @@ running:
 			if pd.Inbound() {
 				inboundCount--
 			}
+		case <-logTimer.C:
+			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
+
+			func() {
+				srv.lock.Lock()
+				defer srv.lock.Unlock()
+				for err, count := range srv.errors {
+					vals = append(vals, err, count)
+				}
+			}()
+
+			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
 
@@ -902,6 +921,8 @@ func (srv *Server) listenLoop(ctx context.Context) {
 
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
+
+	srv.errors = map[string]uint{}
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
@@ -1005,6 +1026,17 @@ func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) 
 	return err
 }
 
+func cleanError(err string) string {
+	switch {
+	case strings.HasSuffix(err, "i/o timeout"):
+		return "i/o timeout"
+	case strings.HasSuffix(err, "closed by the remote host."):
+		return "closed by remote"
+	default:
+		return err
+	}
+}
+
 func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
 	srv.lock.Lock()
@@ -1028,6 +1060,8 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the RLPx handshake.
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
+		errStr := cleanError(err.Error())
+		srv.errors[errStr] = srv.errors[errStr] + 1
 		srv.logger.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
@@ -1047,6 +1081,8 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the capability negotiation handshake.
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
+		errStr := cleanError(err.Error())
+		srv.errors[errStr] = srv.errors[errStr] + 1
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}

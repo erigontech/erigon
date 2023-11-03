@@ -29,11 +29,10 @@ type node struct {
 	enode.Node
 	addedAt        time.Time // time when the node was added to the table
 	livenessChecks uint      // how often liveness was checked
-	errors         map[string]int
 }
 
 func wrapNode(n *enode.Node) *node {
-	return &node{Node: *n, errors: map[string]int{}}
+	return &node{Node: *n}
 }
 
 func wrapNodes(ns []*enode.Node) []*node {
@@ -58,11 +57,6 @@ func unwrapNodes(ns []*node) []*enode.Node {
 
 func (n *node) addr() *net.UDPAddr {
 	return &net.UDPAddr{IP: n.IP(), Port: n.UDP()}
-}
-
-func (n *node) addError(err error) {
-	str := err.Error()
-	n.errors[str] = n.errors[str] + 1
 }
 
 func (n *node) String() string {
