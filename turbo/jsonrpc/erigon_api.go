@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -35,6 +36,9 @@ type ErigonAPI interface {
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
+
+	// Batch get Transaction Receipts
+	BatchGetTransactionsReceipts(ctx context.Context, txHashes []common.Hash) ([]map[string]interface{}, error)
 
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)
