@@ -38,7 +38,7 @@ type ErigonAPI interface {
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
 
 	// Batch get Transaction Receipts
-	BatchGetTransactionsReceipts(ctx context.Context, txHashes []common.Hash) ([]map[string]interface{}, error)
+	BatchGetTransactionReceipts(ctx context.Context, txHashes []common.Hash) ([]map[string]interface{}, error)
 
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)

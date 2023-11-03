@@ -473,7 +473,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 // 	return logs, nil
 // }
 
-func (api *ErigonImpl) BatchGetTransactionsReceipts(ctx context.Context, txHashes []common.Hash) ([]map[string]interface{}, error) {
+func (api *ErigonImpl) BatchGetTransactionReceipts(ctx context.Context, txHashes []common.Hash) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -484,6 +484,10 @@ func (api *ErigonImpl) BatchGetTransactionsReceipts(ctx context.Context, txHashe
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(txHashes) > batchGetTransactionsReceiptsLimit {
+		return nil, fmt.Errorf("batchGetTransactionReceipts: too many txHashes: %d, limitation: %d", len(txHashes), batchGetTransactionsReceiptsLimit)
 	}
 
 	blockNumTxHashesMap := make(map[uint64]map[common.Hash]struct{})
