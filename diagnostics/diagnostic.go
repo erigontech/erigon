@@ -2,9 +2,7 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"time"
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
@@ -25,51 +23,18 @@ func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node
 }
 
 func (d *DiagnosticClient) Setup() {
-	d.snapshotDownloader()
+	d.runSnapshotListener()
 }
 
-func (d *DiagnosticClient) snapshotDownloader() {
+func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
-		retry(100, 1*time.Second, func() error {
-			err := d.runSnapshotListener()
-			if err != nil {
-				fmt.Println("Error running snapshot listener:", err)
-			}
-			return err
-		})
-	}()
-}
+		ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
 
-func (d *DiagnosticClient) runSnapshotListener() error {
-
-	ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
-
-	err := diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
-	if err != nil {
-		fmt.Println("Error starting providers:", err)
-		return err
-	} else {
-
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
 		for info := range ch {
 			d.snapshotDownload = info
 		}
-
-		return nil
-	}
-}
-
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			fmt.Println("retrying after error:", err)
-			time.Sleep(sleep)
-		}
-		err = f()
-		if err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
+	}()
 }
 
 func (d *DiagnosticClient) SnapshotDownload() diaglib.DownloadStatistics {
