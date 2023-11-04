@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -203,6 +205,18 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+func TestBatchGetTransactionReceipts(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	db := m.DB
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), db, nil)
+
+	if _, err := api.BatchGetTransactionReceipts(context.Background(), []libcommon.Hash{}); err != nil {
+		t.Errorf("calling BatchGetTransactionReceipts with empty hash: %v", err)
+	}
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
