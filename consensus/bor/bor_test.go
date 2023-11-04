@@ -2,6 +2,7 @@ package bor_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
@@ -171,6 +172,11 @@ func (r headerReader) GetHeaderByHash(libcommon.Hash) *types.Header {
 
 func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
+}
+
+func (r headerReader) BorSpan(spanId uint64) []byte {
+	b, _ := json.Marshal(&r.validator.heimdall.currentSpan)
+	return b
 }
 
 type spanner struct {
