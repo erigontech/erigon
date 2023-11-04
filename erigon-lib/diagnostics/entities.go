@@ -42,6 +42,8 @@ type DownloadStatistics struct {
 	Connections  uint64 `json:"connections"`
 	Alloc        string `json:"alloc"`
 	Sys          string `json:"sys"`
+	Finished     bool   `json:"finished"`
+	StagePrefix  string `json:"stagePrefix"`
 }
 
 func (ti DownloadStatistics) Type() Type {

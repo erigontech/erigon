@@ -213,6 +213,25 @@ Loop:
 						}
 					}
 				*/
+				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
+					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
+						Progress:     fmt.Sprintf("%.2f%%", stats.Progress),
+						Downloaded:   common.ByteCount(stats.BytesCompleted),
+						Total:        common.ByteCount(stats.BytesTotal),
+						TimeLeft:     "0hrs:0m",
+						TotalTime:    time.Since(downloadStartTime).Round(time.Second).String(),
+						DownloadRate: common.ByteCount(stats.DownloadRate) + "/s",
+						UploadRate:   common.ByteCount(stats.UploadRate) + "/s",
+						Peers:        stats.PeersUnique,
+						Files:        stats.FilesTotal,
+						Connections:  stats.ConnectionsTotal,
+						Alloc:        common.ByteCount(m.Alloc),
+						Sys:          common.ByteCount(m.Sys),
+						Finished:     stats.Completed,
+						StagePrefix:  logPrefix,
+					})
+				}
+
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
@@ -241,6 +260,8 @@ Loop:
 						Connections:  stats.ConnectionsTotal,
 						Alloc:        common.ByteCount(m.Alloc),
 						Sys:          common.ByteCount(m.Sys),
+						Finished:     stats.Completed,
+						StagePrefix:  logPrefix,
 					})
 				}
 
