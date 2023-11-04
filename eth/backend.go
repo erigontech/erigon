@@ -616,7 +616,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 
-	// proof-of-work mining
 	var (
 		snapDb     kv.RwDB
 		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
@@ -627,6 +626,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
+	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
