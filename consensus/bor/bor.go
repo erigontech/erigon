@@ -117,7 +117,7 @@ var (
 
 	// errInvalidSpanValidators is returned if a block contains an
 	// invalid list of validators (i.e. non divisible by 40 bytes).
-	errInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
+	ErrInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -147,7 +147,7 @@ var (
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
+func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
@@ -251,8 +251,8 @@ type Bor struct {
 	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
-	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	Recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	Signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
@@ -396,8 +396,8 @@ func New(
 		config:                 borConfig,
 		DB:                     db,
 		blockReader:            blockReader,
-		recents:                recents,
-		signatures:             signatures,
+		Recents:                recents,
+		Signatures:             signatures,
 		spanner:                spanner,
 		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
@@ -465,8 +465,8 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		DB:          rwWrapper{db},
 		blockReader: blockReader,
 		logger:      logger,
-		recents:     recents,
-		signatures:  signatures,
+		Recents:     recents,
+		Signatures:  signatures,
 		spanCache:   btree.New(32),
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
@@ -491,7 +491,7 @@ func (c *Bor) HeaderProgress(p HeaderProgress) {
 // This is thread-safe (only access the header and config (which is never updated),
 // as well as signatures, which are lru.ARCCache, which is thread-safe)
 func (c *Bor) Author(header *types.Header) (libcommon.Address, error) {
-	return ecrecover(header, c.signatures, c.config)
+	return Ecrecover(header, c.Signatures, c.config)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -551,7 +551,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	}
 
 	if isSprintEnd && signersBytes%validatorHeaderBytesLength != 0 {
-		return errInvalidSpanValidators
+		return ErrInvalidSpanValidators
 	}
 
 	// Ensure that the mix digest is zero as we don't have fork protection currently
@@ -671,12 +671,12 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		}
 
 		if len(producerSet) != len(headerVals) {
-			return errInvalidSpanValidators
+			return ErrInvalidSpanValidators
 		}
 
 		for i, val := range producerSet {
 			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-				return errInvalidSpanValidators
+				return ErrInvalidSpanValidators
 			}
 		}
 	}
@@ -730,9 +730,9 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		}
 
 		// new snap shot
-		snap = newSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
+		snap = NewSnapshot(c.config, c.Signatures, 0, hash, validators, c.logger)
 
-		if err = snap.store(c.DB); err != nil {
+		if err = snap.Store(c.DB); err != nil {
 			return nil, err
 		}
 
@@ -753,13 +753,13 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 				snap := snap
 				g.Go(func() error {
-					_, _ = ecrecover(header, snap.sigcache, snap.config)
+					_, _ = Ecrecover(header, snap.sigcache, snap.config)
 					return nil
 				})
 			}
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
-				snap, err = snap.apply(initialHeaders, c.logger)
+				snap, err = snap.Apply(initialHeaders, c.logger)
 
 				if err != nil {
 					return nil, err
@@ -774,7 +774,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			}
 		}
 
-		if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+		if snap, err = snap.Apply(initialHeaders, c.logger); err != nil {
 			return nil, err
 		}
 	}
@@ -794,14 +794,14 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	//nolint:govet
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
+		if s, ok := c.Recents.Get(hash); ok {
 			snap = s
 			break
 		}
 
 		// If an on-disk snapshot can be found, use that
 		if number%snapshotPersistInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
+			if s, err := LoadSnapshot(c.config, c.Signatures, c.DB, hash); err == nil {
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
@@ -873,15 +873,15 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	}
 
 	var err error
-	if snap, err = snap.apply(headers, c.logger); err != nil {
+	if snap, err = snap.Apply(headers, c.logger); err != nil {
 		return nil, err
 	}
 
-	c.recents.Add(snap.Hash, snap)
+	c.Recents.Add(snap.Hash, snap)
 
 	// If we've generated a new persistent snapshot, save to disk
 	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.DB); err != nil {
+		if err = snap.Store(c.DB); err != nil {
 			return nil, err
 		}
 
@@ -922,7 +922,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		return errUnknownBlock
 	}
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures, c.config)
+	signer, err := Ecrecover(header, c.Signatures, c.config)
 	if err != nil {
 		return err
 	}
