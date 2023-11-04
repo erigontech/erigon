@@ -2,6 +2,7 @@ package network
 
 import (
 	"sync"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -85,9 +86,36 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 	if start > b.slotToDownload {
 		start = 0
 	}
-	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-	if err != nil {
-		return
+
+	reqInterval := time.NewTicker(300 * time.Millisecond)
+	doneRespCh := make(chan []*cltypes.SignedBeaconBlock, 1)
+	var responses []*cltypes.SignedBeaconBlock
+Loop:
+	for {
+		select {
+		case <-reqInterval.C:
+			go func() {
+				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+				if err != nil {
+					return
+				}
+				if responses == nil {
+					return
+				}
+				if len(responses) == 0 {
+					b.rpc.BanPeer(peerId)
+					return
+				}
+				select {
+				case doneRespCh <- responses:
+				default:
+				}
+			}()
+		case <-ctx.Done():
+			return
+		case responses = <-doneRespCh:
+			break Loop
+		}
 	}
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
@@ -103,6 +131,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
+			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.

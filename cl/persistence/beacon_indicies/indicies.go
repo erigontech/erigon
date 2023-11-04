@@ -11,6 +11,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
+	return tx.Put(kv.HighestFinalized, kv.HighestFinalizedKey, base_encoding.Encode64(slot))
+}
+
+func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
+	val, err := tx.GetOne(kv.HighestFinalized, kv.HighestFinalizedKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(val) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64(val), nil
+}
+
 // WriteBlockRootSlot writes the slot associated with a block root.
 func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
 	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64(slot))

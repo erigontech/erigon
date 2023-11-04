@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -78,7 +78,7 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 	}
 
 	method, body := reqGen.estimateGas(string(argsVal), blockRef)
-	res := reqGen.call(method, body, &b)
+	res := reqGen.rpcCallJSON(method, body, &b)
 
 	if res.Err != nil {
 		return 0, fmt.Errorf("EstimateGas rpc failed: %w", res.Err)
@@ -100,7 +100,7 @@ func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) 
 func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.callCli(&result, Methods.ETHGasPrice); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHGasPrice); err != nil {
 		return nil, err
 	}
 
@@ -110,7 +110,7 @@ func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
 	var result hexutility.Bytes
 
-	if err := reqGen.callCli(&result, Methods.ETHCall, args, blockRef, overrides); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHCall, args, blockRef, overrides); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +125,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 		return libcommon.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if err := reqGen.callCli(&result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
 		return libcommon.Hash{}, err
 	}
 
@@ -148,7 +148,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
 	var result jsonrpc.RPCTransaction
 
-	if err := req.callCli(&result, Methods.ETHGetTransactionByHash, hash); err != nil {
+	if err := req.rpcCall(&result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err
 	}
 
@@ -158,7 +158,7 @@ func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc
 func (req *requestGenerator) GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error) {
 	var result types.Receipt
 
-	if err := req.callCli(&result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+	if err := req.rpcCall(&result, Methods.ETHGetTransactionReceipt, hash); err != nil {
 		return nil, err
 	}
 

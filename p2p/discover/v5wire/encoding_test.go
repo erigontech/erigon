@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,7 +33,6 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"

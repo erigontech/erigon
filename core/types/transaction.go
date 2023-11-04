@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -246,7 +245,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.CopyBytes(buf.Bytes())
+		result[i] = libcommon.CopyBytes(buf.Bytes())
 	}
 	return result, nil
 }

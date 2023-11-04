@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -120,7 +119,7 @@ func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return libcommon.CopyBytes(result.ReturnData)
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -129,7 +128,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if result.Err != vm.ErrExecutionReverted {
 		return nil
 	}
-	return common.CopyBytes(result.ReturnData)
+	return libcommon.CopyBytes(result.ReturnData)
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -180,7 +179,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // state and would never be accepted within a block.
 // `refunds` is false when it is not required to apply gas refunds
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
-// for trace_call to replicate OE/Pariry behaviour
+// for trace_call to replicate OE/Parity behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
@@ -439,10 +438,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	st.state.AddBalance(coinbase, amount)
-	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
-		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-		st.state.AddBalance(burntContractAddress, burnAmount)
+	if !msg.IsFree() && rules.IsLondon {
+		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context().BlockNumber)
+		if burntContractAddress != nil {
+			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
+			st.state.AddBalance(*burntContractAddress, burnAmount)
+		}
 	}
 	if st.isBor {
 		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559

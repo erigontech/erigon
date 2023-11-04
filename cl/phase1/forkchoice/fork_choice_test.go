@@ -8,7 +8,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/spf13/afero"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -49,7 +51,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, false)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)

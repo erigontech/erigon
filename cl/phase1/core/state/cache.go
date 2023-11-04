@@ -199,10 +199,10 @@ func (b *CachingBeaconState) _refreshActiveBalances() {
 
 func (b *CachingBeaconState) initCaches() error {
 	var err error
-	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", 5); err != nil {
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", 3); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", 5); err != nil {
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", 3); err != nil {
 		return err
 	}
 	return nil

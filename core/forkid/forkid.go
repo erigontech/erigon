@@ -26,12 +26,11 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 var (
@@ -245,12 +244,16 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		heightForks = append(heightForks, *config.Aura.PosdaoTransition)
 	}
 
+	if config.Bor != nil && config.Bor.AgraBlock != nil {
+		heightForks = append(heightForks, config.Bor.AgraBlock.Uint64())
+	}
+
 	// Sort the fork block numbers & times to permit chronological XOR
 	slices.Sort(heightForks)
 	slices.Sort(timeForks)
 	// Deduplicate block numbers/times applying to multiple forks
-	heightForks = common.RemoveDuplicatesFromSorted(heightForks)
-	timeForks = common.RemoveDuplicatesFromSorted(timeForks)
+	heightForks = libcommon.RemoveDuplicatesFromSorted(heightForks)
+	timeForks = libcommon.RemoveDuplicatesFromSorted(timeForks)
 	// Skip any forks in block 0, that's the genesis ruleset
 	if len(heightForks) > 0 && heightForks[0] == 0 {
 		heightForks = heightForks[1:]

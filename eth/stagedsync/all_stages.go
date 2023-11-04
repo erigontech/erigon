@@ -2,11 +2,11 @@ package stagedsync
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/huandu/xstrings"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var syncMetrics = map[stages.SyncStage]metrics.Counter{}

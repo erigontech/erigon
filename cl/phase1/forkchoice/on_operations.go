@@ -29,7 +29,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
@@ -41,7 +41,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		return err
 	}
 
-	if val.ExitEpoch() != f.forkGraph.Config().FarFutureEpoch {
+	if val.ExitEpoch() != f.beaconCfg.FarFutureEpoch {
 		f.mu.Unlock()
 		return nil
 	}
@@ -97,7 +97,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
@@ -159,7 +159,6 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	change := signedChange.Message
 
-	beaconConfig := f.forkGraph.Config()
 	// Take lock as we interact with state.
 	f.mu.Lock()
 
@@ -168,7 +167,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 		f.mu.Unlock()
 		return err
 	}
-	s, _, err := f.forkGraph.GetState(headHash, false)
+	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		f.mu.Unlock()
 		return err
@@ -180,7 +179,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	wc := validator.WithdrawalCredentials()
 
-	if wc[0] != beaconConfig.BLSWithdrawalPrefixByte {
+	if wc[0] != f.beaconCfg.BLSWithdrawalPrefixByte {
 		f.mu.Unlock()
 		return fmt.Errorf("invalid withdrawal credentials prefix")
 	}
@@ -195,7 +194,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 		}
 
 		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(beaconConfig.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion), genesisValidatorRoot)
+		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
 		if err != nil {
 			return err
 		}

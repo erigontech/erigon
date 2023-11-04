@@ -1,8 +1,6 @@
 package raw
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -65,6 +63,5 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 
 func (b *BeaconState) Copy() (*BeaconState, error) {
 	copied := New(b.BeaconConfig())
-	fmt.Println(copied.slashings)
 	return copied, b.CopyInto(copied)
 }

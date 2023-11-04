@@ -7,16 +7,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 

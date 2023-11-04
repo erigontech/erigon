@@ -22,15 +22,18 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
+
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -121,6 +124,14 @@ type Peer struct {
 	events         *event.Feed
 	pubkey         [64]byte
 	metricsEnabled bool
+
+	//diagnostics info
+	BytesIn      uint64
+	BytesOut     uint64
+	CapBytesIn   map[string]uint64
+	CapBytesOut  map[string]uint64
+	TypeBytesIn  map[string]uint64
+	TypeBytesOut map[string]uint64
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -224,12 +235,57 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 		log:            logger.New("id", conn.node.ID(), "conn", conn.flags),
 		pubkey:         pubkey,
 		metricsEnabled: metricsEnabled,
+		CapBytesIn:     make(map[string]uint64),
+		CapBytesOut:    make(map[string]uint64),
+		TypeBytesIn:    make(map[string]uint64),
+		TypeBytesOut:   make(map[string]uint64),
+		BytesIn:        0,
+		BytesOut:       0,
 	}
 	return p
 }
 
 func (p *Peer) Log() log.Logger {
 	return p.log
+}
+
+func makeFirstCharCap(input string) string {
+	// Convert the entire string to lowercase
+	input = strings.ToLower(input)
+	// Use strings.Title to capitalize the first letter of each word
+	input = strings.ToUpper(input[:1]) + input[1:]
+	return input
+}
+
+func convertToCamelCase(input string) string {
+	parts := strings.Split(input, "_")
+	if len(parts) == 1 {
+		return input
+	}
+
+	var result string
+
+	for _, part := range parts {
+		if len(part) > 0 && part != parts[len(parts)-1] {
+			result += makeFirstCharCap(part)
+		}
+	}
+
+	return result
+}
+
+func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes uint64, inbound bool) {
+	messageType := convertToCamelCase(msgType)
+
+	if inbound {
+		p.BytesIn += bytes
+		p.CapBytesIn[msgCap] += bytes
+		p.TypeBytesIn[messageType] += bytes
+	} else {
+		p.BytesOut += bytes
+		p.CapBytesOut[msgCap] += bytes
+		p.TypeBytesOut[messageType] += bytes
+	}
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
@@ -309,7 +365,7 @@ func (p *Peer) readLoop(errc chan<- error) {
 			errc <- err
 			return
 		}
-		msg.ReceivedAt = time.Now()
+
 		if err = p.handle(msg); err != nil {
 			errc <- err
 			return
@@ -343,6 +399,17 @@ func (p *Peer) handle(msg Msg) error {
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
+		//msgType := "unknown"
+
+		//var dds uint64 = msg.Code
+
+		//dds -= proto.offset
+		//msgCode := msg.Code - proto.offset
+		//msgType = eth.ToProto[proto.cap().Version][dds].String()
+		//msgType := eth.ToProto[proto.cap().Version][msgCode].String()
+
+		//p.CountBytesTransfered(msgType, proto.cap().String(), uint64(msg.Size), true)
+
 		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
 			metrics.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
@@ -445,9 +512,9 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	if msg.Code >= rw.Length {
 		return NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("not handled code=%d", msg.Code))
 	}
+
 	msg.meterCap = rw.cap()
 	msg.meterCode = msg.Code
-
 	msg.Code += rw.offset
 
 	select {
@@ -465,6 +532,7 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 }
 
 func (rw *protoRW) ReadMsg() (Msg, error) {
+
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset
@@ -530,4 +598,24 @@ func (p *Peer) Info() *PeerInfo {
 		info.Protocols[proto.Name] = protoInfo
 	}
 	return info
+}
+
+func (p *Peer) DiagInfo() *diagnostics.PeerStatistics {
+	return &diagnostics.PeerStatistics{
+		BytesIn:      p.BytesIn,
+		BytesOut:     p.BytesOut,
+		CapBytesIn:   p.CapBytesIn,
+		CapBytesOut:  p.CapBytesOut,
+		TypeBytesIn:  p.TypeBytesIn,
+		TypeBytesOut: p.TypeBytesOut,
+	}
+}
+
+func (p *Peer) ResetDiagnosticsCounters() {
+	p.BytesIn = 0
+	p.BytesOut = 0
+	p.CapBytesIn = make(map[string]uint64)
+	p.CapBytesOut = make(map[string]uint64)
+	p.TypeBytesIn = make(map[string]uint64)
+	p.TypeBytesOut = make(map[string]uint64)
 }

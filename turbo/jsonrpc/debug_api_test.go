@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -334,7 +333,7 @@ func TestAccountRange(t *testing.T) {
 		require.Equal(t, 35, len(result.Accounts[addr].Storage))
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
 		for _, v := range result.Accounts {
-			hashedCode, _ := common2.HashData(v.Code)
+			hashedCode, _ := common.HashData(v.Code)
 			require.Equal(t, v.CodeHash.String(), hashedCode.String())
 		}
 	})

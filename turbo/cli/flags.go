@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -20,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -356,8 +357,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
-		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
-		Dirs:    cfg.Dirs,
+		Enabled:           ctx.Bool(utils.HTTPEnabledFlag.Name),
+		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
+		Dirs:              cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,

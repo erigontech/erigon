@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/metrics"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"golang.org/x/exp/slices"
@@ -842,7 +842,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	beaconConfig := s.BeaconConfig()
 	sSlot := s.Slot()
 	if slot <= sSlot {
-		return fmt.Errorf("new slot: %d not greater than s slot: %d", slot, sSlot)
+		return fmt.Errorf("new slot: %d not greater than current slot: %d", slot, sSlot)
 	}
 	// Process each slot.
 	for i := sSlot; i < slot; i++ {

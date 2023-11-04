@@ -19,9 +19,9 @@ package rpc_test
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
