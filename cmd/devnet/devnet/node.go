@@ -30,6 +30,7 @@ type Node interface {
 	Account() *accounts.Account
 	IsBlockProducer() bool
 	Configure(baseNode args.NodeArgs, nodeNumber int) error
+	EnableMetrics(port int)
 }
 
 type NodeSelector interface {
@@ -127,6 +128,10 @@ func (n *devnetNode) GetHttpPort() int {
 
 func (n *devnetNode) GetEnodeURL() string {
 	return n.nodeArgs.GetEnodeURL()
+}
+
+func (n *devnetNode) EnableMetrics(int) {
+	panic("not implemented")
 }
 
 // run configures, creates and serves an erigon node
