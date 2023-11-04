@@ -524,15 +524,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
-	/*
-		if config.SilkwormEnabled {
-			backend.silkworm, err = silkworm.New(config.SilkwormPath)
-			if err != nil {
-				return nil, err
-			}
-		}
-	*/
-
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
