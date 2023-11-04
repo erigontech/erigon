@@ -50,7 +50,7 @@ func RegisterProvider(provider Provider, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 	defer providerMutex.Unlock()
 
-	reg, _ := providers[infoType]
+	reg := providers[infoType]
 
 	if reg != nil {
 		for _, p := range reg.providers {
@@ -70,16 +70,18 @@ func RegisterProvider(provider Provider, infoType Type, logger log.Logger) {
 	}
 }
 
-func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
+func StartProviders(ctx context.Context, infoType Type, logger log.Logger) error {
 	providerMutex.Lock()
 
-	reg, _ := providers[infoType]
+	reg := providers[infoType]
+	if reg == nil {
+		providerMutex.Unlock()
+		return fmt.Errorf("no providers for %s", infoType)
+	}
 
 	toStart := make([]Provider, len(reg.providers))
 
-	for i, provider := range reg.providers {
-		toStart[i] = provider
-	}
+	copy(toStart, reg.providers)
 
 	reg.context = ctx
 
@@ -88,6 +90,8 @@ func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	for _, provider := range toStart {
 		go startProvider(ctx, infoType, provider, logger)
 	}
+
+	return nil
 }
 
 func startProvider(ctx context.Context, infoType Type, provider Provider, logger log.Logger) {

@@ -28,3 +28,22 @@ type PeerStatistics struct {
 	TypeBytesIn  map[string]uint64
 	TypeBytesOut map[string]uint64
 }
+
+type DownloadStatistics struct {
+	Progress     string `json:"progress"`
+	Downloaded   string `json:"downloaded"`
+	Total        string `json:"total"`
+	TimeLeft     string `json:"timeLeft"`
+	TotalTime    string `json:"totalTime"`
+	DownloadRate string `json:"downloadRate"`
+	UploadRate   string `json:"uploadRate"`
+	Peers        int32  `json:"peers"`
+	Files        int32  `json:"files"`
+	Connections  uint64 `json:"connections"`
+	Alloc        string `json:"alloc"`
+	Sys          string `json:"sys"`
+}
+
+func (ti DownloadStatistics) Type() Type {
+	return TypeOf(ti)
+}

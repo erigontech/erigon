@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -130,6 +131,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	// send all hashes to the Downloader service
 	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
+
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
@@ -182,6 +184,12 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
+	var diagnosticsContext context.Context
+	diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
+		diagnosticsContext = ctx
+		return nil
+	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())
+
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err == nil && stats.Completed {
@@ -218,6 +226,24 @@ Loop:
 				if stats.Progress > 0 && stats.DownloadRate == 0 {
 					suffix += " (or verifying)"
 				}
+
+				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
+					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
+						Progress:     fmt.Sprintf("%.2f%%", stats.Progress),
+						Downloaded:   common.ByteCount(stats.BytesCompleted),
+						Total:        common.ByteCount(stats.BytesTotal),
+						TimeLeft:     downloadTimeLeft,
+						TotalTime:    time.Since(downloadStartTime).Round(time.Second).String(),
+						DownloadRate: common.ByteCount(stats.DownloadRate) + "/s",
+						UploadRate:   common.ByteCount(stats.UploadRate) + "/s",
+						Peers:        stats.PeersUnique,
+						Files:        stats.FilesTotal,
+						Connections:  stats.ConnectionsTotal,
+						Alloc:        common.ByteCount(m.Alloc),
+						Sys:          common.ByteCount(m.Sys),
+					})
+				}
+
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
 					"time-left", downloadTimeLeft,
