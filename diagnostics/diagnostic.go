@@ -30,20 +30,46 @@ func (d *DiagnosticClient) Setup() {
 
 func (d *DiagnosticClient) snapshotDownloader() {
 	go func() {
-		//TODO: remove delay and implement some retry logic to wait for register provider on snashotsync.go
-		time.Sleep(100 * time.Second)
-		ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
-
-		err := diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
-		if err != nil {
-			fmt.Println("Error starting providers:", err)
-		} else {
-
-			for info := range ch {
-				d.snapshotDownload = info
+		retry(100, 1*time.Second, func() error {
+			err := d.runSnapshotListener()
+			if err != nil {
+				fmt.Println("Error running snapshot listener:", err)
 			}
-		}
+			return err
+		})
 	}()
+}
+
+func (d *DiagnosticClient) runSnapshotListener() error {
+
+	ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
+
+	err := diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
+	if err != nil {
+		fmt.Println("Error starting providers:", err)
+		return err
+	} else {
+
+		for info := range ch {
+			d.snapshotDownload = info
+		}
+
+		return nil
+	}
+}
+
+func retry(attempts int, sleep time.Duration, f func() error) (err error) {
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			fmt.Println("retrying after error:", err)
+			time.Sleep(sleep)
+		}
+		err = f()
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
 }
 
 func (d *DiagnosticClient) SnapshotDownload() diaglib.DownloadStatistics {
