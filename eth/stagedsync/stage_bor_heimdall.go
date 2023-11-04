@@ -9,9 +9,12 @@ import (
 	"strconv"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
@@ -32,6 +35,7 @@ const (
 
 type BorHeimdallCfg struct {
 	db               kv.RwDB
+	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
 	miningState      MiningState
 	chainConfig      chain.Config
 	heimdallClient   heimdall.IHeimdallClient
@@ -39,19 +43,25 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
+	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
 func StageBorHeimdallCfg(
 	db kv.RwDB,
+	snapDb kv.RwDB,
 	miningState MiningState,
 	chainConfig chain.Config,
 	heimdallClient heimdall.IHeimdallClient,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
+	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:               db,
+		snapDb:           snapDb,
 		miningState:      miningState,
 		chainConfig:      chainConfig,
 		heimdallClient:   heimdallClient,
@@ -59,6 +69,8 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
+		recents:          recents,
+		signatures:       signatures,
 	}
 }
 
