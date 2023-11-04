@@ -402,7 +402,6 @@ func New(
 		spanner:                spanner,
 		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
-		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
@@ -468,7 +467,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		logger:      logger,
 		Recents:     recents,
 		Signatures:  signatures,
-		spanCache:   btree.New(32),
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
