@@ -191,6 +191,10 @@ func (t *UDPv5) Errors() map[string]uint {
 	return t.errors
 }
 
+func (t *UDPv5) LenUnslocited() int {
+	return 0
+}
+
 // Close shuts down packet processing.
 func (t *UDPv5) Close() {
 	t.closeOnce.Do(func() {

@@ -207,6 +207,12 @@ func (t *UDPv4) Errors() map[string]uint {
 	return errors
 }
 
+func (t *UDPv4) LenUnslocited() int {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.unsolicitedNodes.Len()
+}
+
 // Close shuts down the socket and aborts any running queries.
 func (t *UDPv4) Close() {
 	t.closeOnce.Do(func() {
@@ -658,21 +664,30 @@ func (t *UDPv4) loop() {
 		case key := <-t.gotkey:
 			go func() {
 				if key, err := v4wire.DecodePubkey(crypto.S256(), key); err == nil {
-					for _, n := range t.LookupPubkey(key) {
+					nodes := t.LookupPubkey(key)
+					mutex.Lock()
+					defer mutex.Unlock()
+
+					for _, n := range nodes {
 						t.unsolicitedNodes.Add(n.ID(), n)
 					}
 				}
 			}()
 
 		case nodes := <-t.gotnodes:
-			for _, rn := range nodes.nodes {
-				n, err := t.nodeFromRPC(nodes.addr, rn)
-				if err != nil {
-					t.log.Trace("Invalid neighbor node received", "ip", rn.IP, "addr", nodes.addr, "err", err)
-					continue
+
+			func() {
+				mutex.Lock()
+				defer mutex.Unlock()
+				for _, rn := range nodes.nodes {
+					n, err := t.nodeFromRPC(nodes.addr, rn)
+					if err != nil {
+						t.log.Trace("Invalid neighbor node received", "ip", rn.IP, "addr", nodes.addr, "err", err)
+						continue
+					}
+					t.unsolicitedNodes.Add(n.ID(), &n.Node)
 				}
-				t.unsolicitedNodes.Add(n.ID(), &n.Node)
-			}
+			}()
 		}
 	}
 }

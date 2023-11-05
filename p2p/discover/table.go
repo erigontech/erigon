@@ -102,6 +102,7 @@ type transport interface {
 	ping(*enode.Node) (seq uint64, err error)
 	Version() string
 	Errors() map[string]uint
+	LenUnsolicited() int
 }
 
 // bucket contains nodes, ordered by their last activity. the entry
@@ -302,7 +303,8 @@ loop:
 		case <-tableMainenance.C:
 			live := tab.live()
 
-			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(), "len", tab.len(), "live", tab.live(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
+			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(),
+				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
 
 			func() {
 				tab.mutex.Lock()
