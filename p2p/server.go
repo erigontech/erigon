@@ -1063,7 +1063,9 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
 		errStr := cleanError(err.Error())
+		srv.lock.Lock()
 		srv.errors[errStr] = srv.errors[errStr] + 1
+		srv.lock.Unlock()
 		srv.logger.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
@@ -1084,7 +1086,9 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		errStr := cleanError(err.Error())
+		srv.lock.Lock()
 		srv.errors[errStr] = srv.errors[errStr] + 1
+		srv.lock.Unlock()
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}

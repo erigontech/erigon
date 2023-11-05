@@ -93,6 +93,7 @@ var (
 //     to create peer connections to nodes arriving through the iterator.
 type dialScheduler struct {
 	dialConfig
+	mutex       sync.Mutex
 	setupFunc   dialSetupFunc
 	wg          sync.WaitGroup
 	cancel      context.CancelFunc
@@ -125,8 +126,8 @@ type dialScheduler struct {
 	historyTimerTime mclock.AbsTime
 
 	// for logStats
-	doneSinceLastLog int
-	errors           map[string]uint
+	dialed int
+	errors map[string]uint
 }
 
 type dialSetupFunc func(net.Conn, connFlag, *enode.Node) error
@@ -266,7 +267,7 @@ loop:
 			id := task.dest.ID()
 			delete(d.dialing, id)
 			d.updateStaticPool(id)
-			d.doneSinceLastLog++
+			d.dialed++
 
 		case c := <-d.addPeerCh:
 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
@@ -343,15 +344,15 @@ func (d *dialScheduler) readNodes(it enode.Iterator) {
 // nolint
 func (d *dialScheduler) logStats() {
 	vals := []interface{}{"protocol", d.subProtocolVersion,
-		"peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.doneSinceLastLog, "static", len(d.static)}
+		"peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.dialed, "static", len(d.static)}
 
+	d.mutex.Lock()
 	for err, count := range d.errors {
 		vals = append(vals, err, count)
 	}
+	d.mutex.Unlock()
 
 	d.log.Debug("[p2p] Dial scheduler", vals...)
-
-	d.doneSinceLastLog = 0
 }
 
 // rearmHistoryTimer configures d.historyTimer to fire when the
@@ -552,7 +553,9 @@ func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 		cleanErr := cleanupDialErr(err)
 		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanErr)
 
+		d.mutex.Lock()
 		d.errors[cleanErr.Error()] = d.errors[cleanErr.Error()] + 1
+		d.mutex.Unlock()
 		return &dialError{err}
 	}
 	mfd := newMeteredConn(fd, false, &net.TCPAddr{IP: dest.IP(), Port: dest.TCP()})

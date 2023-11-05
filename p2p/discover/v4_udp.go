@@ -72,6 +72,7 @@ const (
 
 // UDPv4 implements the v4 wire protocol.
 type UDPv4 struct {
+	mutex       sync.Mutex
 	conn        UDPConn
 	log         log.Logger
 	netrestrict *netutil.Netlist
@@ -195,7 +196,15 @@ func (t *UDPv4) Version() string {
 }
 
 func (t *UDPv4) Errors() map[string]uint {
-	return t.errors
+	errors := map[string]uint{}
+
+	t.mutex.Lock()
+	for key, value := range t.errors {
+		errors[key] = value
+	}
+	t.mutex.Unlock()
+
+	return errors
 }
 
 // Close shuts down the socket and aborts any running queries.
@@ -844,11 +853,15 @@ func (t *UDPv4) verifyPing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	senderKey, err := v4wire.DecodePubkey(crypto.S256(), fromKey)
 	if err != nil {
+		t.mutex.Lock()
 		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.mutex.Unlock()
 		return err
 	}
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
 		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	h.senderKey = senderKey
@@ -888,11 +901,15 @@ func (t *UDPv4) verifyPong(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 	req := h.Packet.(*v4wire.Pong)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
 		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.handleReply(fromID, from.IP, from.Port, req) {
+		t.mutex.Lock()
 		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	t.localNode.UDPEndpointStatement(from, &net.UDPAddr{IP: req.To.IP, Port: int(req.To.UDP)})
@@ -906,7 +923,9 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 	req := h.Packet.(*v4wire.Findnode)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
 		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
@@ -916,7 +935,9 @@ func (t *UDPv4) verifyFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 		// and UDP port of the target as the source address. The recipient of the findnode
 		// packet would then send a neighbors packet (which is a much bigger packet than
 		// findnode) to the victim.
+		t.mutex.Lock()
 		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
+		t.mutex.Unlock()
 		return errUnknownNode
 	}
 	return nil
@@ -954,11 +975,15 @@ func (t *UDPv4) verifyNeighbors(h *packetHandlerV4, from *net.UDPAddr, fromID en
 	req := h.Packet.(*v4wire.Neighbors)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
 		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.handleReply(fromID, from.IP, from.Port, h.Packet) {
+		t.mutex.Lock()
 		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	return nil
@@ -970,11 +995,15 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 	req := h.Packet.(*v4wire.ENRRequest)
 
 	if v4wire.Expired(req.Expiration) {
+		t.mutex.Lock()
 		t.errors[errExpiredStr] = t.errors[errExpiredStr] + 1
+		t.mutex.Unlock()
 		return errExpired
 	}
 	if !t.checkBond(fromID, from.IP) {
+		t.mutex.Lock()
 		t.errors[errUnknownNodeStr] = t.errors[errUnknownNodeStr] + 1
+		t.mutex.Unlock()
 		return errUnknownNode
 	}
 	return nil
@@ -987,7 +1016,9 @@ func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 	})
 
 	if err != nil {
+		t.mutex.Lock()
 		t.errors[err.Error()] = t.errors[err.Error()] + 1
+		t.mutex.Unlock()
 	}
 }
 
@@ -995,7 +1026,9 @@ func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 
 func (t *UDPv4) verifyENRResponse(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, fromKey v4wire.Pubkey) error {
 	if !t.handleReply(fromID, from.IP, from.Port, h.Packet) {
+		t.mutex.Lock()
 		t.errors[errUnsolicitedReplyStr] = t.errors[errUnsolicitedReplyStr] + 1
+		t.mutex.Unlock()
 		return errUnsolicitedReply
 	}
 	return nil
