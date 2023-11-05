@@ -72,22 +72,25 @@ func computeInitialOffset(version clparams.StateVersion) uint64 {
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
-func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error {
+// buf is just a reusable buffer. if it had to grow it will be returned back as grown.
+func WriteBlockForSnapshot(w io.Writer, block *cltypes.SignedBeaconBlock, reusable []byte) ([]byte, error) {
 	bodyRoot, err := block.Block.Body.HashSSZ()
 	if err != nil {
-		return err
+		return reusable, err
 	}
+	reusable = reusable[:0]
 	// Maybe reuse the buffer?
-	encoded, err := block.EncodeSSZ(nil)
+	encoded, err := block.EncodeSSZ(reusable)
 	if err != nil {
-		return err
+		return reusable, err
 	}
+	reusable = encoded
 	version := block.Version()
 	if _, err := w.Write([]byte{byte(version)}); err != nil {
-		return err
+		return reusable, err
 	}
 	if _, err := w.Write(bodyRoot[:]); err != nil {
-		return err
+		return reusable, err
 	}
 	currentChunkLength := computeInitialOffset(version)
 
@@ -100,20 +103,21 @@ func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error 
 	currentChunkLength += uint64(body.VoluntaryExits.EncodingSizeSSZ())
 	// Write the chunk and chunk attestations
 	if err := chunk_encoding.WriteChunk(w, encoded[:currentChunkLength], chunk_encoding.ChunkDataType); err != nil {
-		return err
+		return reusable, err
 	}
 	// we are done if we are before altair
 	if version <= clparams.AltairVersion {
-		return nil
+		return reusable, nil
 	}
-	encoded = encoded[currentChunkLength+uint64(body.ExecutionPayload.EncodingSizeSSZ()):]
-	if err := WriteEth1BlockForSnapshot(body.ExecutionPayload, w); err != nil {
-		return err
+	encoded = encoded[currentChunkLength:]
+	if err := writeEth1BlockForSnapshot(w, encoded[:body.ExecutionPayload.EncodingSizeSSZ()], body.ExecutionPayload); err != nil {
+		return reusable, err
 	}
+	encoded = encoded[body.ExecutionPayload.EncodingSizeSSZ():]
 	if version <= clparams.BellatrixVersion {
-		return nil
+		return reusable, nil
 	}
-	return chunk_encoding.WriteChunk(w, encoded, chunk_encoding.ChunkDataType)
+	return reusable, chunk_encoding.WriteChunk(w, encoded, chunk_encoding.ChunkDataType)
 }
 
 func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, error) {
@@ -157,7 +161,7 @@ func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader Execut
 		return v, nil
 	}
 	// Read the block pointer and retrieve chunk4 from the execution reader
-	if _, err := ReadEth1BlockFromSnapshot(r, out, executionReader, cfg); err != nil {
+	if _, err := readEth1BlockFromSnapshot(r, out, executionReader, cfg); err != nil {
 		return v, err
 	}
 	if v <= clparams.BellatrixVersion {

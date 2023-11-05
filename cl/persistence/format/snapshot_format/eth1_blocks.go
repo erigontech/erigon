@@ -12,7 +12,7 @@ import (
 )
 
 // WriteEth1BlockForSnapshot writes an execution block to the given writer in the format expected by the snapshot.
-func WriteEth1BlockForSnapshot(block *cltypes.Eth1Block, w io.Writer) error {
+func writeEth1BlockForSnapshot(w io.Writer, encoded []byte, block *cltypes.Eth1Block) error {
 	pos := (length.Hash /*ParentHash*/ + length.Addr /*Miner*/ + length.Hash /*StateRoot*/ + length.Hash /*ReceiptsRoot*/ + types.BloomByteLength /*Bloom*/ +
 		length.Hash /*PrevRandao*/ + 32 /*BlockNumber + Timestamp + GasLimit + GasUsed */ + 4 /*ExtraDataOffset*/ + length.Hash /*BaseFee*/ +
 		length.Hash /*BlockHash*/ + 4 /*TransactionOffset*/)
@@ -27,11 +27,8 @@ func WriteEth1BlockForSnapshot(block *cltypes.Eth1Block, w io.Writer) error {
 	if _, err := w.Write([]byte{byte(block.Version())}); err != nil {
 		return err
 	}
+
 	// Maybe reuse the buffer?
-	encoded, err := block.EncodeSSZ(nil)
-	if err != nil {
-		return err
-	}
 	pos += block.Extra.EncodingSizeSSZ()
 	if err := chunk_encoding.WriteChunk(w, encoded[:pos], chunk_encoding.ChunkDataType); err != nil {
 		return err
@@ -48,7 +45,7 @@ func WriteEth1BlockForSnapshot(block *cltypes.Eth1Block, w io.Writer) error {
 	return chunk_encoding.WriteChunk(w, encoded, chunk_encoding.ChunkDataType)
 }
 
-func ReadEth1BlockFromSnapshot(r io.Reader, out io.Writer, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (clparams.StateVersion, error) {
+func readEth1BlockFromSnapshot(r io.Reader, out io.Writer, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (clparams.StateVersion, error) {
 	// Metadata section is just the current hardfork of the block.
 	vArr := make([]byte, 1)
 	if _, err := r.Read(vArr); err != nil {

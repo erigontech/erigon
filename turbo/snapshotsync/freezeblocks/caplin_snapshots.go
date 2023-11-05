@@ -342,6 +342,8 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	var w bytes.Buffer
 	lzWriter := lz4.NewWriter(&w)
 	defer lzWriter.Close()
+	// Just make a reusable buffer
+	buf := make([]byte, 2048)
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
@@ -360,7 +362,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		}
 		lzWriter.Reset(&w)
 		lzWriter.CompressionLevel = 1
-		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, lzWriter); err != nil {
+		if buf, err = snapshot_format.WriteBlockForSnapshot(lzWriter, obj.Data, buf); err != nil {
 			return err
 		}
 		if err := lzWriter.Flush(); err != nil {
