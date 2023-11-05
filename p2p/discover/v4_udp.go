@@ -525,6 +525,9 @@ func (t *UDPv4) loop() {
 
 		for {
 			select {
+			case <-t.closeCtx.Done():
+				return
+
 			case now := <-timeout.C:
 				func() {
 					mutex.Lock()
