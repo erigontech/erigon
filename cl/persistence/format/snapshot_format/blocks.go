@@ -19,7 +19,8 @@ var buffersPool = sync.Pool{
 }
 
 type ExecutionBlockReaderByNumber interface {
-	BlockByNumber(number uint64, hash libcommon.Hash) (*cltypes.Eth1Block, error)
+	TransactionsSSZ(w io.Writer, number uint64, hash libcommon.Hash) error
+	WithdrawalsSZZ(w io.Writer, number uint64, hash libcommon.Hash) error
 }
 
 const (
@@ -106,7 +107,7 @@ func WriteBlockForSnapshot(block *cltypes.SignedBeaconBlock, w io.Writer) error 
 		return nil
 	}
 	encoded = encoded[currentChunkLength+uint64(body.ExecutionPayload.EncodingSizeSSZ()):]
-	if err := writeExecutionBlockPtr(w, body.ExecutionPayload); err != nil {
+	if err := WriteEth1BlockForSnapshot(body.ExecutionPayload, w); err != nil {
 		return err
 	}
 	if version <= clparams.BellatrixVersion {
@@ -156,23 +157,7 @@ func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader Execut
 		return v, nil
 	}
 	// Read the block pointer and retrieve chunk4 from the execution reader
-	blockNumber, blockHash, err := readExecutionBlockPtr(r)
-	if err != nil {
-		return v, err
-	}
-	executionBlock, err := executionReader.BlockByNumber(blockNumber, blockHash)
-	if err != nil {
-		return v, err
-	}
-	if executionBlock == nil {
-		return v, fmt.Errorf("execution block %d not found", blockNumber)
-	}
-	// TODO(Giulio2002): optimize GC
-	eth1Bytes, err := executionBlock.EncodeSSZ(nil)
-	if err != nil {
-		return v, err
-	}
-	if _, err := out.Write(eth1Bytes); err != nil {
+	if _, err := ReadEth1BlockFromSnapshot(r, out, executionReader, cfg); err != nil {
 		return v, err
 	}
 	if v <= clparams.BellatrixVersion {
