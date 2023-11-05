@@ -7,6 +7,8 @@ import (
 	"io"
 	"sync"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/chunk_encoding"
@@ -17,7 +19,7 @@ var buffersPool = sync.Pool{
 }
 
 type ExecutionBlockReaderByNumber interface {
-	BlockByNumber(number uint64) (*cltypes.Eth1Block, error)
+	BlockByNumber(number uint64, hash libcommon.Hash) (*cltypes.Eth1Block, error)
 }
 
 const (
@@ -33,21 +35,22 @@ const (
 )
 
 func writeExecutionBlockPtr(w io.Writer, p *cltypes.Eth1Block) error {
-	temp := make([]byte, 8)
+	temp := make([]byte, 40)
 	binary.BigEndian.PutUint64(temp, p.BlockNumber)
+	copy(temp[8:], p.BlockHash[:])
 
 	return chunk_encoding.WriteChunk(w, temp, chunk_encoding.PointerDataType)
 }
 
-func readExecutionBlockPtr(r io.Reader) (uint64, error) {
+func readExecutionBlockPtr(r io.Reader) (uint64, libcommon.Hash, error) {
 	b, dT, err := chunk_encoding.ReadChunkToBytes(r)
 	if err != nil {
-		return 0, err
+		return 0, libcommon.Hash{}, err
 	}
 	if dT != chunk_encoding.PointerDataType {
-		return 0, fmt.Errorf("malformed beacon block, invalid block pointer type %d, expected: %d", dT, chunk_encoding.ChunkDataType)
+		return 0, libcommon.Hash{}, fmt.Errorf("malformed beacon block, invalid block pointer type %d, expected: %d", dT, chunk_encoding.ChunkDataType)
 	}
-	return binary.BigEndian.Uint64(b), nil
+	return binary.BigEndian.Uint64(b[:8]), libcommon.BytesToHash(b[8:]), nil
 }
 
 func computeInitialOffset(version clparams.StateVersion) uint64 {
@@ -153,16 +156,16 @@ func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader Execut
 		return v, nil
 	}
 	// Read the block pointer and retrieve chunk4 from the execution reader
-	blockPointer, err := readExecutionBlockPtr(r)
+	blockNumber, blockHash, err := readExecutionBlockPtr(r)
 	if err != nil {
 		return v, err
 	}
-	executionBlock, err := executionReader.BlockByNumber(blockPointer)
+	executionBlock, err := executionReader.BlockByNumber(blockNumber, blockHash)
 	if err != nil {
 		return v, err
 	}
 	if executionBlock == nil {
-		return v, fmt.Errorf("execution block %d not found", blockPointer)
+		return v, fmt.Errorf("execution block %d not found", blockNumber)
 	}
 	// TODO(Giulio2002): optimize GC
 	eth1Bytes, err := executionBlock.EncodeSSZ(nil)
