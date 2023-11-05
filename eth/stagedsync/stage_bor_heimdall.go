@@ -504,15 +504,12 @@ func PersistValidatorSets(
 	headers := make([]*types.Header, 0, 16)
 	var parent *types.Header
 
+	if s, ok := recents.Get(hash); ok {
+		snap = s
+	}
+
 	//nolint:govet
 	for snap == nil {
-		// If an in-memory snapshot was found, use that
-		if s, ok := recents.Get(hash); ok {
-			snap = s
-
-			break
-		}
-
 		// If an on-disk snapshot can be found, use that
 		if blockNum%snapshotPersistInterval == 0 {
 			if s, err := bor.LoadSnapshot(config, signatures, snapDb, hash); err == nil {
@@ -548,6 +545,11 @@ func PersistValidatorSets(
 			parent = chain.GetHeader(hash, blockNum)
 		}
 
+		// If an in-memory snapshot was found, use that
+		if s, ok := recents.Get(hash); ok {
+			snap = s
+			break
+		}
 		if chain != nil && blockNum < chain.FrozenBlocks() {
 			break
 		}
@@ -629,7 +631,6 @@ func PersistValidatorSets(
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	prevSnap := snap.Number
 	if len(headers) > 0 {
 		var err error
 		if snap, err = snap.Apply(parent, headers, logger); err != nil {
@@ -646,10 +647,6 @@ func PersistValidatorSets(
 				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
 			}
 		}
-	}
-
-	if prevSnap == snap.Number {
-		return nil
 	}
 
 	recents.Add(snap.Hash, snap)
