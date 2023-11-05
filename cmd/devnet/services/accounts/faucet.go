@@ -214,7 +214,7 @@ func (f *Faucet) NodeCreated(ctx context.Context, node devnet.Node) {
 func (f *Faucet) NodeStarted(ctx context.Context, node devnet.Node) {
 	logger := devnet.Logger(ctx)
 
-	if strings.HasPrefix(node.Name(), f.chainName) && node.IsBlockProducer() {
+	if strings.HasPrefix(node.GetName(), f.chainName) && node.IsBlockProducer() {
 		f.Lock()
 		defer f.Unlock()
 

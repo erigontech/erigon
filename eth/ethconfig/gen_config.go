@@ -22,7 +22,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                        *types.Genesis `toml:",omitempty"`
 		NetworkID                      uint64
 		EthDiscoveryURLs               []string
-		P2PEnabled                     bool
 		Prune                          prune.Mode
 		BatchSize                      datasize.ByteSize
 		ImportMode                     bool
@@ -47,7 +46,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
-	enc.P2PEnabled = c.P2PEnabled
 	enc.Prune = c.Prune
 	enc.BatchSize = c.BatchSize
 	enc.ImportMode = c.ImportMode
@@ -73,7 +71,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                        *types.Genesis `toml:",omitempty"`
 		NetworkID                      *uint64
 		EthDiscoveryURLs               []string
-		P2PEnabled                     *bool
 		Prune                          *prune.Mode
 		BatchSize                      *datasize.ByteSize
 		ImportMode                     *bool
@@ -106,9 +103,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
-	}
-	if dec.P2PEnabled != nil {
-		c.P2PEnabled = *dec.P2PEnabled
 	}
 	if dec.Prune != nil {
 		c.Prune = *dec.Prune
