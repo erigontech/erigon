@@ -157,8 +157,8 @@ func (tab *Table) seedRand() {
 	crand.Read(b[:])
 
 	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
 	tab.rand.Seed(int64(binary.BigEndian.Uint64(b[:])))
-	tab.mutex.Unlock()
 }
 
 // ReadRandomNodes fills the given slice with random nodes from the table. The results
@@ -167,6 +167,7 @@ func (tab *Table) ReadRandomNodes(buf []*enode.Node) (n int) {
 	if !tab.isInitDone() {
 		return 0
 	}
+
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
@@ -306,6 +307,7 @@ loop:
 			func() {
 				tab.mutex.Lock()
 				defer tab.mutex.Unlock()
+
 				for err, count := range tab.errors {
 					vals = append(vals, err, count)
 				}
@@ -523,8 +525,6 @@ func (tab *Table) live() (n int) {
 }
 
 func (tab *Table) addError(err error) {
-	tab.mutex.Lock()
-	defer tab.mutex.Unlock()
 	str := err.Error()
 	tab.errors[str] = tab.errors[str] + 1
 }
@@ -562,6 +562,7 @@ func (tab *Table) addSeenNode(n *node) {
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
+
 	b := tab.bucket(n.ID())
 	if contains(b.entries, n.ID()) {
 		// Already in bucket, don't add.
@@ -604,6 +605,7 @@ func (tab *Table) addVerifiedNode(n *node) {
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
+
 	b := tab.bucket(n.ID())
 	if tab.bumpInBucket(b, n) {
 		// Already in bucket, moved to front.

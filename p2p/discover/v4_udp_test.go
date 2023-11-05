@@ -237,7 +237,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 			p.errc = nilErr
 			test.udp.addReplyMatcher <- p
 			time.AfterFunc(randomDuration(60*time.Millisecond), func() {
-				if !test.udp.handleReply(p.from, p.ip, testPacket(p.ptype)) {
+				if !test.udp.handleReply(p.from, p.ip, p.port, testPacket(p.ptype)) {
 					t.Logf("not matched: %v", p)
 				}
 			})

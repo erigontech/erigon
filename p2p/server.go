@@ -1032,6 +1032,8 @@ func cleanError(err string) string {
 		return "i/o timeout"
 	case strings.HasSuffix(err, "closed by the remote host."):
 		return "closed by remote"
+	case strings.HasSuffix(err, "connection reset by peer"):
+		return "closed by remote"
 	default:
 		return err
 	}
