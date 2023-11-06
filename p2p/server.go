@@ -1046,11 +1046,8 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Prevent leftover pending conns from entering the handshake.
 	srv.lock.Lock()
 	running := srv.running
-
-	if srv.errors == nil {
-		srv.errors = map[string]uint{}
-	}
-
+	// reset error counts
+	srv.errors = map[string]uint{}
 	srv.lock.Unlock()
 	if !running {
 		return errServerStopped
