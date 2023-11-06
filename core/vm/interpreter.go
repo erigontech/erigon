@@ -225,9 +225,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if in.cfg.Debug && err != nil {
 			if !logged {
-				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
 			} else {
-				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -299,7 +299,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		if in.cfg.Debug {
 			in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, GasChangeCallOpCode)
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
 			logged = true
 		}
 		// execute the operation

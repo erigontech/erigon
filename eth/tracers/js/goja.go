@@ -106,7 +106,6 @@ type jsTracer struct {
 	activePrecompiles []libcommon.Address   // List of active precompiles at current block
 	traceStep         bool                  // True if tracer object exposes a `step()` method
 	traceFrame        bool                  // True if tracer object exposes the `enter()` and `exit()` methods
-	gasLimit          uint64                // Amount of gas bought for the whole tx
 	err               error                 // Any error that should stop tracing
 	obj               *goja.Object          // Trace object
 
@@ -225,7 +224,7 @@ func (t *jsTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.Context().BlockNumber)
-	t.ctx["gasPrice"] = t.vm.ToValue(t.env.TxContext().GasPrice)
+	t.ctx["gasPrice"] = t.vm.ToValue(t.env.TxContext().GasPrice.ToBig())
 }
 
 // CaptureTxEnd implements the Tracer interface and is invoked at the end of
