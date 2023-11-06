@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
@@ -264,8 +264,7 @@ type Bor struct {
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
-	fakeDiff  bool // Skip difficulty verifications
-	spanCache *btree.BTree
+	fakeDiff bool // Skip difficulty verifications
 
 	closeOnce           sync.Once
 	logger              log.Logger
@@ -401,7 +400,6 @@ func New(
 		spanner:                spanner,
 		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
-		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
@@ -467,7 +465,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		logger:      logger,
 		Recents:     recents,
 		Signatures:  signatures,
-		spanCache:   btree.New(32),
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
@@ -644,67 +641,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
 		return ErrInvalidTimestamp
 	}
-
-	sprintLength := c.config.CalculateSprint(number)
-
-	// Verify the validator list match the local contract
-	//
-	// Note: Here we fetch the data from span instead of contract
-	// as done in bor client. The contract (validator set) returns
-	// a fixed span for 0th span i.e. 0 - 255 blocks. Hence, the
-	// contract data and span data won't match for that. Skip validating
-	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
-	// once we start fetching validator data from contract.
-	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
-		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
-
-		if err != nil {
-			return err
-		}
-
-		sort.Sort(valset.ValidatorsByAddress(producerSet))
-
-		headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
-
-		if err != nil {
-			return err
-		}
-
-		if len(producerSet) != len(headerVals) {
-			return ErrInvalidSpanValidators
-		}
-
-		for i, val := range producerSet {
-			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-				return ErrInvalidSpanValidators
-			}
-		}
-	}
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
-
-	// verify the validator list in the last sprint block
-	if isSprintStart(number, sprintLength) {
-		// Retrieve the snapshot needed to verify this header and cache it
-		parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
-		validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
-
-		currentValidators := snap.ValidatorSet.Copy().Validators
-		// sort validator by address
-		sort.Sort(valset.ValidatorsByAddress(currentValidators))
-		for i, validator := range currentValidators {
-			copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
-		}
-		// len(header.Extra) >= extraVanity+extraSeal has already been validated in ValidateHeaderExtraField, so this won't result in a panic
-		if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
-			return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
-		}
-	}
-
-	// All basic checks passed, verify the seal and return
-	return c.verifySeal(chain, header, parents, snap)
+	return nil
 }
 
 func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint64, logEvery *time.Ticker) (snap *Snapshot, err error) {
@@ -723,7 +660,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		// get validators and current span
 		var validators []*valset.Validator
 
-		validators, err = c.spanner.GetCurrentValidators(1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		validators, err = c.spanner.GetCurrentValidators(0, c.authorizedSigner.Load().signer, chain)
 
 		if err != nil {
 			return nil, err
@@ -759,7 +696,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			}
 			initialHeaders = append(initialHeaders, header)
 			if len(initialHeaders) == cap(initialHeaders) {
-				snap, err = snap.Apply(initialHeaders, c.logger)
+				snap, err = snap.Apply(nil, initialHeaders, c.logger)
 
 				if err != nil {
 					return nil, err
@@ -774,7 +711,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 			}
 		}
 
-		if snap, err = snap.Apply(initialHeaders, c.logger); err != nil {
+		if snap, err = snap.Apply(nil, initialHeaders, c.logger); err != nil {
 			return nil, err
 		}
 	}
@@ -852,7 +789,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 	if snap == nil && chain != nil && number <= chain.FrozenBlocks() {
 		var err error
-
 		c.frozenSnapshotsInit.Do(func() {
 			snap, err = c.initFrozenSnapshot(chain, number, logEvery)
 		})
@@ -873,7 +809,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	}
 
 	var err error
-	if snap, err = snap.Apply(headers, c.logger); err != nil {
+	if snap, err = snap.Apply(nil, headers, c.logger); err != nil {
 		return nil, err
 	}
 
@@ -993,7 +929,11 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		var spanID uint64
+		if number+1 > zerothSpanEnd {
+			spanID = 1 + (number+1-zerothSpanEnd-1)/spanLength
+		}
+		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1054,13 +994,13 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
-		// check and commit span
-		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-			c.logger.Error("Error while committing span", "err", err)
-			return nil, types.Receipts{}, err
-		}
 
 		if c.blockReader != nil {
+			// check and commit span
+			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+				c.logger.Error("Error while committing span", "err", err)
+				return nil, types.Receipts{}, err
+			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
@@ -1119,16 +1059,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
-		// check and commit span
-		err := c.checkAndCommitSpan(state, header, cx, syscall)
-		if err != nil {
-			c.logger.Error("Error while committing span", "err", err)
-			return nil, nil, types.Receipts{}, err
-		}
-
-		if c.HeimdallClient != nil {
+		if c.blockReader != nil {
+			// check and commit span
+			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+				c.logger.Error("Error while committing span", "err", err)
+				return nil, nil, types.Receipts{}, err
+			}
 			// commit states
-			if err = c.CommitStates(state, header, cx, syscall); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
@@ -1421,46 +1359,6 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 	return false
 }
 
-func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
-	c.logger.Debug("Getting span", "for block", blockNum)
-	var borSpan *span.HeimdallSpan
-	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
-		borSpan = item.(*span.HeimdallSpan)
-		return false
-	})
-
-	if borSpan != nil && borSpan.StartBlock <= blockNum && borSpan.EndBlock >= blockNum {
-		return borSpan, nil
-	}
-
-	// Span with given block block number is not loaded
-	// As span has fixed set of blocks (except 0th span), we can
-	// formulate it and get the exact ID we'd need to fetch.
-	var spanID uint64
-	if blockNum > zerothSpanEnd {
-		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
-	}
-
-	if c.HeimdallClient == nil {
-		return nil, fmt.Errorf("span with given block number is not loaded: %d", spanID)
-	}
-
-	c.logger.Debug("Span with given block number is not loaded", "fetching span", spanID)
-
-	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-	if err != nil {
-		return nil, err
-	}
-	borSpan = response
-	c.spanCache.ReplaceOrInsert(borSpan)
-
-	for c.spanCache.Len() > 128 {
-		c.spanCache.DeleteMin()
-	}
-
-	return borSpan, nil
-}
-
 func (c *Bor) fetchAndCommitSpan(
 	newSpanID uint64,
 	state *state.IntraBlockState,
@@ -1479,12 +1377,10 @@ func (c *Bor) fetchAndCommitSpan(
 
 		heimdallSpan = *s
 	} else {
-		response, err := c.HeimdallClient.Span(c.execCtx, newSpanID)
-		if err != nil {
+		spanJson := chain.Chain.BorSpan(newSpanID)
+		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {
 			return err
 		}
-
-		heimdallSpan = *response
 	}
 
 	// check if chain id matches with heimdall span
@@ -1592,10 +1488,6 @@ func (c *Bor) CommitStates(
 
 func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
 	c.HeimdallClient = h
-}
-
-func (c *Bor) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error) {
-	return c.spanner.GetCurrentValidators(blockNumber, signer, getSpanForBlock)
 }
 
 //
