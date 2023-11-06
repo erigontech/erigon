@@ -33,6 +33,9 @@ func (d *DiagnosticClient) runSnapshotListener() {
 		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
 		for info := range ch {
 			d.snapshotDownload = info
+			if info.DownloadFinished {
+				return
+			}
 		}
 	}()
 }
