@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -75,6 +76,9 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 		slot := slots[idx]
 
 		r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+		if errors.Is(err, afero.ErrFileNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
