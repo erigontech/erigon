@@ -140,12 +140,12 @@ var (
 	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
-		Usage: "enables internal consensus",
+		Usage: "Enables internal consensus",
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
-		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
 	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
@@ -413,7 +413,7 @@ var (
 
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
-		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
+		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
 	TraceMaxtracesFlag = cli.UintFlag{
@@ -521,7 +521,7 @@ var (
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
-		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+		Usage: "Comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
 	SentryLogPeerInfoFlag = cli.BoolFlag{
 		Name:  "sentry.log-peer-info",
@@ -557,14 +557,14 @@ var (
 	NATFlag = cli.StringFlag{
 		Name: "nat",
 		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
-			 "" or "none"         default - do not nat
-			 "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-			 "any"                uses the first auto-detected mechanism
-			 "upnp"               uses the Universal Plug and Play protocol
-			 "pmp"                uses NAT-PMP with an auto-detected gateway address
-			 "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
-			 "stun"               uses STUN to detect an external IP using a default server
-			 "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
+			 "" or "none"         Default - do not nat
+			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
+			 "any"                Uses the first auto-detected mechanism
+			 "upnp"               Uses the Universal Plug and Play protocol
+			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
+			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
+			 "stun"               Uses STUN to detect an external IP using a default server
+			 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
 `,
 		Value: "",
 	}
@@ -631,27 +631,27 @@ var (
 	}
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
-		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
-		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Usage: "Number of blocks after which to save the vote snapshot to the database",
 		Value: 10,
 	}
 	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
 		Name:  "clique.snapshots",
-		Usage: "number of recent vote snapshots to keep in memory",
+		Usage: "Number of recent vote snapshots to keep in memory",
 		Value: 1024,
 	}
 	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
 		Name:  "clique.signatures",
-		Usage: "number of recent block signatures to keep in memory",
+		Usage: "Number of recent block signatures to keep in memory",
 		Value: 16384,
 	}
 	CliqueDataDirFlag = flags.DirectoryFlag{
 		Name:  "clique.datadir",
-		Usage: "a path to clique db folder",
+		Usage: "Path to clique db folder",
 		Value: "",
 	}
 
@@ -671,17 +671,17 @@ var (
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
 		Value: "16mb",
-		Usage: "bytes per second, example: 32mb",
+		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
 		Value: "4mb",
-		Usage: "bytes per second, example: 32mb",
+		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
 		Value: 3,
-		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
@@ -690,37 +690,37 @@ var (
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
-		Usage: "to disable downloader component",
+		Usage: "Disables downloader component",
 	}
 	DownloaderVerifyFlag = cli.BoolFlag{
 		Name:  "downloader.verify",
-		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
+		Usage: "Verify snapshots on startup. It will not report problems found, but re-download broken pieces.",
 	}
 	DisableIPV6 = cli.BoolFlag{
 		Name:  "downloader.disable.ipv6",
-		Usage: "Turns off ipv6 for the downlaoder",
+		Usage: "Turns off ipv6 for the downloader",
 		Value: false,
 	}
 
 	DisableIPV4 = cli.BoolFlag{
 		Name:  "downloader.disable.ipv4",
-		Usage: "Turn off ipv4 for the downloader",
+		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
-		Usage: "port to listen and serve BitTorrent protocol",
+		Usage: "Port to listen and serve BitTorrent protocol",
 	}
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "unused parameter (reserved for future use)",
+		Usage: "Unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
 		Value: 10,
-		Usage: "connections per file",
+		Usage: "Number of connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
@@ -729,7 +729,7 @@ var (
 	}
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
-		Usage: "runtime limit of chandata db size. you can change value of this flag at any time",
+		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
 		Value: (3 * datasize.TB).String(),
 	}
 	ForcePartialCommitFlag = cli.BoolFlag{
@@ -751,7 +751,7 @@ var (
 
 	WebSeedsFlag = cli.StringFlag{
 		Name:  "webseed",
-		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
+		Usage: "Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
 		Value: "",
 	}
 
