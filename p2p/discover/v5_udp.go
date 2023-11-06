@@ -191,7 +191,7 @@ func (t *UDPv5) Errors() map[string]uint {
 	return t.errors
 }
 
-func (t *UDPv5) LenUnslocited() int {
+func (t *UDPv5) LenUnsolicited() int {
 	return 0
 }
 

@@ -158,6 +158,7 @@ func (t *pingRecorder) updateRecord(n *enode.Node) {
 func (t *pingRecorder) Self() *enode.Node           { return nullNode }
 func (t *pingRecorder) Version() string             { return "none" }
 func (t *pingRecorder) Errors() map[string]uint     { return nil }
+func (t *pingRecorder) LenUnsolicited() int         { return 0 }
 func (t *pingRecorder) lookupSelf() []*enode.Node   { return nil }
 func (t *pingRecorder) lookupRandom() []*enode.Node { return nil }
 

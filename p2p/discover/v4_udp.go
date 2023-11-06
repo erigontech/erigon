@@ -207,7 +207,7 @@ func (t *UDPv4) Errors() map[string]uint {
 	return errors
 }
 
-func (t *UDPv4) LenUnslocited() int {
+func (t *UDPv4) LenUnsolicited() int {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.unsolicitedNodes.Len()
