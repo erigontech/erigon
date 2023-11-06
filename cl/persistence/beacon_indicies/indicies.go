@@ -94,6 +94,38 @@ func MarkRootCanonical(ctx context.Context, tx kv.RwTx, slot uint64, blockRoot l
 	return tx.Put(kv.CanonicalBlockRoots, base_encoding.Encode64(slot), blockRoot[:])
 }
 
+func WriteExecutionBlockNumber(tx kv.RwTx, blockRoot libcommon.Hash, blockNumber uint64) error {
+	return tx.Put(kv.BlockRootToBlockNumber, blockRoot[:], base_encoding.Encode64(blockNumber))
+}
+
+func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash libcommon.Hash) error {
+	return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], blockHash[:])
+}
+
+func ReadExecutionBlockNumber(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, error) {
+	val, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(val) == 0 {
+		return nil, nil
+	}
+	ret := new(uint64)
+	*ret = base_encoding.Decode64(val)
+	return ret, nil
+}
+
+func ReadExecutionBlockHash(tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+	val, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	if len(val) == 0 {
+		return libcommon.Hash{}, nil
+	}
+	return libcommon.BytesToHash(val), nil
+}
+
 func WriteBeaconBlockHeader(ctx context.Context, tx kv.RwTx, signedHeader *cltypes.SignedBeaconBlockHeader) error {
 	headersBytes, err := signedHeader.EncodeSSZ(nil)
 	if err != nil {
