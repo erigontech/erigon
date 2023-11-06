@@ -15,11 +15,11 @@ type DiagnosticClient struct {
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
 
-	snapshotDownload diaglib.DownloadStatistics
+	snapshotDownload map[string]diaglib.DownloadStatistics
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, snapshotDownload: map[string]diaglib.DownloadStatistics{}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -32,7 +32,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 
 		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
 		for info := range ch {
-			d.snapshotDownload = info
+			d.snapshotDownload[info.StagePrefix] = info
 			if info.DownloadFinished {
 				return
 			}
@@ -40,6 +40,6 @@ func (d *DiagnosticClient) runSnapshotListener() {
 	}()
 }
 
-func (d *DiagnosticClient) SnapshotDownload() diaglib.DownloadStatistics {
+func (d *DiagnosticClient) SnapshotDownload() map[string]diaglib.DownloadStatistics {
 	return d.snapshotDownload
 }
