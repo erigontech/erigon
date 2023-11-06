@@ -145,6 +145,15 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwT
 	if err != nil {
 		return err
 	}
+	if block.Version() >= clparams.BellatrixVersion {
+		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteExecutionBlockHash(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockHash); err != nil {
+			return err
+		}
+	}
+
 	if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(ctx, tx, &cltypes.SignedBeaconBlockHeader{
 		Signature: block.Signature,
 		Header: &cltypes.BeaconBlockHeader{
