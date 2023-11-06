@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -59,15 +60,8 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
-	// if err := waitForExecutionEngineToBeReady(ctx, cfg.engine); err != nil {
-	// 	return err
-	// }
 	blockRoot := cfg.startingRoot
-	destinationSlot := uint64(0)
 	currentSlot := cfg.startingSlot
-	if currentSlot > cfg.dbCfg.PruneDepth {
-		destinationSlot = currentSlot - cfg.dbCfg.PruneDepth
-	}
 
 	executionBlocksCollector := etl.NewCollector("HistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionBlocksCollector.Close()
@@ -83,19 +77,22 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
-	tx, err := cfg.indiciesDB.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	bytesReadIn15Seconds := atomic.Uint64{}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		tx, err := cfg.indiciesDB.BeginRw(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
+		destinationSlot, err := beacon_indicies.ReadHighestFinalized(tx)
+		if err != nil {
+			return false, err
+		}
 		bytesReadIn15Seconds.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
@@ -116,7 +113,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
 			if currEth1Progress.Load()%100 == 0 {
-				return false, nil
+				return false, tx.Commit()
 			}
 
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
@@ -125,7 +122,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
-		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
+
+		return foundLatestEth1ValidBlock && slot <= destinationSlot, tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -241,5 +239,5 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return fmt.Errorf("error doing last block insertion during collection: %s", err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
