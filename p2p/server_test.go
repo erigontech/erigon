@@ -458,6 +458,7 @@ func TestServerSetupConn(t *testing.T) {
 			srv := &Server{
 				Config:       cfg,
 				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
+				errors:       map[string]uint{},
 			}
 			if !test.dontstart {
 				if err := srv.TestStart(logger); err != nil {
