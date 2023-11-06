@@ -151,7 +151,7 @@ func CurrentNetwork(ctx context.Context) *Network {
 	}
 
 	if current := CurrentNode(ctx); current != nil {
-		if n, ok := current.(*node); ok {
+		if n, ok := current.(*devnetNode); ok {
 			return n.network
 		}
 	}

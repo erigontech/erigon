@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"sort"
 
 	"github.com/google/btree"
@@ -30,8 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -133,7 +132,7 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 			// Skip deleted entries
 			return true, nil
 		}
-		keyHash, err1 := common.HashData(kLoc)
+		keyHash, err1 := libcommon.HashData(kLoc)
 		if err1 != nil {
 			return false, err1
 		}
@@ -289,8 +288,8 @@ func (s *PlainState) WriteAccountStorage(address libcommon.Address, incarnation 
 		t = btree.New(16)
 		s.storage[address] = t
 	}
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 	_, err := h.Sha.Write(key[:])
 	if err != nil {
 		return err

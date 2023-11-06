@@ -18,10 +18,9 @@ package rpc
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"reflect"
 	"strings"
-
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var (

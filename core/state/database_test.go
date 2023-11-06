@@ -1369,7 +1369,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
@@ -1431,7 +1431,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())

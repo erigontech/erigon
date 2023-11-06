@@ -113,7 +113,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, "")
+	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +142,6 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		RPCGasCap:        50000000,
 		RPCTxFeeCap:      1, // 1 ether
 		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
-		P2PEnabled:       true,
 		StateStream:      true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool

@@ -26,12 +26,14 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -154,6 +156,9 @@ type Config struct {
 	// Internet.
 	NAT nat.Interface `toml:",omitempty"`
 
+	// NAT interface description (see NAT.Parse()).
+	NATSpec string
+
 	// If Dialer is set to a non-nil value, the given Dialer
 	// is used to dial outbound peer connections.
 	Dialer NodeDialer `toml:"-"`
@@ -171,6 +176,18 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+}
+
+func (config *Config) ListenPort() int {
+	_, portStr, err := net.SplitHostPort(config.ListenAddr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // Server manages all peer connections.
@@ -542,15 +559,19 @@ func (srv *Server) setupLocalNode() error {
 		return err
 	}
 	srv.nodedb = db
+
 	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey, srv.logger)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
-	srv.updateLocalNodeStaticAddrCache()
+
 	// TODO: check conflicts
 	for _, p := range srv.Protocols {
 		for _, e := range p.Attributes {
 			srv.localnode.Set(e)
 		}
 	}
+
+	srv.updateLocalNodeStaticAddrCache()
+
 	switch srv.NAT.(type) {
 	case nil:
 		// No NAT interface, do nothing.
@@ -616,6 +637,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
+	srv.updateLocalNodeStaticAddrCache()
 
 	// Discovery V4
 	var unhandled chan discover.ReadPacket
@@ -718,6 +740,8 @@ func (srv *Server) setupListening(ctx context.Context) error {
 	// Update the local node record and map the TCP listening port if NAT is configured.
 	if tcp, ok := listener.Addr().(*net.TCPAddr); ok {
 		srv.localnode.Set(enr.TCP(tcp.Port))
+		srv.updateLocalNodeStaticAddrCache()
+
 		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
@@ -1160,6 +1184,7 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 	for _, peer := range srv.Peers() {
 		if peer != nil {
 			infos = append(infos, peer.Info())
+			peer.ResetDiagnosticsCounters()
 		}
 	}
 	// Sort the result array alphabetically by node identifier
@@ -1170,5 +1195,19 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 			}
 		}
 	}
+	return infos
+}
+
+// PeersInfo returns an array of metadata objects describing connected peers.
+func (srv *Server) DiagnosticsPeersInfo() map[string]*diagnostics.PeerStatistics {
+	// Gather all the generic and sub-protocol specific infos
+	infos := make(map[string]*diagnostics.PeerStatistics)
+	for _, peer := range srv.Peers() {
+		if peer != nil {
+			infos[peer.ID().String()] = peer.DiagInfo()
+			peer.ResetDiagnosticsCounters()
+		}
+	}
+
 	return infos
 }

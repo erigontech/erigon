@@ -43,6 +43,24 @@ type BeaconStateExtension interface {
 }
 
 type BeaconStateBasic interface {
+	BeaconStateMinimal
+	BeaconStateExtra
+	BeaconStateMutator
+	BeaconStateSSZ
+
+	Clone() clonable.Clonable
+	DebugPrint(prefix string)
+}
+
+type BeaconStateSSZ interface {
+	BlockRoot() ([32]byte, error)
+	EncodeSSZ(buf []byte) ([]byte, error)
+	DecodeSSZ(buf []byte, version int) error
+	EncodingSizeSSZ() (size int)
+	HashSSZ() (out [32]byte, err error)
+}
+
+type BeaconStateMutator interface {
 	SetVersion(version clparams.StateVersion)
 	SetSlot(slot uint64)
 	SetFork(fork *cltypes.Fork)
@@ -56,8 +74,6 @@ type BeaconStateBasic interface {
 	SetActivationEpochForValidatorAtIndex(index int, epoch uint64)
 	SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64)
 	SetEth1Data(eth1Data *cltypes.Eth1Data)
-	AddEth1DataVote(vote *cltypes.Eth1Data)
-	ResetEth1DataVotes()
 	SetEth1DepositIndex(eth1DepositIndex uint64)
 	SetValidatorSlashed(index int, slashed bool) error
 	SetValidatorMinCurrentInclusionDelayAttestation(index int, value *solid.PendingAttestation) error
@@ -69,13 +85,11 @@ type BeaconStateBasic interface {
 	SetValidatorIsPreviousMatchingTargetAttester(index int, value bool) error
 	SetValidatorIsPreviousMatchingHeadAttester(index int, value bool) error
 	SetValidatorBalance(index int, balance uint64) error
-	AddValidator(validator solid.Validator, balance uint64)
 	SetRandaoMixAt(index int, mix common.Hash)
 	SetSlashingSegmentAt(index int, segment uint64)
-	IncrementSlashingSegmentAt(index int, delta uint64)
 	SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags)
 	SetValidatorAtIndex(index int, validator solid.Validator)
-	ResetEpochParticipation()
+
 	SetJustificationBits(justificationBits cltypes.JustificationBits)
 	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
 	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint)
@@ -85,22 +99,58 @@ type BeaconStateBasic interface {
 	SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header)
 	SetNextWithdrawalIndex(index uint64)
 	SetNextWithdrawalValidatorIndex(index uint64)
-	ResetHistoricalSummaries()
-	AddHistoricalSummary(summary *cltypes.HistoricalSummary)
-	AddHistoricalRoot(root common.Hash)
 	SetInactivityScores(scores []uint64)
-	AddInactivityScore(score uint64)
 	SetValidatorInactivityScore(index int, score uint64) error
 	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
+	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
+
+	AddEth1DataVote(vote *cltypes.Eth1Data)
+	AddValidator(validator solid.Validator, balance uint64)
+	AddHistoricalSummary(summary *cltypes.HistoricalSummary)
+	AddHistoricalRoot(root common.Hash)
+	AddInactivityScore(score uint64)
 	AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags)
 	AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags)
 	AddPreviousEpochParticipationAt(index int, delta byte)
 	AddCurrentEpochAtteastation(attestation *solid.PendingAttestation)
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)
+
+	IncrementSlashingSegmentAt(index int, delta uint64)
+
+	AppendValidator(in solid.Validator)
+
+	ResetEth1DataVotes()
+	ResetEpochParticipation()
+	ResetHistoricalSummaries()
 	ResetCurrentEpochAttestations()
-	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
 	ResetPreviousEpochAttestations()
+}
+
+type BeaconStateExtra interface {
+	ValidatorLength() int
+	ValidatorBalance(index int) (uint64, error)
+	RandaoMixes() solid.HashVectorSSZ
+	ForEachBalance(fn func(v uint64, idx int, total int) bool)
+	ValidatorExitEpoch(index int) (uint64, error)
+	ValidatorWithdrawableEpoch(index int) (uint64, error)
+	ValidatorEffectiveBalance(index int) (uint64, error)
+	ValidatorMinCurrentInclusionDelayAttestation(index int) (*solid.PendingAttestation, error)
+	ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error)
+	ValidatorIsCurrentMatchingSourceAttester(idx int) (bool, error)
+	ValidatorIsCurrentMatchingTargetAttester(idx int) (bool, error)
+	ValidatorIsCurrentMatchingHeadAttester(idx int) (bool, error)
+	ValidatorIsPreviousMatchingSourceAttester(idx int) (bool, error)
+	ValidatorIsPreviousMatchingTargetAttester(idx int) (bool, error)
+	ValidatorIsPreviousMatchingHeadAttester(idx int) (bool, error)
+	GetRandaoMixes(epoch uint64) [32]byte
+	GetRandaoMix(index int) [32]byte
+	EpochParticipationForValidatorIndex(isCurrentEpoch bool, index int) cltypes.ParticipationFlags
+	GetBlockRootAtSlot(slot uint64) (common.Hash, error)
+	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
+}
+
+type BeaconStateMinimal interface {
 	BeaconConfig() *clparams.BeaconChainConfig
 	Version() clparams.StateVersion
 	GenesisTime() uint64
@@ -114,53 +164,31 @@ type BeaconStateBasic interface {
 	Eth1Data() *cltypes.Eth1Data
 	Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data]
 	Eth1DepositIndex() uint64
-	ValidatorLength() int
-	AppendValidator(in solid.Validator)
+
 	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
-	ForEachBalance(fn func(v uint64, idx int, total int) bool)
-	ValidatorBalance(index int) (uint64, error)
-	ValidatorExitEpoch(index int) (uint64, error)
-	ValidatorWithdrawableEpoch(index int) (uint64, error)
-	ValidatorEffectiveBalance(index int) (uint64, error)
-	ValidatorMinCurrentInclusionDelayAttestation(index int) (*solid.PendingAttestation, error)
-	ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error)
-	ValidatorIsCurrentMatchingSourceAttester(idx int) (bool, error)
-	ValidatorIsCurrentMatchingTargetAttester(idx int) (bool, error)
-	ValidatorIsCurrentMatchingHeadAttester(idx int) (bool, error)
-	ValidatorIsPreviousMatchingSourceAttester(idx int) (bool, error)
-	ValidatorIsPreviousMatchingTargetAttester(idx int) (bool, error)
-	ValidatorIsPreviousMatchingHeadAttester(idx int) (bool, error)
-	RandaoMixes() solid.HashVectorSSZ
-	GetRandaoMixes(epoch uint64) [32]byte
-	GetRandaoMix(index int) [32]byte
+
 	ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool)
 	SlashingSegmentAt(pos int) uint64
+
 	EpochParticipation(currentEpoch bool) *solid.BitList
 	JustificationBits() cltypes.JustificationBits
-	EpochParticipationForValidatorIndex(isCurrentEpoch bool, index int) cltypes.ParticipationFlags
+
 	PreviousJustifiedCheckpoint() solid.Checkpoint
 	CurrentJustifiedCheckpoint() solid.Checkpoint
-	ValidatorInactivityScore(index int) (uint64, error)
 	FinalizedCheckpoint() solid.Checkpoint
+	ValidatorInactivityScore(index int) (uint64, error)
 	CurrentSyncCommittee() *solid.SyncCommittee
 	NextSyncCommittee() *solid.SyncCommittee
 	LatestExecutionPayloadHeader() *cltypes.Eth1Header
 	NextWithdrawalIndex() uint64
+	NextWithdrawalValidatorIndex() uint64
+	// HistoricalSummary has no accessor yet.
+
 	CurrentEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation]
 	CurrentEpochAttestationsLength() int
 	PreviousEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation]
 	PreviousEpochAttestationsLength() int
-	NextWithdrawalValidatorIndex() uint64
-	GetBlockRootAtSlot(slot uint64) (common.Hash, error)
-	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
-	DebugPrint(prefix string)
-	BlockRoot() ([32]byte, error)
-	EncodeSSZ(buf []byte) ([]byte, error)
-	DecodeSSZ(buf []byte, version int) error
-	EncodingSizeSSZ() (size int)
-	Clone() clonable.Clonable
-	HashSSZ() (out [32]byte, err error)
 }
 
 // TODO figure this out

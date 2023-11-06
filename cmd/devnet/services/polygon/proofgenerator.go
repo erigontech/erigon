@@ -5,20 +5,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"math"
 	"math/big"
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -38,7 +38,7 @@ func NewProofGenerator() *ProofGenerator {
 func (pg *ProofGenerator) NodeCreated(ctx context.Context, node devnet.Node) {
 
 	if pg.heimdall == nil {
-		if strings.HasPrefix(node.Name(), "bor") {
+		if strings.HasPrefix(node.GetName(), "bor") {
 			if network := devnet.CurrentNetwork(ctx); network != nil {
 				for _, service := range network.Services {
 					if heimdall, ok := service.(*Heimdall); ok {

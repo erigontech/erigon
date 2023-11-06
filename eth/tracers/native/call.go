@@ -22,12 +22,12 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -72,7 +72,7 @@ func (f callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.CopyBytes(output)
+	output = libcommon.CopyBytes(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -139,7 +139,7 @@ func (t *callTracer) CaptureStart(from libcommon.Address, to libcommon.Address, 
 		Type:  vm.CALL,
 		From:  from,
 		To:    to,
-		Input: common.CopyBytes(input),
+		Input: libcommon.CopyBytes(input),
 		Gas:   gas,
 	}
 	if value != nil {
@@ -148,15 +148,11 @@ func (t *callTracer) CaptureStart(from libcommon.Address, to libcommon.Address, 
 	if create {
 		t.callstack[0].Type = vm.CREATE
 	}
-	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	t.callstack[0].processOutput(output, err)
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
@@ -178,7 +174,7 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 		Type:  typ,
 		From:  from,
 		To:    toCopy,
-		Input: common.CopyBytes(input),
+		Input: libcommon.CopyBytes(input),
 		Gas:   gas,
 		Value: value.ToBig(),
 	}
@@ -222,6 +218,8 @@ func (t *callTracer) CaptureTxEnd(receipt *types.Receipt, err error) {
 		clearFailedLogs(&t.callstack[0], false, 0, t.logGaps)
 		fixLogIndexGap(&t.callstack[0], t.logGaps)
 	}
+	t.logIndex = 0
+	t.logGaps = nil
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
@@ -269,7 +267,7 @@ func clearFailedLogs(cf *callFrame, parentFailed bool, gap int, logGaps map[uint
 		gap += len(cf.Logs)
 		if gap > 0 {
 			lastIdx := len(cf.Logs) - 1
-			if lastIdx > 0 {
+			if lastIdx > 0 && logGaps != nil {
 				idx := cf.Logs[lastIdx].Index
 				logGaps[idx] = gap
 			}

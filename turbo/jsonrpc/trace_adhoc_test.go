@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 

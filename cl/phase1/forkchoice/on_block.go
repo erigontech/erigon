@@ -31,7 +31,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		return nil
 	}
 
-	config := f.forkGraph.Config()
 	var invalidBlock bool
 	if newPayload && f.engine != nil {
 		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
@@ -51,6 +50,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	case fork_graph.PreValidated:
 		return nil
 	case fork_graph.Success:
+		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "code", status)
 		return nil
@@ -65,12 +65,12 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		f.highestSeen = block.Block.Slot
 	}
 	// Add proposer score boost if the block is timely
-	timeIntoSlot := (f.time - f.forkGraph.GenesisTime()) % lastProcessedState.BeaconConfig().SecondsPerSlot
-	isBeforeAttestingInterval := timeIntoSlot < config.SecondsPerSlot/config.IntervalsPerSlot
+	timeIntoSlot := (f.time - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
+	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot == (libcommon.Hash{}) {
 		f.proposerBoostRoot = blockRoot
 	}
-	if lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {
+	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
 			return err
 		}

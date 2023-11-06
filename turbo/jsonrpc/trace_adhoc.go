@@ -9,6 +9,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
@@ -17,8 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -328,7 +328,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 			vmTrace = ot.r.VmTrace
 		}
 		if create {
-			vmTrace.Code = common.CopyBytes(input)
+			vmTrace.Code = libcommon.CopyBytes(input)
 			if ot.lastVmOp != nil {
 				ot.lastVmOp.Cost += int(gas)
 			}
@@ -377,7 +377,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 		action := CreateTraceAction{}
 		action.From = from
 		action.Gas.ToInt().SetUint64(gas)
-		action.Init = common.CopyBytes(input)
+		action.Init = libcommon.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else if typ == vm.SELFDESTRUCT {
@@ -403,7 +403,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 		action.From = from
 		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
-		action.Input = common.CopyBytes(input)
+		action.Input = libcommon.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	}
@@ -440,7 +440,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		return
 	}
 	if !deep {
-		ot.r.Output = common.CopyBytes(output)
+		ot.r.Output = libcommon.CopyBytes(output)
 	}
 	ignoreError := false
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -454,11 +454,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = libcommon.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = libcommon.CopyBytes(output)
 			}
 		} else {
 			topTrace.Result = nil
@@ -468,9 +468,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		if len(output) > 0 {
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = libcommon.CopyBytes(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = libcommon.CopyBytes(output)
 			}
 		}
 		switch topTrace.Type {
@@ -1087,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
-	traceResult.Output = common.CopyBytes(execResult.ReturnData)
+	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[libcommon.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1334,7 +1334,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, txns []type
 		if tracer != nil {
 			tracer.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		}
-		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+		traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
 			sdMap := make(map[libcommon.Address]*StateDiffAccount)

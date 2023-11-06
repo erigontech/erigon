@@ -303,6 +303,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	opts.pageSize = uint64(in.PageSize)
+	if opts.label == kv.ChainDB {
+		opts.log.Info("[db] chaindata", "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+	}
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
@@ -444,6 +447,10 @@ type MdbxKV struct {
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
 func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
 func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }
+
+func (db *MdbxKV) CHandle() unsafe.Pointer {
+	return db.env.CHandle()
+}
 
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction
@@ -821,7 +828,7 @@ func (tx *MdbxTx) Commit() error {
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
-		return err
+		return fmt.Errorf("lable: %s, %w", tx.db.opts.label, err)
 	}
 
 	if tx.db.opts.label == kv.ChainDB {

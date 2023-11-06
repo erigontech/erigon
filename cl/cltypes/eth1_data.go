@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 type Eth1Data struct {
@@ -36,7 +35,7 @@ func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Eth1Data object
 func (e *Eth1Data) EncodingSizeSSZ() int {
-	return common.BlockNumberLength + length.Hash*2
+	return 8 + length.Hash*2
 }
 
 // HashSSZ ssz hashes the Eth1Data object

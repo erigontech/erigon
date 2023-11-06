@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
@@ -20,12 +21,21 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
+type CaplinMode int
+
+const (
+
+	// CaplinModeNone - no caplin mode
+	NoCaplin   CaplinMode = 1
+	OnlyCaplin CaplinMode = 2
+	AlsoCaplin CaplinMode = 3
+)
+
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.DownloadRequest {
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.AllSnapshotTypes))}
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path != "" {
 			if r.TorrentHash != "" {
@@ -39,17 +49,14 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				})
 			}
 		} else {
-			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2SegmentSize {
-				continue
-			}
 			if r.Bor {
-				for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
+				for _, t := range snaptype.BorSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
 				}
 			} else {
-				for _, t := range snaptype.AllSnapshotTypes {
+				for _, t := range snaptype.BlockSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
@@ -72,7 +79,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -130,6 +137,12 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
 				continue
 			}
+		}
+		if caplin == NoCaplin && strings.Contains(p.Name, "beaconblocks") {
+			continue
+		}
+		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") {
+			continue
 		}
 
 		_, exists := existingFilesMap[p.Name]

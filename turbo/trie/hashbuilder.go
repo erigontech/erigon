@@ -11,7 +11,6 @@ import (
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -83,11 +82,11 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 		return fmt.Errorf("length %d", length)
 	}
 	if hb.proofElement != nil {
-		hb.proofElement.storageKey = common.CopyBytes(keyHex[:len(keyHex)-1])
+		hb.proofElement.storageKey = libcommon.CopyBytes(keyHex[:len(keyHex)-1])
 		hb.proofElement.storageValue = new(uint256.Int).SetBytes(val.RawBytes())
 	}
 	key := keyHex[len(keyHex)-length:]
-	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
+	s := &shortNode{Key: libcommon.CopyBytes(key), Val: valueNode(libcommon.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
@@ -233,7 +232,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
-				root = hashNode{hash: common.CopyBytes(hb.acc.Root[:])}
+				root = hashNode{hash: libcommon.CopyBytes(hb.acc.Root[:])}
 			}
 		}
 		popped++
@@ -260,7 +259,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		// we capture it with the account proof element.  Note, we also store the
 		// full key as this root could be for a different account in the negative
 		// case.
-		hb.proofElement.storageRootKey = common.CopyBytes(fullKey)
+		hb.proofElement.storageRootKey = libcommon.CopyBytes(fullKey)
 		hb.proofElement.storageRoot = hb.acc.Root
 	}
 	var accCopy accounts.Account
@@ -271,7 +270,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 
 	a := &accountNode{accCopy, root, true, accountCode, accountCodeSize}
-	s := &shortNode{Key: common.CopyBytes(key), Val: a}
+	s := &shortNode{Key: libcommon.CopyBytes(key), Val: a}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
@@ -373,10 +372,10 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *shortNode
 	switch n := nd.(type) {
 	case nil:
-		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
-		s = &shortNode{Key: common.CopyBytes(key), Val: hashNode{hash: branchHash}}
+		branchHash := libcommon.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		s = &shortNode{Key: libcommon.CopyBytes(key), Val: hashNode{hash: branchHash}}
 	case *fullNode:
-		s = &shortNode{Key: common.CopyBytes(key), Val: n}
+		s = &shortNode{Key: libcommon.CopyBytes(key), Val: n}
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
@@ -486,7 +485,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	for digit := uint(0); digit < 16; digit++ {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = hashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				f.Children[digit] = hashNode{hash: libcommon.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -606,7 +605,7 @@ func (hb *HashBuilder) code(code []byte) error {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
-	codeCopy := common.CopyBytes(code)
+	codeCopy := libcommon.CopyBytes(code)
 	n := codeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
 	hb.sha.Reset()

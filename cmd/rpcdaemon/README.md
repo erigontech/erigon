@@ -117,7 +117,7 @@ If the healthcheck is successful it will return a 200 status code.
 If the healthcheck fails for any reason a status 500 will be returned.  This is true if one of the criteria requested
 fails its check.
 
-You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the 
+You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the
 checks.
 
 Available Options:
@@ -186,6 +186,38 @@ By default data pruned after 90K blocks, can change it by flags like `--prune.hi
 
 Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it requires `h`.
 
+### The --http.url flag
+
+the `--http.url` flag is an optional flag which allows one to bind the HTTP server to a socket, for example, `tcp6://:8545` or `unix:///erigon_http.socket`
+
+If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both be ignored.
+
+note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
+
+
+### HTTPS, HTTP2, and H2C
+
+Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
+
+To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `-https.cert="/path/to.cert"` and `--https.key=/path/to.key`
+
+By default, the HTTPS server will run on the HTTP port + 363. use flag `--https.port` to set the port
+
+The HTTPS server will inherit all other configuration parameters from http, for instance, enabling the websocket server, cors domains, or enabled namespaces
+
+If the `--https.url` flag is set, then `--https.addr` and `--https.port` with both be ignored.
+
+
+### IPC endpoint (geth compatible)
+
+erigon supports the geth-style unix socket IPC. you can enable this with `--socket.enabled` flag,
+and setting the `--socket.url` flag. For instance, if you wanted the socket to exist at `/var/run/erigon.ipc`,
+you would do `--socket.url=unix:///var/run/erigon.ipc`
+
+you can also use `--socket.url=tcp://<addr>:<port>` to serve the raw jsonrpc2 protocol over tcp
+
+the socket will inherit the namespaces from `http.api`
+
 ### RPC Implementation Status
 
 Label "remote" means: `--private.api.addr` flag is required.
@@ -248,7 +280,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getFilterChanges                       | Yes     |                                      |
 | eth_uninstallFilter                        | Yes     |                                      |
 | eth_getLogs                                | Yes     |                                      |
-|                                            |         |                                      |
+|                                 interned spe           |         |                                      |
 | eth_accounts                               | No      | deprecated                           |
 | eth_sendRawTransaction                     | Yes     | `remote`.                            |
 | eth_sendTransaction                        | -       | not yet implemented                  |

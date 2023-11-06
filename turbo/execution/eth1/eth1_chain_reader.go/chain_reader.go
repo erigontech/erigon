@@ -247,8 +247,12 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(hash libcommon.Hash) (bool, error
 	return resp.Canonical, nil
 }
 
-func (ChainReaderWriterEth1) FrozenBlocks() uint64 {
-	panic("ChainReaderEth1.FrozenBlocks not implemented")
+func (c ChainReaderWriterEth1) FrozenBlocks() uint64 {
+	ret, err := c.executionModule.FrozenBlocks(c.ctx, &emptypb.Empty{})
+	if err != nil {
+		panic(err)
+	}
+	return ret.FrozenBlocks
 }
 
 const retryTimeout = 10 * time.Millisecond
