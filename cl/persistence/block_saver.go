@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+const subDivisionFolderSize = 10_000
+
 type beaconChainDatabaseFilesystem struct {
 	rawDB RawBeaconBlockChain
 	cfg   *clparams.BeaconChainConfig
@@ -98,7 +100,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.RwT
 		return err
 	}
 
-	return beacon_indicies.PruneBlockRoots(ctx, tx, from, from+count)
+	return nil
 }
 
 func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
@@ -156,28 +158,9 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwT
 
 // SlotToPaths define the file structure to store a block
 //
-// superEpoch = floor(slot / (epochSize ^ 2))
-// epoch =  floot(slot / epochSize)
-// file is to be stored at
-// "/signedBeaconBlock/{superEpoch}/{epoch}/{root}.ssz_snappy"
+// "/signedBeaconBlock/{slot/10_000}/{root}.ssz_snappy"
 func RootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainConfig) (folderPath string, filePath string) {
-	folderPath = path.Clean(fmt.Sprintf("%d/%d", slot/(config.SlotsPerEpoch*config.SlotsPerEpoch), slot/config.SlotsPerEpoch))
+	folderPath = path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
 	filePath = path.Clean(fmt.Sprintf("%s/%x.sz", folderPath, root))
 	return
-}
-
-func ValidateEpoch(fs afero.Fs, epoch uint64, config *clparams.BeaconChainConfig) error {
-	superEpoch := epoch / (config.SlotsPerEpoch)
-
-	// the folder path is superEpoch/epoch
-	folderPath := path.Clean(fmt.Sprintf("%d/%d", superEpoch, epoch))
-
-	fi, err := afero.ReadDir(fs, folderPath)
-	if err != nil {
-		return err
-	}
-	for _, fn := range fi {
-		fn.Name()
-	}
-	return nil
 }
