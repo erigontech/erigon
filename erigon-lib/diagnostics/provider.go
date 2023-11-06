@@ -18,7 +18,35 @@ const (
 	ckChan ctxKey = iota
 )
 
-type Type reflect.Type
+type Type interface {
+	reflect.Type
+	Context() context.Context
+	Err() error
+}
+
+type diagType struct {
+	reflect.Type
+}
+
+var cancelled = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}()
+
+func (t diagType) Context() context.Context {
+	providerMutex.Lock()
+	defer providerMutex.Unlock()
+	if reg := providers[t]; reg != nil {
+		return reg.context
+	}
+
+	return cancelled
+}
+
+func (t diagType) Err() error {
+	return t.Context().Err()
+}
 
 type Info interface {
 	Type() Type
@@ -26,7 +54,7 @@ type Info interface {
 
 func TypeOf(i Info) Type {
 	t := reflect.TypeOf(i)
-	return Type(t)
+	return diagType{t}
 }
 
 type Provider interface {
@@ -76,6 +104,11 @@ func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 
 	reg := providers[infoType]
 
+	if reg == nil {
+		reg = &registry{}
+		providers[infoType] = reg
+	}
+
 	toStart := make([]Provider, len(reg.providers))
 	copy(toStart, reg.providers)
 
@@ -103,9 +136,13 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	}
 }
 
-func Send[I Info](ctx context.Context, info I) error {
+func Send[I Info](info I) error {
+	ctx := info.Type().Context()
+
 	if ctx.Err() != nil {
 		if !errors.Is(ctx.Err(), context.Canceled) {
+			// drop the diagnostic message if there is
+			// no active diagnostic context for the type
 			return nil
 		}
 
