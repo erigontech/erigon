@@ -34,8 +34,7 @@ import (
 // deployed contract addresses (relevant after the account abstraction).
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 
-// GetPrecompile checks and returns the precomplied contract
-func (evm *EVM) GetPrecompileContract(addr libcommon.Address) (PrecompiledContract, bool) {
+func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
 	case evm.chainRules.IsCancun:
@@ -161,7 +160,7 @@ func (evm *EVM) Interpreter() Interpreter {
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
-	p, isPrecompile := evm.GetPrecompileContract(addr)
+	p, isPrecompile := evm.precompile(addr)
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
