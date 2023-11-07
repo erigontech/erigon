@@ -4,11 +4,13 @@ on:
     branches:
       - devel
       - alpha
+      - e35
       - 'release/**'
   pull_request:
     branches:
       - devel
       - alpha
+      - e35
       - 'release/**'
     types:
       - opened
