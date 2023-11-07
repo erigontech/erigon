@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +9,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"

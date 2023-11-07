@@ -103,7 +103,6 @@ func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 
 	reg := providers[infoType]
-
 	if reg == nil {
 		reg = &registry{}
 		providers[infoType] = reg
