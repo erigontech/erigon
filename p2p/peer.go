@@ -223,7 +223,9 @@ func (p *Peer) Inbound() bool {
 }
 
 func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
-	protomap := matchProtocols(protocols, conn.caps, conn)
+	log := logger.New("id", conn.node.ID(), "conn", conn.flags)
+
+	protomap := matchProtocols(protocols, conn.caps, conn, log)
 	p := &Peer{
 		rw:             conn,
 		running:        protomap,
@@ -232,7 +234,7 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 		protoErr:       make(chan *PeerError, len(protomap)+1), // protocols + pingLoop
 		closed:         make(chan struct{}),
 		pingRecv:       make(chan struct{}, 16),
-		log:            logger.New("id", conn.node.ID(), "conn", conn.flags),
+		log:            log,
 		pubkey:         pubkey,
 		metricsEnabled: metricsEnabled,
 		CapBytesIn:     make(map[string]uint64),
@@ -438,7 +440,7 @@ func countMatchingProtocols(protocols []Protocol, caps []Cap) int {
 }
 
 // matchProtocols creates structures for matching named subprotocols.
-func matchProtocols(protocols []Protocol, caps []Cap, rw MsgReadWriter) map[string]*protoRW {
+func matchProtocols(protocols []Protocol, caps []Cap, rw MsgReadWriter, logger log.Logger) map[string]*protoRW {
 	sort.Sort(capsByNameAndVersion(caps))
 	offset := baseProtocolLength
 	result := make(map[string]*protoRW)
@@ -452,7 +454,7 @@ outer:
 					offset -= old.Length
 				}
 				// Assign the new match
-				result[cap.Name] = &protoRW{Protocol: proto, offset: offset, in: make(chan Msg), w: rw}
+				result[cap.Name] = &protoRW{Protocol: proto, offset: offset, in: make(chan Msg), w: rw, logger: logger}
 				offset += proto.Length
 
 				continue outer
@@ -506,7 +508,10 @@ type protoRW struct {
 	werr   chan<- error    // for write results
 	offset uint64
 	w      MsgWriter
+	logger log.Logger
 }
+
+var traceMsg = false
 
 func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	if msg.Code >= rw.Length {
@@ -520,6 +525,15 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	select {
 	case <-rw.wstart:
 		err = rw.w.WriteMsg(msg)
+
+		if traceMsg {
+			if err != nil {
+				rw.logger.Trace("Write failed", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size, "err", err)
+			} else {
+				rw.logger.Trace("Wrote", "cap", rw.cap(), "msg", msg.Code-rw.offset, "size", msg.Size)
+			}
+		}
+
 		// Report write status back to Peer.run. It will initiate
 		// shutdown if the error is non-nil and unblock the next write
 		// otherwise. The calling protocol code should exit for errors
@@ -536,6 +550,9 @@ func (rw *protoRW) ReadMsg() (Msg, error) {
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset
+		if traceMsg {
+			rw.logger.Trace("Read", "cap", rw.cap(), "msg", msg.Code, "size", msg.Size)
+		}
 		return msg, nil
 	case <-rw.closed:
 		return Msg{}, io.EOF

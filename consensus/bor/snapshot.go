@@ -118,7 +118,7 @@ func (s *Snapshot) copy() *Snapshot {
 	return cpy
 }
 
-func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot, error) {
+func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger log.Logger) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -153,23 +153,29 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 		}
 
 		var validSigner bool
+		var succession int
 
 		// check if signer is in validator set
-		if snap.ValidatorSet.HasAddress(signer) {
-			if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-				return nil, err
-			}
+		if !snap.ValidatorSet.HasAddress(signer) {
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
+		}
+		if succession, err = snap.GetSignerSuccessionNumber(signer); err != nil {
+			return snap, err
+		}
 
-			// add recents
-			snap.Recents[number] = signer
+		// add recents
+		snap.Recents[number] = signer
 
-			validSigner = true
+		validSigner = true
+
+		if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, s.config) {
+			return snap, &BlockTooSoonError{number, succession}
 		}
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
 			if err := ValidateHeaderExtraField(header.Extra); err != nil {
-				return nil, err
+				return snap, err
 			}
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 
@@ -181,12 +187,12 @@ func (s *Snapshot) Apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 		}
 
 		if number > 64 && !validSigner {
-			return nil, &UnauthorizedSignerError{number, signer.Bytes()}
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
 		}
+		parent = header
+		snap.Number = number
+		snap.Hash = header.Hash()
 	}
-
-	snap.Number += uint64(len(headers))
-	snap.Hash = headers[len(headers)-1].Hash()
 
 	return snap, nil
 }

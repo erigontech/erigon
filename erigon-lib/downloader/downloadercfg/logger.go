@@ -127,7 +127,8 @@ func (b adapterHandler) Handle(r lg.Record) {
 		log.Error(str)
 	default:
 		str := r.String()
-		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status")
+		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status") ||
+			strings.Contains(str, "error doing webseed request")
 		if skip {
 			log.Trace(str, "lvl", lvl.LogString())
 			break
