@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"sync"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
@@ -24,6 +25,7 @@ type BeaconSnapshotReader interface {
 	// ReadBlock reads the block at the given slot.
 	// If the block is not present, it returns nil.
 	ReadBlock(slot uint64) (*cltypes.SignedBeaconBlock, error)
+	ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, error)
 	RawBlockSSZ(slot uint64) ([]byte, error)
 
 	FrozenSlots() uint64
@@ -52,18 +54,30 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if buf == nil {
 		return nil, nil
 	}
-
-	// Use pooled buffers and readers to avoid allocations.
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 	buffer.Write(buf)
 
-	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
-	defer lz4ReaderPool.Put(lzReader)
-	lzReader.Reset(buffer)
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockFromSnapshot(buffer, r.eth1Getter, r.cfg)
+}
 
-	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
+func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+	buf, err := r.RawBlockSSZ(slot)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	if buf == nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+	buffer.Write(buf)
+
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(buffer, r.cfg)
 }
 
 func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
@@ -87,6 +101,17 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	if !gg.HasNext() {
 		return nil, nil
 	}
+
 	buf, _ = gg.Next(buf)
+	// Decompress this thing
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+
+	buffer.Reset()
+	buffer.Write(buf)
+	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
+	defer lz4ReaderPool.Put(lzReader)
+	lzReader.Reset(buffer)
+
 	return buf, nil
 }
