@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
@@ -30,13 +31,21 @@ func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
 		ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
 
+		rootCtx, _ := common.RootContext()
+
 		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
-		for info := range ch {
-			d.snapshotDownload[info.StagePrefix] = info
-			if info.DownloadFinished {
+		for {
+			select {
+			case <-rootCtx.Done():
 				return
+			case info := <-ch:
+				d.snapshotDownload[info.StagePrefix] = info
+				if info.DownloadFinished {
+					return
+				}
 			}
 		}
+
 	}()
 }
 
