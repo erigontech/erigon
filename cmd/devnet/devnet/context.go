@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 type ctxKey int
@@ -14,7 +13,6 @@ const (
 	ckLogger ctxKey = iota
 	ckNetwork
 	ckNode
-	ckCliContext
 	ckDevnet
 )
 
@@ -71,11 +69,10 @@ type cnet struct {
 	network  *Network
 }
 
-func WithDevnet(ctx context.Context, cliCtx *cli.Context, devnet Devnet, logger log.Logger) Context {
-	return WithCliContext(
-		context.WithValue(
-			context.WithValue(ctx, ckDevnet, devnet),
-			ckLogger, logger), cliCtx)
+func WithDevnet(ctx context.Context, devnet Devnet, logger log.Logger) Context {
+	ctx = context.WithValue(ctx, ckDevnet, devnet)
+	ctx = context.WithValue(ctx, ckLogger, logger)
+	return devnetContext{ctx}
 }
 
 func WithCurrentNetwork(ctx context.Context, selector interface{}) Context {
@@ -105,14 +102,6 @@ func WithCurrentNode(ctx context.Context, selector interface{}) Context {
 	}
 
 	return devnetContext{context.WithValue(ctx, ckNode, &cnode{selector: selector})}
-}
-
-func WithCliContext(ctx context.Context, cliCtx *cli.Context) Context {
-	return devnetContext{context.WithValue(ctx, ckCliContext, cliCtx)}
-}
-
-func CliContext(ctx context.Context) *cli.Context {
-	return ctx.Value(ckCliContext).(*cli.Context)
 }
 
 func CurrentChainID(ctx context.Context) *big.Int {
@@ -151,7 +140,7 @@ func CurrentNetwork(ctx context.Context) *Network {
 	}
 
 	if current := CurrentNode(ctx); current != nil {
-		if n, ok := current.(*node); ok {
+		if n, ok := current.(*devnetNode); ok {
 			return n.network
 		}
 	}

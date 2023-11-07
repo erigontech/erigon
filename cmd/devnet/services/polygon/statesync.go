@@ -23,7 +23,7 @@ type EventRecordWithBlock struct {
 	BlockNumber uint64
 }
 
-func (h *Heimdall) startStateSyncSubacription() {
+func (h *Heimdall) startStateSyncSubscription() {
 	var err error
 	syncChan := make(chan *contracts.TestStateSenderStateSynced, 100)
 

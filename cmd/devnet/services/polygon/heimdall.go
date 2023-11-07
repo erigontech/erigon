@@ -52,6 +52,8 @@ const (
 	DefaultCheckpointBufferTime      time.Duration = 1000 * time.Second
 )
 
+const HeimdallGrpcAddressDefault = "localhost:8540"
+
 type CheckpointConfig struct {
 	RootChainTxConfirmations  uint64
 	ChildChainTxConfirmations uint64
@@ -65,6 +67,7 @@ type CheckpointConfig struct {
 type Heimdall struct {
 	sync.Mutex
 	chainConfig        *chain.Config
+	grpcAddr           string
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
 	latestCheckpoint   *CheckpointAck
@@ -85,9 +88,15 @@ type Heimdall struct {
 	startTime          time.Time
 }
 
-func NewHeimdall(chainConfig *chain.Config, checkpointConfig *CheckpointConfig, logger log.Logger) *Heimdall {
+func NewHeimdall(
+	chainConfig *chain.Config,
+	grpcAddr string,
+	checkpointConfig *CheckpointConfig,
+	logger log.Logger,
+) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
+		grpcAddr:           grpcAddr,
 		checkpointConfig:   *checkpointConfig,
 		spans:              map[uint64]*span.HeimdallSpan{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
@@ -256,14 +265,18 @@ func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()
 
-	if strings.HasPrefix(node.Name(), "bor") && node.IsBlockProducer() && node.Account() != nil {
+	if strings.HasPrefix(node.GetName(), "bor") && node.IsBlockProducer() && node.Account() != nil {
 		// TODO configurable voting power
 		h.addValidator(node.Account().Address, 1000, 0)
 	}
 }
 
 func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
-	if !strings.HasPrefix(node.Name(), "bor") && node.IsBlockProducer() {
+	if h.validatorSet == nil {
+		panic("Heimdall devnet service: unexpected empty validator set! Call addValidator() before starting nodes.")
+	}
+
+	if !strings.HasPrefix(node.GetName(), "bor") && node.IsBlockProducer() {
 		h.Lock()
 		defer h.Unlock()
 
@@ -276,7 +289,9 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
 
 		if err != nil {
+			h.Unlock()
 			h.unsubscribe()
+			h.Lock()
 			h.logger.Error("Failed to deploy state sender", "err", err)
 			return
 		}
@@ -320,7 +335,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.rootChainAddress)
 			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.syncSenderAddress)
 
-			go h.startStateSyncSubacription()
+			go h.startStateSyncSubscription()
 			go h.startChildHeaderSubscription(deployCtx)
 			go h.startRootHeaderBlockSubscription()
 		}()
@@ -362,19 +377,7 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	// if this is a restart
 	h.unsubscribe()
 
-	return heimdallgrpc.StartHeimdallServer(ctx, h, HeimdallGRpc(ctx), h.logger)
-}
-
-func HeimdallGRpc(ctx context.Context) string {
-	addr := "localhost:8540"
-
-	if cli := devnet.CliContext(ctx); cli != nil {
-		if grpcAddr := cli.String("bor.heimdallgRPC"); len(grpcAddr) > 0 {
-			addr = grpcAddr
-		}
-	}
-
-	return addr
+	return heimdallgrpc.StartHeimdallServer(ctx, h, h.grpcAddr, h.logger)
 }
 
 func (h *Heimdall) Stop() {

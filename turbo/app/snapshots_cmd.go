@@ -404,7 +404,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
-	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, freezeblocks.MergeSteps, db, nil, logger)
+	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
@@ -460,7 +460,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	for i := from; i < to; i += every {
-		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil); err != nil {
+		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
