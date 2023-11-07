@@ -652,3 +652,60 @@ func setRoutes(erigonUrl, gethURL string) {
 	routes[Erigon] = erigonUrl
 	routes[Geth] = gethURL
 }
+
+func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
+	r := b.Result
+	rg := bg.Result
+	if r.FullBlock.Difficulty.ToInt().Cmp(rg.FullBlock.Difficulty.ToInt()) != 0 {
+		fmt.Printf("Difficulty difference %d %d\n", r.FullBlock.Difficulty.ToInt(), rg.FullBlock.Difficulty.ToInt())
+		return false
+	}
+	if r.FullBlock.Miner != rg.FullBlock.Miner {
+		fmt.Printf("Miner different %x %x\n", r.FullBlock.Miner, rg.FullBlock.Miner)
+		return false
+	}
+	if len(r.FullBlock.Transactions) != len(rg.FullBlock.Transactions) {
+		fmt.Printf("Num of txs different: %d %d\n", len(r.FullBlock.Transactions), len(rg.FullBlock.Transactions))
+		return false
+	}
+	for i, tx := range r.FullBlock.Transactions {
+		txg := rg.FullBlock.Transactions[i]
+		if tx.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+			return false
+		}
+		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+			return false
+		}
+		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+			return false
+		}
+		if tx.Hash != txg.Hash {
+			fmt.Printf("Tx %x different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+			return false
+		}
+	}
+
+	for i, rcp := range r.Receipts {
+		rcpg := rg.Receipts[i]
+		if rcp.From != rcpg.From {
+			fmt.Printf("Receipt %d different From: %x %x\n", i, rcp.From, rcpg.From)
+			return false
+		}
+		if (rcp.To == nil && rcpg.To != nil) || (rcp.To != nil && rcpg.To == nil) {
+			fmt.Printf("Receipt %d different To nilness: %t %t\n", i, rcp.To == nil, rcpg.To == nil)
+			return false
+		}
+		if rcp.To != nil && rcpg.To != nil && *rcp.To != *rcpg.To {
+			fmt.Printf("Receipt %d different To: %x %x\n", i, *rcp.To, *rcpg.To)
+			return false
+		}
+		if rcp.BlockHash != rcpg.BlockHash {
+			fmt.Printf("Receipt %x different Hash: %s %s\n", i, rcp.BlockHash, rcpg.BlockHash)
+			return false
+		}
+	}
+	return true
+}

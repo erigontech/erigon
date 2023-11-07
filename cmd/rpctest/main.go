@@ -18,15 +18,16 @@ func main() {
 	logger := logging.SetupLogger("rpctest")
 
 	var (
-		needCompare bool
-		fullTest    bool
-		gethURL     string
-		erigonURL   string
-		blockFrom   uint64
-		blockTo     uint64
-		latest      bool
-		recordFile  string
-		errorFile   string
+		needCompare   bool
+		fullTest      bool
+		gethURL       string
+		erigonURL     string
+		blockFrom     uint64
+		blockTo       uint64
+		latest        bool
+		recordFile    string
+		errorFile     string
+		visitAllPages bool
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
@@ -49,6 +50,9 @@ func main() {
 	}
 	withErrorFile := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&errorFile, "errorFile", "", "File where to record errors (when responses do not match)")
+	}
+	withVisitAllPages := func(cmd *cobra.Command) {
+		cmd.Flags().BoolVar(&visitAllPages, "visitAllPages", false, "Visit all pages")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -107,6 +111,19 @@ func main() {
 		},
 	}
 	with(benchEthGetTransactionByHashCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
+	var benchOtsGetBlockTransactions = &cobra.Command{
+		Use:   "benchOtsGetBlockTransactions",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchOtsGetBlockTransactions(erigonURL, gethURL, needCompare, visitAllPages, latest, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchOtsGetBlockTransactions, withErigonUrl, withGethUrl, withNeedCompare, withVisitAllPages, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
@@ -403,6 +420,7 @@ func main() {
 		benchTraceReplayTransactionCmd,
 		benchEthBlockByNumberCmd,
 		benchEthGetBalanceCmd,
+		benchOtsGetBlockTransactions,
 		replayCmd,
 	)
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {

@@ -262,3 +262,68 @@ type ParityListStorageKeysResult struct {
 	CommonResponse
 	Result []hexutility.Bytes `json:"result"`
 }
+
+type OtsUncle struct {
+}
+
+type OtsTransaction struct {
+	BlockHash        libcommon.Hash     `json:"blockHash"`
+	BlockNumber      hexutil.Uint64     `json:"blockNumber"`
+	From             libcommon.Address  `json:"from"`
+	Gas              hexutil.Big        `json:"gas"`
+	GasPrice         hexutil.Big        `json:"gasPrice"`
+	Hash             string             `json:"hash"`
+	Input            hexutility.Bytes   `json:"input"`
+	To               *libcommon.Address `json:"to"` // Pointer because it might be missing
+	TransactionIndex hexutil.Uint64     `json:"transactionIndex"`
+	Value            hexutil.Big        `json:"value"`
+	Type             hexutil.Big        `json:"type"`    // To check
+	ChainId          hexutil.Big        `json:"chainId"` // To check
+}
+
+type OtsReceipt struct {
+	BlockHash   libcommon.Hash `json:"blockHash"`
+	BlockNumber hexutil.Uint64 `json:"blockNumber"`
+	//ContractAddress   libcommon.Address `json:"contractAddress"`
+	CumulativeGasUsed hexutil.Big        `json:"cumulativeGasUsed"`
+	EffectiveGasPrice hexutil.Big        `json:"effectiveGasPrice"`
+	From              libcommon.Address  `json:"from"`
+	GasUsed           hexutil.Big        `json:"gasUsed"`
+	To                *libcommon.Address `json:"to"` // Pointer because it might be missing
+	TransactionHash   string             `json:"hash"`
+	TransactionIndex  hexutil.Uint64     `json:"transactionIndex"`
+}
+
+type OtsFullBlock struct {
+	Difficulty hexutil.Big `json:"difficulty"`
+	//ExtraData        libcommon.Hash    `json:"extraData"` // To check
+	GasLimit hexutil.Big    `json:"gasLimit"`
+	GasUsed  hexutil.Big    `json:"gasUsed"`
+	Hash     libcommon.Hash `json:"hash"`
+	//Bloom    hexutility.Bytes  `json:"logsBloom" gencodec:"required"`
+	Miner libcommon.Address `json:"miner"`
+	//MixHash          libcommon.Hash    `json:"mixHash"` // To check
+	//Nonce  hexutil.Uint64 `json:"nonce"`
+	Number hexutil.Big `json:"number"`
+	//ParentHash       libcommon.Hash    `json:"parentHash"`   // To check
+	//ReceiptsRoot     libcommon.Hash    `json:"receiptsRoot"` // To check
+	//Sha3Uncles       libcommon.Hash    `json:"sha3Uncles"`   // To check
+	Size hexutil.Big `json:"size"`
+	//StateRoot        libcommon.Hash    `json:"stateRoot"` // To check
+	//Timestamp        hexutil.Big       `json:"timestamp"` // To check
+	TotalDifficulty  hexutil.Big      `json:"totalDifficulty"`
+	TransactionCount uint64           `json:"transactionCount"`
+	Transactions     []OtsTransaction `json:"transactions"`
+	TxRoot           libcommon.Hash   `json:"transactionsRoot"`
+	uncles           []OtsUncle       `json:"uncles"`
+}
+
+type OtsBlockTransactionsResult struct {
+	FullBlock *OtsFullBlock `json:"fullblock"`
+	Receipts  []OtsReceipt  `json:"receipts"`
+}
+
+type OtsBlockTransactions struct {
+	CommonResponse
+	Result *OtsBlockTransactionsResult `json:"result"`
+}
