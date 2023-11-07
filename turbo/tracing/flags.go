@@ -6,12 +6,12 @@ import (
 
 var (
 	TracerFlag = cli.StringFlag{
-		Name:  "tracer",
+		Name:  "vmtrace",
 		Usage: "Set the provider tracer",
 	}
 
 	TracerConfigFlag = cli.StringFlag{
-		Name:  "tracer.config",
+		Name:  "vmtrace.config",
 		Usage: "Set the config of the tracer",
 	}
 )
