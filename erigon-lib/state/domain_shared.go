@@ -217,12 +217,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if err != nil {
 			return 0, err
 		}
-		bn = binary.BigEndian.Uint64(bnBytes)
-		txn, err = rawdbv3.TxNums.Max(tx, bn)
-		if err != nil {
-			return 0, err
+		if len(bnBytes) == 8 {
+			bn = binary.BigEndian.Uint64(bnBytes)
+			txn, err = rawdbv3.TxNums.Max(tx, bn)
+			if err != nil {
+				return 0, err
+			}
 		}
-
 		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
 		if snapTxNum > txn {
 			txn = snapTxNum
