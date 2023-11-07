@@ -564,7 +564,11 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
-	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(datasize.KB*8), logger)
+	bufSize := 8 * datasize.KB
+	if keyCount > 1000 {
+		bufSize = 1 * datasize.MB
+	}
+	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
