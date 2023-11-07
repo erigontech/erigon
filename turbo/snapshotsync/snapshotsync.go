@@ -184,11 +184,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	var diagnosticsContext context.Context
-	diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
-		diagnosticsContext = ctx
+	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
 		return nil
-	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())
+	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
 
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
@@ -213,22 +211,21 @@ Loop:
 						}
 					}
 				*/
-				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
-					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
-						Downloaded:       stats.BytesCompleted,
-						Total:            stats.BytesTotal,
-						TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
-						DownloadRate:     stats.DownloadRate,
-						UploadRate:       stats.UploadRate,
-						Peers:            stats.PeersUnique,
-						Files:            stats.FilesTotal,
-						Connections:      stats.ConnectionsTotal,
-						Alloc:            m.Alloc,
-						Sys:              m.Sys,
-						DownloadFinished: stats.Completed,
-						StagePrefix:      logPrefix,
-					})
-				}
+
+				diagnostics.Send(diagnostics.DownloadStatistics{
+					Downloaded:       stats.BytesCompleted,
+					Total:            stats.BytesTotal,
+					TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
+					DownloadRate:     stats.DownloadRate,
+					UploadRate:       stats.UploadRate,
+					Peers:            stats.PeersUnique,
+					Files:            stats.FilesTotal,
+					Connections:      stats.ConnectionsTotal,
+					Alloc:            m.Alloc,
+					Sys:              m.Sys,
+					DownloadFinished: stats.Completed,
+					StagePrefix:      logPrefix,
+				})
 
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
@@ -244,22 +241,20 @@ Loop:
 					suffix += " (or verifying)"
 				}
 
-				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
-					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
-						Downloaded:       stats.BytesCompleted,
-						Total:            stats.BytesTotal,
-						TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
-						DownloadRate:     stats.DownloadRate,
-						UploadRate:       stats.UploadRate,
-						Peers:            stats.PeersUnique,
-						Files:            stats.FilesTotal,
-						Connections:      stats.ConnectionsTotal,
-						Alloc:            m.Alloc,
-						Sys:              m.Sys,
-						DownloadFinished: stats.Completed,
-						StagePrefix:      logPrefix,
-					})
-				}
+				diagnostics.Send(diagnostics.DownloadStatistics{
+					Downloaded:       stats.BytesCompleted,
+					Total:            stats.BytesTotal,
+					TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
+					DownloadRate:     stats.DownloadRate,
+					UploadRate:       stats.UploadRate,
+					Peers:            stats.PeersUnique,
+					Files:            stats.FilesTotal,
+					Connections:      stats.ConnectionsTotal,
+					Alloc:            m.Alloc,
+					Sys:              m.Sys,
+					DownloadFinished: stats.Completed,
+					StagePrefix:      logPrefix,
+				})
 
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
