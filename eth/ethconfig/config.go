@@ -275,6 +275,7 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.SepoliaChainName:    {},
 	networkname.GoerliChainName:     {},
 	networkname.MumbaiChainName:     {},
+	networkname.AmoyChainName:       {},
 	networkname.BorMainnetChainName: {},
 	networkname.GnosisChainName:     {},
 	networkname.ChiadoChainName:     {},

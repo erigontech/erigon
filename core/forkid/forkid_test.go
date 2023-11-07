@@ -153,6 +153,14 @@ func TestCreation(t *testing.T) {
 				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 0}},        // First Agra block
 			},
 		},
+		// Amoy test cases
+		{
+			params.AmoyChainConfig,
+			params.AmoyGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0x190a55ad), Next: 0}},
+			},
+		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {

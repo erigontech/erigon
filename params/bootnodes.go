@@ -122,6 +122,8 @@ var MumbaiBootnodes = []string{
 	"enode://36105c59723cfa879b19524f964517fb0a468c0a6e9477a7d0512e5e09532c7088ac7366b8da450a572c9e4328c511c83f8d97402c88f0518d828d734c107fd6@162.55.4.38:30303",
 }
 
+var AmoyBootnodes = []string{} // Todo: Add BorAmoy bootnodes
+
 var BorMainnetBootnodes = []string{
 	"enode://b8f1cc9c5d4403703fbf377116469667d2b1823c0daf16b7250aa576bacf399e42c3930ccfcb02c5df6879565a2b8931335565f0e8d3f8e72385ecf4a4bf160a@3.36.224.80:30303",
 	"enode://8729e0c825f3d9cad382555f3e46dcff21af323e89025a0e6312df541f4a9e73abfa562d64906f5e59c51fe6f0501b3e61b07979606c56329c020ed739910759@54.194.245.5:30303",
@@ -185,6 +187,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GoerliBootnodes
 	case networkname.MumbaiChainName:
 		return MumbaiBootnodes
+	case networkname.AmoyChainName:
+		return AmoyBootnodes
 	case networkname.BorMainnetChainName:
 		return BorMainnetBootnodes
 	case networkname.GnosisChainName:
