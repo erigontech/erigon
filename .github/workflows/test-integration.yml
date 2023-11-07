@@ -28,10 +28,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: test-integration
-        run: make test-integration
-
-  #        name: history-v3-test-integration
-  #        run: make test3-integration
+        run: make test3-integration
 
   tests-windows:
     strategy:
