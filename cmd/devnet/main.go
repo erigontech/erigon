@@ -347,7 +347,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					},
 					Nodes: []devnet.Node{
 						&args.BlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								WithoutHeimdall:  true,
@@ -355,7 +355,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							AccountSlots: 200,
 						},
 						&args.NonBlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								WithoutHeimdall:  true,
@@ -406,7 +406,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					},
 					Nodes: []devnet.Node{
 						&args.BlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								HeimdallGRpc:     heimdallGrpc,
@@ -414,7 +414,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							AccountSlots: 200,
 						},
 						&args.BlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								HeimdallGRpc:     heimdallGrpc,
@@ -430,7 +430,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							AccountSlots: 200,
 						},*/
 						&args.NonBlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								HeimdallGRpc:     heimdallGrpc,
@@ -453,7 +453,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					},
 					Nodes: []devnet.Node{
 						&args.BlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 								VMDebug:          true,
@@ -463,7 +463,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							AccountSlots: 200,
 						},
 						&args.NonBlockProducer{
-							Node: args.Node{
+							NodeArgs: args.NodeArgs{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "3",
 							},
@@ -489,14 +489,14 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 				},
 				Nodes: []devnet.Node{
 					&args.BlockProducer{
-						Node: args.Node{
+						NodeArgs: args.NodeArgs{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
 					&args.NonBlockProducer{
-						Node: args.Node{
+						NodeArgs: args.NodeArgs{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},

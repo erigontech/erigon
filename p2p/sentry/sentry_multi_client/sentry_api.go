@@ -1,8 +1,10 @@
-package sentry
+package sentry_multi_client
 
 import (
 	"context"
 	"math/rand"
+
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -72,7 +74,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
 		}
-		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }
@@ -119,7 +121,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
 		}
-		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }

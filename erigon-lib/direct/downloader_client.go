@@ -35,6 +35,9 @@ func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderCl
 func (c *DownloaderClient) Download(ctx context.Context, in *proto_downloader.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
 }
+func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.Delete(ctx, in)
+}
 func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Verify(ctx, in)
 }
