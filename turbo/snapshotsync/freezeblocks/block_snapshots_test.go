@@ -57,28 +57,86 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 	}
 }
 
+func TestFindMergeRange(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
+	t.Run("big", func(t *testing.T) {
+		var ranges []Range
+		for i := 0; i < 24; i++ {
+			ranges = append(ranges, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+		}
+		found := merger.FindMergeRanges(ranges, uint64(24*100_000))
+
+		expect := []Range{
+			{0, 500_000},
+			{500_000, 1_000_000},
+			{1_000_000, 1_500_000},
+		}
+		require.Equal(t, Ranges(expect).String(), Ranges(found).String())
+	})
+
+	t.Run("small", func(t *testing.T) {
+		var ranges Ranges
+		for i := 0; i < 240; i++ {
+			ranges = append(ranges, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
+		}
+		found := merger.FindMergeRanges(ranges, uint64(240*10_000))
+
+		expect := Ranges{
+			{0, 500_000},
+			{500_000, 1_000_000},
+			{1_000_000, 1_500_000},
+			{1_500_000, 1_600_000},
+			{1_600_000, 1_700_000},
+			{1_700_000, 1_800_000},
+			{1_800_000, 1_900_000},
+			{1_900_000, 2_000_000},
+			{2_000_000, 2_100_000},
+			{2_100_000, 2_200_000},
+			{2_200_000, 2_300_000},
+			{2_300_000, 2_400_000},
+		}
+
+		require.Equal(t, expect.String(), Ranges(found).String())
+	})
+
+	t.Run("IsRecent", func(t *testing.T) {
+		require.True(t, Range{500_000, 599_000}.IsRecent(1_000_000))
+		require.True(t, Range{500_000, 501_000}.IsRecent(1_000_000))
+		require.False(t, Range{499_000, 500_000}.IsRecent(1_000_000))
+		require.False(t, Range{400_000, 500_000}.IsRecent(1_000_000))
+		require.False(t, Range{400_000, 401_000}.IsRecent(1_000_000))
+
+		require.False(t, Range{500_000, 501_000}.IsRecent(1_100_000))
+	})
+
+}
+
 func TestMergeSnapshots(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
-		for _, snT := range snaptype.AllSnapshotTypes {
+		for _, snT := range snaptype.BlockSnapshotTypes {
 			createTestSegmentFile(t, from, to, snT, dir, logger)
 		}
 	}
 
-	N := uint64(7)
-	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+	N := uint64(17)
+	createFile(0, snaptype.Erigon2MergeLimit)
+	for i := uint64(snaptype.Erigon2MergeLimit); i < snaptype.Erigon2MergeLimit+N*100_000; i += 100_000 {
 		createFile(i, i+100_000)
 	}
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
-		ranges := merger.FindMergeRanges(s.Ranges())
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
+			return nil
+		}, func(l []string) error {
+			return nil
+		})
 		require.NoError(err)
 	}
 
@@ -90,14 +148,18 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, nil, logger)
-		ranges := merger.FindMergeRanges(s.Ranges())
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
+			return nil
+		}, func(l []string) error {
+			return nil
+		})
 		require.NoError(err)
 	}
 
-	expectedFileName = snaptype.SegmentFileName(1_100_000, 1_200_000, snaptype.Transactions)
+	expectedFileName = snaptype.SegmentFileName(1_800_000, 1_900_000, snaptype.Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()

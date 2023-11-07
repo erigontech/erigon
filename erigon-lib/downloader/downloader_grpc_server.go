@@ -19,6 +19,8 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -44,6 +46,7 @@ type GrpcServer struct {
 
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -70,7 +73,33 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			return nil, err
 		}
 	}
-	s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+	return &emptypb.Empty{}, nil
+}
+
+// Delete - stop seeding, remove file, remove .torrent
+func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (*emptypb.Empty, error) {
+	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+	torrents := s.d.torrentClient.Torrents()
+	for _, name := range request.Paths {
+		if name == "" {
+			return nil, fmt.Errorf("field 'path' is required")
+		}
+		for _, t := range torrents {
+			select {
+			case <-t.GotInfo():
+				continue
+			default:
+			}
+			if t.Name() == name {
+				t.Drop()
+				break
+			}
+		}
+
+		fPath := filepath.Join(s.d.SnapDir(), name)
+		_ = os.Remove(fPath)
+		_ = os.Remove(fPath + ".torrent")
+	}
 	return &emptypb.Empty{}, nil
 }
 

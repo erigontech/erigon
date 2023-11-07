@@ -79,16 +79,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	_, found := s.peerStatistics[msg.GetPeer().Pid]
-
-	if found {
-		s.peerStatistics[msg.GetPeer().Pid].BytesOut += uint64(len(compressedData))
-	} else {
-		s.peerStatistics[msg.GetPeer().Pid] = &diagnostics.PeerStatistics{
-			BytesIn:  0,
-			BytesOut: uint64(len(compressedData)),
-		}
-	}
+	s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Type.String(), "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
@@ -326,16 +317,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 		return err
 	}
 
-	_, found := s.peerStatistics[string(textPid)]
-
-	if found {
-		s.peerStatistics[string(textPid)].BytesIn += uint64(len(data))
-	} else {
-		s.peerStatistics[string(textPid)] = &diagnostics.PeerStatistics{
-			BytesIn:  uint64(len(data)),
-			BytesOut: 0,
-		}
-	}
+	msgType, msgCap := parseTopic(pkt.GetTopic())
+	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
 	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
@@ -365,4 +348,44 @@ func (s *SentinelServer) GetPeersStatistics() map[string]*diagnostics.PeerStatis
 	}
 
 	return stats
+}
+
+func (s *SentinelServer) trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
+	if s.peerStatistics == nil {
+		s.peerStatistics = make(map[string]*diagnostics.PeerStatistics)
+	}
+
+	if _, exists := s.peerStatistics[peerID]; !exists {
+		s.peerStatistics[peerID] = &diagnostics.PeerStatistics{
+			CapBytesIn:   make(map[string]uint64),
+			CapBytesOut:  make(map[string]uint64),
+			TypeBytesIn:  make(map[string]uint64),
+			TypeBytesOut: make(map[string]uint64),
+		}
+	}
+
+	stats := s.peerStatistics[peerID]
+
+	if inbound {
+		stats.BytesIn += uint64(bytes)
+		stats.CapBytesIn[msgCap] += uint64(bytes)
+		stats.TypeBytesIn[msgType] += uint64(bytes)
+	} else {
+		stats.BytesOut += uint64(bytes)
+		stats.CapBytesOut[msgCap] += uint64(bytes)
+		stats.TypeBytesOut[msgType] += uint64(bytes)
+	}
+}
+
+func parseTopic(input string) (string, string) {
+	parts := strings.Split(input, "/")
+
+	if len(parts) < 4 {
+		return "unknown", "unknown"
+	}
+
+	capability := parts[1]
+	topick := parts[3]
+
+	return capability, topick
 }

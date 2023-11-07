@@ -7,7 +7,7 @@ import (
 func (reqGen *requestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
 	var result p2p.NodeInfo
 
-	if err := reqGen.callCli(&result, Methods.AdminNodeInfo); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.AdminNodeInfo); err != nil {
 		return p2p.NodeInfo{}, err
 	}
 

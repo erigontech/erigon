@@ -141,6 +141,18 @@ func TestCreation(t *testing.T) {
 				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 0}},          // First Shanghai block
 			},
 		},
+		// Mumbai test cases
+		{
+			params.MumbaiChainConfig,
+			params.MumbaiGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0xf6ef3fdf), Next: 2722000}},
+				{2722000, 0, ID{Hash: checksumToBytes(0x8647df30), Next: 13996000}},  // First Istanbul block
+				{13996000, 0, ID{Hash: checksumToBytes(0x06cc1179), Next: 22640000}}, // First Berlin block
+				{22640000, 0, ID{Hash: checksumToBytes(0x9adf950e), Next: 41874000}}, // First London block
+				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 0}},        // First Agra block
+			},
+		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
