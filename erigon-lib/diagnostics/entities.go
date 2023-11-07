@@ -30,20 +30,20 @@ type PeerStatistics struct {
 }
 
 type DownloadStatistics struct {
-	Progress         string `json:"progress"`
-	Downloaded       string `json:"downloaded"`
-	Total            string `json:"total"`
-	TimeLeft         string `json:"timeLeft"`
-	TotalTime        string `json:"totalTime"`
-	DownloadRate     string `json:"downloadRate"`
-	UploadRate       string `json:"uploadRate"`
-	Peers            int32  `json:"peers"`
-	Files            int32  `json:"files"`
-	Connections      uint64 `json:"connections"`
-	Alloc            string `json:"alloc"`
-	Sys              string `json:"sys"`
-	DownloadFinished bool   `json:"downloadFinished"`
-	StagePrefix      string `json:"stagePrefix"`
+	Progress         float32 `json:"progress"`
+	Downloaded       uint64  `json:"downloaded"`
+	Total            uint64  `json:"total"`
+	TimeLeft         float64 `json:"timeLeft"`
+	TotalTime        float64 `json:"totalTime"`
+	DownloadRate     uint64  `json:"downloadRate"`
+	UploadRate       uint64  `json:"uploadRate"`
+	Peers            int32   `json:"peers"`
+	Files            int32   `json:"files"`
+	Connections      uint64  `json:"connections"`
+	Alloc            uint64  `json:"alloc"`
+	Sys              uint64  `json:"sys"`
+	DownloadFinished bool    `json:"downloadFinished"`
+	StagePrefix      string  `json:"stagePrefix"`
 }
 
 func (ti DownloadStatistics) Type() Type {
