@@ -45,8 +45,6 @@ const (
 	BeaconBlocks
 )
 
-var BorSnapshotTypes = []Type{BorEvents, BorSpans}
-
 func (ft Type) String() string {
 	switch ft {
 	case Headers:
