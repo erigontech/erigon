@@ -25,7 +25,7 @@ type BeaconSnapshotReader interface {
 	// ReadBlock reads the block at the given slot.
 	// If the block is not present, it returns nil.
 	ReadBlock(slot uint64) (*cltypes.SignedBeaconBlock, error)
-	ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, error)
+	ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error)
 	RawBlockSSZ(slot uint64) ([]byte, error)
 
 	FrozenSlots() uint64
