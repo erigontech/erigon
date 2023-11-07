@@ -565,7 +565,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
-	if keyCount > 1000 {
+	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
 		bufSize = 1 * datasize.MB
 	}
 	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)

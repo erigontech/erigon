@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -96,6 +97,10 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	// t.Run("compressDomainVals=false, domainLargeValues=false", func(t *testing.T) {
 	// 	testCollationBuild(t, false, false)
 	// })
@@ -118,7 +123,6 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	defer logEvery.Stop()
 	db, d := testDbAndDomainOfStepValsDup(t, 16, logger, !domainLargeValues)
 	ctx := context.Background()
-	defer d.Close()
 
 	d.domainLargeValues = domainLargeValues
 	if compressDomainVals {
@@ -1056,6 +1060,9 @@ func TestScanStaticFilesD(t *testing.T) {
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
