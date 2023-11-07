@@ -215,10 +215,8 @@ Loop:
 				*/
 				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
 					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
-						Progress:         stats.Progress,
 						Downloaded:       stats.BytesCompleted,
 						Total:            stats.BytesTotal,
-						TimeLeft:         0,
 						TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
 						DownloadRate:     stats.DownloadRate,
 						UploadRate:       stats.UploadRate,
@@ -248,10 +246,8 @@ Loop:
 
 				if diagnosticsContext != nil && diagnosticsContext.Err() == nil {
 					diagnostics.Send(diagnosticsContext, diagnostics.DownloadStatistics{
-						Progress:         stats.Progress,
 						Downloaded:       stats.BytesCompleted,
 						Total:            stats.BytesTotal,
-						TimeLeft:         float64(stats.BytesTotal - stats.BytesCompleted),
 						TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
 						DownloadRate:     stats.DownloadRate,
 						UploadRate:       stats.UploadRate,

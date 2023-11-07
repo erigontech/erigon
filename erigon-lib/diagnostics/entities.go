@@ -30,10 +30,8 @@ type PeerStatistics struct {
 }
 
 type DownloadStatistics struct {
-	Progress         float32 `json:"progress"`
 	Downloaded       uint64  `json:"downloaded"`
 	Total            uint64  `json:"total"`
-	TimeLeft         float64 `json:"timeLeft"`
 	TotalTime        float64 `json:"totalTime"`
 	DownloadRate     uint64  `json:"downloadRate"`
 	UploadRate       uint64  `json:"uploadRate"`
