@@ -61,6 +61,9 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
+	if err := a.sn.BuildMissingIndices(a.ctx, a.logger, log.LvlDebug); err != nil {
+		return err
+	}
 	// Here we need to start mdbx transaction and lock the thread
 	log.Info("[Antiquary]: Stopping Caplin to process historical indicies")
 	tx, err := a.mainDB.BeginRw(a.ctx)
@@ -117,6 +120,17 @@ func (a *Antiquary) Antiquate(from, to uint64) error {
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 8, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
+
+	roTx, err := a.mainDB.BeginRo(a.ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from); err != nil {
+		return err
+	}
+	roTx.Rollback()
+
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -125,11 +139,5 @@ func (a *Antiquary) Antiquate(from, to uint64) error {
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to); err != nil {
 		return err
 	}
-	if err := a.beaconDB.PurgeRange(a.ctx, tx, from, to-from); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return nil
+	return tx.Commit()
 }
