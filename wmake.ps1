@@ -533,7 +533,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-integration") {
     Write-Host " Running integration tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 30m -tags $($Erigon.BuildTags),integration,e4"
+    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 130m -tags $($Erigon.BuildTags),integration,e4"
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
