@@ -445,7 +445,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
-	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, freezeblocks.MergeSteps, db, nil, logger)
+	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
 
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
