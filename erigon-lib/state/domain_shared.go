@@ -109,7 +109,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:       tx,
 	}
 
-	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -478,23 +478,31 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) branchFn(pref []byte) ([]byte, error) {
-	v, err := sd.LatestCommitment(pref)
+type SharedDomainsCommitmentContext struct {
+	sd *SharedDomains
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, error) {
+	v, err := ctx.sd.LatestCommitment(pref)
 	if err != nil {
-		return nil, fmt.Errorf("branchFn failed: %w", err)
+		return nil, fmt.Errorf("GetBranch failed: %w", err)
 	}
-	//fmt.Printf("branchFn[sd]: %x: %x\n", pref, v)
+	//fmt.Printf("GetBranch: %x: %x\n", pref, v)
 	if len(v) == 0 {
 		return nil, nil
 	}
-	// skip touchmap
-	return v[2:], nil
+	return v, nil
 }
 
-func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, err := sd.LatestAccount(plainKey)
+func (ctx *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	//fmt.Printf("PutBranch: %x: %x\n", pref, branch)
+	return ctx.sd.updateCommitmentData(prefix, data, prevData)
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, err := ctx.sd.LatestAccount(plainKey)
 	if err != nil {
-		return fmt.Errorf("accountFn failed: %w", err)
+		return fmt.Errorf("GetAccount failed: %w", err)
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
@@ -505,18 +513,18 @@ func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error
 		if len(chash) > 0 {
 			copy(cell.CodeHash[:], chash)
 		}
-		//fmt.Printf("accountFn[sd]: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
+		//fmt.Printf("GetAccount: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
 	}
 
-	code, err := sd.LatestCode(plainKey)
+	code, err := ctx.sd.LatestCode(plainKey)
 	if err != nil {
-		return fmt.Errorf("accountFn[sd]: failed to read latest code: %w", err)
+		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
-		//fmt.Printf("accountFn[sd]: code %x - %x\n", plainKey, code)
-		sd.Commitment.updates.keccak.Reset()
-		sd.Commitment.updates.keccak.Write(code)
-		sd.Commitment.updates.keccak.Read(cell.CodeHash[:])
+		//fmt.Printf("GetAccount: code %x - %x\n", plainKey, code)
+		ctx.sd.Commitment.updates.keccak.Reset()
+		ctx.sd.Commitment.updates.keccak.Write(code)
+		ctx.sd.Commitment.updates.keccak.Read(cell.CodeHash[:])
 	} else {
 		cell.CodeHash = commitment.EmptyCodeHashArray
 	}
@@ -524,14 +532,17 @@ func (sd *SharedDomains) accountFn(plainKey []byte, cell *commitment.Cell) error
 	return nil
 }
 
-func (sd *SharedDomains) storageFn(plainKey []byte, cell *commitment.Cell) error {
+func (ctx *SharedDomainsCommitmentContext) TempDir() string {
+	return ctx.sd.aggCtx.a.dirs.Tmp
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	//addr, loc := splitKey(plainKey)
-	enc, err := sd.LatestStorage(plainKey)
+	enc, err := ctx.sd.LatestStorage(plainKey)
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("storageFn[sd]: %x|%x - %x\n", addr, loc, enc)
+	//fmt.Printf("GetStorage: %x|%x - %x\n", addr, loc, enc)
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
 	cell.Delete = cell.StorageLen == 0
@@ -642,7 +653,7 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
 	if ctx != nil {
-		sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
+		sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	}
 }
 
@@ -688,43 +699,11 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 	defer mxCommitmentRunning.Dec()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(ctx, trace)
+	rootHash, err = sd.Commitment.ComputeCommitment(ctx, trace)
 	if err != nil {
 		return nil, err
 	}
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-
-	for pref, update := range branchNodeUpdates {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		prefix := []byte(pref)
-
-		stateValue, err := sd.LatestCommitment(prefix)
-		if err != nil {
-			return nil, err
-		}
-		stated := commitment.BranchData(stateValue)
-		merged, err := sd.Commitment.branchMerger.Merge(stated, update)
-		if err != nil {
-			return nil, err
-		}
-		// this updates ensures that if commitment is present, each brunches are also present in commitment state at that moment with costs of storage
-		//if bytes.Equal(stated, merged) {
-		//      continue
-		//}
-		if trace {
-			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
-		}
-
-		if err = sd.updateCommitmentData(prefix, merged, stated); err != nil {
-			return nil, err
-		}
-		mxCommitmentBranchUpdates.Inc()
-	}
 	if saveStateAfter {
 		prevState, been, err := sd.aggCtx.commitment.GetLatest(keyCommitmentState, nil, sd.roTx)
 		if err != nil {
