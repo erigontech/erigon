@@ -126,7 +126,7 @@ func (a *Antiquary) Antiquate(from, to uint64) error {
 		return err
 	}
 	defer roTx.Rollback()
-	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from); err != nil {
+	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from-1); err != nil {
 		return err
 	}
 	roTx.Rollback()
