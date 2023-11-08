@@ -57,7 +57,8 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 			br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}
 		}
 		var b bytes.Buffer
-		require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
+		_, err := snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
+		require.NoError(t, err)
 		blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
 		require.NoError(t, err)
 		_ = blk2

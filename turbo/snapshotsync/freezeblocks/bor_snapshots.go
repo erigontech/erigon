@@ -1164,8 +1164,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 				return err
 			}
 		}
-		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
-		for _, t := range snaptype.BlockSnapshotTypes {
+		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}

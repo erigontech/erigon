@@ -616,6 +616,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 
+	var (
+		snapDb     kv.RwDB
+		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	)
+	if bor, ok := backend.engine.(*bor.Bor); ok {
+		snapDb = bor.DB
+		recents = bor.Recents
+		signatures = bor.Signatures
+	}
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,

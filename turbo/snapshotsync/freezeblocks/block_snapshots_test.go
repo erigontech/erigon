@@ -58,7 +58,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 }
 
 func TestFindMergeRange(t *testing.T) {
-	merger := NewMerger("x", 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, nil)
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	t.Run("big", func(t *testing.T) {
 		var ranges []Range
 		for i := 0; i < 24; i++ {

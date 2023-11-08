@@ -456,7 +456,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -495,7 +495,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -580,7 +580,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -644,7 +644,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	s, err := state2.NewAggregatorV3(ctx, dirs, 200000, db, log.Root())
+	s, err := state2.NewAggregatorV3(ctx, dirs.Tmp, dirs.Tmp, 200000, db, log.Root())
 	if err != nil {
 		return err
 	}
