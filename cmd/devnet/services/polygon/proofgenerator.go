@@ -39,7 +39,7 @@ func NewProofGenerator() *ProofGenerator {
 func (pg *ProofGenerator) NodeCreated(ctx context.Context, node devnet.Node) {
 
 	if pg.heimdall == nil {
-		if strings.HasPrefix(node.Name(), "bor") {
+		if strings.HasPrefix(node.GetName(), "bor") {
 			if network := devnet.CurrentNetwork(ctx); network != nil {
 				for _, service := range network.Services {
 					if heimdall, ok := service.(*Heimdall); ok {

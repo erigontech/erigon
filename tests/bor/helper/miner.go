@@ -142,7 +142,6 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		RPCGasCap:        50000000,
 		RPCTxFeeCap:      1, // 1 ether
 		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
-		P2PEnabled:       true,
 		StateStream:      true,
 		HistoryV3:        ethconfig.EnableHistoryV4InTest,
 	}

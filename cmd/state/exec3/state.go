@@ -2,10 +2,13 @@ package exec3
 
 import (
 	"context"
+	"math/big"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -261,6 +264,65 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 	}
+}
+
+type ChainReader struct {
+	config      *chain.Config
+	tx          kv.Tx
+	blockReader services.FullBlockReader
+}
+
+func NewChainReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader) ChainReader {
+	return ChainReader{config: config, tx: tx, blockReader: blockReader}
+}
+
+func (cr ChainReader) Config() *chain.Config        { return cr.config }
+func (cr ChainReader) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		return h
+	}
+	return rawdb.ReadHeader(cr.tx, hash, number)
+}
+func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		return h
+	}
+	return rawdb.ReadHeaderByNumber(cr.tx, number)
+
+}
+func (cr ChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+	if cr.blockReader != nil {
+		number := rawdb.ReadHeaderNumber(cr.tx, hash)
+		if number == nil {
+			return nil
+		}
+		return cr.GetHeader(hash, *number)
+	}
+	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
+	return h
+}
+func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
+	td, err := rawdb.ReadTd(cr.tx, hash, number)
+	if err != nil {
+		log.Error("ReadTd failed", "err", err)
+		return nil
+	}
+	return td
+}
+func (cr ChainReader) FrozenBlocks() uint64 {
+	return cr.blockReader.FrozenBlocks()
+}
+func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	panic("")
+}
+func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
+	panic("")
+}
+func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	panic("")
 }
 
 func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

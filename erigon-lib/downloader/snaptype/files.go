@@ -44,6 +44,8 @@ const (
 	BeaconBlocks
 )
 
+var BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
 func (ft Type) String() string {
 	switch ft {
 	case Headers:
@@ -90,7 +92,7 @@ const (
 
 func (it IdxType) String() string { return string(it) }
 
-var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
+var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
@@ -175,8 +177,10 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2MergeLimit }
-func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Seedable() bool {
+	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
+}
+func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }

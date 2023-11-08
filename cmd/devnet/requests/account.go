@@ -37,7 +37,7 @@ type StorageResult struct {
 func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
 	var result hexutility.Bytes
 
-	if err := reqGen.callCli(&result, Methods.ETHGetCode, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHGetCode, address, blockRef); err != nil {
 		return nil, err
 	}
 
@@ -47,7 +47,7 @@ func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.
 func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.callCli(&result, Methods.ETHGetBalance, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHGetBalance, address, blockRef); err != nil {
 		return nil, err
 	}
 
@@ -57,7 +57,7 @@ func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockRef r
 func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.callCli(&result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(&result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {
 		return nil, err
 	}
 
@@ -68,7 +68,7 @@ func (reqGen *requestGenerator) DebugAccountAt(blockHash libcommon.Hash, txIndex
 	var b DebugAccountAt
 
 	method, body := reqGen.debugAccountAt(blockHash, txIndex, account)
-	if res := reqGen.call(method, body, &b); res.Err != nil {
+	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
 		return nil, fmt.Errorf("failed to get account: %v", res.Err)
 	}
 
