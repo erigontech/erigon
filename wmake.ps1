@@ -519,7 +519,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test") {
     Write-Host " Running tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 -tags=e4 --timeout 120s"
+    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 -tags=e4 ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
