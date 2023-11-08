@@ -129,7 +129,7 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) > 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
@@ -148,7 +148,7 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, MergeSteps, nil, params.MainnetChainConfig, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) == 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
