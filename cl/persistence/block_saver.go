@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -17,6 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/spf13/afero"
 )
+
+const subDivisionFolderSize = 10_000
 
 type beaconChainDatabaseFilesystem struct {
 	rawDB RawBeaconBlockChain
@@ -73,6 +76,9 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 		slot := slots[idx]
 
 		r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+		if errors.Is(err, afero.ErrFileNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +104,7 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.RwT
 		return err
 	}
 
-	return beacon_indicies.PruneBlockRoots(ctx, tx, from, from+count)
+	return nil
 }
 
 func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
@@ -139,6 +145,15 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwT
 	if err != nil {
 		return err
 	}
+	if block.Version() >= clparams.BellatrixVersion {
+		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteExecutionBlockHash(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockHash); err != nil {
+			return err
+		}
+	}
+
 	if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(ctx, tx, &cltypes.SignedBeaconBlockHeader{
 		Signature: block.Signature,
 		Header: &cltypes.BeaconBlockHeader{
@@ -156,28 +171,9 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwT
 
 // SlotToPaths define the file structure to store a block
 //
-// superEpoch = floor(slot / (epochSize ^ 2))
-// epoch =  floot(slot / epochSize)
-// file is to be stored at
-// "/signedBeaconBlock/{superEpoch}/{epoch}/{root}.ssz_snappy"
+// "/signedBeaconBlock/{slot/10_000}/{root}.ssz_snappy"
 func RootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainConfig) (folderPath string, filePath string) {
-	folderPath = path.Clean(fmt.Sprintf("%d/%d", slot/(config.SlotsPerEpoch*config.SlotsPerEpoch), slot/config.SlotsPerEpoch))
+	folderPath = path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
 	filePath = path.Clean(fmt.Sprintf("%s/%x.sz", folderPath, root))
 	return
-}
-
-func ValidateEpoch(fs afero.Fs, epoch uint64, config *clparams.BeaconChainConfig) error {
-	superEpoch := epoch / (config.SlotsPerEpoch)
-
-	// the folder path is superEpoch/epoch
-	folderPath := path.Clean(fmt.Sprintf("%d/%d", superEpoch, epoch))
-
-	fi, err := afero.ReadDir(fs, folderPath)
-	if err != nil {
-		return err
-	}
-	for _, fn := range fi {
-		fn.Name()
-	}
-	return nil
 }

@@ -13,7 +13,7 @@ func TestNodeArgs(t *testing.T) {
 	asMap := map[string]struct{}{}
 
 	nodeArgs, _ := args.AsArgs(args.BlockProducer{
-		Node: args.Node{
+		NodeArgs: args.NodeArgs{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 1)),
 			PrivateApiAddr: "localhost:9092",
 		},
@@ -37,7 +37,7 @@ func TestNodeArgs(t *testing.T) {
 	}
 
 	nodeArgs, _ = args.AsArgs(args.NonBlockProducer{
-		Node: args.Node{
+		NodeArgs: args.NodeArgs{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",
 			PrivateApiAddr: "localhost:9091",

@@ -331,7 +331,7 @@ func TestMatchProtocols(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		result := matchProtocols(tt.Local, tt.Remote, nil)
+		result := matchProtocols(tt.Local, tt.Remote, nil, log.Root())
 		if len(result) != len(tt.Match) {
 			t.Errorf("test %d: negotiation mismatch: have %v, want %v", i, len(result), len(tt.Match))
 			continue

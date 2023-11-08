@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,28 +10,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
-	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
-	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
-	"github.com/ledgerwatch/erigon/core/types"
-
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/app"
+	erigon_app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
@@ -81,10 +76,10 @@ var (
 		Usage: "Run with a devnet local Heimdall service",
 	}
 
-	HeimdallgRPCAddressFlag = cli.StringFlag{
+	HeimdallGrpcAddressFlag = cli.StringFlag{
 		Name:  "bor.heimdallgRPC",
 		Usage: "Address of Heimdall gRPC service",
-		Value: "localhost:8540",
+		Value: polygon.HeimdallGrpcAddressDefault,
 	}
 
 	BorSprintSizeFlag = cli.IntFlag{
@@ -135,19 +130,15 @@ type PanicHandler struct {
 
 func (ph PanicHandler) Log(r *log.Record) error {
 	fmt.Printf("Msg: %s\nStack: %s\n", r.Msg, dbg.Stack())
-	os.Exit(1)
+	os.Exit(2)
 	return nil
 }
 
 func main() {
-
-	debug.RaiseFdLimit()
-
 	app := cli.NewApp()
 	app.Version = params.VersionWithCommit(params.GitCommit)
-	app.Action = func(ctx *cli.Context) error {
-		return action(ctx)
-	}
+	app.Action = mainContext
+
 	app.Flags = []cli.Flag{
 		&DataDirFlag,
 		&ChainFlag,
@@ -156,7 +147,7 @@ func main() {
 		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
-		&HeimdallgRPCAddressFlag,
+		&HeimdallGrpcAddressFlag,
 		&BorSprintSizeFlag,
 		&MetricsEnabledFlag,
 		&MetricsNodeFlag,
@@ -170,27 +161,18 @@ func main() {
 		&logging.LogDirVerbosityFlag,
 	}
 
-	app.After = func(ctx *cli.Context) error {
-		// unsubscribe from all the subscriptions made
-		services.UnsubscribeAll()
-		return nil
-	}
 	if err := app.Run(os.Args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
-const (
-	recipientAddress        = "0x71562b71999873DB5b286dF957af199Ec94617F7"
-	sendValue        uint64 = 10000
-)
-
-func action(ctx *cli.Context) error {
-	dataDir := ctx.String("datadir")
+func setupLogger(ctx *cli.Context) (log.Logger, error) {
+	dataDir := ctx.String(DataDirFlag.Name)
 	logsDir := filepath.Join(dataDir, "logs")
 
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return err
+		return nil, err
 	}
 
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
@@ -198,65 +180,92 @@ func action(ctx *cli.Context) error {
 	// Make root logger fail
 	log.Root().SetHandler(PanicHandler{})
 
+	return logger, nil
+}
+
+func handleTerminationSignals(stopFunc func(), logger log.Logger) {
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
+
+	switch s := <-signalCh; s {
+	case syscall.SIGTERM:
+		logger.Info("Stopping networks")
+		stopFunc()
+	case syscall.SIGINT:
+		logger.Info("Terminating network")
+		os.Exit(-int(syscall.SIGINT))
+	}
+}
+
+func connectDiagnosticsIfEnabled(ctx *cli.Context, logger log.Logger) {
+	metricsEnabled := ctx.Bool(MetricsEnabledFlag.Name)
+	diagnosticsUrl := ctx.String(DiagnosticsURLFlag.Name)
+	if metricsEnabled && len(diagnosticsUrl) > 0 {
+		err := erigon_app.ConnectDiagnostics(ctx, logger)
+		if err != nil {
+			logger.Error("app.ConnectDiagnostics failed", "err", err)
+		}
+	}
+}
+
+func mainContext(ctx *cli.Context) error {
+	debug.RaiseFdLimit()
+
+	logger, err := setupLogger(ctx)
+	if err != nil {
+		return err
+	}
+
 	// clear all the dev files
+	dataDir := ctx.String(DataDirFlag.Name)
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
 		return err
 	}
 
 	network, err := initDevnet(ctx, logger)
-
 	if err != nil {
 		return err
 	}
 
-	metrics := ctx.Bool("metrics")
-
-	if metrics {
-		// TODO should get this from the network as once we have multiple nodes we'll need to iterate the
-		// nodes and create a series of urls - for the moment only one is supported
-		ctx.Set("metrics.urls", fmt.Sprintf("http://localhost:%d/debug/", ctx.Int("metrics.port")))
+	if err = initDevnetMetrics(ctx, network); err != nil {
+		return err
 	}
 
-	// start the network with each node in a go routine
 	logger.Info("Starting Devnet")
-
-	runCtx, err := network.Start(ctx, logger)
-
+	runCtx, err := network.Start(logger)
 	if err != nil {
-		return fmt.Errorf("Devnet start failed: %w", err)
+		return fmt.Errorf("devnet start failed: %w", err)
 	}
 
-	go func() {
-		signalCh := make(chan os.Signal, 1)
-		signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
+	go handleTerminationSignals(network.Stop, logger)
+	go connectDiagnosticsIfEnabled(ctx, logger)
 
-		switch s := <-signalCh; s {
-		case syscall.SIGTERM:
-			logger.Info("Stopping networks")
-			network.Stop()
-		case syscall.SIGINT:
-			logger.Info("Terminating network")
-			os.Exit(-int(syscall.SIGINT))
-		}
-	}()
-
-	diagnosticsUrl := ctx.String("diagnostics.url")
-
-	if metrics && len(diagnosticsUrl) > 0 {
-		go func() {
-			app.ConnectDiagnostics(ctx, logger)
-		}()
+	enabledScenarios := strings.Split(ctx.String(ScenariosFlag.Name), ",")
+	if err = allScenarios(runCtx).Run(runCtx, enabledScenarios...); err != nil {
+		return err
 	}
 
-	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
-		transactions.MaxNumberOfEmptyBlockChecks = 30
+	if ctx.Bool(WaitFlag.Name) {
+		logger.Info("Waiting")
+		network.Wait()
+	} else {
+		logger.Info("Stopping Networks")
+		network.Stop()
 	}
 
-	scenarios.Scenarios{
+	return nil
+}
+
+func allScenarios(runCtx devnet.Context) scenarios.Scenarios {
+	// unsubscribe from all the subscriptions made
+	defer services.UnsubscribeAll()
+
+	const recipientAddress = "0x71562b71999873DB5b286dF957af199Ec94617F7"
+	const sendValue uint64 = 10000
+
+	return scenarios.Scenarios{
 		"dynamic-tx-node-0": {
-			Context: runCtx.
-				WithCurrentNetwork(0).
-				WithCurrentNode(0),
+			Context: runCtx.WithCurrentNetwork(0).WithCurrentNode(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "PingErigonRpc"},
@@ -304,205 +313,52 @@ func action(ctx *cli.Context) error {
 				//{Text: "BatchProcessTransfers", Args: []any{"child-funder", 1, 10, 2, 2}},
 			},
 		},
-	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
-
-	if ctx.Bool("wait") || (metrics && len(diagnosticsUrl) > 0) {
-		logger.Info("Waiting")
-		network.Wait()
-	} else {
-		logger.Info("Stopping Networks")
-		network.Stop()
 	}
-
-	return nil
 }
 
 func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
-	chain := ctx.String(ChainFlag.Name)
+	chainName := ctx.String(ChainFlag.Name)
 	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)
 	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
 
-	faucetSource := accounts.NewAccount("faucet-source")
-
-	switch chain {
+	switch chainName {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
-			return []*devnet.Network{
-				{
-					DataDir:            dataDir,
-					Chain:              networkname.BorDevnetChainName,
-					Logger:             logger,
-					BasePort:           40303,
-					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        baseRpcHost,
-					BaseRPCPort:        baseRpcPort,
-					//Snapshots:          true,
-					Alloc: types.GenesisAlloc{
-						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
-					},
-					Services: []devnet.Service{
-						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
-					},
-					Nodes: []devnet.Node{
-						&args.BlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								WithoutHeimdall:  true,
-							},
-							AccountSlots: 200,
-						},
-						&args.NonBlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								WithoutHeimdall:  true,
-							},
-						},
-					},
-				}}, nil
+			return tests.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
+		} else if ctx.Bool(LocalHeimdallFlag.Name) {
+			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
+			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
+			return tests.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, logger), nil
 		} else {
-			var heimdallGrpc string
-			var services []devnet.Service
-			var withMilestones = utils.WithHeimdallMilestones.Value
-
-			checkpointOwner := accounts.NewAccount("checkpoint-owner")
-
-			if ctx.Bool(LocalHeimdallFlag.Name) {
-				config := *params.BorDevnetChainConfig
-				// milestones are not supported yet on the local heimdall
-				withMilestones = false
-
-				if sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name)); sprintSize > 0 {
-					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
-				}
-
-				services = append(services, polygon.NewHeimdall(&config,
-					&polygon.CheckpointConfig{
-						CheckpointBufferTime: 60 * time.Second,
-						CheckpointAccount:    checkpointOwner,
-					},
-					logger))
-
-				heimdallGrpc = polygon.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
-			}
-
-			return []*devnet.Network{
-				{
-					DataDir:            dataDir,
-					Chain:              networkname.BorDevnetChainName,
-					Logger:             logger,
-					BasePort:           40303,
-					BasePrivateApiAddr: "localhost:10090",
-					BaseRPCHost:        baseRpcHost,
-					BaseRPCPort:        baseRpcPort,
-					BorStateSyncDelay:  5 * time.Second,
-					BorWithMilestones:  &withMilestones,
-					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
-					Alloc: types.GenesisAlloc{
-						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
-					},
-					Nodes: []devnet.Node{
-						&args.BlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								HeimdallGRpc:     heimdallGrpc,
-							},
-							AccountSlots: 200,
-						},
-						&args.BlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								HeimdallGRpc:     heimdallGrpc,
-							},
-							AccountSlots: 200,
-						},
-						/*&args.BlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								HeimdallGRpc:     heimdallGrpc,
-							},
-							AccountSlots: 200,
-						},*/
-						&args.NonBlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								HeimdallGRpc:     heimdallGrpc,
-							},
-						},
-					},
-				},
-				{
-					DataDir:            dataDir,
-					Chain:              networkname.DevChainName,
-					Logger:             logger,
-					BasePort:           30403,
-					BasePrivateApiAddr: "localhost:10190",
-					BaseRPCHost:        baseRpcHost,
-					BaseRPCPort:        baseRpcPort + 1000,
-					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
-					Alloc: types.GenesisAlloc{
-						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
-						checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
-					},
-					Nodes: []devnet.Node{
-						&args.BlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
-								VMDebug:          true,
-								HttpCorsDomain:   "*",
-							},
-							DevPeriod:    5,
-							AccountSlots: 200,
-						},
-						&args.NonBlockProducer{
-							Node: args.Node{
-								ConsoleVerbosity: "0",
-								DirVerbosity:     "3",
-							},
-						},
-					},
-				}}, nil
+			return tests.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
 		}
 
 	case networkname.DevChainName:
-		return []*devnet.Network{
-			{
-				DataDir:            dataDir,
-				Chain:              networkname.DevChainName,
-				Logger:             logger,
-				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCHost:        baseRpcHost,
-				BaseRPCPort:        baseRpcPort,
-				Alloc: types.GenesisAlloc{
-					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
-				},
-				Services: []devnet.Service{
-					account_services.NewFaucet(networkname.DevChainName, faucetSource),
-				},
-				Nodes: []devnet.Node{
-					&args.BlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-						},
-						AccountSlots: 200,
-					},
-					&args.NonBlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-						},
-					},
-				},
-			}}, nil
+		return tests.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, logger), nil
+
+	default:
+		return nil, fmt.Errorf("unknown network: '%s'", chainName)
+	}
+}
+
+func initDevnetMetrics(ctx *cli.Context, network devnet.Devnet) error {
+	metricsEnabled := ctx.Bool(MetricsEnabledFlag.Name)
+	metricsNode := ctx.Int(MetricsNodeFlag.Name)
+	metricsPort := ctx.Int(MetricsPortFlag.Name)
+
+	if !metricsEnabled {
+		return nil
 	}
 
-	return nil, fmt.Errorf(`Unknown network: "%s"`, chain)
+	for _, nw := range network {
+		for i, nodeArgs := range nw.Nodes {
+			if metricsEnabled && (metricsNode == i) {
+				nodeArgs.EnableMetrics(metricsPort)
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("initDevnetMetrics: not found %s=%d", MetricsNodeFlag.Name, metricsNode)
 }
