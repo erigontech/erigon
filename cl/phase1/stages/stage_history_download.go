@@ -13,12 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/persistence"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -29,8 +28,9 @@ type StageHistoryReconstructionCfg struct {
 	genesisCfg   *clparams.GenesisConfig
 	beaconCfg    *clparams.BeaconChainConfig
 	downloader   *network.BackwardBeaconDownloader
+	sn           *freezeblocks.CaplinSnapshots
 	startingRoot libcommon.Hash
-	dbCfg        db_config.DatabaseConfiguration
+	backfilling  bool
 	startingSlot uint64
 	tmpdir       string
 	db           persistence.BeaconChainDatabase
@@ -41,7 +41,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, dbCfg db_config.DatabaseConfiguration, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:   genesisCfg,
 		beaconCfg:    beaconCfg,
@@ -50,10 +50,11 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, db
 		tmpdir:       tmpdir,
 		startingSlot: startinSlot,
 		logger:       logger,
-		dbCfg:        dbCfg,
+		backfilling:  backfilling,
 		indiciesDB:   indiciesDB,
 		db:           db,
 		engine:       engine,
+		sn:           sn,
 	}
 }
 
@@ -65,14 +66,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	executionBlocksCollector := etl.NewCollector("HistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionBlocksCollector.Close()
+	executionBlocksCollector.LogLvl(log.LvlDebug)
 	// Start the procedure
 	logger.Info("Starting downloading History", "from", currentSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidBlock := false
+	foundLatestEth1ValidBlock := &atomic.Bool{}
+	foundLatestEth1ValidBlock.Store(false)
 	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
-		foundLatestEth1ValidBlock = true // skip this if we are not using an engine supporting direct insertion
+		foundLatestEth1ValidBlock.Store(true) // skip this if we are not using an engine supporting direct insertion
 	}
 
 	var currEth1Progress atomic.Int64
@@ -89,10 +92,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlot, err := beacon_indicies.ReadHighestFinalized(tx)
-		if err != nil {
-			return false, err
-		}
+		destinationSlot := cfg.sn.SegmentsMax()
 		bytesReadIn15Seconds.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
@@ -101,7 +101,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, err
 			}
 		}
-		if !foundLatestEth1ValidBlock {
+		if !foundLatestEth1ValidBlock.Load() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
 			encodedPayload, err := payload.EncodeSSZ(nil)
 			if err != nil {
@@ -120,14 +120,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
+			foundLatestEth1ValidBlock.Store(len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber)
+		}
+		if blk.Version() <= clparams.AltairVersion {
+			foundLatestEth1ValidBlock.Store(true)
 		}
 
-		return foundLatestEth1ValidBlock && slot <= destinationSlot, tx.Commit()
+		return foundLatestEth1ValidBlock.Load() && (!cfg.backfilling || slot <= destinationSlot), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
-	logInterval := time.NewTicker(logIntervalTime)
 	finishCh := make(chan struct{})
 	// Start logging thread
 
@@ -139,13 +141,22 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				bytesReadIn15Seconds.Store(0)
 			case <-ctx.Done():
 				return
+			case <-finishCh:
+				return
 			}
 		}
 	}()
 	go func() {
+		logInterval := time.NewTicker(logIntervalTime)
+		defer logInterval.Stop()
 		for {
 			select {
 			case <-logInterval.C:
+				// if we found the latest valid hash extend ticker to 10 times the normal amout
+				if foundLatestEth1ValidBlock.Load() {
+					logInterval.Reset(10 * logIntervalTime)
+				}
+
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(); !ready {
 						if err != nil {
@@ -169,19 +180,34 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadIn15Seconds.Load())/(1000*1000*15)),
-					"peers", peerCount)
+					"peers", peerCount,
+					"reconnected", foundLatestEth1ValidBlock.Load(),
+				)
 				logger.Info("Downloading History", logArgs...)
 			case <-finishCh:
 				return
 			case <-ctx.Done():
-
 			}
 		}
 	}()
-	for !cfg.downloader.Finished() {
-		cfg.downloader.RequestMore(ctx)
+
+	go func() {
+		for !cfg.downloader.Finished() {
+			cfg.downloader.RequestMore(ctx)
+		}
+		close(finishCh)
+	}()
+	// Lets wait for the latestValidHash to be turned on
+	for !foundLatestEth1ValidBlock.Load() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+			fmt.Println("A")
+		}
 	}
-	close(finishCh)
+	cfg.downloader.SetThrottle(1 * time.Second) // throttle to 1 second for backfilling
+
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
 	db2 := memdb.New(cfg.tmpdir)
 	defer db2.Close()

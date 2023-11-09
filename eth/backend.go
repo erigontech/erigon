@@ -853,7 +853,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentinel = client
 
 		go func() {
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}, backend.downloaderClient); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()

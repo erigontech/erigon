@@ -388,6 +388,7 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
@@ -423,9 +424,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
-	cfg := stages.StageHistoryReconstruction(downloader, beaconDB, db, nil, genesisConfig, beaconConfig, db_config.DatabaseConfiguration{
-		PruneDepth: math.MaxUint64,
-	}, bRoot, bs.Slot(), "/tmp", log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 

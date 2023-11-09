@@ -27,7 +27,7 @@ type Antiquary struct {
 	beaconDB   persistence.BlockSource
 }
 
-func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, snapshotsDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) (*Antiquary, error) {
+func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) *Antiquary {
 	return &Antiquary{
 		mainDB:     mainDB,
 		dirs:       dirs,
@@ -36,11 +36,14 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 		sn:         sn,
 		reader:     reader,
 		ctx:        ctx,
-	}, nil
+	}
 }
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
+	if a.downloader == nil {
+		return nil // Just skip if we don't have a downloader
+	}
 	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
 		return err
@@ -116,6 +119,9 @@ func (a *Antiquary) Loop() error {
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) Antiquate(from, to uint64) error {
+	if a.downloader == nil {
+		return nil // Just skip if we don't have a downloader
+	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 8, log.LvlDebug, a.logger); err != nil {
 		return err

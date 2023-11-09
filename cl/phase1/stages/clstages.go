@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -39,6 +40,7 @@ type Cfg struct {
 	indiciesDB      kv.RwDB
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
+	sn              *freezeblocks.CaplinSnapshots
 
 	hasDownloaded bool
 }
@@ -62,6 +64,7 @@ func ClStagesCfg(
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
 	indiciesDB kv.RwDB,
+	sn *freezeblocks.CaplinSnapshots,
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 ) *Cfg {
@@ -77,6 +80,7 @@ func ClStagesCfg(
 		beaconDB:        beaconDB,
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
+		sn:              sn,
 	}
 }
 
@@ -249,7 +253,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.dbConfig, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
