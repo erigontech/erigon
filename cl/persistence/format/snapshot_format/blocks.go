@@ -151,7 +151,6 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	if err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}
-	fmt.Println(v, bodyRoot)
 	chunk1, dT1, err := chunk_encoding.ReadChunkToBytes(r)
 	if err != nil {
 		return nil, 0, libcommon.Hash{}, err
