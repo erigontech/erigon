@@ -26,7 +26,6 @@ type BeaconSnapshotReader interface {
 	// If the block is not present, it returns nil.
 	ReadBlock(slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error)
-	RawBlockSSZ(slot uint64) ([]byte, error)
 
 	FrozenSlots() uint64
 }
@@ -47,40 +46,6 @@ func (r *beaconSnapshotReader) FrozenSlots() uint64 {
 }
 
 func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	buf, err := r.RawBlockSSZ(slot)
-	if err != nil {
-		return nil, err
-	}
-	if buf == nil {
-		return nil, nil
-	}
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-	buffer.Write(buf)
-
-	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockFromSnapshot(buffer, r.eth1Getter, r.cfg)
-}
-
-func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
-	buf, err := r.RawBlockSSZ(slot)
-	if err != nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-	if buf == nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-	buffer.Write(buf)
-
-	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(buffer, r.cfg)
-}
-
-func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	view := r.sn.View()
 	defer view.Close()
 
@@ -103,6 +68,9 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	}
 
 	buf, _ = gg.Next(buf)
+	if buf == nil {
+		return nil, nil
+	}
 	// Decompress this thing
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
@@ -113,5 +81,46 @@ func (r *beaconSnapshotReader) RawBlockSSZ(slot uint64) ([]byte, error) {
 	defer lz4ReaderPool.Put(lzReader)
 	lzReader.Reset(buffer)
 
-	return buf, nil
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockFromSnapshot(buffer, r.eth1Getter, r.cfg)
+}
+
+func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+	view := r.sn.View()
+	defer view.Close()
+
+	var buf []byte
+
+	seg, ok := view.BeaconBlocksSegment(slot)
+	if !ok {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	if seg.idxSlot == nil {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+
+	gg := seg.seg.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	buf, _ = gg.Next(buf)
+	if buf == nil {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	// Decompress this thing
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+
+	buffer.Reset()
+	buffer.Write(buf)
+	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
+	defer lz4ReaderPool.Put(lzReader)
+	lzReader.Reset(buffer)
+
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(buffer, r.cfg)
 }
