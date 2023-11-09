@@ -2,6 +2,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -80,6 +81,7 @@ func (a *Antiquary) Loop() error {
 	defer logInterval.Stop()
 	// Now write the snapshots as indicies
 	for i := from; i < a.reader.FrozenSlots(); i++ {
+		fmt.Println(i)
 		// read the snapshot
 		header, elBlockNumber, elBlockHash, err := a.reader.ReadHeader(i)
 		if err != nil {
