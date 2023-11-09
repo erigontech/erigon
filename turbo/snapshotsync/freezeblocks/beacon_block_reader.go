@@ -82,7 +82,7 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	lzReader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockFromSnapshot(buffer, r.eth1Getter, r.cfg)
+	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
 }
 
 func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
@@ -122,5 +122,5 @@ func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlo
 	lzReader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(buffer, r.cfg)
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(lzReader, r.cfg)
 }
