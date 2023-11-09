@@ -401,13 +401,9 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 }
 
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger, lvl log.Lvl) error {
-	// Create .idx files
-	if s.IndicesMax() >= s.SegmentsMax() {
-		return s.ReopenFolder()
-	}
-	if !s.segmentsReady.Load() {
-		return fmt.Errorf("not all snapshot segments are available")
-	}
+	// if !s.segmentsReady.Load() {
+	// 	return fmt.Errorf("not all snapshot segments are available")
+	// }
 
 	// wait for Downloader service to download all expected snapshots
 	segments, _, err := SegmentsCaplin(s.dir)
