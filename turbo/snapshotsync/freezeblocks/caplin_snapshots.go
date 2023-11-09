@@ -104,14 +104,14 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
-
+	fmt.Println("Y")
 	// Calculate how many records there will be in the index
 	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-
+	fmt.Println("X")
 	_, fname := filepath.Split(segmentFilePath)
 	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
