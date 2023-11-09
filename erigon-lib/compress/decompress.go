@@ -156,11 +156,13 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
 	}()
+	fmt.Println("FX")
 
 	d.f, err = os.Open(compressedFilePath)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("NX")
 	var stat os.FileInfo
 	if stat, err = d.f.Stat(); err != nil {
 		return nil, err
@@ -173,14 +175,17 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
+	fmt.Println("QX")
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
+	fmt.Println("LX")
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 	dictSize := binary.BigEndian.Uint64(d.data[16:24])
 	data := d.data[24 : 24+dictSize]
+	fmt.Println("RRX")
 
 	var depths []uint64
 	var patterns [][]byte
