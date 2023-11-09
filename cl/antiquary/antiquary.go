@@ -106,6 +106,7 @@ func (a *Antiquary) Loop() error {
 		case <-logInterval.C:
 			log.Info("[Antiquary]: Processed snapshots", "progress", i, "target", a.reader.FrozenSlots())
 		case <-a.ctx.Done():
+		default:
 		}
 	}
 	// write the indicies
