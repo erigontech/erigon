@@ -235,6 +235,10 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	return result, nil
 }
 
+func (r *RemoteBlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn    *RoSnapshots
@@ -1076,6 +1080,73 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 		lastEventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 	}
 	return lastEventID
+}
+
+func (r *BlockReader) LastFrozenSpanID() uint64 {
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Spans()
+	if len(segments) == 0 {
+		return 0
+	}
+	lastSegment := segments[len(segments)-1]
+	var lastSpanID uint64
+	if lastSegment.ranges.to > zerothSpanEnd {
+		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
+	}
+	return lastSpanID
+}
+
+func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	// Compute starting block of the span
+	var endBlock uint64
+	if spanId > 0 {
+		endBlock = (spanId)*spanLength + zerothSpanEnd
+	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], spanId)
+	if endBlock >= r.FrozenBorBlocks() {
+		v, err := tx.GetOne(kv.BorSpans, buf[:])
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, fmt.Errorf("span %d not found (db)", spanId)
+		}
+		return common.Copy(v), nil
+	}
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Spans()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.idx == nil {
+			continue
+		}
+		var spanFrom uint64
+		if sn.ranges.from > zerothSpanEnd {
+			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
+		}
+		if spanId < spanFrom {
+			continue
+		}
+		var spanTo uint64
+		if sn.ranges.to > zerothSpanEnd {
+			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
+		}
+		if spanId >= spanTo {
+			continue
+		}
+		if sn.idx.KeyCount() == 0 {
+			continue
+		}
+		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
+		gg := sn.seg.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+		return common.Copy(result), nil
+	}
+	return nil, fmt.Errorf("span %d not found (snapshots)", spanId)
 }
 
 // ---- Data Integrity part ----

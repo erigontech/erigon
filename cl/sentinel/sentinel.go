@@ -168,7 +168,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	// Start stream handlers
 	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2).Start()
 
-	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
+	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}

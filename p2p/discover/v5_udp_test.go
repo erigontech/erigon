@@ -67,7 +67,7 @@ func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	ln.SetFallbackUDP(realaddr.Port)
 	ctx := context.Background()
 	ctx = disableLookupSlowdown(ctx)
-	udp, err := ListenV5(ctx, socket, ln, cfg)
+	udp, err := ListenV5(ctx, "test", socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func newUDPV5TestContext(ctx context.Context, t *testing.T, logger log.Logger) *
 	ln := enode.NewLocalNode(test.db, test.localkey, logger)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
-	test.udp, err = ListenV5(ctx, test.pipe, ln, Config{
+	test.udp, err = ListenV5(ctx, "test", test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlError),
 		ValidSchemes: enode.ValidSchemesForTesting,
