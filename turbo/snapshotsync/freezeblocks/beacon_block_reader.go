@@ -108,7 +108,7 @@ func (r *beaconSnapshotReader) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlo
 	}
 
 	buf, _ = gg.Next(buf)
-	if buf == nil {
+	if len(buf) == 0 {
 		return nil, 0, libcommon.Hash{}, nil
 	}
 	// Decompress this thing
