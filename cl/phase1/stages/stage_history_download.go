@@ -201,7 +201,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		close(finishCh)
 	}()
 	// Lets wait for the latestValidHash to be turned on
-	for !foundLatestEth1ValidBlock.Load() || (!cfg.waitForAllRoutines && !cfg.downloader.Finished()) {
+	for !foundLatestEth1ValidBlock.Load() || (cfg.waitForAllRoutines && !cfg.downloader.Finished()) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
