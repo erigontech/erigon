@@ -418,6 +418,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		if hasIdxFile(segment, logger) {
 			continue
 		}
+		fmt.Println("Building index for", segment.Path)
 		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, s.dir, nil, log.LvlDebug, logger); err != nil {
 			return err
 		}
