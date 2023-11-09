@@ -61,9 +61,9 @@ func (m *milestone) IsValidChain(currentHeader uint64, chain []*types.Header) bo
 	var isValid bool = false
 	defer func() {
 		if isValid {
-			MilestoneChainMeter.Inc()
+			MilestoneChainMeter.Add(1)
 		} else {
-			MilestoneChainMeter.Dec()
+			MilestoneChainMeter.Add(-1)
 		}
 	}()
 
