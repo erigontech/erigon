@@ -404,30 +404,30 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger, lvl log.Lvl) error {
 	// Create .idx files
-	if s.IndicesMax() < s.SegmentsMax() {
-		if !s.segmentsReady.Load() {
-			return fmt.Errorf("not all snapshot segments are available")
-		}
+	fmt.Println(s.IndicesMax(), s.SegmentsMax())
+	if s.IndicesMax() >= s.SegmentsMax() {
+		return s.ReopenFolder()
+	}
+	if !s.segmentsReady.Load() {
+		return fmt.Errorf("not all snapshot segments are available")
+	}
 
-		// wait for Downloader service to download all expected snapshots
-		if s.IndicesMax() < s.SegmentsMax() {
-			segments, _, err := SegmentsCaplin(s.dir)
-			for index := range segments {
-				segment := segments[index]
-				if segment.T != snaptype.BeaconBlocks {
-					continue
-				}
-				if hasIdxFile(segment, logger) {
-					continue
-				}
-				if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, s.dir, nil, log.LvlDebug, logger); err != nil {
-					return err
-				}
-			}
-			if err != nil {
-				return err
-			}
+	// wait for Downloader service to download all expected snapshots
+	segments, _, err := SegmentsCaplin(s.dir)
+	for index := range segments {
+		segment := segments[index]
+		if segment.T != snaptype.BeaconBlocks {
+			continue
 		}
+		if hasIdxFile(segment, logger) {
+			continue
+		}
+		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, s.dir, nil, log.LvlDebug, logger); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
 	}
 
 	return s.ReopenFolder()
