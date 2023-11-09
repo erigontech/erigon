@@ -60,10 +60,6 @@ func (a *Antiquary) Loop() error {
 		case <-a.ctx.Done():
 		}
 	}
-	// If it is ready, reopen the folder
-	if err := a.sn.ReopenFolder(); err != nil {
-		return err
-	}
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger, log.LvlDebug); err != nil {
 		return err
 	}
