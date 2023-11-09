@@ -98,14 +98,14 @@ func (s *beaconBlockSegments) View(f func(segments []*BeaconBlockSegment) error)
 	return f(s.segments)
 }
 
-func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
+	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return BeaconBlocksIdx(ctx, f, segName, fromSlot, toSlot, snapDir, tmpDir, p, lvl, logger)
+	return BeaconBlocksIdx(ctx, f, path.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -418,8 +418,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		if hasIdxFile(segment, logger) {
 			continue
 		}
-		fmt.Println("Building index for", segment.Path)
-		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, s.dir, nil, log.LvlDebug, logger); err != nil {
+		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, nil, log.LvlDebug, logger); err != nil {
 			return err
 		}
 	}
