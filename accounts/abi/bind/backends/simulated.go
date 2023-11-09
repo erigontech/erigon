@@ -177,7 +177,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
