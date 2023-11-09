@@ -414,14 +414,17 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 
 	// wait for Downloader service to download all expected snapshots
 	segments, _, err := SegmentsCaplin(s.dir)
+	fmt.Println(len(segments))
 	for index := range segments {
 		segment := segments[index]
 		if segment.T != snaptype.BeaconBlocks {
 			continue
 		}
+		fmt.Println(hasIdxFile(segment, logger))
 		if hasIdxFile(segment, logger) {
 			continue
 		}
+		fmt.Println("Yo")
 		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, s.dir, nil, log.LvlDebug, logger); err != nil {
 			return err
 		}
