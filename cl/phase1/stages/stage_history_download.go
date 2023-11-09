@@ -202,8 +202,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(1 * time.Second):
-			fmt.Println("A")
+		case <-time.After(5 * time.Second):
+			fmt.Println(foundLatestEth1ValidBlock.Load())
 		}
 	}
 	cfg.downloader.SetThrottle(1 * time.Second) // throttle to 1 second for backfilling
