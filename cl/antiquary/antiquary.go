@@ -87,7 +87,9 @@ func (a *Antiquary) Loop() error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("A")
+		if header == nil {
+			continue
+		}
 		blockRoot, err := header.Header.HashSSZ()
 		if err != nil {
 			return err
