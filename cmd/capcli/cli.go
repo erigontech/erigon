@@ -424,7 +424,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
-	cfg := stages.StageHistoryReconstruction(downloader, csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, bRoot, bs.Slot(), "/tmp", log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 

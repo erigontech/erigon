@@ -253,7 +253,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, false, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

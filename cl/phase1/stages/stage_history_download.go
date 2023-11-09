@@ -25,36 +25,38 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg   *clparams.GenesisConfig
-	beaconCfg    *clparams.BeaconChainConfig
-	downloader   *network.BackwardBeaconDownloader
-	sn           *freezeblocks.CaplinSnapshots
-	startingRoot libcommon.Hash
-	backfilling  bool
-	startingSlot uint64
-	tmpdir       string
-	db           persistence.BeaconChainDatabase
-	indiciesDB   kv.RwDB
-	engine       execution_client.ExecutionEngine
-	logger       log.Logger
+	genesisCfg         *clparams.GenesisConfig
+	beaconCfg          *clparams.BeaconChainConfig
+	downloader         *network.BackwardBeaconDownloader
+	sn                 *freezeblocks.CaplinSnapshots
+	startingRoot       libcommon.Hash
+	backfilling        bool
+	waitForAllRoutines bool
+	startingSlot       uint64
+	tmpdir             string
+	db                 persistence.BeaconChainDatabase
+	indiciesDB         kv.RwDB
+	engine             execution_client.ExecutionEngine
+	logger             log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:   genesisCfg,
-		beaconCfg:    beaconCfg,
-		downloader:   downloader,
-		startingRoot: startingRoot,
-		tmpdir:       tmpdir,
-		startingSlot: startinSlot,
-		logger:       logger,
-		backfilling:  backfilling,
-		indiciesDB:   indiciesDB,
-		db:           db,
-		engine:       engine,
-		sn:           sn,
+		genesisCfg:         genesisCfg,
+		beaconCfg:          beaconCfg,
+		downloader:         downloader,
+		startingRoot:       startingRoot,
+		tmpdir:             tmpdir,
+		startingSlot:       startinSlot,
+		waitForAllRoutines: waitForAllRoutines,
+		logger:             logger,
+		backfilling:        backfilling,
+		indiciesDB:         indiciesDB,
+		db:                 db,
+		engine:             engine,
+		sn:                 sn,
 	}
 }
 
@@ -199,7 +201,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		close(finishCh)
 	}()
 	// Lets wait for the latestValidHash to be turned on
-	for !foundLatestEth1ValidBlock.Load() {
+	for !foundLatestEth1ValidBlock.Load() && (!cfg.waitForAllRoutines || !cfg.downloader.Finished()) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
