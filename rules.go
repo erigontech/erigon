@@ -73,7 +73,7 @@ func mismatchingUnlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.$unlock()`).
 		Where(m["unlock"].Text == "RUnlock").
 		At(m["unlock"]).
-		Report(`maybe $2mu.Unlock() was intended?
+		Report(`maybe $mu.Unlock() was intended?
 			Rules are in ./rules.go file.`)
 
 	m.Match(`$mu.RLock(); defer $mu.$unlock()`).
