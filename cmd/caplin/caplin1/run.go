@@ -105,7 +105,11 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger)
 	// Create the antiquary
 	if snDownloader != nil {
-		go antiq.Loop()
+		go func() {
+			if err := antiq.Loop(); err != nil {
+				logger.Error("Antiquary failed", "err", err)
+			}
+		}()
 	}
 
 	pool := pool.NewOperationsPool(beaconConfig)
