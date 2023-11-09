@@ -104,19 +104,16 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
-	fmt.Println("Y")
 	// Calculate how many records there will be in the index
 	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	fmt.Println("X")
 	_, fname := filepath.Split(segmentFilePath)
 	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
 
-	fmt.Println("OO")
 	if err := Idx(ctx, d, sn.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Generating idx for beacon blocks", "progress", i)
@@ -405,7 +402,6 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger, lvl log.Lvl) error {
 	// Create .idx files
-	fmt.Println(s.IndicesMax(), s.SegmentsMax())
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return s.ReopenFolder()
 	}
@@ -415,6 +411,9 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 
 	// wait for Downloader service to download all expected snapshots
 	segments, _, err := SegmentsCaplin(s.dir)
+	if err != nil {
+		return err
+	}
 	for index := range segments {
 		segment := segments[index]
 		if segment.T != snaptype.BeaconBlocks {
