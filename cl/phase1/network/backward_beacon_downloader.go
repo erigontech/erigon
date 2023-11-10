@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -104,7 +103,6 @@ Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
-			fmt.Println("A")
 			go func() {
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
@@ -121,13 +119,10 @@ Loop:
 					return
 				}
 				atomicResp.Store(responses)
-				fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			}()
 		case <-ctx.Done():
-			fmt.Println("A")
 			return ctx.Err()
 		default:
-			fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 				break Loop
 			}
