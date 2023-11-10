@@ -250,6 +250,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					// This stage is special so use context.Background() TODO(Giulio2002): make the context be passed in
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc)
 
