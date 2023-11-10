@@ -199,7 +199,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-time.After(5 * time.Second):
 		}
 	}
-	cfg.downloader.SetThrottle(500 * time.Millisecond) // throttle to 0.5 second for backfilling
+	cfg.downloader.SetThrottle(time.Second) // throttle to 0.5 second for backfilling
 
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
 	db2 := memdb.New(cfg.tmpdir)

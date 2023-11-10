@@ -108,6 +108,7 @@ Loop:
 				if err != nil {
 					return
 				}
+				fmt.Println(responses)
 				if responses == nil {
 					return
 				}
