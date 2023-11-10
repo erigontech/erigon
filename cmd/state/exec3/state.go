@@ -197,6 +197,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			rules = &chain.Rules{}
 			break
 		}
+
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {

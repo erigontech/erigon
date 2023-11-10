@@ -281,13 +281,14 @@ func ExecV3(ctx context.Context,
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	if doms.TxNum() > inputTxNum {
+		fmt.Printf("redeclare1 txnum=%d -> %d\n", inputTxNum, doms.TxNum()-offsetFromBlockBeginning)
 		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
 		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
 	}
 	if doms.BlockNum() > blockNum {
+		fmt.Printf("redeclare2 blockNum=%d -> %d\n", blockNum, doms.BlockNum())
 		blockNum = doms.BlockNum()
-		fmt.Printf("exec2 blockNum=%d\n", blockNum)
 	}
 	outputTxNum.Store(inputTxNum)
 
