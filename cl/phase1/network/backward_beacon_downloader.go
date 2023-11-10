@@ -131,6 +131,7 @@ Loop:
 		if b.finished {
 			return
 		}
+		fmt.Println("LOL")
 		segment := responses[i]
 		// is this new block root equal to the expected root?
 		blockRoot, err := segment.Block.HashSSZ()
