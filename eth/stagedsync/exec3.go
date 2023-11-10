@@ -229,7 +229,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	inputTxNum = doms.TxNum() - offsetFromBlockBeginning - 1
+	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 	blockNum = doms.BlockNum()
 
 	if applyTx != nil {
