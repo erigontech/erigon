@@ -296,7 +296,7 @@ func ConsensusClStages(ctx context.Context,
 						// If we got an empty packet ban the peer
 						if len(blocks.Data) == 0 {
 							cfg.rpc.BanPeer(blocks.Peer)
-							log.Warn("no data received from peer in epoch download")
+							log.Debug("no data received from peer in epoch download")
 							continue MainLoop
 						}
 
