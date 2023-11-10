@@ -33,7 +33,7 @@ type Antiquary struct {
 }
 
 func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) *Antiquary {
-	var backfilled *atomic.Bool
+	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
 		mainDB:     mainDB,
