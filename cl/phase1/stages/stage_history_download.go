@@ -187,7 +187,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	go func() {
 		for !cfg.downloader.Finished() {
-			cfg.downloader.RequestMore(ctx)
+			if err := cfg.downloader.RequestMore(ctx); err != nil {
+				log.Debug("closing backfilling routine", "err", err)
+				return
+			}
 		}
 		close(finishCh)
 	}()

@@ -90,7 +90,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
-func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
+func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	count := uint64(32)
 	start := b.slotToDownload - count + 1
 	// Overflow? round to 0.
@@ -125,7 +125,7 @@ Loop:
 			}()
 		case <-ctx.Done():
 			fmt.Println("A")
-			return
+			return ctx.Err()
 		default:
 			fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
@@ -138,7 +138,7 @@ Loop:
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished {
-			return
+			return nil
 		}
 		segment := responses[i]
 		// is this new block root equal to the expected root?
@@ -162,4 +162,5 @@ Loop:
 		b.expectedRoot = segment.Block.ParentRoot
 		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 	}
+	return nil
 }
