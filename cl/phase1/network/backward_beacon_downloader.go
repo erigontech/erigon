@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -103,10 +102,8 @@ Loop:
 		select {
 		case <-b.reqInterval.C:
 			go func() {
-				fmt.Println("A")
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
-					fmt.Println(err)
 					return
 				}
 				if responses == nil {
@@ -132,7 +129,6 @@ Loop:
 		if b.finished {
 			return
 		}
-		fmt.Println("LOL")
 		segment := responses[i]
 		// is this new block root equal to the expected root?
 		blockRoot, err := segment.Block.HashSSZ()

@@ -85,11 +85,13 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	bytesReadInTotal := atomic.Uint64{}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		fmt.Println("A")
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
 			return false, err
 		}
 		defer tx.Rollback()
+		fmt.Println("B")
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
@@ -197,7 +199,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(5 * time.Second):
-			fmt.Println(foundLatestEth1ValidBlock.Load())
 		}
 	}
 	cfg.downloader.SetThrottle(1 * time.Second) // throttle to 1 second for backfilling
