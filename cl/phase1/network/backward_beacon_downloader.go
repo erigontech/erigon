@@ -124,6 +124,7 @@ Loop:
 				fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			}()
 		case <-ctx.Done():
+			fmt.Println("A")
 			return
 		default:
 			fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
