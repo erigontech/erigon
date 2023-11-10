@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -96,14 +97,13 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 	if start > b.slotToDownload {
 		start = 0
 	}
-	doneRespCh := make(chan []*cltypes.SignedBeaconBlock, 1)
-	var responses []*cltypes.SignedBeaconBlock
+	var atomicResp atomic.Value
+
 Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
 			go func() {
-				fmt.Println(start, count)
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
 					return
@@ -115,19 +115,18 @@ Loop:
 					b.rpc.BanPeer(peerId)
 					return
 				}
-				fmt.Println(len(responses))
-				select {
-				case doneRespCh <- responses:
-				default:
-				}
+				atomicResp.Store(responses)
 			}()
 		case <-ctx.Done():
 			return
-		case responses = <-doneRespCh:
-			break Loop
+		default:
+			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+				break Loop
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	fmt.Println(responses)
+	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		fmt.Println("X")
