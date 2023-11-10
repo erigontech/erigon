@@ -247,30 +247,12 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if blockNum > 0 {
-			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
-			if err != nil {
-				return err
-			}
-			outputTxNum.Store(_outputTxNum)
-			outputTxNum.Add(1)
-			//inputTxNum = outputTxNum.Load()
-		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
 			var err error
 			maxTxNum, err = rawdbv3.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
-			}
-			if blockNum > 0 {
-				_outputTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-				if err != nil {
-					return err
-				}
-				outputTxNum.Store(_outputTxNum)
-				outputTxNum.Add(1)
-				//inputTxNum = outputTxNum.Load()
 			}
 			return nil
 		}); err != nil {
