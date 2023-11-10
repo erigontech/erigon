@@ -154,9 +154,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		for {
 			select {
 			case <-logInterval.C:
+				logTime := logIntervalTime
 				// if we found the latest valid hash extend ticker to 10 times the normal amout
 				if foundLatestEth1ValidBlock.Load() {
-					logInterval.Reset(10 * logIntervalTime)
+					logTime = 20 * logIntervalTime
+					logInterval.Reset(logTime)
 				}
 
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
@@ -171,7 +173,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				blockProgress := float64(prevProgress - currProgress)
-				speed := blockProgress / float64(logIntervalTime/time.Second)
+				speed := blockProgress / float64(logTime/time.Second)
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
