@@ -187,7 +187,7 @@ Loop:
 		if err != nil {
 			return err
 		}
-		if slot == nil {
+		if slot == nil || *slot == 0 {
 			break
 		}
 		b.slotToDownload = *slot - 1
