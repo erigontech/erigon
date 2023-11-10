@@ -75,7 +75,6 @@ func (a *Antiquary) Loop() error {
 	if err != nil {
 		return err
 	}
-	lastProcessed := from
 	logInterval := time.NewTicker(30 * time.Second)
 	defer logInterval.Stop()
 	// Now write the snapshots as indicies
@@ -92,7 +91,6 @@ func (a *Antiquary) Loop() error {
 		if err != nil {
 			return err
 		}
-		lastProcessed = header.Header.Slot
 		if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(a.ctx, tx, header, false); err != nil {
 			return err
 		}
@@ -110,7 +108,7 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 	// write the indicies
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, lastProcessed); err != nil {
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, a.reader.FrozenSlots()-1); err != nil {
 		return err
 	}
 	log.Info("[Antiquary]: Restarting Caplin")

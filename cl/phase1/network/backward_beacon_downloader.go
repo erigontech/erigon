@@ -22,16 +22,16 @@ type BackwardBeaconDownloader struct {
 	rpc            *rpc.BeaconRpcP2P
 	onNewBlock     OnNewBlock
 	finished       bool
-	throttle       time.Duration
+	reqInterval    *time.Ticker
 
 	mu sync.Mutex
 }
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
-		ctx:      ctx,
-		rpc:      rpc,
-		throttle: 300 * time.Millisecond,
+		ctx:         ctx,
+		rpc:         rpc,
+		reqInterval: time.NewTicker(300 * time.Millisecond),
 	}
 }
 
@@ -39,7 +39,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *Ba
 func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.throttle = throttle
+	b.reqInterval.Reset(throttle)
 }
 
 // SetSlotToDownload sets slot to download.
@@ -95,14 +95,12 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 	if start > b.slotToDownload {
 		start = 0
 	}
-
-	reqInterval := time.NewTicker(b.throttle)
 	doneRespCh := make(chan []*cltypes.SignedBeaconBlock, 1)
 	var responses []*cltypes.SignedBeaconBlock
 Loop:
 	for {
 		select {
-		case <-reqInterval.C:
+		case <-b.reqInterval.C:
 			go func() {
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
