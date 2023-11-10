@@ -82,7 +82,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
-	bytesReadIn15Seconds := atomic.Uint64{}
+	bytesReadInTotal := atomic.Uint64{}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -95,7 +95,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		destinationSlot := cfg.sn.SegmentsMax()
-		bytesReadIn15Seconds.Add(uint64(blk.EncodingSizeSSZ()))
+		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
@@ -136,19 +136,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Start logging thread
 
 	go func() {
-		t := time.NewTicker(15 * time.Second)
-		for {
-			select {
-			case <-t.C:
-				bytesReadIn15Seconds.Store(0)
-			case <-ctx.Done():
-				return
-			case <-finishCh:
-				return
-			}
-		}
-	}()
-	go func() {
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
 		for {
@@ -183,11 +170,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadIn15Seconds.Load())/(1000*1000*15)),
+					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadInTotal.Load())/(1000*1000*15)),
 					"peers", peerCount,
 					"snapshots", cfg.sn.SegmentsMax(),
 					"reconnected", foundLatestEth1ValidBlock.Load(),
 				)
+				bytesReadInTotal.Store(0)
 				logger.Info("Downloading History", logArgs...)
 			case <-finishCh:
 				return
