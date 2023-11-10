@@ -228,7 +228,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
 		if snapTxNum > txn {
 			txn = snapTxNum
-			ok, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
+			_, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
 			if err != nil {
 				return 0, err
 			}

@@ -229,6 +229,9 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	// Cases:
+	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
+	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 	blockNum = doms.BlockNum()
 
@@ -279,19 +282,6 @@ func ExecV3(ctx context.Context,
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
-	// Cases:
-	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
-	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	//fmt.Printf("redeclare1? txnum=%d > %d\n", doms.TxNum(), inputTxNum)
-	//if doms.TxNum() > inputTxNum {
-	//	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
-	// has to start from Txnum-Offset (offset > 0 when we have half-block data)
-	// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
-	//}
-	fmt.Printf("redeclare2? blockNum=%d > %d\n", doms.BlockNum(), blockNum)
-	if doms.BlockNum() > blockNum {
-		fmt.Printf("redeclare2 blockNum=%d -> %d\n", blockNum, doms.BlockNum())
-	}
 	outputTxNum.Store(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
@@ -602,7 +592,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec: %d -> %d, txnum=%d\n", blockNum, maxBlockNum, inputTxNum)
+	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
