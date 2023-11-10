@@ -119,12 +119,13 @@ Loop:
 					b.rpc.BanPeer(peerId)
 					return
 				}
-				fmt.Println(len(responses))
 				atomicResp.Store(responses)
+				fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			}()
 		case <-ctx.Done():
 			return
 		default:
+			fmt.Println(len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)))
 			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 				break Loop
 			}
