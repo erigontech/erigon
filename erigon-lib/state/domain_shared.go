@@ -211,6 +211,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
+	fmt.Printf("[dbg] SeekCommitment: %d, %d, %t\n", bn, txn, ok)
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
@@ -220,6 +221,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if len(bnBytes) == 8 {
 			bn = binary.BigEndian.Uint64(bnBytes)
 			txn, err = rawdbv3.TxNums.Max(tx, bn)
+			fmt.Printf("[dbg] SeekCommitment2: %d, %d, %t\n", bn, txn, ok)
 			if err != nil {
 				return 0, err
 			}
@@ -227,7 +229,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
 		if snapTxNum > txn {
 			txn = snapTxNum
-			_, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
+			ok, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
+			fmt.Printf("[dbg] SeekCommitment3: %d, %d, %t\n", bn, txn, ok)
 			if err != nil {
 				return 0, err
 			}

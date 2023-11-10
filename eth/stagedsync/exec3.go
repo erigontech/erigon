@@ -273,7 +273,7 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	log.Debug("execv3 starting",
+	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
@@ -599,7 +599,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
