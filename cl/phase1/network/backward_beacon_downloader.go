@@ -26,7 +26,7 @@ type BackwardBeaconDownloader struct {
 	onNewBlock     OnNewBlock
 	finished       bool
 	reqInterval    *time.Ticker
-	db             kv.R2DB
+	db             kv.RwDB
 	neverSkip      bool
 
 	mu sync.Mutex
