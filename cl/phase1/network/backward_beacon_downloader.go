@@ -104,6 +104,7 @@ Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
+			fmt.Println("A")
 			go func() {
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
