@@ -160,7 +160,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				blockProgress := float64(prevProgress - currProgress)
-				speed := blockProgress / float64(logTime/time.Second)
+				ratio := float64(logTime / time.Second)
+				speed := blockProgress / ratio
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
@@ -170,7 +171,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadInTotal.Load())/(1000*1000*15)),
+					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadInTotal.Load())/(1000*1000*ratio)),
 					"peers", peerCount,
 					"snapshots", cfg.sn.SegmentsMax(),
 					"reconnected", foundLatestEth1ValidBlock.Load(),
