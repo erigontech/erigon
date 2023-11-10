@@ -129,6 +129,9 @@ func (a *Antiquary) Loop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
+			if !a.backfilled.Load() {
+				continue
+			}
 			// initialize roTx
 			roTx, err := a.mainDB.BeginRo(a.ctx)
 			if err != nil {
