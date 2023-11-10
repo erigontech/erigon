@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -157,6 +158,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
 		rw.SetReader(state.NewStateReaderV3(rw.rs))
 	}
+	fmt.Printf("HistoryExecution: %d, %t\n", txTask.TxNum, txTask.HistoryExecution)
 
 	if rw.background && rw.chainTx == nil {
 		var err error
