@@ -6,10 +6,12 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -24,15 +26,19 @@ type BackwardBeaconDownloader struct {
 	onNewBlock     OnNewBlock
 	finished       bool
 	reqInterval    *time.Ticker
+	db             kv.RoDB
+	neverSkip      bool
 
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, db kv.RoDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
 		rpc:         rpc,
+		db:          db,
 		reqInterval: time.NewTicker(300 * time.Millisecond),
+		neverSkip:   true,
 	}
 }
 
@@ -55,6 +61,13 @@ func (b *BackwardBeaconDownloader) SetExpectedRoot(root libcommon.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.expectedRoot = root
+}
+
+// SetExpectedRoot sets the expected root we expect to download.
+func (b *BackwardBeaconDownloader) SetNeverSkip(neverSkip bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.neverSkip = neverSkip
 }
 
 // SetShouldStopAtFn sets the stop condition.
@@ -157,5 +170,35 @@ Loop:
 		b.expectedRoot = segment.Block.ParentRoot
 		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 	}
+	if b.neverSkip {
+		return nil
+	}
+	// try skipping if the next slot is in db
+	tx, err := b.db.BeginRo(b.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	canonicalBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, b.slotToDownload)
+	if err != nil {
+		return err
+	}
+	maxIterations := 10_000
+	totalIterations := 0
+	// it will stop if we end finding a gap or if we reach the maxIterations
+	for canonicalBlockRoot != (libcommon.Hash{}) && maxIterations > totalIterations {
+		totalIterations++
+		// set expected root to the segment parent root
+		b.expectedRoot = canonicalBlockRoot
+		if b.slotToDownload == 0 {
+			break
+		}
+		b.slotToDownload = b.slotToDownload - 1 // update slot (might be inexact but whatever)
+		canonicalBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, b.slotToDownload)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

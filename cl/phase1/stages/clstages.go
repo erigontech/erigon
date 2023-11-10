@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -41,6 +42,7 @@ type Cfg struct {
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
 	sn              *freezeblocks.CaplinSnapshots
+	antiquary       *antiquary.Antiquary
 
 	hasDownloaded bool
 }
@@ -56,6 +58,7 @@ type Args struct {
 
 func ClStagesCfg(
 	rpc *rpc.BeaconRpcP2P,
+	antiquary *antiquary.Antiquary,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
@@ -70,6 +73,7 @@ func ClStagesCfg(
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
+		antiquary:       antiquary,
 		genesisCfg:      genesisCfg,
 		beaconCfg:       beaconCfg,
 		state:           state,
@@ -255,9 +259,9 @@ func ConsensusClStages(ctx context.Context,
 					}
 					// This stage is special so use context.Background() TODO(Giulio2002): make the context be passed in
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc)
+					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

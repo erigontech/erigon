@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -37,12 +38,13 @@ type StageHistoryReconstructionCfg struct {
 	db                 persistence.BeaconChainDatabase
 	indiciesDB         kv.RwDB
 	engine             execution_client.ExecutionEngine
+	antiquary          *antiquary.Antiquary
 	logger             log.Logger
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:         genesisCfg,
 		beaconCfg:          beaconCfg,
@@ -54,6 +56,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, sn
 		logger:             logger,
 		backfilling:        backfilling,
 		indiciesDB:         indiciesDB,
+		antiquary:          antiquary,
 		db:                 db,
 		engine:             engine,
 		sn:                 sn,
@@ -193,6 +196,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		log.Info("Backfilling finished")
+
 		close(finishCh)
 	}()
 	// Lets wait for the latestValidHash to be turned on
@@ -204,7 +208,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 	}
 	cfg.downloader.SetThrottle(600 * time.Millisecond) // throttle to 0.6 second for backfilling
-
+	cfg.downloader.SetNeverSkip(false)
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
 	db2 := memdb.New(cfg.tmpdir)
 	defer db2.Close()
