@@ -195,6 +195,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return
 			}
 		}
+		cfg.antiquary.NotifyBackfilled()
 		log.Info("Backfilling finished")
 
 		close(finishCh)
