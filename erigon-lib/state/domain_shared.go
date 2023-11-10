@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
@@ -211,7 +212,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
-	fmt.Printf("[dbg] SeekCommitment: %d, %d, %t\n", bn, txn, ok)
+	fmt.Printf("[dbg] SeekCommitment: %d, %d, %t, %s\n", bn, txn, ok, dbg.Stack())
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
