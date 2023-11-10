@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -102,6 +103,7 @@ Loop:
 		select {
 		case <-b.reqInterval.C:
 			go func() {
+				fmt.Println("A")
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
 					return
