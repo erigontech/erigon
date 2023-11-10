@@ -240,6 +240,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 				}
 				resp, err := s.requestPeer(ctx, pid, req)
 				if err != nil {
+					fmt.Println(err)
 					s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
 					// we simply retry
 					return false
