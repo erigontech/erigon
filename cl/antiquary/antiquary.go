@@ -41,6 +41,7 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 		downloader: downloader,
 		logger:     logger,
 		sn:         sn,
+		beaconDB:   beaconDB,
 		reader:     reader,
 		ctx:        ctx,
 		backfilled: backfilled,
