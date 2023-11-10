@@ -108,6 +108,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		LogAddrs:   ac.a.logAddrs,
 		LogTopics:  ac.a.logTopics,
 		roTx:       tx,
+		trace:      true,
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
