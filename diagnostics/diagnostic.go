@@ -29,7 +29,8 @@ func (d *DiagnosticClient) Setup() {
 
 func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
-		ctx, ch, _ /*cancel*/ := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
+		ctx, ch, cancel := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
+		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
@@ -37,6 +38,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 		for {
 			select {
 			case <-rootCtx.Done():
+				cancel()
 				return
 			case info := <-ch:
 				d.snapshotDownload[info.StagePrefix] = info
