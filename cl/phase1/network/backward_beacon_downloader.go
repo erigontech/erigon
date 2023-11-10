@@ -111,11 +111,11 @@ Loop:
 				if responses == nil {
 					return
 				}
-				fmt.Println(len(responses))
 				if len(responses) == 0 {
 					b.rpc.BanPeer(peerId)
 					return
 				}
+				fmt.Println(len(responses))
 				select {
 				case doneRespCh <- responses:
 				default:
@@ -124,10 +124,10 @@ Loop:
 		case <-ctx.Done():
 			return
 		case responses = <-doneRespCh:
-			fmt.Println(responses)
 			break Loop
 		}
 	}
+	fmt.Println(responses)
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		fmt.Println("X")
