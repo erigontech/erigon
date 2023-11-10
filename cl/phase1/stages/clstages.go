@@ -175,6 +175,9 @@ func ConsensusClStages(ctx context.Context,
 			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
 			return err
 		}
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+			return err
+		}
 		// Write block to database optimistically if we are very behind.
 		return cfg.beaconDB.WriteBlock(ctx, tx, block, false)
 	}

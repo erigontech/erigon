@@ -192,6 +192,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return
 			}
 		}
+		log.Info("Backfilling finished")
 		close(finishCh)
 	}()
 	// Lets wait for the latestValidHash to be turned on
