@@ -26,13 +26,13 @@ type BackwardBeaconDownloader struct {
 	onNewBlock     OnNewBlock
 	finished       bool
 	reqInterval    *time.Ticker
-	db             kv.RoDB
+	db             kv.R2DB
 	neverSkip      bool
 
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, db kv.RoDB) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, db kv.RwDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
 		rpc:         rpc,
@@ -174,31 +174,31 @@ Loop:
 		return nil
 	}
 	// try skipping if the next slot is in db
-	tx, err := b.db.BeginRo(b.ctx)
+	tx, err := b.db.BeginRw(b.ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	canonicalBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, b.slotToDownload)
-	if err != nil {
-		return err
-	}
-	maxIterations := 10_000
-	totalIterations := 0
+
 	// it will stop if we end finding a gap or if we reach the maxIterations
-	for canonicalBlockRoot != (libcommon.Hash{}) && maxIterations > totalIterations {
-		totalIterations++
-		// set expected root to the segment parent root
-		b.expectedRoot = canonicalBlockRoot
-		if b.slotToDownload == 0 {
+	for {
+		// check if the expected root is in db
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		if err != nil {
+			return err
+		}
+		if slot == nil {
 			break
 		}
-		b.slotToDownload = b.slotToDownload - 1 // update slot (might be inexact but whatever)
-		canonicalBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, b.slotToDownload)
+		b.slotToDownload = *slot - 1
+		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
+			return err
+		}
+		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
 		if err != nil {
 			return err
 		}
 	}
 
-	return nil
+	return tx.Commit()
 }
