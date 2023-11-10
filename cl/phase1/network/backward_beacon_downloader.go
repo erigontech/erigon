@@ -111,6 +111,7 @@ Loop:
 				if responses == nil {
 					return
 				}
+				fmt.Println(len(responses))
 				if len(responses) == 0 {
 					b.rpc.BanPeer(peerId)
 					return
