@@ -233,6 +233,7 @@ func ExecV3(ctx context.Context,
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
+	outputTxNum.Store(inputTxNum)
 	blockNum = doms.BlockNum()
 
 	if applyTx != nil {
@@ -263,8 +264,6 @@ func ExecV3(ctx context.Context,
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
-
-	outputTxNum.Store(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
