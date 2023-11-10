@@ -98,12 +98,16 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		start = 0
 	}
 	var atomicResp atomic.Value
+	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
 
 Loop:
 	for {
 		select {
 		case <-b.reqInterval.C:
 			go func() {
+				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+					return
+				}
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
 					return
