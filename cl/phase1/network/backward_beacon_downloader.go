@@ -124,6 +124,7 @@ Loop:
 		case <-ctx.Done():
 			return
 		case responses = <-doneRespCh:
+			fmt.Println(responses)
 			break Loop
 		}
 	}
