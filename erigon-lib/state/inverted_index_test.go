@@ -185,11 +185,11 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 
+	ii.integrateFiles(sf, 0, 16)
+
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-
-	ii.integrateFiles(sf, 0, 16)
 
 	from, to := ii.stepsRangeInDB(tx)
 	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
