@@ -20,6 +20,7 @@ linters:
     - unparam
     - makezero
     - testifylint #TODO: enable me
+    - perfsprint #TODO: enable me
     - protogetter
   enable:
     - unconvert
