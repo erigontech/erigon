@@ -108,6 +108,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
+	defer sf.CleanupOnError()
 
 	g := sf.decomp.MakeGetter()
 	g.Reset(0)
