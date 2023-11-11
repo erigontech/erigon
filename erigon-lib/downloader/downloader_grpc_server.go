@@ -73,6 +73,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			return nil, err
 		}
 	}
+
 	return &emptypb.Empty{}, nil
 }
 
