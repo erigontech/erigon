@@ -107,6 +107,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		LogAddrs:   ac.a.logAddrs,
 		LogTopics:  ac.a.logTopics,
 		roTx:       tx,
+		//trace:      true,
 	}
 
 	sd.Commitment.ResetFns(sd.branchFn, sd.accountFn, sd.storageFn)
@@ -273,8 +274,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			txn = lastTxInBlock + 1
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
-			txsFromBlockBeginning = txn - firstTxInBlock
 			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
+			txsFromBlockBeginning = txn - firstTxInBlock
 			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
 		} else {
 			txn = firstTxInBlock
