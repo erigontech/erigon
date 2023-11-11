@@ -923,8 +923,8 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	return db, h, keys, txs
 }
 
-func Test_HistoryIterate(t *testing.T) {
-	t.Skip("fix me!")
+func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
+	//t.Skip("fix me!")
 
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -958,13 +958,17 @@ func Test_HistoryIterate(t *testing.T) {
 			return bytes.Compare(writtenKeys[i], writtenKeys[j]) < 0
 		})
 
-		require.Equal(writtenKeys, keys)
+		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
+		require.Equal(len(writtenKeys), len(keys))
+		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 
-	t.Run("large_values", func(t *testing.T) {
-		db, h, keys, txs := writeSomeHistory(t, true, logger)
-		test(t, h, db, keys, txs)
-	})
+	//LargeHistoryValues: don't support various keys len
+	//TODO: write hist test for non-various keys len
+	//t.Run("large_values", func(t *testing.T) {
+	//	db, h, keys, txs := writeSomeHistory(t, true, logger)
+	//	test(t, h, db, keys, txs)
+	//})
 	t.Run("small_values", func(t *testing.T) {
 		db, h, keys, txs := writeSomeHistory(t, false, logger)
 		test(t, h, db, keys, txs)

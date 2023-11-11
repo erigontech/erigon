@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -81,9 +82,14 @@ type History struct {
 }
 
 type histCfg struct {
-	iiCfg              iiCfg
-	compression        FileCompression
+	iiCfg       iiCfg
+	compression FileCompression
+
+	//historyLargeValues
+	//small values (<2Kb) - can be stored in more compact ways in db (DupSort feature)
+	//historyLargeValues=true - doesn't support keys of various length (all keys must have same length)
 	historyLargeValues bool
+
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 }
@@ -1791,6 +1797,10 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 }
 
 func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KV, error) {
+	roTx.ForEach(kv.TblAccountVals, nil, func(k, v []byte) error {
+		fmt.Printf("AccTbl: %x, %x\n", k, v)
+		return nil
+	})
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1923,6 +1933,8 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("first.old!: %x\n", hi.kBackup)
+
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -1977,6 +1989,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			return nil
 		}
 		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		fmt.Printf("first!: %x, %s, %s\n", firstKey[:len(firstKey)-8], hi.valsTable, dbg.Stack())
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
@@ -1984,12 +1997,14 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			return nil
 		}
 
+		fmt.Printf("seek: %x\n", next)
 		seek = append(next, hi.startTxKey[:]...)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("a: %x, %x\n", k[:len(k)-8], v)
 		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
 			next, ok := kv.NextSubtree(k[:len(k)-8])
 			if !ok {
@@ -2000,6 +2015,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			continue
 		}
 		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
+			fmt.Printf("b: %x, %x\n", k, v)
 			// stuck on the same key, move to first key larger than seek
 			for {
 				k, v, err = hi.valsC.Next()
@@ -2017,12 +2033,19 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			}
 		}
 		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-
+		/*
+			if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
+					copy(seek[:len(k)-8], k[:len(k)-8])
+					continue
+				}
+		*/
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
 			if len(seek) != len(k) {
+				fmt.Printf("c: %x %x\n", seek[:len(seek)-8], k[:len(k)-8])
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
 				continue
 			}
+			fmt.Printf("d: %x %x\n", seek[:len(seek)-8], k[:len(k)-8])
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
