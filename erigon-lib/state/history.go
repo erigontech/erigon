@@ -1797,10 +1797,6 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 }
 
 func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KV, error) {
-	roTx.ForEach(kv.TblAccountVals, nil, func(k, v []byte) error {
-		fmt.Printf("AccTbl: %x, %x\n", k, v)
-		return nil
-	})
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
