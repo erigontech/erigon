@@ -188,6 +188,18 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 	roTx.Rollback()
 
+	paths := a.sn.SegFilePaths(from, to)
+	downloadItems := make([]*proto_downloader.DownloadItem, len(paths))
+	for i, path := range paths {
+		downloadItems[i] = &proto_downloader.DownloadItem{
+			Path: path,
+		}
+	}
+	// Notify bittorent to seed the new snapshots
+	if _, err := a.downloader.Download(a.ctx, &proto_downloader.DownloadRequest{Items: downloadItems}); err != nil {
+		return err
+	}
+
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
