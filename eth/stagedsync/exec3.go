@@ -265,7 +265,6 @@ func ExecV3(ctx context.Context,
 	}
 	if doms.BlockNum() > 0 {
 		blockNum = doms.BlockNum()
-		fmt.Printf("exec2 blockNum=%d\n", blockNum)
 	}
 	//inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 	outputTxNum.Store(inputTxNum)
