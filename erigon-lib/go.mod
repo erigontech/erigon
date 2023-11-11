@@ -152,4 +152,4 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
-replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.5
