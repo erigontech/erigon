@@ -85,7 +85,7 @@ type histCfg struct {
 	iiCfg       iiCfg
 	compression FileCompression
 
-	//historyLargeValues
+	//historyLargeValues:
 	//small values (<2Kb) - can be stored in more compact ways in db (DupSort feature)
 	//historyLargeValues=true - doesn't support keys of various length (all keys must have same length)
 	historyLargeValues bool
