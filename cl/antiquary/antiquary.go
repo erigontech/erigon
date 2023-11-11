@@ -58,6 +58,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	reCheckTicker := time.NewTicker(3 * time.Second)
+	defer reCheckTicker.Stop()
 	// Fist part of the antiquate is to download caplin snapshots
 	for !statsReply.Completed {
 		select {
@@ -133,25 +134,27 @@ func (a *Antiquary) Loop() error {
 			if !a.backfilled.Load() {
 				continue
 			}
-			// initialize roTx
-			roTx, err := a.mainDB.BeginRo(a.ctx)
-			if err != nil {
+			var (
+				from uint64
+				to   uint64
+			)
+			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
+				// read the last beacon snapshots
+				from, err = beacon_indicies.ReadLastBeaconSnapshot(roTx)
+				if err != nil {
+					return err
+				}
+				from += 1
+				// read the finalized head
+				to, err = beacon_indicies.ReadHighestFinalized(roTx)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
-			// read the last beacon snapshots
-			from, err := beacon_indicies.ReadLastBeaconSnapshot(roTx)
-			if err != nil {
-				roTx.Rollback()
-				return err
-			}
-			from += 1
-			// read the finalized head
-			to, err := beacon_indicies.ReadHighestFinalized(roTx)
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
-			roTx.Rollback()
+			// Sanity checks just to be safe.
 			if from >= to {
 				continue
 			}
