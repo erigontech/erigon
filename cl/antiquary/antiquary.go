@@ -186,7 +186,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from-1); err != nil {
 		return err
 	}
-	a.downloader.Verify()
 	roTx.Rollback()
 
 	tx, err := a.mainDB.BeginRw(a.ctx)
