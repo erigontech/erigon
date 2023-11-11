@@ -222,6 +222,7 @@ func ExecV3(ctx context.Context,
 	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 	outputTxNum.Store(inputTxNum)
 	blockNum = doms.BlockNum()
+	fmt.Printf("[dbg] e3 set bn1: blockNum=%d, %d\n", blockNum, execStage.BlockNumber)
 
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
