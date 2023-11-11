@@ -70,6 +70,15 @@ func TestGenesisBlockRoots(t *testing.T) {
 	if block.Hash() != params.ChiadoGenesisHash {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
 	}
+
+	block, _, err = core.GenesisToBlock(core.GnosisDencun2DevnetGenesisBlock(), "")
+	require.NoError(err)
+	if block.Root() != params.GnosisDencun2DevnetStateRoot {
+		t.Errorf("wrong Gnosis_Dencun2_Devnet genesis state root, got %v, want %v", block.Root(), params.GnosisDencun2DevnetStateRoot)
+	}
+	if block.Hash() != params.GnosisDencun2DevnetGenesisHash {
+		t.Errorf("wrong Gnosis_Dencun2_Devnet genesis hash, got %v, want %v", block.Hash(), params.GnosisDencun2DevnetGenesisHash)
+	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
