@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	sentry2 "github.com/ledgerwatch/erigon/p2p/sentry"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -38,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	sentry2 "github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
