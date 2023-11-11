@@ -1456,10 +1456,10 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
 	txFrom, txTo := stepFrom*ii.aggregationStep, stepTo*ii.aggregationStep
-	mxRunningCollations.Inc()
-	start := time.Now()
-	defer mxRunningCollations.Dec()
-	defer mxCollateTook.UpdateDuration(start)
+	//mxRunningCollations.Inc()
+	//start := time.Now()
+	//defer mxRunningCollations.Dec()
+	//defer mxCollateTook.UpdateDuration(start)
 
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
