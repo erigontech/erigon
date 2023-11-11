@@ -37,24 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func BenchmarkName(b *testing.B) {
-	j := newJournal()
-	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			j.Reset()
-		}
-	})
-	b.Run("2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			j.Reset2()
-		}
-	})
-	b.Run("3", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			j.Reset3()
-		}
-	})
-}
 func TestSnapshotRandom(t *testing.T) {
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
