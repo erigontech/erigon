@@ -552,8 +552,8 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+			//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+			//mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
@@ -596,9 +596,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 			}
-			mxRunningFilesBuilding.Inc()
+			//mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
+			//mxRunningFilesBuilding.Dec()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
