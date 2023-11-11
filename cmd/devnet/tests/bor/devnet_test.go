@@ -4,6 +4,8 @@ package bor
 
 import (
 	"context"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	accounts_steps "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
@@ -11,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestStateSync(t *testing.T) {

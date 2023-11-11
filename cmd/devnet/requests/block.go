@@ -2,8 +2,9 @@ package requests
 
 import (
 	"encoding/json"
-	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
+
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
