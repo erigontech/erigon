@@ -153,7 +153,12 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 }
 func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		domains := state2.NewSharedDomains(tx)
+		domains := tx.(*state2.SharedDomains)
+		minTxNum, err := rawdbv3.TxNums.Min(domains.Tx(), blockNum)
+		if err != nil {
+			panic(err)
+		}
+		domains.SetTxNum(context.Background(), uint64(int(minTxNum)+1))
 		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)

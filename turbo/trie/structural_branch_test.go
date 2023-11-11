@@ -42,7 +42,7 @@ func TestIHCursor(t *testing.T) {
 		k := common.FromHex(ks)
 		integrity.AssertSubset(k, hasTree, hasState)
 		integrity.AssertSubset(k, hasHash, hasState)
-		_ = tx.Put(kv.TrieOfAccounts, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
+		_ = tx.Put(kv.TrieOfAccounts, k, libcommon.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
 	}
 
 	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []libcommon.Hash{hash})

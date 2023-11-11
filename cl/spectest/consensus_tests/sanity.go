@@ -1,13 +1,14 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/spectest"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

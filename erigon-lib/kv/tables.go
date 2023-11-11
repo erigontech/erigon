@@ -438,8 +438,14 @@ const (
 	// [Block Root] => [State Root]
 	BlockRootToStateRoot = "BlockRootToStateRoot"
 	StateRootToBlockRoot = "StateRootToBlockRoot"
+
+	BlockRootToBlockNumber = "BlockRootToBlockNumber"
+	BlockRootToBlockHash   = "BlockRootToBlockHash"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
+
+	HighestFinalized = "HighestFinalized" // hash -> transaction/receipt lookup metadata
 
 	// BlockRoot => Beacon Block Header
 	BeaconBlockHeaders = "BeaconBlockHeaders"
@@ -478,6 +484,7 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 	PlainStateVersion           = []byte("PlainStateVersion")
 
+	HighestFinalizedKey         = []byte("HighestFinalized")
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
@@ -601,9 +608,12 @@ var ChaindataTables = []string{
 	StateRootToBlockRoot,
 	BlockRootToParentRoot,
 	BeaconBlockHeaders,
+	HighestFinalized,
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
+	BlockRootToBlockHash,
+	BlockRootToBlockNumber,
 }
 
 const (
@@ -702,22 +712,22 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeIdx:               {Flags: DupSort},
 	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
-	//TblCommitmentHistoryVals: {Flags: DupSort},
-	TblCommitmentIdx:  {Flags: DupSort},
-	TblLogAddressKeys: {Flags: DupSort},
-	TblLogAddressIdx:  {Flags: DupSort},
-	TblLogTopicsKeys:  {Flags: DupSort},
-	TblLogTopicsIdx:   {Flags: DupSort},
-	TblTracesFromKeys: {Flags: DupSort},
-	TblTracesFromIdx:  {Flags: DupSort},
-	TblTracesToKeys:   {Flags: DupSort},
-	TblTracesToIdx:    {Flags: DupSort},
-	RAccountKeys:      {Flags: DupSort},
-	RAccountIdx:       {Flags: DupSort},
-	RStorageKeys:      {Flags: DupSort},
-	RStorageIdx:       {Flags: DupSort},
-	RCodeKeys:         {Flags: DupSort},
-	RCodeIdx:          {Flags: DupSort},
+	TblCommitmentHistoryVals: {Flags: DupSort},
+	TblCommitmentIdx:         {Flags: DupSort},
+	TblLogAddressKeys:        {Flags: DupSort},
+	TblLogAddressIdx:         {Flags: DupSort},
+	TblLogTopicsKeys:         {Flags: DupSort},
+	TblLogTopicsIdx:          {Flags: DupSort},
+	TblTracesFromKeys:        {Flags: DupSort},
+	TblTracesFromIdx:         {Flags: DupSort},
+	TblTracesToKeys:          {Flags: DupSort},
+	TblTracesToIdx:           {Flags: DupSort},
+	RAccountKeys:             {Flags: DupSort},
+	RAccountIdx:              {Flags: DupSort},
+	RStorageKeys:             {Flags: DupSort},
+	RStorageIdx:              {Flags: DupSort},
+	RCodeKeys:                {Flags: DupSort},
+	RCodeIdx:                 {Flags: DupSort},
 }
 
 var BorTablesCfg = TableCfg{

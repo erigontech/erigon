@@ -2,9 +2,12 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -13,9 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/spf13/afero"
 )
+
+const subDivisionFolderSize = 10_000
 
 type beaconChainDatabaseFilesystem struct {
 	rawDB RawBeaconBlockChain
@@ -32,7 +36,31 @@ func NewBeaconChainDatabaseFilesystem(rawDB RawBeaconBlockChain, executionEngine
 	}
 }
 
-func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+func (b beaconChainDatabaseFilesystem) GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if blockRoot == (libcommon.Hash{}) {
+		return nil, nil
+	}
+
+	r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	block := cltypes.NewSignedBeaconBlock(b.cfg)
+	version := b.cfg.GetCurrentStateVersion(slot / b.cfg.SlotsPerEpoch)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, version); err != nil {
+		return nil, err
+	}
+
+	return &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block}, nil
+}
+
+func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	// Retrieve block roots for each ranged slot
 	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, from, count)
 	if err != nil {
@@ -40,14 +68,17 @@ func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, f
 	}
 
 	if len(beaconBlockRooots) == 0 {
-		return nil, nil
+		return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}, nil
 	}
 
-	blocks := []*peers.PeeredObject[*cltypes.SignedBeaconBlock]{}
+	blocks := []*cltypes.SignedBeaconBlock{}
 	for idx, blockRoot := range beaconBlockRooots {
 		slot := slots[idx]
 
 		r, err := b.rawDB.BlockReader(ctx, slot, blockRoot)
+		if errors.Is(err, afero.ErrFileNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -59,13 +90,13 @@ func (b beaconChainDatabaseFilesystem) GetRange(tx kv.Tx, ctx context.Context, f
 			return nil, err
 		}
 
-		blocks = append(blocks, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block})
+		blocks = append(blocks, block)
 	}
-	return blocks, nil
+	return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: blocks}, nil
 
 }
 
-func (b beaconChainDatabaseFilesystem) PurgeRange(tx kv.RwTx, ctx context.Context, from uint64, count uint64) error {
+func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) error {
 	if err := beacon_indicies.RangeBlockRoots(ctx, tx, from, from+count, func(slot uint64, beaconBlockRoot libcommon.Hash) bool {
 		b.rawDB.DeleteBlock(ctx, slot, beaconBlockRoot)
 		return true
@@ -73,10 +104,10 @@ func (b beaconChainDatabaseFilesystem) PurgeRange(tx kv.RwTx, ctx context.Contex
 		return err
 	}
 
-	return beacon_indicies.PruneBlockRoots(ctx, tx, from, from+count)
+	return nil
 }
 
-func (b beaconChainDatabaseFilesystem) WriteBlock(tx kv.RwTx, ctx context.Context, block *cltypes.SignedBeaconBlock, canonical bool) error {
+func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -114,6 +145,15 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(tx kv.RwTx, ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if block.Version() >= clparams.BellatrixVersion {
+		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteExecutionBlockHash(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockHash); err != nil {
+			return err
+		}
+	}
+
 	if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(ctx, tx, &cltypes.SignedBeaconBlockHeader{
 		Signature: block.Signature,
 		Header: &cltypes.BeaconBlockHeader{
@@ -131,28 +171,9 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(tx kv.RwTx, ctx context.Contex
 
 // SlotToPaths define the file structure to store a block
 //
-// superEpoch = floor(slot / (epochSize ^ 2))
-// epoch =  floot(slot / epochSize)
-// file is to be stored at
-// "/signedBeaconBlock/{superEpoch}/{epoch}/{root}.ssz_snappy"
+// "/signedBeaconBlock/{slot/10_000}/{root}.ssz_snappy"
 func RootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainConfig) (folderPath string, filePath string) {
-	folderPath = path.Clean(fmt.Sprintf("%d/%d", slot/(config.SlotsPerEpoch*config.SlotsPerEpoch), slot/config.SlotsPerEpoch))
+	folderPath = path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
 	filePath = path.Clean(fmt.Sprintf("%s/%x.sz", folderPath, root))
 	return
-}
-
-func ValidateEpoch(fs afero.Fs, epoch uint64, config *clparams.BeaconChainConfig) error {
-	superEpoch := epoch / (config.SlotsPerEpoch)
-
-	// the folder path is superEpoch/epoch
-	folderPath := path.Clean(fmt.Sprintf("%d/%d", superEpoch, epoch))
-
-	fi, err := afero.ReadDir(fs, folderPath)
-	if err != nil {
-		return err
-	}
-	for _, fn := range fi {
-		fn.Name()
-	}
-	return nil
 }

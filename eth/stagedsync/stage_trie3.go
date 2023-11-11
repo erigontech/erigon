@@ -34,7 +34,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+	_, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

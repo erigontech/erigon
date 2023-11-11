@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -87,15 +88,19 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	defer tx.Rollback()
+
+	bytesReadIn15Seconds := atomic.Uint64{}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
+		bytesReadIn15Seconds.Add(uint64(blk.EncodingSizeSSZ()))
+
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(tx, ctx, blk, true); err != nil {
+			if err := cfg.db.WriteBlock(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
@@ -120,7 +125,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			foundLatestEth1ValidBlock = len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber
 		}
-
 		return slot <= destinationSlot && foundLatestEth1ValidBlock, nil
 	})
 	prevProgress := cfg.downloader.Progress()
@@ -128,6 +132,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	logInterval := time.NewTicker(logIntervalTime)
 	finishCh := make(chan struct{})
 	// Start logging thread
+
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		for {
+			select {
+			case <-t.C:
+				bytesReadIn15Seconds.Store(0)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	go func() {
 		for {
 			select {
@@ -143,7 +159,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := float64(prevProgress-currProgress) / float64(logIntervalTime/time.Second)
+				blockProgress := float64(prevProgress - currProgress)
+				speed := blockProgress / float64(logIntervalTime/time.Second)
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
@@ -153,6 +170,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
+					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadIn15Seconds.Load())/(1000*1000*15)),
 					"peers", peerCount)
 				logger.Info("Downloading History", logArgs...)
 			case <-finishCh:

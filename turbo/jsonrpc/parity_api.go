@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
@@ -81,7 +80,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 			if err != nil {
 				return nil, err
 			}
-			keys = append(keys, common.CopyBytes(k[20:]))
+			keys = append(keys, libcommon.CopyBytes(k[20:]))
 		}
 		return keys, nil
 	}

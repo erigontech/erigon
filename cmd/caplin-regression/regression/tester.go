@@ -5,15 +5,18 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	solid2 "github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/pool"
+
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -41,13 +44,13 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), true)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()))
 	if err != nil {
 		return err
 	}
 	log.Info("Loading public keys into memory")
 	bls.SetEnabledCaching(true)
-	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+	state.ForEachValidator(func(v solid2.Validator, idx, total int) bool {
 		pk := v.PublicKey()
 		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
 			panic(err)
@@ -84,7 +87,7 @@ func TestRegressionWithValidation(store *forkchoice.ForkChoiceStore, block *clty
 	if err := store.OnBlock(block, false, true); err != nil {
 		return err
 	}
-	block.Block.Body.Attestations.Range(func(index int, value *solid.Attestation, length int) bool {
+	block.Block.Body.Attestations.Range(func(index int, value *solid2.Attestation, length int) bool {
 		store.OnAttestation(value, true)
 		return true
 	})

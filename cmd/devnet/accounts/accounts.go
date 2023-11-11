@@ -20,6 +20,14 @@ func init() {
 	core.DevnetSignKey = func(addr libcommon.Address) *ecdsa.PrivateKey {
 		return SigKey(addr)
 	}
+
+	devnetEtherbaseAccount := &Account{
+		"DevnetEtherbase",
+		core.DevnetEtherbase,
+		core.DevnetSignPrivateKey,
+	}
+	accountsByAddress[core.DevnetEtherbase] = devnetEtherbaseAccount
+	accountsByName[devnetEtherbaseAccount.Name] = devnetEtherbaseAccount
 }
 
 var accountsByAddress = map[libcommon.Address]*Account{}

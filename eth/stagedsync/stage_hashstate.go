@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -23,8 +25,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -340,16 +340,16 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 	switch len(key) {
 	case length.Addr:
 		// account
-		hash, err := common.HashData(key)
+		hash, err := libcommon.HashData(key)
 		return hash[:], err
 	case length.Addr + length.Incarnation + length.Hash:
 		// storage
-		addrHash, err := common.HashData(key[:length.Addr])
+		addrHash, err := libcommon.HashData(key[:length.Addr])
 		if err != nil {
 			return nil, err
 		}
 		inc := binary.BigEndian.Uint64(key[length.Addr:])
-		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
+		secKey, err := libcommon.HashData(key[length.Addr+length.Incarnation:])
 		if err != nil {
 			return nil, err
 		}
@@ -367,7 +367,7 @@ func transformContractCodeKey(key []byte) ([]byte, error) {
 	}
 	address, incarnation := dbutils.PlainParseStoragePrefix(key)
 
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := libcommon.HashData(address[:])
 	if err != nil {
 		return nil, err
 	}

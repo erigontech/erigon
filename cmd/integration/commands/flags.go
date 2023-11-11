@@ -31,7 +31,6 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
-	useBtreePlus                   bool
 
 	commitmentMode string
 	commitmentTrie string
@@ -89,10 +88,6 @@ func withUnwind(cmd *cobra.Command) {
 }
 func withNoCommit(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
-}
-
-func withBtreePlus(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&useBtreePlus, "btree.plus", true, "use alternative btree indexes instead recsplit for warm files read")
 }
 
 func withPruneTo(cmd *cobra.Command) {

@@ -19,6 +19,9 @@ linters:
     - goerr113
     - unparam
     - makezero
+    - testifylint #TODO: enable me
+    - perfsprint #TODO: enable me
+    - protogetter
   enable:
     - unconvert
     - predeclared
@@ -114,6 +117,7 @@ issues:
         - unused
         - deadcode
         - gocritic
+        - perfsprint
     - path: hack\.go
       linters:
         - gosec

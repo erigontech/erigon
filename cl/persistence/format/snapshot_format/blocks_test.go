@@ -27,8 +27,15 @@ var capellaBlockSSZSnappy []byte
 //go:embed test_data/deneb.ssz_snappy
 var denebBlockSSZSnappy []byte
 
+var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
+	var emptyBlockCapella = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	emptyBlockCapella.Block.Slot = clparams.MainnetBeaconConfig.CapellaForkEpoch * 32
+
+	emptyBlock.EncodingSizeSSZ()
+	emptyBlockCapella.EncodingSizeSSZ()
 	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
@@ -40,25 +47,18 @@ func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
 	require.NoError(t, utils.DecodeSSZSnappy(bellatrixBlock, bellatrixBlockSSZSnappy, int(clparams.BellatrixVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(altairBlock, altairBlockSSZSnappy, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(phase0Block, phase0BlockSSZSnappy, int(clparams.Phase0Version)))
-	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock}
-}
-
-type TestBlockReader struct {
-	Block *cltypes.Eth1Block
-}
-
-func (t *TestBlockReader) BlockByNumber(number uint64) (*cltypes.Eth1Block, error) {
-	return t.Block, nil
+	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock, emptyBlockCapella}
 }
 
 func TestBlockSnapshotEncoding(t *testing.T) {
 	for _, blk := range getTestBlocks(t) {
-		var br TestBlockReader
+		var br snapshot_format.MockBlockReader
 		if blk.Version() >= clparams.BellatrixVersion {
-			br = TestBlockReader{Block: blk.Block.Body.ExecutionPayload}
+			br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}
 		}
 		var b bytes.Buffer
-		require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
+		_, err := snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
+		require.NoError(t, err)
 		blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
 		require.NoError(t, err)
 		_ = blk2

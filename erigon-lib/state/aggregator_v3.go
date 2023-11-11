@@ -35,6 +35,8 @@ import (
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -157,7 +159,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	cfg = domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
 		domainLargeValues: CommitmentDomainLargeValues,
 		compress:          CompressNone,
@@ -802,7 +804,11 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	return math2.MaxUint64
 }
-func (ac *AggregatorV3Context) CanUnwindDomainsTo() uint64 { return ac.maxTxNumInFiles(false) }
+func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
+	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
+	return histBlockNumProgress, err
+}
+func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 { return ac.maxTxNumInFiles(false) }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
@@ -1450,7 +1456,6 @@ type AggregatorV3Context struct {
 	logTopics  *InvertedIndexContext
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
-	keyBuf     []byte
 
 	id uint64 // set only if TRACE_AGG=true
 }

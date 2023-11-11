@@ -121,11 +121,7 @@ func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.idxHeaderHash.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idxHeaderHash.Close()
-		sn.idxHeaderHash = nil
-	}
+
 	return nil
 }
 
@@ -182,11 +178,6 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.idxBodyNumber.ModTime().Before(sn.seg.ModTime()) {
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.idxBodyNumber.Close()
-		sn.idxBodyNumber = nil
-	}
 	return nil
 }
 
@@ -229,23 +220,26 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
-		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxTxnHash.Close()
-		sn.IdxTxnHash = nil
-	}
+
+	/*
+		// Historically we had several times when:
+		//  - erigon downloaded new version of .seg file
+		//  - or didn't finish download and start indexing
+		// this was a "quick-fix protection" against this cases
+		// but now we have other protections for this cases
+		// let's try to remove this one - because it's not compatible with "copy datadir" and "restore datadir from backup" scenarios
+		if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
+			log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
+			//Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+			sn.IdxTxnHash.Close()
+			sn.IdxTxnHash = nil
+		}
+	*/
 
 	fileName = snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.Transactions2Block.String())
 	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
-		log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "name", sn.IdxTxnHash.FileName())
-		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxTxnHash2BlockNum.Close()
-		sn.IdxTxnHash2BlockNum = nil
 	}
 	return nil
 }
@@ -959,7 +953,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 		}
 	}()
 
-	for _, t := range snaptype.AllSnapshotTypes {
+	for _, t := range snaptype.BlockSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
 			if segment.T != t {
@@ -1065,7 +1059,7 @@ MainLoop:
 		if f.From == f.To {
 			continue
 		}
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.From, f.To, t))
 			if !dir2.FileExist(p) {
 				continue MainLoop
@@ -1116,6 +1110,28 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		res = append(res, f)
 	}
 	return res
+}
+
+func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, missingSnapshots, err
+	}
+
+	{
+		var l []snaptype.FileInfo
+		var m []Range
+		for _, f := range list {
+			if f.T != snaptype.BeaconBlocks {
+				continue
+			}
+			l = append(l, f)
+		}
+		l, m = noGaps(noOverlaps(l))
+		res = append(res, l...)
+		missingSnapshots = append(missingSnapshots, m...)
+	}
+	return res, missingSnapshots, nil
 }
 
 func Segments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
@@ -1203,11 +1219,11 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	if curBlockNum <= (params.FullImmutabilityThreshold / 2) {
+	if curBlockNum <= params.FullImmutabilityThreshold {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return canRetire(blockFrom, curBlockNum-(params.FullImmutabilityThreshold/2))
+	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
@@ -1217,8 +1233,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
-	if blockFrom%500_000 == 0 {
-		maxJump = 500_000
+	if blockFrom%snaptype.Erigon2MergeLimit == 0 {
+		maxJump = snaptype.Erigon2MergeLimit
 	} else if blockFrom%100_000 == 0 {
 		maxJump = 100_000
 	} else if blockFrom%10_000 == 0 {
@@ -1227,8 +1243,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	//roundedTo1K := (to / 1_000) * 1_000
 	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
-	case jump >= 500_000:
-		blockTo = blockFrom + 500_000
+	case jump >= snaptype.Erigon2MergeLimit:
+		blockTo = blockFrom + snaptype.Erigon2MergeLimit
 	case jump >= 100_000:
 		blockTo = blockFrom + 100_000
 	case jump >= 10_000:
@@ -1250,7 +1266,7 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
@@ -1258,7 +1274,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1268,34 +1284,31 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
+	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
+	onMerge := func(r Range) error {
+		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+			notifier.OnNewSnapshot()
+		}
+
+		if seedNewSnapshots != nil {
+			downloadRequest := []services.DownloadRequest{
+				services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */),
+			}
+			if err := seedNewSnapshots(downloadRequest); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
 		return err
 	}
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
 
-	downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
-	for i := range rangesToMerge {
-		r := &services.Range{From: rangesToMerge[i].from, To: rangesToMerge[i].to}
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
-	}
-
-	if seedNewSnapshots != nil {
-		if err := seedNewSnapshots(downloadRequest); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -1320,7 +1333,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
 		// go-routine is still working
@@ -1331,7 +1344,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
 		if ok {
-			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 				br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 			}
 		}
@@ -1525,10 +1538,6 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
-	stat, err := os.Stat(sn.Path)
-	if err != nil {
-		return false
-	}
 	dir, _ := filepath.Split(sn.Path)
 	fName := snaptype.IdxFileName(sn.From, sn.To, sn.T.String())
 	var result = true
@@ -1538,21 +1547,11 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		if err != nil {
 			return false
 		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
-		}
 		idx.Close()
 	case snaptype.Transactions:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
-		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
 		}
 		idx.Close()
 
@@ -1560,11 +1559,6 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		idx, err = recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
-		}
-		// If index was created before the segment file, it needs to be ignored (and rebuilt)
-		if idx.ModTime().Before(stat.ModTime()) {
-			log.Warn("[snapshots] skip index because it modify time is before .seg file. re-generate index or do `touch --no-create -d`", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
-			result = false
 		}
 		idx.Close()
 	}
@@ -1712,7 +1706,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	expectedBlockNum := blockFrom
 	key := make([]byte, 8+32)
 	from := hexutility.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1720,12 +1713,8 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 		if blockNum >= blockTo {
 			return false, nil
 		}
-		if expectedBlockNum != blockNum {
-			return false, fmt.Errorf("found gaps in kv.HeaderCanonical table: expected %d, found %d", expectedBlockNum, blockNum)
-		}
-		expectedBlockNum++
-
-		key = append(append(key[:0], k...), v...)
+		copy(key, k)
+		copy(key[8:], v)
 		dataRLP, err := tx.GetOne(kv.Headers, key)
 		if err != nil {
 			return false, err
@@ -2178,29 +2167,43 @@ type Merger struct {
 	tmpDir          string
 	chainConfig     *chain.Config
 	chainDB         kv.RoDB
-	notifier        services.DBEventNotifier
 	logger          log.Logger
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
 
 type Range struct {
 	from, to uint64
 }
 
-func (r Range) From() uint64 { return r.from }
-func (r Range) To() uint64   { return r.to }
+func (r Range) From() uint64             { return r.from }
+func (r Range) To() uint64               { return r.to }
+func (r Range) IsRecent(max uint64) bool { return max-r.to < snaptype.Erigon2MergeLimit }
 
-func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+type Ranges []Range
+
+func (r Ranges) String() string {
+	return fmt.Sprintf("%d", r)
+}
+
+var MergeSteps = []uint64{500_000, 100_000, 10_000}
+var RecentMergeSteps = []uint64{100_000, 10_000}
+
+func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		if r.to-r.from >= snaptype.Erigon2SegmentSize { // is complete .seg
-			continue
+		isRecent := r.IsRecent(maxBlockNum)
+		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
+		if isRecent {
+			mergeLimit, mergeSteps = snaptype.Erigon2RecentMergeLimit, RecentMergeSteps
 		}
 
-		for _, span := range []uint64{500_000, 100_000, 10_000} {
+		if r.to-r.from >= mergeLimit {
+			continue
+		}
+		for _, span := range mergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
@@ -2297,7 +2300,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -2309,7 +2312,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return err
 		}
 
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
@@ -2329,11 +2332,20 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
 		snapshots.LogStat()
-		if m.notifier != nil { // notify about new snapshots of any size
-			m.notifier.OnNewSnapshot()
-			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
+
+		if err := onMerge(r); err != nil {
+			return err
 		}
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range snaptype.BlockSnapshotTypes {
+			if len(toMerge[t]) == 0 {
+				continue
+			}
+			if err := onDelete(toMerge[t]); err != nil {
+				return err
+			}
+		}
+		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
+		for _, t := range snaptype.BlockSnapshotTypes {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}
@@ -2360,6 +2372,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		return err
 	}
 	defer f.Close()
+
+	_, fName := filepath.Split(targetFile)
+	m.logger.Debug("[snapshots] merge", "file", fName)
 
 	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {

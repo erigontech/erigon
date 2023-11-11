@@ -125,6 +125,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
 			aggStep:  50,
@@ -159,10 +160,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	if rc.useBplus {
-		UseBpsTree = true
-		defer func() { UseBpsTree = false }()
-	}
+	//if rc.useBplus {
+	//	UseBpsTree = true
+	//	defer func() { UseBpsTree = false }()
+	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -246,10 +247,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
-	dom2 := NewSharedDomains(WrapTxWithCtx(tx, ac2))
+	dom2 := NewSharedDomains(WrapTxWithCtx(rwTx, ac2))
 	defer dom2.Close()
 
-	_, err = dom2.SeekCommitment(ctx, rwTx, 0, 1<<63-1)
+	_, err = dom2.SeekCommitment(ctx, rwTx)
 	sstartTx := dom2.TxNum()
 
 	require.NoError(t, err)
@@ -274,6 +275,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+
 	logger := log.New()
 	aggStep := uint64(100)
 	ctx := context.Background()
@@ -360,7 +362,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDoms := NewSharedDomains(WrapTxWithCtx(newTx, ac))
 	defer newDoms.Close()
 
-	_, err = newDoms.SeekCommitment(ctx, newTx, 0, 1<<63-1)
+	_, err = newDoms.SeekCommitment(ctx, newTx)
 	require.NoError(t, err)
 	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
@@ -560,7 +562,11 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
-	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(datasize.KB*8), logger)
+	bufSize := 8 * datasize.KB
+	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
+		bufSize = 1 * datasize.MB
+	}
+	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)

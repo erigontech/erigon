@@ -7,7 +7,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -66,7 +65,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 			continue // Skip deleted entries
 		}
 		key := libcommon.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
+		seckey, err := libcommon.HashData(k[20:])
 		if err != nil {
 			return StorageRangeResult{}, err
 		}

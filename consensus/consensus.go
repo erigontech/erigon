@@ -55,6 +55,9 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
+
+	// Byte string representation of a bor span with given ID
+	BorSpan(spanId uint64) []byte
 }
 
 // ChainReader defines a small collection of methods needed to access the local

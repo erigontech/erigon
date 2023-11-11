@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -149,7 +149,7 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
-			codeHash, err := common.HashData(val)
+			codeHash, err := libcommon.HashData(val)
 			if err != nil {
 				return err
 			}
@@ -228,7 +228,7 @@ type ReconWorker struct {
 	chainConfig *chain.Config
 	logger      log.Logger
 	genesis     *types.Genesis
-	chain       ChainReader
+	chain       *consensuschain.Reader
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -252,7 +252,7 @@ func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 		engine:      engine,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
-	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
+	rw.chain = consensuschain.NewReader(chainConfig, chainTx, blockReader, logger)
 	rw.ibs = state.New(rw.stateReader)
 	return rw
 }

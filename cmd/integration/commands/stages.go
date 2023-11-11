@@ -5,27 +5,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
-
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -34,7 +36,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -528,7 +529,6 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withNoCommit(cmdStageExec)
-	withBtreePlus(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
@@ -560,7 +560,6 @@ func init() {
 	rootCmd.AddCommand(cmdStageTrie)
 
 	withConfig(cmdStagePatriciaTrie)
-	withBtreePlus(cmdStagePatriciaTrie)
 	withDataDir(cmdStagePatriciaTrie)
 	withReset(cmdStagePatriciaTrie)
 	withBlock(cmdStagePatriciaTrie)
@@ -679,11 +678,6 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		domains := libstate.NewSharedDomains(tx)
 		defer domains.Close()
-
-		_, err := domains.SeekCommitment(ctx, tx, 0, math.MaxUint64)
-		if err != nil {
-			return fmt.Errorf("seek commitment: %w", err)
-		}
 		//txnUm := domains.TxNum()
 		blockNum := domains.BlockNum()
 
@@ -973,7 +967,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				defer ct.Close()
 				doms := libstate.NewSharedDomains(tx)
 				defer doms.Close()
-				_, err = doms.SeekCommitment(ctx, tx, 0, math.MaxUint64)
+				_, err = doms.SeekCommitment(ctx, tx)
 				if err != nil {
 					return err
 				}
@@ -1507,8 +1501,6 @@ var _aggSingleton *libstate.AggregatorV3
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
-		libstate.UseBpsTree = useBtreePlus
-
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			useSnapshots, _ = snap.Enabled(tx)
@@ -1637,7 +1629,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
-	sentryControlServer, err := sentry.NewMultiClient(
+	sentryControlServer, err := sentry_multi_client.NewMultiClient(
 		db,
 		"",
 		chainConfig,
@@ -1661,7 +1653,18 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	notifications := &shards.Notifications{}
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil, heimdallClient, logger)
+	var (
+		snapDb     kv.RwDB
+		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	)
+	if bor, ok := engine.(*bor.Bor); ok {
+		snapDb = bor.DB
+		recents = bor.Recents
+		signatures = bor.Signatures
+	}
+	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil,
+		heimdallClient, recents, signatures, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
@@ -1674,7 +1677,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
-			stagedsync.StageBorHeimdallCfg(db, miner, *chainConfig, heimdallClient, blockReader, nil, nil),
+			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, blockReader, nil, nil, recents, signatures),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),

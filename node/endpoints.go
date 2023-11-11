@@ -19,29 +19,102 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
+type HttpEndpointConfig struct {
+	Timeouts rpccfg.HTTPTimeouts
+	HTTPS    bool
+	CertFile string
+	KeyFile  string
+}
+
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
-func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler http.Handler) (*http.Server, net.Addr, error) {
+func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http.Handler) (*http.Server, net.Addr, error) {
 	// start the HTTP listener
 	var (
 		listener net.Listener
 		err      error
 	)
-	if listener, err = net.Listen("tcp", endpoint); err != nil {
+	socketUrl, err := url.Parse(urlEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("malformatted http listen url %s: %w", urlEndpoint, err)
+	}
+	if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
+		return nil, nil, err
+	}
+	// make sure timeout values are meaningful
+	CheckTimeouts(&cfg.Timeouts)
+	// create the http2 server for handling h2c
+	h2 := &http2.Server{}
+	// enable h2c support
+	handler = h2c.NewHandler(handler, h2)
+	// Bundle the http server
+	httpSrv := &http.Server{
+		Handler:           handler,
+		ReadTimeout:       cfg.Timeouts.ReadTimeout,
+		WriteTimeout:      cfg.Timeouts.WriteTimeout,
+		IdleTimeout:       cfg.Timeouts.IdleTimeout,
+		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
+	}
+	// start the HTTP server
+	go func() {
+		var serveErr error
+		if cfg.HTTPS {
+			serveErr = httpSrv.ServeTLS(listener, cfg.CertFile, cfg.KeyFile)
+			if serveErr != nil && !isIgnoredHttpServerError(serveErr) {
+				log.Warn("Failed to serve https endpoint", "err", serveErr)
+			}
+		} else {
+			serveErr = httpSrv.Serve(listener)
+			if serveErr != nil && !isIgnoredHttpServerError(serveErr) {
+				log.Warn("Failed to serve http endpoint", "err", serveErr)
+			}
+		}
+	}()
+	return httpSrv, listener.Addr(), err
+}
+
+func isIgnoredHttpServerError(serveErr error) bool {
+	return (errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, libcommon.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed))
+
+}
+
+// StartHTTPEndpoint starts the HTTP RPC endpoint.
+func StartHTTPSEndpoint(urlEndpoint string,
+	keyFile string, certFile string,
+	timeouts rpccfg.HTTPTimeouts, handler http.Handler,
+) (*http.Server, net.Addr, error) {
+	// start the HTTP listener
+	var (
+		listener net.Listener
+		err      error
+	)
+	socketUrl, err := url.Parse(urlEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("malformatted http listen url %s: %w", urlEndpoint, err)
+	}
+	if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
 		return nil, nil, err
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&timeouts)
-	// Bundle and start the HTTP server
+	// create the http2 server for handling h2c
+	h2 := &http2.Server{}
+	// enable h2c support
+	handler = h2c.NewHandler(handler, h2)
+	// Bundle the http server
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadTimeout:       timeouts.ReadTimeout,
@@ -49,8 +122,9 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 		IdleTimeout:       timeouts.IdleTimeout,
 		ReadHeaderTimeout: timeouts.ReadTimeout,
 	}
+	// start the HTTP server
 	go func() {
-		serveErr := httpSrv.Serve(listener)
+		serveErr := httpSrv.ServeTLS(listener, certFile, keyFile)
 		if serveErr != nil &&
 			!(errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, libcommon.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed)) {
 			log.Warn("Failed to serve http endpoint", "err", serveErr)

@@ -81,9 +81,14 @@ type History struct {
 }
 
 type histCfg struct {
-	iiCfg              iiCfg
-	compression        FileCompression
+	iiCfg       iiCfg
+	compression FileCompression
+
+	//historyLargeValues: used to store values > 2kb (pageSize/2)
+	//small values - can be stored in more compact ways in db (DupSort feature)
+	//historyLargeValues=true - doesn't support keys of various length (all keys must have same length)
 	historyLargeValues bool
+
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 }
@@ -548,9 +553,9 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	}
 
 	ic := h.hc.ic
-	// defer func() {
-	// 	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
-	// }()
+	//defer func() {
+	//	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
+	//}()
 
 	if h.largeValues {
 		lk := len(key1) + len(key2)
@@ -1029,113 +1034,8 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 }
 
 type HistoryRecord struct {
-	TxNum  uint64
-	Value  []byte
-	PValue []byte
-}
-
-func (hc *HistoryContext) ifUnwindKey(key []byte, toTxNum uint64, roTx kv.Tx) (toRestore *HistoryRecord, needDeleting bool, err error) {
-	it, err := hc.IdxRange(key, 0, int(toTxNum+hc.ic.ii.aggregationStep), order.Asc, -1, roTx)
-	if err != nil {
-		return nil, false, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
-	}
-
-	tnums := [3]*HistoryRecord{
-		{TxNum: uint64(math.MaxUint64)},
-	}
-
-	for it.HasNext() {
-		txn, err := it.Next()
-		if err != nil {
-			return nil, false, err
-		}
-		if txn < toTxNum {
-			tnums[0].TxNum = txn // 0 could be false-positive (having no value, even nil)
-			//fmt.Printf("seen %x @tx %d\n", key, txn)
-			continue
-		}
-		v, ok, err := hc.GetNoStateWithRecent(key, txn, roTx)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok {
-			break
-		}
-		//fmt.Printf("found %x @tx %d ->%t '%x'\n", key, txn, ok, v)
-
-		if txn == toTxNum {
-			tnums[1] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
-		}
-		if txn > toTxNum {
-			tnums[2] = &HistoryRecord{TxNum: txn, Value: common.Copy(v)}
-			break
-		}
-	}
-
-	if tnums[0].TxNum != math.MaxUint64 {
-		v, ok, err := hc.GetNoStateWithRecent(key, tnums[0].TxNum, roTx)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok {
-			tnums[0].TxNum = math.MaxUint64
-		} else {
-			tnums[0].Value = common.Copy(v)
-		}
-	}
-
-	if tnums[0].TxNum != math.MaxUint64 {
-		if tnums[1] != nil {
-			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[1].Value, PValue: tnums[0].Value}
-			//fmt.Printf("toRestore %x @%d [0-1] %x\n", key, toRestore.TxNum, toRestore.Value)
-			return toRestore, true, nil
-		}
-		if tnums[2] != nil {
-			toRestore = &HistoryRecord{TxNum: tnums[0].TxNum, Value: tnums[2].Value, PValue: tnums[0].Value}
-			//fmt.Printf("toRestore %x @%d [0-2] %x\n", key, toRestore.TxNum, toRestore.Value)
-			return toRestore, true, nil
-		}
-		//fmt.Printf("toRestore %x @%d [0] %x\n", key, toRestore.TxNum, toRestore.Value)
-		// actual value is in domain and no need to delete
-		return nil, false, nil
-	}
-	//fmt.Printf("toRestore NONE %x @%d ->%x [1] %+v [2] %+v\n", key, tnums[0].TxNum, tnums[0].Value, tnums[1], tnums[2])
-	return nil, true, nil
-}
-
-// deprecated
-// returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
-func (hc *HistoryContext) unwindKey(key []byte, beforeTxNum uint64, rwTx kv.RwTx) ([]HistoryRecord, error) {
-	it, err := hc.IdxRange(key, int(beforeTxNum), math.MaxInt, order.Asc, -1, rwTx)
-	if err != nil {
-		return nil, fmt.Errorf("idxRange %s: %w", hc.h.filenameBase, err)
-	}
-
-	res := make([]HistoryRecord, 0, 2)
-	var finished bool
-	for txn, err := it.Next(); !finished; txn, err = it.Next() {
-		if err != nil {
-			return nil, err
-		}
-		v, ok, err := hc.GetNoStateWithRecent(key, txn, rwTx)
-		if err != nil {
-			return nil, err
-		}
-		// if bytes.Equal(key, common.FromHex("1079")) {
-		fmt.Printf("unwind {largeVals=%t} %x [txn=%d, wanted %d] -> %t %x\n", hc.h.historyLargeValues, key, txn, beforeTxNum, ok, fmt.Sprintf("%x", v))
-		// }
-		if !ok {
-			continue
-		}
-		res = append(res, HistoryRecord{TxNum: txn, Value: v})
-		if len(res) == 2 {
-			break
-		}
-		finished = !it.HasNext()
-
-	}
-
-	return res, nil
+	TxNum uint64
+	Value []byte
 }
 
 type HistoryContext struct {
@@ -1200,6 +1100,7 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !hc.CanPrune(rwTx) {
 		return nil
 	}
@@ -2064,6 +1965,7 @@ func (hi *HistoryChangesIterDB) advance() (err error) {
 	}
 	return hi.advanceSmallVals()
 }
+
 func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
@@ -2102,7 +2004,29 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			seek = append(next, hi.startTxKey[:]...)
 			continue
 		}
-		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
+		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
+			// stuck on the same key, move to first key larger than seek
+			for {
+				k, v, err = hi.valsC.Next()
+				if err != nil {
+					return err
+				}
+				if k == nil {
+					hi.nextKey = nil
+					return nil
+				}
+				//fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
+				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
+					break
+				}
+			}
+		}
+		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
+			if len(seek) != len(k) {
+				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
+				continue
+			}
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}

@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -106,23 +105,17 @@ func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
 	assert.Equalf(t, bucket1 /*expected*/, bucket2 /*actual*/, "bucket %q", bucketName)
 }
 
-type stateWriterGen func(uint64) state.WriterWithChangeSets
+type stateWriterGen func(uint64) state.StateWriter
 
 func hashedWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewDbStateWriter(tx, blockNum)
 	}
 }
 
 func plainWriterGen(tx kv.RwTx) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
+	return func(blockNum uint64) state.StateWriter {
 		return state.NewPlainStateWriter(tx, tx, blockNum)
-	}
-}
-
-func domainWriterGen(tx kv.TemporalTx, domains *state2.SharedDomains) stateWriterGen {
-	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewWriterV4(domains)
 	}
 }
 
@@ -167,7 +160,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := common.HashData(code)
+					codeHash, _ := libcommon.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -238,7 +231,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := common.HashData(code)
+					codeHash, _ := libcommon.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -267,8 +260,10 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			testAccounts[i] = newAcc
 		}
 		if blockNumber >= from {
-			if err := blockWriter.WriteChangeSets(); err != nil {
-				t.Fatal(err)
+			if casted, ok := blockWriter.(state.WriterWithChangeSets); ok {
+				if err := casted.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 	}

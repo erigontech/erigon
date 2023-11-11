@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"google.golang.org/grpc"
 )
@@ -109,4 +110,13 @@ func (s *SentinelSubscribeGossipS) Err(err error) {
 		return
 	}
 	s.ch <- &gossipReply{err: err}
+}
+
+func (s *SentinelClientDirect) GetPeersStatistics() map[string]*diagnostics.PeerStatistics {
+
+	if diag, ok := s.server.(diagnostics.PeerStatisticsGetter); ok {
+		return diag.GetPeersStatistics()
+	}
+
+	return map[string]*diagnostics.PeerStatistics{}
 }

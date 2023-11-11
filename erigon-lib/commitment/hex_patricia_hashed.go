@@ -815,12 +815,16 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) (bool, error) {
-	branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
+	if len(key) == 0 {
+		key = []byte("root")
+	}
+	branchData, err := hph.branchFn(key)
 	if err != nil {
 		return false, err
 	}
 	if hph.trace {
-		fmt.Printf("unfoldBranchNode [%x] depth %d, afterMap[%016b] touchMap[%016b]\n", hph.currentKey[:hph.currentKeyLen], depth, hph.afterMap[row], hph.touchMap[row])
+		fmt.Printf("unfoldBranchNode ^%x^[%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
 	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
@@ -828,7 +832,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 		return false, nil
 	}
 	if len(branchData) == 0 {
-		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(hexToCompact(hph.currentKey[:hph.currentKeyLen])), "row", row, "depth", depth, "deleted", deleted)
+		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
 		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", hexToCompact(hph.currentKey[:hph.currentKeyLen]))
 	}
 	hph.branchBefore[row] = true
@@ -1010,6 +1014,9 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 
 	depth := hph.depths[row]
 	updateKey = hexToCompact(hph.currentKey[:updateKeyLen])
+	if len(updateKey) == 0 {
+		updateKey = []byte("root")
+	}
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
 	if hph.trace {
@@ -1068,17 +1075,6 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		// Delete if it existed
 		if hph.branchBefore[row] {
 			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
-			// branchData, _, err = EncodeBranch(0, hph.touchMap[row], hph.afterMap[row], func(nb int, skip bool) (*Cell, error) {
-			// 	if skip || nb != nibble {
-			// 		return nil, nil
-			// 	}
-			// 	cell := &hph.grid[row][nibble]
-			// 	_, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-			// 	if err != nil {
-			// 		return nil, err
-			// 	}
-			// 	return cell, nil
-			// })
 			if err != nil {
 				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
 			}

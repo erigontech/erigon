@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -18,8 +18,8 @@ func (r *RegressionTester) readStartingState() (*state.CachingBeaconState, error
 	if err != nil {
 		return nil, err
 	}
-	s := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(s, stateFile, int(clparams.CapellaVersion)); err != nil {
+	s := state.New(&clparams2.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(s, stateFile, int(clparams2.CapellaVersion)); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -39,7 +39,7 @@ func (r *RegressionTester) initBlocks() error {
 			return err
 		}
 		b := new(cltypes.SignedBeaconBlock)
-		if err := utils.DecodeSSZSnappy(b, f, int(clparams.CapellaVersion)); err != nil {
+		if err := utils.DecodeSSZSnappy(b, f, int(clparams2.CapellaVersion)); err != nil {
 			return err
 		}
 		r.blockList = append(r.blockList, b)

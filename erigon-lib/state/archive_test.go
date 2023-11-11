@@ -16,6 +16,7 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+
 	tmp := t.TempDir()
 	logger := log.New()
 

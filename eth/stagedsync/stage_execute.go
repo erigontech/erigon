@@ -13,6 +13,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
+
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 
@@ -30,7 +33,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -176,7 +178,7 @@ func executeBlock(
 	var execRs *core.EphemeralExecResult
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger), getTracer, logger)
+	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, consensuschain.NewReader(cfg.chainConfig, tx, cfg.blockReader, logger), getTracer, logger)
 	if err != nil {
 		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
 	}
@@ -327,22 +329,28 @@ var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	domains := libstate.NewSharedDomains(tx)
 	defer domains.Close()
+	//txTo, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
+	//if err != nil {
+	//      return err
+	//}
+	//bn, _, ok, err := domains.SeekCommitment2(tx, 0, txTo)
+	//if ok && bn != u.UnwindPoint {
+	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
+	//}
+
+	//unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+	//if err != nil {
+	//	return err
+	//}
+	//if u.UnwindPoint < unwindToLimit {
+	//	return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	//}
 	rs := state.NewStateV3(domains, logger)
-
-	if u.UnwindPoint < tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo() {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsTo())
-	}
-
-	domains.StartWrites()
-	defer domains.FinishWrites()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
-	}
-	if tx == nil {
-		panic(1)
 	}
 	if err := rs.Unwind(ctx, tx, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
@@ -456,6 +464,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, cfg.engine, false)
 		defer clean()
 	}
+	//fmt.Printf("exec: %d -> %d\n", stageProgress+1, to)
 
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
@@ -578,6 +587,8 @@ Loop:
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
+	//dumpPlainStateDebug(tx, nil)
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -642,10 +653,11 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	if block == nil {
 		return nil
 	}
+	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
 	if histV3 {
-		_, _ = engine.Author(block.HeaderNoCopy())
 		return nil
 	}
+
 	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
@@ -703,6 +715,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
+	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
@@ -723,6 +736,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if err = u.Done(tx); err != nil {
 		return err
 	}
+	//dumpPlainStateDebug(tx, nil)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

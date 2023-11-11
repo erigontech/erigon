@@ -1,7 +1,7 @@
 {
     "000-fork=Cancun-no_stack_overflow": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7516.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -143,7 +143,7 @@
     },
     "001-fork=Cancun-stack_overflow": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.0-unstable-fd389791-20230926",
+            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7516.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },

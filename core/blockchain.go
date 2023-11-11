@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
+
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -37,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -283,7 +284,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 func FinalizeBlockExecution(
 	engine consensus.Engine, stateReader state.StateReader,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.WriterWithChangeSets, cc *chain.Config,
+	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
@@ -305,8 +306,10 @@ func FinalizeBlockExecution(
 		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+	if casted, ok := stateWriter.(state.WriterWithChangeSets); ok {
+		if err := casted.WriteChangeSets(); err != nil {
+			return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+		}
 	}
 	return newBlock, newTxs, newReceipt, nil
 }

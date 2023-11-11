@@ -585,6 +585,7 @@ func TestAppend(t *testing.T) {
 	require.NoError(collector.Collect([]byte{2}, nil))
 	require.NoError(collector.Collect([]byte{3}, nil))
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		fmt.Printf("%x %x\n", k, v)
 		if k[0] == 1 {
 			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
 		} else if k[0] == 2 {

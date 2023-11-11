@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
@@ -12,12 +14,11 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
-var MaxNumberOfEmptyBlockChecks = 25
+// max number of blocks to look for a transaction in
+const defaultMaxNumberOfEmptyBlockChecks = 25
 
 func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libcommon.Hash]uint64, error) {
 	devnet.Logger(ctx).Info("Awaiting transactions in confirmed blocks...")
@@ -28,7 +29,13 @@ func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libco
 		hashmap[hash] = true
 	}
 
-	m, err := searchBlockForHashes(ctx, hashmap)
+	maxNumberOfEmptyBlockChecks := defaultMaxNumberOfEmptyBlockChecks
+	network := devnet.CurrentNetwork(ctx)
+	if (network != nil) && (network.MaxNumberOfEmptyBlockChecks > 0) {
+		maxNumberOfEmptyBlockChecks = network.MaxNumberOfEmptyBlockChecks
+	}
+
+	m, err := searchBlockForHashes(ctx, hashmap, maxNumberOfEmptyBlockChecks)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
 	}
@@ -36,7 +43,11 @@ func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libco
 	return m, nil
 }
 
-func searchBlockForHashes(ctx context.Context, hashmap map[libcommon.Hash]bool) (map[libcommon.Hash]uint64, error) {
+func searchBlockForHashes(
+	ctx context.Context,
+	hashmap map[libcommon.Hash]bool,
+	maxNumberOfEmptyBlockChecks int,
+) (map[libcommon.Hash]uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	if len(hashmap) == 0 {
@@ -72,7 +83,7 @@ func searchBlockForHashes(ctx context.Context, hashmap map[libcommon.Hash]bool) 
 			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
 		}
 
-		if blockCount == MaxNumberOfEmptyBlockChecks {
+		if blockCount == maxNumberOfEmptyBlockChecks {
 			for h := range hashmap {
 				logger.Error("Missing Tx", "txHash", h)
 			}

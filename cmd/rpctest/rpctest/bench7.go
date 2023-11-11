@@ -8,7 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-func Bench7(erigonURL, gethURL string) {
+func Bench7(erigonURL, gethURL string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -34,8 +34,7 @@ func Bench7(erigonURL, gethURL string) {
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigonURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
-			fmt.Printf("Could not get storageRange: %v\n", err)
-			return
+			return fmt.Errorf("Could not get storageRange: %v\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -54,8 +53,7 @@ func Bench7(erigonURL, gethURL string) {
 	for nextKeyG != nil {
 		var srg DebugStorageRange
 		if err := post(client, gethURL, fmt.Sprintf(template, blockhash, i, to, *nextKeyG, 1024, reqID), &srg); err != nil {
-			fmt.Printf("Could not get storageRange: %v\n", err)
-			return
+			return fmt.Errorf("Could not get storageRange: %v\n", err)
 		}
 		if srg.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", srg.Error.Code, srg.Error.Message)
@@ -76,7 +74,8 @@ func Bench7(erigonURL, gethURL string) {
 		printStorageRange(sm)
 		fmt.Printf("================smg\n")
 		printStorageRange(smg)
-		return
+		return fmt.Errorf("storage are different")
 	}
 	fmt.Printf("storageRanges: %d\n", len(sm))
+	return nil
 }

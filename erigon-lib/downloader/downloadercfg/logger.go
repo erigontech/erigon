@@ -73,6 +73,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
 			strings.Contains(str, "inited with remoteAddr")
 		if skip {
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Debug(str)
@@ -82,71 +83,56 @@ func (b adapterHandler) Handle(r lg.Record) {
 		//strings.Contains(str, "banning ip <nil>") ||
 		//strings.Contains(str, "spurious timer") { // suppress useless errors
 		if skip {
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
-
 		log.Info(str)
 	case lg.Warning:
 		str := r.String()
-		skip := strings.Contains(str, "EOF")
-		//if strings.Contains(str, "could not find offer for id") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "banned ip") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
-		//	break
-		//}
-		if strings.Contains(str, "requested chunk too long") { // suppress useless errors
-			break
-		}
-		//if strings.Contains(str, "reservation cancelled") { // suppress useless errors
-		//	break
-		//}
-		//if strings.Contains(str, "received invalid reject") { // suppress useless errors
-		//	break
-		//}
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "requested chunk too long") ||
+			strings.Contains(str, "banned ip") ||
+			strings.Contains(str, "banning webseed") ||
+			strings.Contains(str, "TrackerClient closed") ||
+			strings.Contains(str, "being sole dirtier of piece") ||
+			strings.Contains(str, "webrtc conn for unloaded torrent") ||
+			strings.Contains(str, "could not find offer for id") ||
+			strings.Contains(str, "received invalid reject") ||
+			strings.Contains(str, "reservation cancelled")
 
 		if skip {
+			log.Trace(str)
 			break
 		}
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
-		skip := strings.Contains(str, "EOF")
-
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "short write") ||
+			strings.Contains(str, "disabling data download")
 		if skip {
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Error(str)
 	case lg.Critical:
 		str := r.String()
-		skip := strings.Contains(str, "EOF") || strings.Contains(str, "torrent closed")
-		//if strings.Contains(str, "don't want conns") { // suppress useless errors
-		//	break
-		//}
-
+		skip := strings.Contains(str, "EOF") ||
+			strings.Contains(str, "torrent closed") ||
+			strings.Contains(str, "don't want conns")
 		if skip {
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
 		log.Error(str)
 	default:
 		str := r.String()
-		skip := false
-		if strings.Contains(str, "unhandled response status") { // suppress useless errors
-			break
-		}
+		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status") ||
+			strings.Contains(str, "error doing webseed request")
 		if skip {
+			log.Trace(str, "lvl", lvl.LogString())
 			break
 		}
-
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
 }

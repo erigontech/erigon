@@ -26,12 +26,15 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -66,6 +69,8 @@ const (
 
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
+
+	serverStatsLogInterval = 60 * time.Second
 )
 
 var errServerStopped = errors.New("server stopped")
@@ -154,6 +159,9 @@ type Config struct {
 	// Internet.
 	NAT nat.Interface `toml:",omitempty"`
 
+	// NAT interface description (see NAT.Parse()).
+	NATSpec string
+
 	// If Dialer is set to a non-nil value, the given Dialer
 	// is used to dial outbound peer connections.
 	Dialer NodeDialer `toml:"-"`
@@ -171,6 +179,18 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+}
+
+func (config *Config) ListenPort() int {
+	_, portStr, err := net.SplitHostPort(config.ListenAddr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // Server manages all peer connections.
@@ -215,6 +235,7 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
+	errors         map[string]uint
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -637,7 +658,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(ctx, conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -655,9 +676,9 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		}
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(ctx, sconn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(ctx, conn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			return err
@@ -775,6 +796,9 @@ func (srv *Server) run() {
 		trusted[n.ID()] = true
 	}
 
+	logTimer := time.NewTicker(serverStatsLogInterval)
+	defer logTimer.Stop()
+
 running:
 	for {
 		select {
@@ -838,6 +862,18 @@ running:
 			if pd.Inbound() {
 				inboundCount--
 			}
+		case <-logTimer.C:
+			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
+
+			func() {
+				srv.lock.Lock()
+				defer srv.lock.Unlock()
+				for err, count := range srv.errors {
+					vals = append(vals, err, count)
+				}
+			}()
+
+			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
 
@@ -888,6 +924,8 @@ func (srv *Server) listenLoop(ctx context.Context) {
 
 	// The slots limit accepts of new connections.
 	slots := semaphore.NewWeighted(int64(srv.MaxPendingPeers))
+
+	srv.errors = map[string]uint{}
 
 	// Wait for slots to be returned on exit. This ensures all connection goroutines
 	// are down before listenLoop returns.
@@ -991,10 +1029,25 @@ func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) 
 	return err
 }
 
+func cleanError(err string) string {
+	switch {
+	case strings.HasSuffix(err, "i/o timeout"):
+		return "i/o timeout"
+	case strings.HasSuffix(err, "closed by the remote host."):
+		return "closed by remote"
+	case strings.HasSuffix(err, "connection reset by peer"):
+		return "closed by remote"
+	default:
+		return err
+	}
+}
+
 func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
 	srv.lock.Lock()
 	running := srv.running
+	// reset error counts
+	srv.errors = map[string]uint{}
 	srv.lock.Unlock()
 	if !running {
 		return errServerStopped
@@ -1014,6 +1067,10 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the RLPx handshake.
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
+		errStr := cleanError(err.Error())
+		srv.lock.Lock()
+		srv.errors[errStr] = srv.errors[errStr] + 1
+		srv.lock.Unlock()
 		srv.logger.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
@@ -1033,6 +1090,10 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the capability negotiation handshake.
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
+		errStr := cleanError(err.Error())
+		srv.lock.Lock()
+		srv.errors[errStr] = srv.errors[errStr] + 1
+		srv.lock.Unlock()
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
@@ -1167,6 +1228,7 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 	for _, peer := range srv.Peers() {
 		if peer != nil {
 			infos = append(infos, peer.Info())
+			peer.ResetDiagnosticsCounters()
 		}
 	}
 	// Sort the result array alphabetically by node identifier
@@ -1177,5 +1239,19 @@ func (srv *Server) PeersInfo() []*PeerInfo {
 			}
 		}
 	}
+	return infos
+}
+
+// PeersInfo returns an array of metadata objects describing connected peers.
+func (srv *Server) DiagnosticsPeersInfo() map[string]*diagnostics.PeerStatistics {
+	// Gather all the generic and sub-protocol specific infos
+	infos := make(map[string]*diagnostics.PeerStatistics)
+	for _, peer := range srv.Peers() {
+		if peer != nil {
+			infos[peer.ID().String()] = peer.DiagInfo()
+			peer.ResetDiagnosticsCounters()
+		}
+	}
+
 	return infos
 }

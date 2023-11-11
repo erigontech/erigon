@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -64,30 +63,12 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const (
 		ThreadsLimit = 9_000
-		DBSizeLimit  = 3 * datasize.TB
-		DBPageSize   = 8 * datasize.KB
-		GrowthStep   = 2 * datasize.GB
 	)
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB).Accede()
-	if label == kv.ChainDB {
-		opts = opts.MapSize(DBSizeLimit)
-		opts = opts.PageSize(DBPageSize.Bytes())
-		opts = opts.GrowthStep(GrowthStep)
-	} else {
-		opts = opts.GrowthStep(16 * datasize.MB)
-	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
-
-	// if db is not exists, we dont want to pass this flag since it will create db with maplimit of 1mb
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-		// to read all options from DB, instead of overriding them
-		opts = opts.Accede()
-	}
-
 	return opts
 }
 

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -92,7 +91,7 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 		}
 		stream.WriteMore()
 		stream.WriteObjectField("message")
-		stream.WriteString(fmt.Sprintf("%v", err))
+		stream.WriteString(err.Error())
 		de, ok := err.(DataError)
 		if ok {
 			stream.WriteMore()
@@ -101,7 +100,7 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 			if derr == nil {
 				stream.Write(data)
 			} else {
-				stream.WriteString(fmt.Sprintf("%v", derr))
+				stream.WriteString(derr.Error())
 			}
 		}
 		stream.WriteObjectEnd()

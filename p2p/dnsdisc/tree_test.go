@@ -20,8 +20,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 

@@ -198,7 +198,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		if len(val) == 0 {
 			return next(k, nil, nil)
 		}
-		if err := root.InsertOrdered(common.CopyBytes(k), common.CopyBytes(val), func(node verkle.VerkleNode) {
+		if err := root.InsertOrdered(libcommon.CopyBytes(k), libcommon.CopyBytes(val), func(node verkle.VerkleNode) {
 			rootHash := node.Commitment().Bytes()
 			encodedNode, err := node.Serialize()
 			if err != nil {
@@ -256,7 +256,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, kv.VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(value) > 0 {
-			if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
+			if err := rootNode.Insert(libcommon.CopyBytes(key), libcommon.CopyBytes(value), resolverFunc); err != nil {
 				return err
 			}
 			insertions++

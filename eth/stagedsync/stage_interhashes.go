@@ -8,6 +8,8 @@ import (
 	"math/bits"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -20,8 +22,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -231,11 +231,11 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, sto
 			if err != nil {
 				return err
 			}
-			addrHash, err := common.HashData(k[:length.Addr])
+			addrHash, err := libcommon.HashData(k[:length.Addr])
 			if err != nil {
 				return err
 			}
-			secKey, err := common.HashData(k[length.Addr:])
+			secKey, err := libcommon.HashData(k[length.Addr:])
 			if err != nil {
 				return err
 			}

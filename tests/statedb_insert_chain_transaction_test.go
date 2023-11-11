@@ -8,12 +8,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -507,10 +506,6 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountUpdateIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
-
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -600,9 +595,6 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]

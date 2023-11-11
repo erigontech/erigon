@@ -43,7 +43,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -217,7 +216,7 @@ func runCmd(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		code = common.Hex2Bytes(bin)
+		code = libcommon.Hex2Bytes(bin)
 	}
 	initialGas := ctx.Uint64(GasFlag.Name)
 	if genesisConfig.GasLimit != 0 {
