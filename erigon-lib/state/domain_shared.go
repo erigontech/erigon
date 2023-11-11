@@ -212,6 +212,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
+	fmt.Printf("[dbg] SeekCommitment1: %d, %d, %t\n", bn, txn, ok)
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
@@ -266,9 +267,9 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if err != nil {
 			return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
 		}
-		if sd.trace {
-			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
-		}
+		//if sd.trace {
+		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+		//}
 		if txn == lastTxInBlock || txn+1 == lastTxInBlock {
 			blockNum++
 			txn = lastTxInBlock + 1
@@ -280,17 +281,17 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		} else {
 			txn = firstTxInBlock
 		}
-		if sd.trace {
-			fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
-		}
+		//if sd.trace {
+		fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
+		//}
 	} else {
 		blockNum = bn
 		if blockNum != 0 {
 			txn++
 		}
-		if sd.trace {
-			fmt.Printf("[commitment] found block %d tx %d. No DB info about block first/last txnum has been found\n", blockNum, txn)
-		}
+		//if sd.trace {
+		fmt.Printf("[commitment] found block %d tx %d. No DB info about block first/last txnum has been found\n", blockNum, txn)
+		//}
 	}
 
 	sd.SetBlockNum(blockNum)
