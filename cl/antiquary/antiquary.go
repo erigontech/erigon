@@ -117,7 +117,7 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 	// write the indicies
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, a.reader.FrozenSlots()-1); err != nil {
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, a.reader.FrozenSlots()); err != nil {
 		return err
 	}
 	log.Info("[Antiquary]: Restarting Caplin")
@@ -168,7 +168,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return nil // Just skip if we don't have a downloader
 	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 8, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 8, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 
@@ -187,7 +187,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to); err != nil {
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
 		return err
 	}
 	return tx.Commit()
