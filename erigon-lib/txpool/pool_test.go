@@ -174,7 +174,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, log.New())
 	assert.NoError(err)
-	require.True(pool != nil)
+	require.NotEqual(nil, pool)
 	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
