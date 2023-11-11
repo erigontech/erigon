@@ -555,9 +555,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			//mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
-			mxRunningFilesBuilding.Inc()
+			//mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
+			//mxRunningFilesBuilding.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
