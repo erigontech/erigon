@@ -1008,9 +1008,6 @@ func (c Collation) Close() {
 	if c.valuesComp != nil {
 		c.valuesComp.Close()
 	}
-	if c.historyComp != nil {
-		c.HistoryCollation.Close()
-	}
 	c.HistoryCollation.Close()
 }
 
