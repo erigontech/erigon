@@ -242,12 +242,30 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+		if blockNum > 0 {
+			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
+			if err != nil {
+				return err
+			}
+			outputTxNum.Store(_outputTxNum)
+			outputTxNum.Add(1)
+			inputTxNum = outputTxNum.Load()
+		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
 			var err error
 			maxTxNum, err = rawdbv3.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
+			}
+			if blockNum > 0 {
+				_outputTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
+				if err != nil {
+					return err
+				}
+				outputTxNum.Store(_outputTxNum)
+				outputTxNum.Add(1)
+				inputTxNum = outputTxNum.Load()
 			}
 			return nil
 		}); err != nil {
@@ -266,14 +284,11 @@ func ExecV3(ctx context.Context,
 	if doms.BlockNum() > 0 {
 		blockNum = doms.BlockNum()
 	}
-	//inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 	outputTxNum.Store(inputTxNum)
-	//blockNum = doms.BlockNum()
 
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
-	fmt.Printf("[dbg] e3: inputTxNum=%d, restored_block=%d, restored_txNum=%d, offsetFromBlockBeginning=%d\n", inputTxNum, blockNum, doms.TxNum(), offsetFromBlockBeginning)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
