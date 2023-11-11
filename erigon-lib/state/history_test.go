@@ -924,8 +924,6 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
-	//t.Skip("fix me!")
-
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
