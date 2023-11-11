@@ -156,6 +156,17 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
 func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
+
+func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
+	var res []string
+	for _, seg := range s.BeaconBlocks.segments {
+		if seg.ranges.from == from && seg.ranges.to == to {
+			res = append(res, seg.seg.FilePath())
+		}
+	}
+	return res
+}
+
 func (s *CaplinSnapshots) BlocksAvailable() uint64 {
 	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
 }
