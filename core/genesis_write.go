@@ -442,15 +442,15 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
-func GnosisDencun1DevnetGenesisBlock() *types.Genesis {
+func GnosisDencun2DevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.GnosisDencun1DevnetConfig,
+		Config:     params.GnosisDencun2DevnetConfig,
 		AuRaStep:   0,
 		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(1),
 		BaseFee:    big.NewInt(0x3b9aca00),
-		Alloc:      readPrealloc("allocs/gnosis_dencun1_devnet.json"),
+		Alloc:      readPrealloc("allocs/gnosis_dencun2_devnet.json"),
 	}
 }
 
@@ -669,8 +669,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
-	case networkname.GnosisDencun1DevnetName:
-		return GnosisDencun1DevnetGenesisBlock()
+	case networkname.GnosisDencun2DevnetName:
+		return GnosisDencun2DevnetGenesisBlock()
 	default:
 		return nil
 	}

@@ -59,13 +59,13 @@ var (
 	BorDevnetGenesisHash           = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash              = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash              = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-	GnosisDencun1DevnetGenesisHash = libcommon.HexToHash("0x59055365d8dba222b2c6c037a064cc9be9fc1726bf0ce779a16e792531c2ffe5")
+	GnosisDencun2DevnetGenesisHash = libcommon.HexToHash("0x59055365d8dba222b2c6c037a064cc9be9fc1726bf0ce779a16e792531c2ffe5")
 )
 
 var (
 	GnosisGenesisStateRoot       = libcommon.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 	ChiadoGenesisStateRoot       = libcommon.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
-	GnosisDencun1DevnetStateRoot = libcommon.HexToHash("0xfd6db11ed8ad0fac40e5e9b218d2b1304725c7d07c3f3571dad6c60a13e1d858")
+	GnosisDencun2DevnetStateRoot = libcommon.HexToHash("0xfd6db11ed8ad0fac40e5e9b218d2b1304725c7d07c3f3571dad6c60a13e1d858")
 )
 
 var (
@@ -133,7 +133,7 @@ var (
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
-	GnosisDencun1DevnetConfig = readChainSpec("chainspecs/gnosis_dencun1_devnet.json")
+	GnosisDencun2DevnetConfig = readChainSpec("chainspecs/gnosis_dencun2_devnet.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
@@ -217,8 +217,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GnosisChainConfig
 	case networkname.ChiadoChainName:
 		return ChiadoChainConfig
-	case networkname.GnosisDencun1DevnetName:
-		return GnosisDencun1DevnetConfig
+	case networkname.GnosisDencun2DevnetName:
+		return GnosisDencun2DevnetConfig
 	default:
 		return nil
 	}
@@ -244,8 +244,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
-	case networkname.GnosisDencun1DevnetName:
-		return &GnosisDencun1DevnetGenesisHash
+	case networkname.GnosisDencun2DevnetName:
+		return &GnosisDencun2DevnetGenesisHash
 	default:
 		return nil
 	}
@@ -271,8 +271,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
-	case genesisHash == GnosisDencun1DevnetGenesisHash:
-		return GnosisDencun1DevnetConfig
+	case genesisHash == GnosisDencun2DevnetGenesisHash:
+		return GnosisDencun2DevnetConfig
 	default:
 		return nil
 	}
@@ -298,7 +298,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,
-		GnosisDencun1DevnetConfig.ChainID,
+		GnosisDencun2DevnetConfig.ChainID,
 	}
 	for _, id := range ids {
 		if id.Cmp(chainID) == 0 {
