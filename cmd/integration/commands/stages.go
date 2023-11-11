@@ -529,7 +529,6 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withNoCommit(cmdStageExec)
-	withBtreePlus(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
@@ -561,7 +560,6 @@ func init() {
 	rootCmd.AddCommand(cmdStageTrie)
 
 	withConfig(cmdStagePatriciaTrie)
-	withBtreePlus(cmdStagePatriciaTrie)
 	withDataDir(cmdStagePatriciaTrie)
 	withReset(cmdStagePatriciaTrie)
 	withBlock(cmdStagePatriciaTrie)
@@ -1503,8 +1501,6 @@ var _aggSingleton *libstate.AggregatorV3
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
-		libstate.UseBpsTree = useBtreePlus
-
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			useSnapshots, _ = snap.Enabled(tx)

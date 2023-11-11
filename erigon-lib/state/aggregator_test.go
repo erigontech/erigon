@@ -28,8 +28,6 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	t.Skip("this test failing if run all erigon-lib tests, and not failing if run only this test")
-
 	db, agg := testDbAndAggregatorv3(t, 1000)
 	ctx := context.Background()
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -162,10 +160,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	if rc.useBplus {
-		UseBpsTree = true
-		defer func() { UseBpsTree = false }()
-	}
+	//if rc.useBplus {
+	//	UseBpsTree = true
+	//	defer func() { UseBpsTree = false }()
+	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
