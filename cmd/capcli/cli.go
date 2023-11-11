@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
@@ -423,8 +424,9 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
-	cfg := stages.StageHistoryReconstruction(downloader, csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
+
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(nil, nil, dirs, nil, nil, nil, nil, nil, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
