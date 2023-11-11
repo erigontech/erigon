@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -529,7 +530,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		if n == 0 {
 			continue
 		}
-		logCtx = append(logCtx, fmt.Sprintf("%d", i), fmt.Sprintf("%d", n))
+		logCtx = append(logCtx, strconv.Itoa(i), strconv.Itoa(n))
 	}
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
