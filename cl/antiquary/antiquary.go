@@ -124,8 +124,8 @@ func (a *Antiquary) Loop() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	// Check for snapshots retirement every 10 seconds
-	retirementTicker := time.NewTicker(10 * time.Second)
+	// Check for snapshots retirement every 3 minutes
+	retirementTicker := time.NewTicker(3 * time.Minute)
 	defer retirementTicker.Stop()
 	for {
 		select {
@@ -152,6 +152,12 @@ func (a *Antiquary) Loop() error {
 				return err
 			}
 			roTx.Rollback()
+			if from >= to {
+				continue
+			}
+			if to-from < snaptype.Erigon2RecentMergeLimit {
+				continue
+			}
 			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 			if err := a.antiquate(from, to); err != nil {
@@ -180,6 +186,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from-1); err != nil {
 		return err
 	}
+	a.downloader.Verify()
 	roTx.Rollback()
 
 	tx, err := a.mainDB.BeginRw(a.ctx)
