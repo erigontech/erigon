@@ -289,7 +289,7 @@ require (
 )
 
 replace (
-	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.5
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 )
