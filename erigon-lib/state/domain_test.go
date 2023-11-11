@@ -1472,8 +1472,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 
-	UseBpsTree = true
-
 	dc := d.MakeContext()
 	defer d.Close()
 	dc.StartWrites()
@@ -1544,8 +1542,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.domainLargeValues = true // false requires dupsort value table for domain
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
-
-	UseBpsTree = true
 
 	dc := d.MakeContext()
 	defer dc.Close()
