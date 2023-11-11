@@ -26,6 +26,7 @@ linters:
     - errchkjson #TODO: enable me
     - unused #TODO: enable me
     - testifylint #TODO: enable me
+    - perfsprint #TODO: enable me
     - gocheckcompilerdirectives
     - protogetter
   enable:
