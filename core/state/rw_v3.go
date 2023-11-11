@@ -126,7 +126,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], txTask.AccountPrevs[key]); err != nil {
 						return err
 					}
 				}
@@ -138,7 +138,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+					if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], txTask.CodePrevs[key]); err != nil {
 						return err
 					}
 				}
@@ -150,7 +150,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], txTask.StoragePrevs[key]); err != nil {
 						return err
 					}
 				}
@@ -164,9 +164,13 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0, err := domains.LatestAccount(addrBytes)
-		if err != nil {
-			return err
+		enc0, ok := txTask.AccountPrevs[addr.String()]
+		if !ok {
+			var err error
+			enc0, err = domains.LatestAccount(addrBytes)
+			if err != nil {
+				return err
+			}
 		}
 		acc.Reset()
 		if len(enc0) > 0 {
@@ -350,16 +354,20 @@ type StateWriterBufferedV3 struct {
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
-	codePrevs    map[string]uint64
+	codePrevs    map[string][]byte
 
 	tx kv.Tx
 }
 
 func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
-		rs:         rs,
-		writeLists: newWriteList(),
+		rs: rs,
 		//trace:      true,
+		writeLists:   newWriteList(),
+		accountPrevs: make(map[string][]byte),
+		accountDels:  make(map[string]*accounts.Account),
+		storagePrevs: make(map[string][]byte),
+		codePrevs:    make(map[string][]byte),
 	}
 }
 
@@ -370,17 +378,17 @@ func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 
 func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	w.accountPrevs = nil
-	w.accountDels = nil
-	w.storagePrevs = nil
-	w.codePrevs = nil
+	w.accountPrevs = make(map[string][]byte)
+	w.accountDels = make(map[string]*accounts.Account)
+	w.storagePrevs = make(map[string][]byte)
+	w.codePrevs = make(map[string][]byte)
 }
 
 func (w *StateWriterBufferedV3) WriteSet() map[string]*libstate.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
@@ -390,6 +398,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
+	w.accountPrevs[string(address[:])] = accounts.SerialiseV3(original)
 	if original.Incarnation > account.Incarnation {
 		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
@@ -408,6 +417,13 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), code)
+	if incarnation > 0 {
+		prev, err := w.rs.domains.LatestCode(address[:])
+		if err != nil {
+			log.Error("UpdateAccountCode: read latest code", "addr", address.String(), "err", err)
+		}
+		w.codePrevs[string(address[:])] = prev
+	}
 	return nil
 }
 
@@ -416,6 +432,7 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		fmt.Printf("del acc: %x\n", address)
 	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
+	w.accountDels[string(address[:])] = original
 	return nil
 }
 
@@ -428,6 +445,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
+	w.storagePrevs[compositeS] = original.Bytes()
 	return nil
 }
 
