@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"math"
 	"math/big"
 	"strings"
 	"sync"
+
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

@@ -3,6 +3,7 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
