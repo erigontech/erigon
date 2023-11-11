@@ -207,7 +207,20 @@ func ExecV3(ctx context.Context,
 	outputTxNum := atomic.Uint64{}
 	blockComplete := atomic.Bool{}
 	blockComplete.Store(true)
+
 	var inputTxNum uint64
+	if execStage.BlockNumber > 0 {
+		blockNum = execStage.BlockNumber + 1
+	} else if !useExternalTx { //nolint
+		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
+		//if err != nil {
+		//	return err
+		//}
+		//if found {
+		//	stageProgress = _downloadedBlockNum - 1
+		//	block = _downloadedBlockNum - 1
+		//}
+	}
 
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
@@ -216,13 +229,6 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	// Cases:
-	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
-	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
-	outputTxNum.Store(inputTxNum)
-	blockNum = doms.BlockNum()
-	fmt.Printf("[dbg] e3 set bn1: blockNum=%d, %d\n", blockNum, execStage.BlockNumber)
 
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
@@ -249,10 +255,25 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	// Cases:
+	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
+	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
+	if doms.TxNum() > 0 {
+		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
+		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
+		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
+	}
+	if doms.BlockNum() > 0 {
+		blockNum = doms.BlockNum()
+		fmt.Printf("exec2 blockNum=%d\n", blockNum)
+	}
+	//inputTxNum = doms.TxNum() - offsetFromBlockBeginning
+	outputTxNum.Store(inputTxNum)
+	//blockNum = doms.BlockNum()
+
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
-	fmt.Printf("[dbg] e3: inputTxNum=%d, restored_block=%d, restored_txNum=%d, offsetFromBlockBeginning=%d\n", inputTxNum, blockNum, doms.TxNum(), offsetFromBlockBeginning)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
