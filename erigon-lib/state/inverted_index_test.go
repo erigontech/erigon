@@ -187,6 +187,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	ii.integrateFiles(sf, 0, 16)
 
@@ -204,6 +205,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
 		var cur kv.Cursor
