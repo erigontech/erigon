@@ -2022,12 +2022,6 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			}
 		}
 		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-		/*
-			if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
-					copy(seek[:len(k)-8], k[:len(k)-8])
-					continue
-				}
-		*/
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
