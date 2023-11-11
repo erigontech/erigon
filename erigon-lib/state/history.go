@@ -749,6 +749,15 @@ func (sf HistoryFiles) Close() {
 	if sf.efHistoryIdx != nil {
 		sf.efHistoryIdx.Close()
 	}
+	if sf.efExistence != nil {
+		sf.efExistence.Close()
+	}
+	if sf.warmLocality != nil {
+		sf.warmLocality.Close()
+	}
+	if sf.coldLocality != nil {
+		sf.coldLocality.Close()
+	}
 }
 func (h *History) reCalcRoFiles() {
 	roFiles := ctxFiles(h.files, true, false)

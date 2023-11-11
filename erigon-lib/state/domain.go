@@ -1145,18 +1145,10 @@ func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesBt != nil {
 		sf.valuesBt.Close()
 	}
-	if sf.historyDecomp != nil {
-		sf.historyDecomp.Close()
+	if sf.bloom != nil {
+		sf.bloom.Close()
 	}
-	if sf.historyIdx != nil {
-		sf.historyIdx.Close()
-	}
-	if sf.efHistoryDecomp != nil {
-		sf.efHistoryDecomp.Close()
-	}
-	if sf.efHistoryIdx != nil {
-		sf.efHistoryIdx.Close()
-	}
+	sf.HistoryFiles.Close()
 }
 
 // buildFiles performs potentially resource intensive operations of creating
