@@ -1011,6 +1011,7 @@ func (c Collation) Close() {
 	if c.historyComp != nil {
 		c.HistoryCollation.Close()
 	}
+	c.HistoryCollation.Close()
 }
 
 // collate gathers domain changes over the specified step, using read-only transaction,
