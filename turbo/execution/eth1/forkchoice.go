@@ -162,7 +162,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 
 	// If we don't have it, too bad
 	if fcuHeader == nil {
-		fmt.Println("A")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			Status:          execution.ExecutionStatus_MissingSegment,
@@ -183,7 +182,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		number: fcuHeader.Number.Uint64(),
 	})
 	for !isCanonicalHash {
-		fmt.Println("X")
 		newCanonicals = append(newCanonicals, &canonicalEntry{
 			hash:   currentParentHash,
 			number: currentParentNumber,
