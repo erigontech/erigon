@@ -162,6 +162,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 
 	// If we don't have it, too bad
 	if fcuHeader == nil {
+		fmt.Println("A")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			Status:          execution.ExecutionStatus_MissingSegment,
@@ -182,6 +183,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		number: fcuHeader.Number.Uint64(),
 	})
 	for !isCanonicalHash {
+		fmt.Println("X")
 		newCanonicals = append(newCanonicals, &canonicalEntry{
 			hash:   currentParentHash,
 			number: currentParentNumber,
@@ -250,19 +252,20 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	for _, canonicalSegment := range newCanonicals {
 		chainReader := stagedsync.NewChainReaderImpl(e.config, tx, e.blockReader, e.logger)
 
-		b := rawdb.ReadBlock(tx, canonicalSegment.hash, canonicalSegment.number)
+		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
+		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
 
-		if b == nil {
+		if b == nil || h == nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number))
 			return
 		}
 
-		if err := e.engine.VerifyHeader(chainReader, b.Header(), true); err != nil {
+		if err := e.engine.VerifyHeader(chainReader, h, true); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
 
-		if err := e.engine.VerifyUncles(chainReader, b.Header(), b.Uncles()); err != nil {
+		if err := e.engine.VerifyUncles(chainReader, h, b.Uncles); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
