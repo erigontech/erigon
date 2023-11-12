@@ -107,6 +107,7 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
+func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
