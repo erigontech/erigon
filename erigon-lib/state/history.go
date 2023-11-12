@@ -1096,6 +1096,14 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	if hc.readers == nil {
 		hc.readers = make([]*recsplit.IndexReader, len(hc.files))
 	}
+	{
+		//assert
+		for _, f := range hc.files {
+			if f.src.index == nil {
+				panic("assert: file has nil index " + f.src.decompressor.FileName())
+			}
+		}
+	}
 	r := hc.readers[i]
 	if r == nil {
 		r = hc.files[i].src.index.GetReaderFromPool()

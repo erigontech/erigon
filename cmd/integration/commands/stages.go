@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/turbo/builder"
@@ -957,32 +956,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		var blockNum uint64
-		var err error
-
-		if v3db, ok := db.(*temporal.DB); ok {
-			agg := v3db.Agg()
-			err = v3db.Update(ctx, func(tx kv.RwTx) error {
-				ct := agg.MakeContext()
-				defer ct.Close()
-				doms := libstate.NewSharedDomains(tx)
-				defer doms.Close()
-				_, err = doms.SeekCommitment(ctx, tx)
-				if err != nil {
-					return err
-				}
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				blockNum = doms.BlockNum()
-				return err
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		if err := reset2.ResetExec(ctx, db, chain, "", blockNum); err != nil {
+		if err := reset2.ResetExec(ctx, db, chain, ""); err != nil {
 			return err
 		}
 
@@ -1038,6 +1012,19 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if unwind > 0 {
+		if historyV3 {
+			doms := libstate.NewSharedDomains(tx)
+			defer doms.Close()
+			unwindToTxNum, _ := rawdbv3.TxNums.Min(tx, unwind)
+			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindToTxNum)
+			if err != nil {
+				return err
+			}
+			if ok {
+				fmt.Printf("blockNumWithCommitment: %d, %d\n", blockNumWithCommitment, unwind)
+			}
+			panic(1)
+		}
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
 		if err != nil {
