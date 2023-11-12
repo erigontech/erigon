@@ -1146,7 +1146,7 @@ func (sf StaticFiles) CleanupOnError() {
 	if sf.bloom != nil {
 		sf.bloom.Close()
 	}
-	sf.HistoryFiles.Close()
+	sf.HistoryFiles.CleanupOnError()
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -1171,7 +1171,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	closeComp := true
 	defer func() {
 		if closeComp {
-			hStaticFiles.Close()
+			hStaticFiles.CleanupOnError()
 			if valuesComp != nil {
 				valuesComp.Close()
 			}

@@ -736,7 +736,7 @@ type HistoryFiles struct {
 	coldLocality *LocalityIndexFiles
 }
 
-func (sf HistoryFiles) Close() {
+func (sf HistoryFiles) CleanupOnError() {
 	if sf.historyDecomp != nil {
 		sf.historyDecomp.Close()
 	}

@@ -191,7 +191,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
-		defer sf.Close()
+		defer sf.CleanupOnError()
 		c.Close()
 
 		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
@@ -238,7 +238,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 1, c, background.NewProgressSet())
 		require.NoError(t, err)
-		defer sf.Close()
+		defer sf.CleanupOnError()
 		c.Close()
 
 		g := sf.valuesDecomp.MakeGetter()
