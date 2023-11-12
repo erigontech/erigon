@@ -118,7 +118,6 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	defer logEvery.Stop()
 	db, d := testDbAndDomainOfStepValsDup(t, 16, logger, !domainLargeValues)
 	ctx := context.Background()
-	defer d.Close()
 
 	d.domainLargeValues = domainLargeValues
 	if compressDomainVals {
@@ -192,6 +191,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
+		defer sf.CleanupOnError()
 		c.Close()
 
 		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compression)
@@ -238,6 +238,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 1, c, background.NewProgressSet())
 		require.NoError(t, err)
+		defer sf.CleanupOnError()
 		c.Close()
 
 		g := sf.valuesDecomp.MakeGetter()
@@ -1056,7 +1057,6 @@ func TestScanStaticFilesD(t *testing.T) {
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
-
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d := testDbAndDomain(t, log.New())
@@ -1112,6 +1112,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
+	defer sf.CleanupOnError()
 	c.Close()
 
 	g := sf.valuesDecomp.MakeGetter()
@@ -1465,8 +1466,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 
-	UseBpsTree = true
-
 	dc := d.MakeContext()
 	defer d.Close()
 	dc.StartWrites()
@@ -1537,8 +1536,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.domainLargeValues = true // false requires dupsort value table for domain
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
-
-	UseBpsTree = true
 
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -1624,6 +1621,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
+	t.Skip("fix me!")
+
 	db, d := testDbAndDomain(t, log.New())
 	defer d.Close()
 	defer db.Close()

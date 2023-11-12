@@ -1,10 +1,10 @@
 module github.com/ledgerwatch/erigon-lib
 
-go 1.20
+go 1.21
 
 require (
 	github.com/erigontech/mdbx-go v0.36.2
-	github.com/ledgerwatch/interfaces v0.0.0-20231011121315-f58b806039f0
+	github.com/ledgerwatch/interfaces v0.0.0-20231031050643-c86352e41520
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -33,7 +33,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231018071743-d0f7bf588658
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231108094649-548d27768f8e
 	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.1.0
@@ -45,11 +45,11 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
-	golang.org/x/crypto v0.14.0
+	golang.org/x/crypto v0.15.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
-	golang.org/x/sync v0.4.0
-	golang.org/x/sys v0.13.0
-	golang.org/x/time v0.3.0
+	golang.org/x/sync v0.5.0
+	golang.org/x/sys v0.14.0
+	golang.org/x/time v0.4.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.31.0
@@ -143,7 +143,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
 	golang.org/x/mod v0.13.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -156,7 +156,7 @@ require (
 )
 
 replace (
-	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+	github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.7
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

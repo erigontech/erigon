@@ -45,7 +45,7 @@ import (
 
 // AggregationStep number of transactions in smalest static file
 const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
+//const HistoryV3AggregationStep = 3_125_000 / 50 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -75,7 +75,7 @@ var Defaults = Config{
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
-		BodyDownloadTimeoutSeconds: 30,
+		BodyDownloadTimeoutSeconds: 2,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -103,7 +103,8 @@ var Defaults = Config{
 		Produce:    true,
 	},
 
-	SilkwormEnabled: false,
+	// applies if SilkwormPath is set
+	SilkwormExecution: true,
 }
 
 func init() {
@@ -179,8 +180,6 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	P2PEnabled bool
-
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
 
@@ -254,8 +253,10 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormEnabled bool
-	SilkwormPath    string
+	SilkwormPath      string
+	SilkwormExecution bool
+	SilkwormRpcDaemon bool
+	SilkwormSentry    bool
 }
 
 type Sync struct {

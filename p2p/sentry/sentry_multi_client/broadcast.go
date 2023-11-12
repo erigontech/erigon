@@ -1,4 +1,4 @@
-package sentry
+package sentry_multi_client
 
 import (
 	"context"

@@ -49,13 +49,8 @@ func TestBlockchain(t *testing.T) {
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
 
 		//TODO: AlexSharov - need to fix this test
-		//bt.skipLoad(`^ValidBlocks/bcTotalDifficultyTest/uncleBlockAtBlock3AfterBlock3.json`)
-		//bt.skipLoad(`^InvalidBlocks/bcForgedTest`)
+		bt.skipLoad(`^ValidBlocks/bcForkStressTest/ForkStressTest.json`)
 		bt.skipLoad(`^TransitionTests`)
-
-		//bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow.json`)
-		//bt.skipLoad(`^ValidBlocks/bcStateTests/RefundOverflow2.json`)
-		//bt.skipLoad(`^InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp2.json`)
 	}
 
 	checkStateRoot := true

@@ -107,6 +107,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		LogAddrs:   ac.a.logAddrs,
 		LogTopics:  ac.a.logTopics,
 		roTx:       tx,
+		//trace:      true,
 	}
 
 	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
@@ -212,14 +213,28 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		return 0, err
 	}
 	if !ok {
-		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
-		bn, txn, err = rawdbv3.TxNums.Last(tx)
+		// handle case when we have no commitment, but have executed blocks
+		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
 		if err != nil {
 			return 0, err
 		}
-		toTx := max64(snapTxNum, txn)
+		if len(bnBytes) == 8 {
+			bn = binary.BigEndian.Uint64(bnBytes)
+			txn, err = rawdbv3.TxNums.Max(tx, bn)
+			if err != nil {
+				return 0, err
+			}
+		}
+		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
+		if snapTxNum > txn {
+			txn = snapTxNum
+			_, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
+			if err != nil {
+				return 0, err
+			}
+		}
 		sd.SetBlockNum(bn)
-		sd.SetTxNum(ctx, toTx)
+		sd.SetTxNum(ctx, txn)
 		newRh, err := sd.rebuildCommitment(ctx, tx)
 		if err != nil {
 			return 0, err
@@ -229,7 +244,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			sd.SetTxNum(ctx, 0)
 			return 0, nil
 		}
-		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
+		//fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 	}
 	if bn == 0 && txn == 0 {
 		sd.SetBlockNum(bn)
@@ -259,8 +274,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			txn = lastTxInBlock + 1
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
-			txsFromBlockBeginning = txn - firstTxInBlock
 			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
+			txsFromBlockBeginning = txn - firstTxInBlock
 			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
 		} else {
 			txn = firstTxInBlock

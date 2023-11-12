@@ -438,6 +438,10 @@ const (
 	// [Block Root] => [State Root]
 	BlockRootToStateRoot = "BlockRootToStateRoot"
 	StateRootToBlockRoot = "StateRootToBlockRoot"
+
+	BlockRootToBlockNumber = "BlockRootToBlockNumber"
+	BlockRootToBlockHash   = "BlockRootToBlockHash"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
@@ -608,6 +612,8 @@ var ChaindataTables = []string{
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
+	BlockRootToBlockHash,
+	BlockRootToBlockNumber,
 }
 
 const (
@@ -706,22 +712,22 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeIdx:               {Flags: DupSort},
 	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
-	//TblCommitmentHistoryVals: {Flags: DupSort},
-	TblCommitmentIdx:  {Flags: DupSort},
-	TblLogAddressKeys: {Flags: DupSort},
-	TblLogAddressIdx:  {Flags: DupSort},
-	TblLogTopicsKeys:  {Flags: DupSort},
-	TblLogTopicsIdx:   {Flags: DupSort},
-	TblTracesFromKeys: {Flags: DupSort},
-	TblTracesFromIdx:  {Flags: DupSort},
-	TblTracesToKeys:   {Flags: DupSort},
-	TblTracesToIdx:    {Flags: DupSort},
-	RAccountKeys:      {Flags: DupSort},
-	RAccountIdx:       {Flags: DupSort},
-	RStorageKeys:      {Flags: DupSort},
-	RStorageIdx:       {Flags: DupSort},
-	RCodeKeys:         {Flags: DupSort},
-	RCodeIdx:          {Flags: DupSort},
+	TblCommitmentHistoryVals: {Flags: DupSort},
+	TblCommitmentIdx:         {Flags: DupSort},
+	TblLogAddressKeys:        {Flags: DupSort},
+	TblLogAddressIdx:         {Flags: DupSort},
+	TblLogTopicsKeys:         {Flags: DupSort},
+	TblLogTopicsIdx:          {Flags: DupSort},
+	TblTracesFromKeys:        {Flags: DupSort},
+	TblTracesFromIdx:         {Flags: DupSort},
+	TblTracesToKeys:          {Flags: DupSort},
+	TblTracesToIdx:           {Flags: DupSort},
+	RAccountKeys:             {Flags: DupSort},
+	RAccountIdx:              {Flags: DupSort},
+	RStorageKeys:             {Flags: DupSort},
+	RStorageIdx:              {Flags: DupSort},
+	RCodeKeys:                {Flags: DupSort},
+	RCodeIdx:                 {Flags: DupSort},
 }
 
 var BorTablesCfg = TableCfg{

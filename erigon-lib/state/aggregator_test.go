@@ -160,10 +160,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	if rc.useBplus {
-		UseBpsTree = true
-		defer func() { UseBpsTree = false }()
-	}
+	//if rc.useBplus {
+	//	UseBpsTree = true
+	//	defer func() { UseBpsTree = false }()
+	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -562,7 +562,11 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
-	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(datasize.KB*8), logger)
+	bufSize := 8 * datasize.KB
+	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
+		bufSize = 1 * datasize.MB
+	}
+	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)

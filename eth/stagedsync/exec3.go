@@ -201,7 +201,8 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	var blockNum, stageProgress uint64
+	stageProgress := execStage.BlockNumber
+	var blockNum uint64
 	var maxTxNum uint64
 	outputTxNum := atomic.Uint64{}
 	blockComplete := atomic.Bool{}
@@ -209,7 +210,6 @@ func ExecV3(ctx context.Context,
 
 	var inputTxNum uint64
 	if execStage.BlockNumber > 0 {
-		stageProgress = execStage.BlockNumber
 		blockNum = execStage.BlockNumber + 1
 	} else if !useExternalTx { //nolint
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
@@ -273,23 +273,22 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	log.Debug("execv3 starting",
-		"inputTxNum", inputTxNum, "restored_block", blockNum,
-		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
-
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	if doms.TxNum() > inputTxNum {
+	if doms.TxNum() > 0 {
 		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
 		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
 		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
 	}
-	if doms.BlockNum() > blockNum {
+	if doms.BlockNum() > 0 {
 		blockNum = doms.BlockNum()
-		fmt.Printf("exec2 blockNum=%d\n", blockNum)
 	}
 	outputTxNum.Store(inputTxNum)
+
+	log.Warn("execv3 starting",
+		"inputTxNum", inputTxNum, "restored_block", blockNum,
+		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {

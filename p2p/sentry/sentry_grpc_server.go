@@ -25,6 +25,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -664,7 +666,9 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(ctx context.Context, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool, logger log.Logger) error {
+func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool, logger log.Logger) error {
+	dir.MustExist(dirs.DataDir)
+
 	discovery := func() enode.Iterator {
 		d, err := setupDiscovery(discoveryDNS)
 		if err != nil {

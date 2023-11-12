@@ -378,7 +378,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 			// Write state changes to db
 			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
-				panic(err)
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
@@ -677,3 +676,4 @@ func (cr *FakeChainReader) FrozenBlocks() uint64                                
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
+func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

@@ -81,9 +81,14 @@ type History struct {
 }
 
 type histCfg struct {
-	iiCfg              iiCfg
-	compression        FileCompression
+	iiCfg       iiCfg
+	compression FileCompression
+
+	//historyLargeValues: used to store values > 2kb (pageSize/2)
+	//small values - can be stored in more compact ways in db (DupSort feature)
+	//historyLargeValues=true - doesn't support keys of various length (all keys must have same length)
 	historyLargeValues bool
+
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 }
@@ -731,7 +736,7 @@ type HistoryFiles struct {
 	coldLocality *LocalityIndexFiles
 }
 
-func (sf HistoryFiles) Close() {
+func (sf HistoryFiles) CleanupOnError() {
 	if sf.historyDecomp != nil {
 		sf.historyDecomp.Close()
 	}
@@ -743,6 +748,15 @@ func (sf HistoryFiles) Close() {
 	}
 	if sf.efHistoryIdx != nil {
 		sf.efHistoryIdx.Close()
+	}
+	if sf.efExistence != nil {
+		sf.efExistence.Close()
+	}
+	if sf.warmLocality != nil {
+		sf.warmLocality.Close()
+	}
+	if sf.coldLocality != nil {
+		sf.coldLocality.Close()
 	}
 }
 func (h *History) reCalcRoFiles() {
@@ -2017,7 +2031,6 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			}
 		}
 		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
