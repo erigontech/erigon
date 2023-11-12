@@ -1112,7 +1112,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
-	defer sf.Close()
+	defer sf.CleanupOnError()
 	c.Close()
 
 	g := sf.valuesDecomp.MakeGetter()
