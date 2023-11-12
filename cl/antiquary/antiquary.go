@@ -117,8 +117,15 @@ func (a *Antiquary) Loop() error {
 		default:
 		}
 	}
+	frozenSlots := a.reader.FrozenSlots()
+	if frozenSlots != 0 {
+		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
+			return err
+		}
+	}
+
 	// write the indicies
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, a.reader.FrozenSlots()); err != nil {
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
 	log.Info("[Antiquary]: Restarting Caplin")
