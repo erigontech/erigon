@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime"
 	"testing"
 	"time"
 
@@ -60,10 +59,6 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -113,6 +108,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
+	defer sf.CleanupOnError()
 
 	g := sf.decomp.MakeGetter()
 	g.Reset(0)
@@ -189,25 +185,27 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 
-	tx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
-
 	ii.integrateFiles(sf, 0, 16)
 
-	from, to := ii.stepsRangeInDB(tx)
-	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
-	require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 	ic.Close()
+	err = db.Update(ctx, func(tx kv.RwTx) error {
+		from, to := ii.stepsRangeInDB(tx)
+		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
+		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-	ic = ii.MakeContext()
-	defer ic.Close()
+		ic = ii.MakeContext()
+		defer ic.Close()
 
-	err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
+		err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
+		require.NoError(t, err)
+		return nil
+	})
 	require.NoError(t, err)
-	err = tx.Commit()
+
 	require.NoError(t, err)
 	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
 		var cur kv.Cursor
@@ -220,7 +218,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Nil(t, k, table)
 	}
 
-	from, to = ii.stepsRangeInDB(tx)
+	from, to := ii.stepsRangeInDB(tx)
 	require.Equal(t, float64(0), from)
 	require.Equal(t, float64(0), to)
 }

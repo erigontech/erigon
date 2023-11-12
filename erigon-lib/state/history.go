@@ -736,7 +736,7 @@ type HistoryFiles struct {
 	coldLocality *LocalityIndexFiles
 }
 
-func (sf HistoryFiles) Close() {
+func (sf HistoryFiles) CleanupOnError() {
 	if sf.historyDecomp != nil {
 		sf.historyDecomp.Close()
 	}
@@ -748,6 +748,15 @@ func (sf HistoryFiles) Close() {
 	}
 	if sf.efHistoryIdx != nil {
 		sf.efHistoryIdx.Close()
+	}
+	if sf.efExistence != nil {
+		sf.efExistence.Close()
+	}
+	if sf.warmLocality != nil {
+		sf.warmLocality.Close()
+	}
+	if sf.coldLocality != nil {
+		sf.coldLocality.Close()
 	}
 }
 func (h *History) reCalcRoFiles() {
