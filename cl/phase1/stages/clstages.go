@@ -366,8 +366,8 @@ func ConsensusClStages(ctx context.Context,
 					if totalRequest > 2 {
 						sources = append(sources, rpcSource)
 					}
-					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
-					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
+					// 15 seconds is a good timeout for this
+					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
 					defer cn()
 
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
