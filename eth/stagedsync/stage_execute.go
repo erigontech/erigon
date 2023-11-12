@@ -507,6 +507,7 @@ Loop:
 		}
 
 		if err != nil {
+			fmt.Printf("dbg: %T, %+v %#v\n", err, err, err)
 			if errors.Is(err, silkworm.ErrInterrupted) {
 				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "block", blockNum, "err", err)
 				// Remount the termination signal

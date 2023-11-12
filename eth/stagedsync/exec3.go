@@ -753,11 +753,9 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					if !errors.Is(err, consensus.ErrInvalidBlock) {
-						return err
-					} else {
+					if !errors.Is(err, context.Canceled) {
 						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
-						if cfg.hd != nil {
+						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
 						if cfg.badBlockHalt {
@@ -903,7 +901,7 @@ Loop:
 		waitWorkers()
 	}
 
-	if b != nil {
+	if b != nil && !u.HasUnwindPoint() {
 		_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
 		if err != nil {
 			return err

@@ -1008,9 +1008,7 @@ func (c Collation) Close() {
 	if c.valuesComp != nil {
 		c.valuesComp.Close()
 	}
-	if c.historyComp != nil {
-		c.HistoryCollation.Close()
-	}
+	c.HistoryCollation.Close()
 }
 
 // collate gathers domain changes over the specified step, using read-only transaction,
@@ -1145,18 +1143,10 @@ func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesBt != nil {
 		sf.valuesBt.Close()
 	}
-	if sf.historyDecomp != nil {
-		sf.historyDecomp.Close()
+	if sf.bloom != nil {
+		sf.bloom.Close()
 	}
-	if sf.historyIdx != nil {
-		sf.historyIdx.Close()
-	}
-	if sf.efHistoryDecomp != nil {
-		sf.efHistoryDecomp.Close()
-	}
-	if sf.efHistoryIdx != nil {
-		sf.efHistoryIdx.Close()
-	}
+	sf.HistoryFiles.CleanupOnError()
 }
 
 // buildFiles performs potentially resource intensive operations of creating
@@ -1181,7 +1171,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	closeComp := true
 	defer func() {
 		if closeComp {
-			hStaticFiles.Close()
+			hStaticFiles.CleanupOnError()
 			if valuesComp != nil {
 				valuesComp.Close()
 			}
