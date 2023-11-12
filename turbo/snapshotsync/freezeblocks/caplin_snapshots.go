@@ -160,7 +160,7 @@ func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
 	var res []string
 	for _, seg := range s.BeaconBlocks.segments {
-		if seg.ranges.from == from && seg.ranges.to == to {
+		if seg.ranges.from >= from && seg.ranges.to <= to {
 			res = append(res, seg.seg.FilePath())
 		}
 	}
