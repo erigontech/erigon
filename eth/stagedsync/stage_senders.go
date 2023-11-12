@@ -123,7 +123,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	collectorSenders := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer collectorSenders.Close()
 
-	fmt.Println("AX")
 	errCh := make(chan senderRecoveryError)
 	go func() {
 		defer debug.LogPanic()
