@@ -69,6 +69,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	blockRoot := cfg.startingRoot
 	currentSlot := cfg.startingSlot
 
+	if !clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID) {
+		cfg.backfilling = false // disable backfilling if not on a supported network
+	}
 	executionBlocksCollector := etl.NewCollector("HistoryDownload", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionBlocksCollector.Close()
 	executionBlocksCollector.LogLvl(log.LvlDebug)

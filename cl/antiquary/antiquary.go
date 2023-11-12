@@ -30,6 +30,7 @@ type Antiquary struct {
 	ctx        context.Context
 	beaconDB   persistence.BlockSource
 	backfilled *atomic.Bool
+	cfg        *clparams.BeaconChainConfig
 }
 
 func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) *Antiquary {
@@ -45,6 +46,7 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 		reader:     reader,
 		ctx:        ctx,
 		backfilled: backfilled,
+		cfg:        cfg,
 	}
 }
 
@@ -52,6 +54,10 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 func (a *Antiquary) Loop() error {
 	if a.downloader == nil {
 		return nil // Just skip if we don't have a downloader
+	}
+	// Skip if we dont support backfilling for the current network
+	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
+		return nil
 	}
 	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
