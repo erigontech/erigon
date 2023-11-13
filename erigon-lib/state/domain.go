@@ -1015,6 +1015,15 @@ func (c Collation) Close() {
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
+	{ //assert
+		if txFrom%d.aggregationStep != 0 {
+			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
+		}
+		if txTo%d.aggregationStep != 0 {
+			panic(fmt.Errorf("assert: unexpected txTo=%d", txTo))
+		}
+	}
+
 	mxRunningCollations.Inc()
 	started := time.Now()
 	defer func() {
@@ -1036,7 +1045,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = compress.NewCompressor(ctx, "collate values", coll.valuesPath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 	comp := NewArchiveWriter(coll.valuesComp, d.compression)
@@ -1048,7 +1057,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	defer keysCursor.Close()
 
 	var (
-		pos       uint64
 		stepBytes = make([]byte, 8)
 		keySuffix = make([]byte, 256+8)
 		v         []byte
@@ -1064,63 +1072,39 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		defer valsDup.Close()
 	}
 
-	if err := func() error {
-		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
-			if err != nil {
-				return err
-			}
-			pos++
-			if !bytes.Equal(stepBytes, stepInDB) {
-				continue
-			}
-
-			copy(keySuffix, k)
-			copy(keySuffix[len(k):], stepInDB)
-
-			switch d.domainLargeValues {
-			case true:
-				v, err = roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
-			default:
-				v, err = valsDup.SeekBothRange(keySuffix[:len(k)], keySuffix[len(k):len(k)+8])
-				//fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
-				for {
-					k, _, _ := valsDup.Next()
-					if len(k) == 0 {
-						break
-					}
-
-					if bytes.HasPrefix(k, keySuffix[:len(k)]) {
-						//fmt.Printf("next: %x -> %x\n", k, v)
-					} else {
-						break
-					}
-				}
-			}
-			if err != nil {
-				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-
-			if err = comp.AddWord(k); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-			}
-			if err = comp.AddWord(v); err != nil {
-				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-			}
-			mxCollationSize.Inc()
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
+		if err != nil {
+			return coll, err
 		}
-		return nil
-	}(); err != nil {
-		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
+		if !bytes.Equal(stepBytes, stepInDB) {
+			continue
+		}
+
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], stepInDB)
+
+		switch d.domainLargeValues {
+		case true:
+			v, err = roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+		default:
+			v, err = valsDup.SeekBothRange(keySuffix[:len(k)], keySuffix[len(k):len(k)+8])
+			//fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
+		}
+		if err != nil {
+			return coll, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+
+		if err = comp.AddWord(k); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+		}
+		if err = comp.AddWord(v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+		}
 	}
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
+	mxCollationSize.Add(coll.valuesCount)
 	return coll, nil
 }
 

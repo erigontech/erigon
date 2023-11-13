@@ -178,7 +178,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	err = dc.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	{
-		c, err := d.collate(ctx, 0, 0, 7, tx)
+		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
 		require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
