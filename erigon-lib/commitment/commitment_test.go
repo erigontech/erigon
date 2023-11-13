@@ -44,7 +44,8 @@ func generateCellRow(t *testing.T, size int) (row []*Cell, bitmap uint16) {
 func TestBranchData_MergeHexBranches2(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
-	enc, _, err := EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
 		return row[i], nil
 	})
 
@@ -141,7 +142,8 @@ func TestBranchData_ExtractPlainKeys(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	enc, _, err := EncodeBranch(bm, bm, bm, cg)
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
 	extAPK, extSPK, err := enc.ExtractPlainKeys()
@@ -169,7 +171,8 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	enc, _, err := EncodeBranch(bm, bm, bm, cg)
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
 	extAPK, extSPK, err := enc.ExtractPlainKeys()

@@ -31,36 +31,47 @@ func NewMockState(t *testing.T) *MockState {
 	}
 }
 
-func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
+func (ms *MockState) TempDir() string {
+	return ms.t.TempDir()
+}
+
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	// updates already merged by trie
+	ms.cm[string(prefix)] = data
+	return nil
+}
+
+func (ms *MockState) GetBranch(prefix []byte) ([]byte, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
-		return exBytes[2:], nil // Skip touchMap, but keep afterMap
+		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
+		return exBytes, nil
 	}
 	return nil, nil
 }
 
-func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
+func (ms *MockState) GetAccount(plainKey []byte, cell *Cell) error {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
-		ms.t.Logf("accountFn not found key [%x]", plainKey)
+		ms.t.Logf("GetAccount not found key [%x]", plainKey)
 		cell.Delete = true
 		return nil
 	}
 	var ex Update
 	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
-		ms.t.Fatalf("accountFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
+		ms.t.Fatalf("GetAccount decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
 		return nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("accountFn key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
+		ms.t.Fatalf("GetAccount key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
 		return nil
 	}
 	if ex.Flags&StorageUpdate != 0 {
-		ms.t.Logf("accountFn reading storage item for key [%x]", plainKey)
-		return fmt.Errorf("storage read by accountFn")
+		ms.t.Logf("GetAccount reading storage item for key [%x]", plainKey)
+		return fmt.Errorf("storage read by GetAccount")
 	}
 	if ex.Flags&DeleteUpdate != 0 {
-		ms.t.Fatalf("accountFn reading deleted account for key [%x]", plainKey)
+		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)
 		return nil
 	}
 	if ex.Flags&BalanceUpdate != 0 {
@@ -81,37 +92,37 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 	return nil
 }
 
-func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
+func (ms *MockState) GetStorage(plainKey []byte, cell *Cell) error {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
-		ms.t.Logf("storageFn not found key [%x]", plainKey)
+		ms.t.Logf("GetStorage not found key [%x]", plainKey)
 		cell.Delete = true
 		return nil
 	}
 	var ex Update
 	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
-		ms.t.Fatalf("storageFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
+		ms.t.Fatalf("GetStorage decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
 		return nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("storageFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		ms.t.Fatalf("GetStorage key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
 		return nil
 	}
 	if ex.Flags&BalanceUpdate != 0 {
-		ms.t.Logf("storageFn reading balance for key [%x]", plainKey)
+		ms.t.Logf("GetStorage reading balance for key [%x]", plainKey)
 		return nil
 	}
 	if ex.Flags&NonceUpdate != 0 {
-		ms.t.Fatalf("storageFn reading nonce for key [%x]", plainKey)
+		ms.t.Fatalf("GetStorage reading nonce for key [%x]", plainKey)
 		return nil
 	}
 	if ex.Flags&CodeUpdate != 0 {
-		ms.t.Fatalf("storageFn reading codeHash for key [%x]", plainKey)
+		ms.t.Fatalf("GetStorage reading codeHash for key [%x]", plainKey)
 		return nil
 	}
 	if ex.Flags&DeleteUpdate != 0 {
-		ms.t.Fatalf("storageFn reading deleted item for key [%x]", plainKey)
+		ms.t.Fatalf("GetStorage reading deleted item for key [%x]", plainKey)
 		return nil
 	}
 	if ex.Flags&StorageUpdate != 0 {
