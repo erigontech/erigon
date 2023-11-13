@@ -241,7 +241,7 @@ func (ch codeChange) dirtied() (libcommon.Address, bool) {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) {
-	s.getStateObject(ch.account).setState(&ch.key, ch.prevalue)
+	s.getStateObject(ch.account).setState(ch.key, ch.prevalue)
 }
 
 func (ch storageChange) dirtied() (libcommon.Address, bool) {

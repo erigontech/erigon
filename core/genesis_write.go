@@ -578,7 +578,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			for key, value := range account.Storage {
 				key := key
 				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, &key, *val)
+				statedb.SetState(addr, key, *val)
 			}
 
 			if len(account.Constructor) > 0 {

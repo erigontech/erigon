@@ -94,7 +94,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
+			l.env.IntraBlockState().GetState(contract.Address(), address, &value)
 			l.storage[contract.Address()][address] = value.Bytes32()
 			outputStorage = true
 		}

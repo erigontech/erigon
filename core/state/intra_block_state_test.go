@@ -103,7 +103,7 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 				var key libcommon.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetState(addr, &key, *val)
+				s.SetState(addr, key, *val)
 			},
 			args: make([]int64, 2),
 		},
@@ -297,7 +297,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if obj := state.getStateObject(addr); obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
-				checkstate.GetState(addr, &key, &out)
+				checkstate.GetState(addr, key, &out)
 				if !checkeq("GetState("+key.Hex()+")", out, value) {
 					return err
 				}
@@ -306,7 +306,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if obj := checkstate.getStateObject(addr); obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
-				state.GetState(addr, &key, &out)
+				state.GetState(addr, key, &out)
 				if !checkeq("GetState("+key.Hex()+")", out, value) {
 					return err
 				}

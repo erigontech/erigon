@@ -42,7 +42,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
-				state.SetState(addr, &key, value)
+				state.SetState(addr, key, value)
 			}
 		}
 	}
