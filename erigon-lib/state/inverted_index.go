@@ -969,7 +969,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
@@ -1000,7 +1000,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 				return err
 			}
 			txNum := binary.BigEndian.Uint64(v)
-			if txNum >= txTo {
+			if txNum >= txTo { // [txFrom; txTo)
 				break
 			}
 
