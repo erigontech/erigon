@@ -37,6 +37,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -74,7 +75,8 @@ type Sentinel struct {
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
-	db persistence.RawBeaconBlockChain
+	db                persistence.RawBeaconBlockChain
+	bandwidthReporter *metrics.BandwidthCounter
 
 	discoverConfig       discover.Config
 	pubsub               *pubsub.PubSub
@@ -166,7 +168,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.bandwidthReporter, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
@@ -183,11 +185,12 @@ func New(
 	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:     ctx,
-		cfg:     cfg,
-		db:      db,
-		metrics: true,
-		logger:  logger,
+		ctx:               ctx,
+		cfg:               cfg,
+		db:                db,
+		metrics:           true,
+		logger:            logger,
+		bandwidthReporter: metrics.NewBandwidthCounter(),
 	}
 
 	// Setup discovery
@@ -235,7 +238,6 @@ func New(
 		return nil, err
 	}
 	s.host = host
-
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()

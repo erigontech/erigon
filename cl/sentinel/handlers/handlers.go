@@ -15,9 +15,11 @@ package handlers
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -25,35 +27,46 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
+var rateLimitInBytes = 300 * 1024 // 300 KB
+
+var rateLimitedProtocolsNames = []string{
+	communication.BeaconBlocksByRangeProtocolV2,
+	communication.BeaconBlocksByRootProtocolV2,
+}
+
 type ConsensusHandlers struct {
-	handlers      map[protocol.ID]network.StreamHandler
-	host          host.Host
-	metadata      *cltypes.Metadata
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
-	ctx           context.Context
+	handlers          map[protocol.ID]network.StreamHandler
+	host              host.Host
+	metadata          *cltypes.Metadata
+	beaconConfig      *clparams.BeaconChainConfig
+	genesisConfig     *clparams.GenesisConfig
+	ctx               context.Context
+	bandwidthReporter metrics.Reporter // We use this to report bandwidth usage to the metrics subsystem
 
 	beaconDB persistence.RawBeaconBlockChain
 }
 
 const (
 	SuccessfulResponsePrefix = 0x00
+	RateLimitedPrefix        = 0x02
 	ResourceUnavaiablePrefix = 0x03
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host, bandwidthReporter metrics.Reporter,
 	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		host:          host,
-		metadata:      metadata,
-		beaconDB:      db,
-		genesisConfig: genesisConfig,
-		beaconConfig:  beaconConfig,
-		ctx:           ctx,
+		host:              host,
+		metadata:          metadata,
+		beaconDB:          db,
+		genesisConfig:     genesisConfig,
+		beaconConfig:      beaconConfig,
+		ctx:               ctx,
+		bandwidthReporter: bandwidthReporter,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -62,8 +75,8 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		communication.StatusProtocolV1:              c.statusHandler,
 		communication.MetadataProtocolV1:            c.metadataV1Handler,
 		communication.MetadataProtocolV2:            c.metadataV2Handler,
-		communication.BeaconBlocksByRangeProtocolV1: c.blocksByRangeHandler,
-		communication.BeaconBlocksByRootProtocolV1:  c.beaconBlocksByRootHandler,
+		communication.BeaconBlocksByRangeProtocolV2: c.blocksByRangeHandler,
+		communication.BeaconBlocksByRootProtocolV2:  c.beaconBlocksByRootHandler,
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -88,6 +101,22 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		if err == nil {
 			if str, ok := rawVer.(string); ok {
 				l["agent"] = str
+			}
+		}
+		remoteID := s.Conn().RemotePeer()
+		if slices.Contains(rateLimitedProtocolsNames, name) {
+			stats := c.bandwidthReporter.GetBandwidthForPeer(remoteID)
+			if int(stats.RateOut) > rateLimitInBytes {
+				if err := ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix); err != nil {
+					l["err"] = err
+					s.Reset()
+					return
+				}
+				err = s.Close()
+				if err != nil {
+					l["err"] = err
+				}
+				return
 			}
 		}
 		err = fn(s)

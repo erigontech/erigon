@@ -96,6 +96,7 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 
 	options := []libp2p.Option{
 		privKeyOption(priKey),
+		libp2p.BandwidthReporter(s.bandwidthReporter),
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/caplin"),
 		libp2p.Transport(tcp.NewTCPTransport),
