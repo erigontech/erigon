@@ -63,7 +63,6 @@ var (
 
 	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
 	mxRunningFilesBuilding    = metrics.GetOrCreateCounter("domain_running_files_building")
-	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
 	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
 	mxPruneTookHistory        = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
@@ -1024,15 +1023,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}
 
-	mxRunningCollations.Inc()
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
-		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(started)
 	}()
 
-	coll.HistoryCollation, err = d.History.collate(step, txFrom, txTo, roTx)
+	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
@@ -1076,7 +1073,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if err != nil {
 			return coll, err
 		}
-		if !bytes.Equal(stepBytes, stepInDB) {
+		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
 			continue
 		}
 
@@ -1104,7 +1101,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
-	mxCollationSize.Add(coll.valuesCount)
+	mxCollationSize.Set(uint64(coll.valuesCount))
 	return coll, nil
 }
 

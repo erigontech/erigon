@@ -538,22 +538,15 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 
 			var collation Collation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
 				return err
-			})
-			if err != nil {
-				return err
-			}
-			if err != nil {
+			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 			}
 			collListMu.Lock()
 			collations = append(collations, collation)
 			collListMu.Unlock()
-
-			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)

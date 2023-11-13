@@ -1456,9 +1456,7 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
 	txFrom, txTo := stepFrom*ii.aggregationStep, stepTo*ii.aggregationStep
-	mxRunningCollations.Inc()
 	start := time.Now()
-	defer mxRunningCollations.Dec()
 	defer mxCollateTook.UpdateDuration(start)
 
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
@@ -1469,18 +1467,16 @@ func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, r
 	indexBitmaps := map[string]*roaring64.Bitmap{}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	for k, v, err = keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
-		var bitmap *roaring64.Bitmap
-		var ok bool
-		if bitmap, ok = indexBitmaps[string(v)]; !ok {
+		bitmap, ok := indexBitmaps[string(v)]
+		if !ok {
 			bitmap = bitmapdb.NewBitmap64()
 			indexBitmaps[string(v)] = bitmap
 		}

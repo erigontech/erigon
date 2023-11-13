@@ -606,9 +606,10 @@ func (c HistoryCollation) Close() {
 	for _, b := range c.indexBitmaps {
 		bitmapdb.ReturnToPool64(b)
 	}
+	c.indexBitmaps = nil
 }
 
-func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
 	var historyComp ArchiveWriter
 	var err error
 	closeComp := true
@@ -620,7 +621,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := h.vFilePath(step, step+1)
-	comp, err := compress.NewCompressor(context.Background(), "collate history", historyPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	comp, err := compress.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -634,24 +635,27 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 	indexBitmaps := map[string]*roaring64.Bitmap{}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	for k, v, err = keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err := keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
+		if err != nil {
+			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
+		}
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
-		var bitmap *roaring64.Bitmap
-		var ok bool
-
 		ks := string(v)
-		if bitmap, ok = indexBitmaps[ks]; !ok {
+		bitmap, ok := indexBitmaps[ks]
+		if !ok {
 			bitmap = bitmapdb.NewBitmap64()
 			indexBitmaps[ks] = bitmap
 		}
 		bitmap.Add(txNum)
-	}
-	if err != nil {
-		return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
+
+		select {
+		case <-ctx.Done():
+			return HistoryCollation{}, ctx.Err()
+		default:
+		}
 	}
 	keys := make([]string, 0, len(indexBitmaps))
 	for key := range indexBitmaps {
@@ -690,13 +694,13 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			if h.historyLargeValues {
 				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
 				if err != nil {
-					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, k, err)
+					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, key, err)
 				}
 				if len(val) == 0 {
 					val = nil
 				}
 				if err = historyComp.AddWord(val); err != nil {
-					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
+					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
 				}
 			} else {
 				val, err := cd.SeekBothRange(keyBuf[:lk], keyBuf[lk:])
@@ -710,13 +714,14 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 					val = nil
 				}
 				if err = historyComp.AddWord(val); err != nil {
-					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
+					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
 				}
 			}
 			historyCount++
 		}
 	}
 	closeComp = false
+	mxCollationSizeHist.Set(uint64(historyComp.Count()))
 	return HistoryCollation{
 		historyPath:  historyPath,
 		historyComp:  historyComp,
