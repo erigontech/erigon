@@ -73,6 +73,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineStyle": {
               "fill": "solid"
@@ -171,6 +172,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -270,6 +272,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -370,6 +373,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -513,6 +517,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -628,6 +633,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -726,6 +732,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineStyle": {
               "fill": "solid"
@@ -856,7 +863,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus"
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
       },
       "fieldConfig": {
         "defaults": {
@@ -877,6 +885,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
@@ -972,6 +981,32 @@
           "legendFormat": "running commitment: {{instance}}",
           "range": true,
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "domain_wal_flushes{instance=~\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "domain WAL flushes {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "domain_running_files_building{instance=~\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "files building {{instance}}",
+          "range": true,
+          "refId": "F"
         }
       ],
       "title": "Running Collations / Merges / Prunes",
@@ -1024,6 +1059,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -1120,6 +1156,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 2,
@@ -1372,6 +1409,7 @@
               "tooltip": false,
               "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -4038,7 +4076,7 @@
       "id": 180,
       "options": {
         "legend": {
-          "calcs": [
+          "ca[Olcs": [
             "mean",
             "last"
           ],
@@ -5255,7 +5293,8 @@
           ]
         },
         "datasource": {
-          "type": "prometheus"
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
         },
         "definition": "go_goroutines",
         "hide": 0,
@@ -5385,6 +5424,6 @@
   "timezone": "",
   "title": "Erigon Internals",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 5,
+  "version": 2,
   "weekStart": ""
 }

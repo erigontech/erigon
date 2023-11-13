@@ -118,7 +118,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
-		c, err := h.collate(0, 0, 8, tx)
+		c, err := h.collate(ctx, 0, 0, 8, tx)
 		require.NoError(err)
 		require.True(strings.HasSuffix(c.historyPath, "hist.0-1.v"))
 		require.Equal(6, c.historyCount)
@@ -226,7 +226,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		err = hc.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
-		c, err := h.collate(0, 0, 16, tx)
+		c, err := h.collate(ctx, 0, 0, 16, tx)
 		require.NoError(err)
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -361,7 +361,7 @@ func TestHistoryHistory(t *testing.T) {
 		// Leave the last 2 aggregation steps un-collated
 		for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
 			func() {
-				c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
+				c, err := h.collate(ctx, step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
 				require.NoError(err)
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
@@ -399,7 +399,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
-		c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
+		c, err := h.collate(ctx, step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
 		require.NoError(err)
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)

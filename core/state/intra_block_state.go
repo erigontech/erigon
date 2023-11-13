@@ -142,11 +142,15 @@ func (sdb *IntraBlockState) Reset() {
 		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	*/
 
-	sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	//sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	clear(sdb.nilAccounts)
+	//sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	clear(sdb.stateObjects)
+	//sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	clear(sdb.stateObjectsDirty)
 	sdb.logs = make(map[libcommon.Hash][]*types.Log)
-	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	//sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0

@@ -248,7 +248,9 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
-	t.Skip("e3: fix me!")
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 
 	length := 10
 
@@ -1172,9 +1174,6 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := mock.Mock(t), mock.Mock(t)
