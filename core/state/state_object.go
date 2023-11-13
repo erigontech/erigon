@@ -140,7 +140,7 @@ func (so *stateObject) markSelfdestructed() {
 
 func (so *stateObject) touch() {
 	so.db.journal.append(touchChange{
-		account: &so.address,
+		account: so.address,
 	})
 	if so.address == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
@@ -205,7 +205,7 @@ func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
-			account:  &so.address,
+			account:  so.address,
 			key:      *key,
 			prevalue: so.fakeStorage[*key],
 		})
@@ -220,7 +220,7 @@ func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 	}
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:  &so.address,
+		account:  so.address,
 		key:      *key,
 		prevalue: prev,
 	})
@@ -294,7 +294,7 @@ func (so *stateObject) SubBalance(amount *uint256.Int) {
 
 func (so *stateObject) SetBalance(amount *uint256.Int) {
 	so.db.journal.append(balanceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Balance,
 	})
 	so.setBalance(amount)
@@ -340,7 +340,7 @@ func (so *stateObject) Code() []byte {
 func (so *stateObject) SetCode(codeHash libcommon.Hash, code []byte) {
 	prevcode := so.Code()
 	so.db.journal.append(codeChange{
-		account:  &so.address,
+		account:  so.address,
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
@@ -355,7 +355,7 @@ func (so *stateObject) setCode(codeHash libcommon.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Nonce,
 	})
 	so.setNonce(nonce)

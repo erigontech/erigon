@@ -311,7 +311,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	}
 	if !needAccount {
 		sdb.journal.append(balanceIncrease{
-			account:  &addr,
+			account:  addr,
 			increase: *amount,
 		})
 		bi, ok := sdb.balanceInc[addr]
@@ -410,7 +410,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 		return false
 	}
 	sdb.journal.append(selfdestructChange{
-		account:     &addr,
+		account:     addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: *stateObject.Balance(),
 	})
@@ -442,7 +442,7 @@ func (sdb *IntraBlockState) SetTransientState(addr libcommon.Address, key libcom
 	}
 
 	sdb.journal.append(transientStorageChange{
-		account:  &addr,
+		account:  addr,
 		key:      key,
 		prevalue: prev,
 	})
@@ -525,7 +525,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
-		sdb.journal.append(createObjectChange{account: &addr})
+		sdb.journal.append(createObjectChange{account: addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
 	}

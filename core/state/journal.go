@@ -28,7 +28,7 @@ type journalEntry interface {
 	revert(*IntraBlockState)
 
 	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() *libcommon.Address
+	dirtied() (libcommon.Address, bool)
 }
 
 // journal contains the list of state modifications applied since the last state
@@ -49,8 +49,8 @@ func newJournal() *journal {
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
 	j.entries = append(j.entries, entry)
-	if addr := entry.dirtied(); addr != nil {
-		j.dirties[*addr]++
+	if addr, ok := entry.dirtied(); ok {
+		j.dirties[addr]++
 	}
 }
 
@@ -62,9 +62,9 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		j.entries[i].revert(statedb)
 
 		// Drop any dirty tracking induced by the change
-		if addr := j.entries[i].dirtied(); addr != nil {
-			if j.dirties[*addr]--; j.dirties[*addr] == 0 {
-				delete(j.dirties, *addr)
+		if addr, ok := j.entries[i].dirtied(); ok {
+			if j.dirties[addr]--; j.dirties[addr] == 0 {
+				delete(j.dirties, addr)
 			}
 		}
 	}
@@ -86,46 +86,46 @@ func (j *journal) length() int {
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
-		account *libcommon.Address
+		account libcommon.Address
 	}
 	resetObjectChange struct {
 		account *libcommon.Address
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     *libcommon.Address
+		account     libcommon.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account *libcommon.Address
+		account libcommon.Address
 		prev    uint256.Int
 	}
 	balanceIncrease struct {
-		account  *libcommon.Address
+		account  libcommon.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account *libcommon.Address
+		account libcommon.Address
 		prev    uint64
 	}
 	storageChange struct {
-		account  *libcommon.Address
+		account  libcommon.Address
 		key      libcommon.Hash
 		prevalue uint256.Int
 	}
 	fakeStorageChange struct {
-		account  *libcommon.Address
+		account  libcommon.Address
 		key      libcommon.Hash
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account  *libcommon.Address
+		account  libcommon.Address
 		prevcode []byte
 		prevhash libcommon.Hash
 	}
@@ -138,7 +138,7 @@ type (
 		txhash libcommon.Hash
 	}
 	touchChange struct {
-		account *libcommon.Address
+		account libcommon.Address
 	}
 
 	// Changes to the access list
@@ -151,39 +151,39 @@ type (
 	}
 
 	transientStorageChange struct {
-		account  *libcommon.Address
+		account  libcommon.Address
 		key      libcommon.Hash
 		prevalue uint256.Int
 	}
 )
 
 func (ch createObjectChange) revert(s *IntraBlockState) {
-	delete(s.stateObjects, *ch.account)
-	delete(s.stateObjectsDirty, *ch.account)
+	delete(s.stateObjects, ch.account)
+	delete(s.stateObjectsDirty, ch.account)
 }
 
-func (ch createObjectChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch createObjectChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) {
 	s.setStateObject(*ch.account, ch.prev)
 }
 
-func (ch resetObjectChange) dirtied() *libcommon.Address {
-	return nil
+func (ch resetObjectChange) dirtied() (a libcommon.Address, ok bool) {
+	return a, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) {
-	obj := s.getStateObject(*ch.account)
+	obj := s.getStateObject(ch.account)
 	if obj != nil {
 		obj.selfdestructed = ch.prev
 		obj.setBalance(&ch.prevbalance)
 	}
 }
 
-func (ch selfdestructChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch selfdestructChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 var ripemd = libcommon.HexToAddress("0000000000000000000000000000000000000003")
@@ -191,85 +191,85 @@ var ripemd = libcommon.HexToAddress("0000000000000000000000000000000000000003")
 func (ch touchChange) revert(s *IntraBlockState) {
 }
 
-func (ch touchChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch touchChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch balanceChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setBalance(&ch.prev)
+	s.getStateObject(ch.account).setBalance(&ch.prev)
 }
 
-func (ch balanceChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch balanceChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) {
-	if bi, ok := s.balanceInc[*ch.account]; ok {
+	if bi, ok := s.balanceInc[ch.account]; ok {
 		bi.increase.Sub(&bi.increase, &ch.increase)
 		bi.count--
 		if bi.count == 0 {
-			delete(s.balanceInc, *ch.account)
+			delete(s.balanceInc, ch.account)
 		}
 	}
 }
 
-func (ch balanceIncrease) dirtied() *libcommon.Address {
-	return ch.account
+func (ch balanceIncrease) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
-func (ch balanceIncreaseTransfer) dirtied() *libcommon.Address {
-	return nil
+func (ch balanceIncreaseTransfer) dirtied() (a libcommon.Address, ok bool) {
+	return a, false
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) {
 	ch.bi.transferred = false
 }
 func (ch nonceChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setNonce(ch.prev)
+	s.getStateObject(ch.account).setNonce(ch.prev)
 }
 
-func (ch nonceChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch nonceChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch codeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setCode(ch.prevhash, ch.prevcode)
+	s.getStateObject(ch.account).setCode(ch.prevhash, ch.prevcode)
 }
 
-func (ch codeChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch codeChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch storageChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setState(&ch.key, ch.prevalue)
+	s.getStateObject(ch.account).setState(&ch.key, ch.prevalue)
 }
 
-func (ch storageChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch storageChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).fakeStorage[ch.key] = ch.prevalue
+	s.getStateObject(ch.account).fakeStorage[ch.key] = ch.prevalue
 }
 
-func (ch fakeStorageChange) dirtied() *libcommon.Address {
-	return ch.account
+func (ch fakeStorageChange) dirtied() (libcommon.Address, bool) {
+	return ch.account, true
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) {
-	s.setTransientState(*ch.account, ch.key, ch.prevalue)
+	s.setTransientState(ch.account, ch.key, ch.prevalue)
 }
 
-func (ch transientStorageChange) dirtied() *libcommon.Address {
-	return nil
+func (ch transientStorageChange) dirtied() (a libcommon.Address, ok bool) {
+	return
 }
 
 func (ch refundChange) revert(s *IntraBlockState) {
 	s.refund = ch.prev
 }
 
-func (ch refundChange) dirtied() *libcommon.Address {
-	return nil
+func (ch refundChange) dirtied() (a libcommon.Address, ok bool) {
+	return
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) {
@@ -282,8 +282,8 @@ func (ch addLogChange) revert(s *IntraBlockState) {
 	s.logSize--
 }
 
-func (ch addLogChange) dirtied() *libcommon.Address {
-	return nil
+func (ch addLogChange) dirtied() (a libcommon.Address, ok bool) {
+	return
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) {
@@ -299,14 +299,14 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) {
 	s.accessList.DeleteAddress(ch.address)
 }
 
-func (ch accessListAddAccountChange) dirtied() *libcommon.Address {
-	return nil
+func (ch accessListAddAccountChange) dirtied() (a libcommon.Address, ok bool) {
+	return
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) {
 	s.accessList.DeleteSlot(ch.address, ch.slot)
 }
 
-func (ch accessListAddSlotChange) dirtied() *libcommon.Address {
-	return nil
+func (ch accessListAddSlotChange) dirtied() (a libcommon.Address, ok bool) {
+	return
 }
