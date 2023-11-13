@@ -1466,7 +1466,6 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
-	hph.rootChecked = false
 	hph.root.hl = 0
 	hph.root.downHashedLen = 0
 	hph.root.apl = 0
@@ -1477,6 +1476,7 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.root.Balance.Clear()
 	hph.root.Nonce = 0
 	hph.rootTouched = false
+	hph.rootChecked = false
 	hph.rootPresent = true
 }
 
@@ -1744,6 +1744,8 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
+	hph.Reset()
+
 	if buf == nil {
 		// reset state to 'empty'
 		hph.currentKeyLen = 0
@@ -1758,19 +1760,16 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			hph.touchMap[i] = 0
 			hph.afterMap[i] = 0
 		}
-		hph.root = Cell{}
 		return nil
 	}
 	if hph.activeRows != 0 {
-		return fmt.Errorf("has active rows, could not reset state")
+		return fmt.Errorf("target trie has active rows, could not reset state before fold")
 	}
 
 	var s state
 	if err := s.Decode(buf); err != nil {
 		return err
 	}
-
-	hph.Reset()
 
 	if err := hph.root.Decode(s.Root); err != nil {
 		return err
@@ -1785,7 +1784,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	copy(hph.afterMap[:], s.AfterMap[:])
 
 	if hph.root.apl > 0 {
-		if err := hph.ctx.GetStorage(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
+		if err := hph.ctx.GetAccount(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
 			return err
 		}
 	} else if hph.root.spl > 0 {

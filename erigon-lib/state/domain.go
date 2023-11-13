@@ -1082,19 +1082,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				v, err = roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
 			default:
 				v, err = valsDup.SeekBothRange(keySuffix[:len(k)], keySuffix[len(k):len(k)+8])
-				//fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
-				for {
-					k, _, _ := valsDup.Next()
-					if len(k) == 0 {
-						break
-					}
-
-					if bytes.HasPrefix(k, keySuffix[:len(k)]) {
-						//fmt.Printf("next: %x -> %x\n", k, v)
-					} else {
-						break
-					}
-				}
 			}
 			if err != nil {
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
