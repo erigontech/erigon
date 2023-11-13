@@ -775,7 +775,7 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := ac.Prune(cc, ac.a.aggregatedStep.Load(), math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
+	if err := ac.Prune(cc, tx); err != nil { // prune part of retired data, before commit
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
@@ -800,11 +800,12 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
 
+	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
 	txTo := (step + 1) * ac.a.aggregationStep
 	var txFrom uint64
 

@@ -2081,7 +2081,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	defer keysCursor.Close()
 
 	var (
-		k, v          []byte
 		prunedKeys    uint64
 		prunedMaxStep uint64
 		prunedMinStep = uint64(math.MaxUint64)
@@ -2097,7 +2096,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		defer valsDup.Close()
 	}
 
-	for k, v, err = keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
+	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2110,43 +2109,37 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		limit--
 
-		k, v, err = keysCursorForDeletes.SeekBothExact(k, v)
-		if err != nil {
-			return err
-		}
 		seek = append(append(seek[:0], k...), v...)
-		//if bytes.HasPrefix(seek, hexutility.MustDecodeString("1a4a4de8fe37b308fea3eb786195af8c813e18f8196bcb830a40cd57f169692572197d70495a7c6d0184c5093dcc960e1384239e")) {
-		//	fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		//}
 		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 
 		mxPruneSizeDomain.Inc()
 		prunedKeys++
 
 		if dc.d.domainLargeValues {
-			//if bytes.HasPrefix(seek, hexutility.MustDecodeString("1a4a4de8fe37b308fea3eb786195af8c813e18f8196bcb830a40cd57f169692572197d70495a7c6d0184c5093dcc960e1384239e")) {
-			//	fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-			//}
 			//fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 			err = rwTx.Delete(dc.d.valsTable, seek)
+			if err != nil {
+				return fmt.Errorf("prune domain value: %w", err)
+			}
 		} else {
 			sv, err := valsDup.SeekBothRange(seek[:len(k)], seek[len(k):len(k)+len(v)])
 			if err != nil {
-				return err
+				return fmt.Errorf("prune domain value: %w", err)
 			}
 			if bytes.HasPrefix(sv, v) {
 				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 				err = valsDup.DeleteCurrent()
 				if err != nil {
-					return err
+					return fmt.Errorf("prune domain value: %w", err)
 				}
 			}
 		}
-		if err != nil {
-			return fmt.Errorf("prune domain value: %w", err)
-		}
 
-		if err = keysCursorForDeletes.DeleteCurrent(); err != nil { // invalidates kk, vv
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
 

@@ -609,6 +609,7 @@ func (c HistoryCollation) Close() {
 	c.indexBitmaps = nil //nolint
 }
 
+// [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
 	var historyComp ArchiveWriter
 	var err error
@@ -1073,6 +1074,8 @@ func (hc *HistoryContext) SetTxNum(v uint64) { hc.ic.SetTxNum(v) }
 func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
+
+// Prune [txFrom; txTo)
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !hc.CanPrune(rwTx) {
@@ -1093,7 +1096,6 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 	var (
 		txKey    [8]byte
-		k, v     []byte
 		valsC    kv.RwCursor
 		valsCDup kv.RwCursorDupSort
 	)
@@ -1115,9 +1117,12 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 	seek := make([]byte, 0, 256)
 	var pruneSize uint64
-	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+	for k, v, err := historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		if err != nil {
+			return err
+		}
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo { //[txFrom; txTo)
 			break
 		}
 		if limit == 0 {
