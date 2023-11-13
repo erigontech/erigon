@@ -33,6 +33,7 @@ import (
 )
 
 var rateLimitInBytes = 300 * 1024 // 300 KB
+var baseReqSurplus = 10 * 1024    // 10 KB
 
 var rateLimitedProtocolsNames = []string{
 	communication.BeaconBlocksByRangeProtocolV2,
@@ -119,6 +120,8 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				return
 			}
 		}
+		// When we receive a request signal 10kb surplus to the rate limit to avoid DDOS
+		c.bandwidthReporter.LogSentMessage(int64(baseReqSurplus))
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
