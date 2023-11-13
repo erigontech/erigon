@@ -153,6 +153,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
+
 	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
