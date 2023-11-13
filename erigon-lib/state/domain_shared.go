@@ -276,8 +276,10 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
 			txsFromBlockBeginning = txn - firstTxInBlock
-			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
+			//txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
+
+			//example: txn=1,firstTxInBlock=0 -> txsFromBlockBeginning=1
 		} else {
 			txn = firstTxInBlock
 		}

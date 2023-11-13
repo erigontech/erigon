@@ -564,6 +564,7 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *
 			fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		}
 
+		fmt.Printf("[dbg] SeekCommitment: %d\n", txn)
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 			ok = true

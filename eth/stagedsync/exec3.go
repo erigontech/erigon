@@ -230,14 +230,14 @@ func ExecV3(ctx context.Context,
 		k, v, _ := itttt.Next()
 		fmt.Printf("hist: %x, %x\n", k, v)
 	}
-	itttt2, err := applyTx.(kv.TemporalTx).IndexRange(kv.AccountsHistoryIdx, common.FromHex("0xF29A6c0f8eE500dC87d0d4EB8B26a6faC7A76767"), 2734370, -1, order.Asc, -1)
-	if err != nil {
-		panic(err)
-	}
-	for itttt2.HasNext() {
-		v, _ := itttt2.Next()
-		fmt.Printf("idx: %d\n", v)
-	}
+	//itttt2, err := applyTx.(kv.TemporalTx).IndexRange(kv.AccountsHistoryIdx, common.FromHex("0xF29A6c0f8eE500dC87d0d4EB8B26a6faC7A76767"), 2734370, -1, order.Asc, -1)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//for itttt2.HasNext() {
+	//	v, _ := itttt2.Next()
+	//	fmt.Printf("idx: %d\n", v)
+	//}
 
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
@@ -294,7 +294,7 @@ func ExecV3(ctx context.Context,
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	if doms.TxNum() > 0 {
-		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
+		inputTxNum = doms.TxNum() - offsetFromBlockBeginning + 1
 		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
 		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
 	}
