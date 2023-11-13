@@ -615,32 +615,32 @@ func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return dc.wal.addValue(key1, key2, nil)
 }
 
-func (d *DomainContext) update(key []byte, tx kv.RwTx) error {
+func (dc *DomainContext) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(d.hc.ic.txNum / d.d.aggregationStep))
+	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.hc.ic.txNum / dc.d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(d.d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(dc.d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *DomainContext) put(key, val []byte, tx kv.RwTx) error {
-	if err := d.update(key, tx); err != nil {
+func (dc *DomainContext) put(key, val []byte, tx kv.RwTx) error {
+	if err := dc.update(key, tx); err != nil {
 		return err
 	}
-	invertedStep := ^(d.hc.ic.txNum / d.d.aggregationStep)
+	invertedStep := ^(dc.hc.ic.txNum / dc.d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(d.d.valsTable, keySuffix, val)
+	return tx.Put(dc.d.valsTable, keySuffix, val)
 }
 
 // Deprecated
-func (d *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
+func (dc *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, _, err := d.GetLatest(key, nil, tx)
+	original, _, err := dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
@@ -648,23 +648,23 @@ func (d *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
 		return nil
 	}
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = d.hc.AddPrevValue(key1, key2, original); err != nil {
+	if err = dc.hc.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	return d.put(key, val, tx)
+	return dc.put(key, val, tx)
 }
 
 // Deprecated
-func (d *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
+func (dc *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, found, err := d.GetLatest(key, nil, tx)
+	original, found, err := dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return nil
 	}
-	return d.DeleteWithPrev(key1, key2, original)
+	return dc.DeleteWithPrev(key1, key2, original)
 }
 
 func (dc *DomainContext) SetTxNum(v uint64) {
