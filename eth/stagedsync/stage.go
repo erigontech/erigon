@@ -100,6 +100,7 @@ func ForkReset(badBlock libcommon.Hash) UnwindReason {
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
 	UnwindTo(unwindPoint uint64, reason UnwindReason)
+	HasUnwindPoint() bool
 }
 
 // UnwindState contains the information about unwind.

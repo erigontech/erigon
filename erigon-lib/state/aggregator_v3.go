@@ -538,22 +538,15 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 
 			var collation Collation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
 				return err
-			})
-			if err != nil {
-				return err
-			}
-			if err != nil {
+			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 			}
 			collListMu.Lock()
 			collations = append(collations, collation)
 			collListMu.Unlock()
-
-			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
@@ -590,7 +583,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 			var collation map[string]*roaring64.Bitmap
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, step+1, tx)
+				collation, err = d.collate(ctx, step, tx)
 				return err
 			})
 			if err != nil {
@@ -731,38 +724,6 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
-func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
-	if a.db == nil {
-		return nil
-	}
-	e, ctx := errgroup.WithContext(ctx)
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.accounts.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.storage.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.code.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.commitment.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.logAddrs.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.logTopics.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.tracesFrom.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.tracesTo.warmup(ctx, txFrom, limit, tx) })
-	})
-	return e.Wait()
-}
-
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
@@ -814,7 +775,7 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := ac.Prune(cc, ac.a.aggregatedStep.Load(), math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
+	if err := ac.Prune(cc, tx); err != nil { // prune part of retired data, before commit
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
@@ -839,11 +800,12 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
 
+	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
 	txTo := (step + 1) * ac.a.aggregationStep
 	var txFrom uint64
 
