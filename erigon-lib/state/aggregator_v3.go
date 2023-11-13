@@ -583,7 +583,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 			var collation map[string]*roaring64.Bitmap
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, step+1, tx)
+				collation, err = d.collate(ctx, step, tx)
 				return err
 			})
 			if err != nil {

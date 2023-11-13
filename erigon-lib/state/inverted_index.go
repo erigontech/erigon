@@ -1454,8 +1454,9 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 }
 
 // collate [stepFrom, stepTo)
-func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
-	txFrom, txTo := stepFrom*ii.aggregationStep, stepTo*ii.aggregationStep
+func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
+	stepTo := step + 1
+	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
 	start := time.Now()
 	defer mxCollateTook.UpdateDuration(start)
 
