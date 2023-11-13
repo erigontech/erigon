@@ -781,6 +781,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx, efHistoryIdx       *recsplit.Index
 		efExistence                    *ExistenceFilter
 		efHistoryComp                  *compress.Compressor
+		warmLocality                   *LocalityIndexFiles
 		rs                             *recsplit.RecSplit
 	)
 	closeComp := true
@@ -803,6 +804,12 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 			}
 			if efHistoryIdx != nil {
 				efHistoryIdx.Close()
+			}
+			if efExistence != nil {
+				efExistence.Close()
+			}
+			if warmLocality != nil {
+				warmLocality.Close()
 			}
 			if rs != nil {
 				rs.Close()
@@ -941,7 +948,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	rs.Close()
 	rs = nil
 
-	warmLocality, err := h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
+	warmLocality, err = h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
 	if err != nil {
 		return HistoryFiles{}, err
 	}

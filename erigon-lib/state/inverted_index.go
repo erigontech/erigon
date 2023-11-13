@@ -1511,15 +1511,13 @@ func (sf InvertedFiles) CleanupOnError() {
 
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
-	start := time.Now()
-	defer mxBuildTook.UpdateDuration(start)
-
 	var (
-		decomp    *compress.Decompressor
-		index     *recsplit.Index
-		existence *ExistenceFilter
-		comp      *compress.Compressor
-		err       error
+		decomp       *compress.Decompressor
+		index        *recsplit.Index
+		existence    *ExistenceFilter
+		comp         *compress.Compressor
+		warmLocality *LocalityIndexFiles
+		err          error
 	)
 	closeComp := true
 	defer func() {
@@ -1532,6 +1530,12 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 			if index != nil {
 				index.Close()
+			}
+			if existence != nil {
+				existence.Close()
+			}
+			if warmLocality != nil {
+				warmLocality.Close()
 			}
 		}
 	}()
@@ -1590,7 +1594,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		}
 	}
 
-	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step+1, ps)
+	warmLocality, err = ii.buildWarmLocality(ctx, decomp, step+1, ps)
 	if err != nil {
 		return InvertedFiles{}, fmt.Errorf("buildWarmLocality: %w", err)
 	}

@@ -1140,6 +1140,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	start := time.Now()
 	defer func() {
 		d.stats.LastFileBuildingTook = time.Since(start)
+		mxBuildTook.UpdateDuration(start)
 	}()
 
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
@@ -1147,8 +1148,13 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, err
 	}
 	valuesComp := collation.valuesComp
-	var valuesDecomp *compress.Decompressor
-	var valuesIdx *recsplit.Index
+
+	var (
+		valuesDecomp *compress.Decompressor
+		valuesIdx    *recsplit.Index
+		bt           *BtIndex
+		bloom        *ExistenceFilter
+	)
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -1161,6 +1167,12 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			}
 			if valuesIdx != nil {
 				valuesIdx.Close()
+			}
+			if bt != nil {
+				bt.Close()
+			}
+			if bloom != nil {
+				bloom.Close()
 			}
 		}
 	}()
@@ -1183,7 +1195,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 	}
 
-	var bt *BtIndex
 	{
 		btPath := d.kvBtFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
@@ -1191,7 +1202,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	var bloom *ExistenceFilter
 	{
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		if dir.FileExist(fPath) {
