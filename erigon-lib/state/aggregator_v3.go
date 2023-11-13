@@ -724,38 +724,6 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
-func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
-	if a.db == nil {
-		return nil
-	}
-	e, ctx := errgroup.WithContext(ctx)
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.accounts.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.storage.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.code.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.commitment.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.logAddrs.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.logTopics.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.tracesFrom.warmup(ctx, txFrom, limit, tx) })
-	})
-	e.Go(func() error {
-		return a.db.View(ctx, func(tx kv.Tx) error { return a.tracesTo.warmup(ctx, txFrom, limit, tx) })
-	})
-	return e.Wait()
-}
-
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }

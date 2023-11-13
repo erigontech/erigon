@@ -1635,51 +1635,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	ii.reCalcRoFiles()
 }
 
-func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
-	keysCursor, err := tx.CursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	idxC, err := tx.CursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-	k, v, err = keysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	txTo := txFrom + ii.aggregationStep
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = txFrom + limit
-	}
-	for ; k != nil; k, v, err = keysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		_, _ = idxC.SeekBothRange(v, k)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
-}
-
 func (ii *InvertedIndex) DisableReadAhead() {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {

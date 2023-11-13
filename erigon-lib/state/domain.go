@@ -1528,58 +1528,6 @@ func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
 	return k == nil && k2 == nil && isEmptyHist, nil
 }
 
-// nolint
-func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
-	domainKeysCursor, err := tx.CursorDupSort(d.keysTable)
-	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
-	}
-	defer domainKeysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	idxC, err := tx.CursorDupSort(d.keysTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-	valsC, err := tx.Cursor(d.valsTable)
-	if err != nil {
-		return err
-	}
-	defer valsC.Close()
-	k, v, err := domainKeysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	txTo := txFrom + d.aggregationStep
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = txFrom + limit
-	}
-	for ; k != nil; k, v, err = domainKeysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		_, _, _ = valsC.Seek(v[len(v)-8:])
-		_, _ = idxC.SeekBothRange(v[:len(v)-8], k)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
-	return d.History.warmup(ctx, txFrom, limit, tx)
-}
-
 func (dc *DomainContext) Rotate() flusher {
 	hf := dc.hc.Rotate()
 	if dc.wal != nil {

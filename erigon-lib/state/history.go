@@ -984,53 +984,6 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	h.reCalcRoFiles()
 }
 
-func (h *History) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
-	historyKeysCursor, err := tx.CursorDupSort(h.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
-	}
-	defer historyKeysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	valsC, err := tx.Cursor(h.historyValsTable)
-	if err != nil {
-		return err
-	}
-	defer valsC.Close()
-	k, v, err := historyKeysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	txTo := txFrom + h.aggregationStep
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = txFrom + limit
-	}
-	keyBuf := make([]byte, 256)
-	for ; k != nil; k, v, err = historyKeysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		copy(keyBuf, v)
-		binary.BigEndian.PutUint64(keyBuf[len(v):], txNum)
-		_, _, _ = valsC.Seek(keyBuf)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
-}
-
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	if h.historyLargeValues {
 		k, err := kv.FirstKey(tx, h.historyValsTable)
