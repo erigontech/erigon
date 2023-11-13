@@ -606,7 +606,7 @@ func (c HistoryCollation) Close() {
 	for _, b := range c.indexBitmaps {
 		bitmapdb.ReturnToPool64(b)
 	}
-	c.indexBitmaps = nil
+	c.indexBitmaps = nil //nolint
 }
 
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
