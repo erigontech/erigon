@@ -1572,9 +1572,16 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
+		if TRACE && dc.d.filenameBase == "accounts" {
+			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+		}
 		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
+	if TRACE && dc.d.filenameBase == "accounts" {
+		fmt.Printf("GetLatest(%s, %x) -> not found\n", dc.d.filenameBase, filekey)
+	}
+
 	return nil, false, nil
 }
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
@@ -1728,7 +1735,13 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		// if history returned marker of key creation
 		// domain must return nil
 		if len(v) == 0 {
+			if TRACE && dc.d.filenameBase == "accounts" {
+				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
+			}
 			return nil, nil
+		}
+		if TRACE && dc.d.filenameBase == "accounts" {
+			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
 		}
 		return v, nil
 	}
@@ -1866,7 +1879,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 				v = v[8:]
 			}
 		}
-
+		if TRACE && dc.d.filenameBase == "accounts" {
+			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
+		}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	}
@@ -1878,6 +1893,8 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	}
 	return v, found, nil
 }
+
+const TRACE = false
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	var cp CursorHeap

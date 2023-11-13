@@ -27,8 +27,11 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 		panic(fmt.Sprintf("type %T didn't satisfy interface", tx))
 	}
 }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64) {
+	fmt.Printf("[dbg] hist reader SetTxNum(%d)\n", txNum)
+	hr.txNum = txNum
+}
+func (hr *HistoryReaderV3) SetTrace(trace bool) { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (hr *HistoryReaderV3) ResetReadSet()                     {}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -220,6 +221,22 @@ func ExecV3(ctx context.Context,
 		//	stageProgress = _downloadedBlockNum - 1
 		//	block = _downloadedBlockNum - 1
 		//}
+	}
+	itttt, err := applyTx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, -1, -1, order.Asc, -1)
+	if err != nil {
+		panic(err)
+	}
+	for itttt.HasNext() {
+		k, v, _ := itttt.Next()
+		fmt.Printf("hist: %x, %x\n", k, v)
+	}
+	itttt2, err := applyTx.(kv.TemporalTx).IndexRange(kv.AccountsHistoryIdx, common.FromHex("0xF29A6c0f8eE500dC87d0d4EB8B26a6faC7A76767"), 2734370, -1, order.Asc, -1)
+	if err != nil {
+		panic(err)
+	}
+	for itttt2.HasNext() {
+		v, _ := itttt2.Next()
+		fmt.Printf("idx: %d\n", v)
 	}
 
 	// MA setio
@@ -699,8 +716,9 @@ Loop:
 				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
 			}
+			//fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)

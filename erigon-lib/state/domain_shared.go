@@ -212,6 +212,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
+	//fmt.Printf("SeekCommitment1: %d %d %t\n", bn, txn, ok)
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
@@ -274,8 +275,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			txn = lastTxInBlock + 1
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
-			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			txsFromBlockBeginning = txn - firstTxInBlock
+			txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
 			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
 		} else {
 			txn = firstTxInBlock
