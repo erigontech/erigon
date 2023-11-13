@@ -96,7 +96,7 @@ func (b beaconChainDatabaseFilesystem) GetRange(ctx context.Context, tx kv.Tx, f
 
 }
 
-func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) error {
+func (b beaconChainDatabaseFilesystem) PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error {
 	if err := beacon_indicies.RangeBlockRoots(ctx, tx, from, from+count, func(slot uint64, beaconBlockRoot libcommon.Hash) bool {
 		b.rawDB.DeleteBlock(ctx, slot, beaconBlockRoot)
 		return true

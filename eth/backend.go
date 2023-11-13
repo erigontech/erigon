@@ -853,7 +853,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentinel = client
 
 		go func() {
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}, backend.downloaderClient, true); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
@@ -1173,12 +1173,23 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
+	var discover bool
+	if err := s.chainDB.View(ctx, func(tx kv.Tx) error {
+		p, err := stages.GetStageProgress(tx, stages.Snapshots)
+		if err != nil {
+			return err
+		}
+		discover = p == 0
+		return nil
+	}); err != nil {
+		return err
+	}
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		// start embedded Downloader
-		s.downloader, err = downloader3.New(ctx, downloaderCfg, s.config.Dirs, s.logger, log.LvlDebug)
+		s.downloader, err = downloader3.New(ctx, downloaderCfg, s.config.Dirs, s.logger, log.LvlDebug, discover)
 		if err != nil {
 			return err
 		}
