@@ -44,7 +44,7 @@ type Cfg struct {
 	sn              *freezeblocks.CaplinSnapshots
 	antiquary       *antiquary.Antiquary
 
-	hasDownloaded bool
+	hasDownloaded, backfilling bool
 }
 
 type Args struct {
@@ -70,6 +70,7 @@ func ClStagesCfg(
 	sn *freezeblocks.CaplinSnapshots,
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
+	backfilling bool,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -85,6 +86,7 @@ func ClStagesCfg(
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
 		sn:              sn,
+		backfilling:     backfilling,
 	}
 }
 
@@ -261,7 +263,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, true, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

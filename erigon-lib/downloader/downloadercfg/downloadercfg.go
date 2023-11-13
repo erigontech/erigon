@@ -181,7 +181,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
-		DownloadTorrentFilesFromWebseed: true, ExpectedTorrentFilesHashes: torrentsHashes,
+		DownloadTorrentFilesFromWebseed: false, ExpectedTorrentFilesHashes: torrentsHashes,
 	}, nil
 }
 

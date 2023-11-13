@@ -203,6 +203,9 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 	roTx.Rollback()
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
 
 	paths := a.sn.SegFilePaths(from, to)
 	downloadItems := make([]*proto_downloader.DownloadItem, len(paths))
