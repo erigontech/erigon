@@ -15,12 +15,12 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -105,21 +105,22 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			}
 		}
 		remoteID := s.Conn().RemotePeer()
-		if slices.Contains(rateLimitedProtocolsNames, name) {
-			stats := c.bandwidthReporter.GetBandwidthForPeer(remoteID)
-			if int(stats.RateOut) > rateLimitInBytes {
-				if err := ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix); err != nil {
-					l["err"] = err
-					s.Reset()
-					return
-				}
-				err = s.Close()
-				if err != nil {
-					l["err"] = err
-				}
+		// if slices.Contains(rateLimitedProtocolsNames, name) {
+		stats := c.bandwidthReporter.GetBandwidthForPeer(remoteID)
+		if int(stats.RateOut) > rateLimitInBytes {
+			fmt.Println("rate limited", name, stats.RateOut)
+			if err := ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix); err != nil {
+				l["err"] = err
+				s.Reset()
 				return
 			}
+			err = s.Close()
+			if err != nil {
+				l["err"] = err
+			}
+			return
 		}
+		//}
 		// When we receive a request signal 10kb surplus to the rate limit to avoid DDOS
 		c.bandwidthReporter.LogSentMessage(int64(baseReqSurplus))
 		err = fn(s)
