@@ -435,9 +435,6 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 			return err
 		}
 	}
-	if err != nil {
-		return err
-	}
 
 	return s.ReopenFolder()
 }

@@ -2,6 +2,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -59,6 +60,9 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 	if seg.idxSlot == nil {
 		return nil, nil
 	}
+	if slot < seg.idxSlot.BaseDataID() {
+		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, seg.idxSlot.BaseDataID())
+	}
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 
 	gg := seg.seg.MakeGetter()
@@ -67,8 +71,9 @@ func (r *beaconSnapshotReader) ReadBlock(slot uint64) (*cltypes.SignedBeaconBloc
 		return nil, nil
 	}
 
+	buf = buf[:0]
 	buf, _ = gg.Next(buf)
-	if buf == nil {
+	if len(buf) == 0 {
 		return nil, nil
 	}
 	// Decompress this thing

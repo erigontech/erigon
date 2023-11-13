@@ -286,7 +286,7 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([
 func validateTorrentBytes(b []byte, torrentHashes []string) error {
 	var mi metainfo.MetaInfo
 	if len(torrentHashes) == 0 {
-		return fmt.Errorf("no snapshots provided")
+		return nil
 	}
 	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
 		return err
