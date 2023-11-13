@@ -1454,11 +1454,10 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 }
 
 // collate [stepFrom, stepTo)
-func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
-	txFrom, txTo := stepFrom*ii.aggregationStep, stepTo*ii.aggregationStep
-	mxRunningCollations.Inc()
+func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
+	stepTo := step + 1
+	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
 	start := time.Now()
-	defer mxRunningCollations.Dec()
 	defer mxCollateTook.UpdateDuration(start)
 
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
@@ -1469,18 +1468,16 @@ func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, r
 	indexBitmaps := map[string]*roaring64.Bitmap{}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	for k, v, err = keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
-		var bitmap *roaring64.Bitmap
-		var ok bool
-		if bitmap, ok = indexBitmaps[string(v)]; !ok {
+		bitmap, ok := indexBitmaps[string(v)]
+		if !ok {
 			bitmap = bitmapdb.NewBitmap64()
 			indexBitmaps[string(v)] = bitmap
 		}
@@ -1514,15 +1511,13 @@ func (sf InvertedFiles) CleanupOnError() {
 
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
-	start := time.Now()
-	defer mxBuildTook.UpdateDuration(start)
-
 	var (
-		decomp    *compress.Decompressor
-		index     *recsplit.Index
-		existence *ExistenceFilter
-		comp      *compress.Compressor
-		err       error
+		decomp       *compress.Decompressor
+		index        *recsplit.Index
+		existence    *ExistenceFilter
+		comp         *compress.Compressor
+		warmLocality *LocalityIndexFiles
+		err          error
 	)
 	closeComp := true
 	defer func() {
@@ -1535,6 +1530,12 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 			if index != nil {
 				index.Close()
+			}
+			if existence != nil {
+				existence.Close()
+			}
+			if warmLocality != nil {
+				warmLocality.Close()
 			}
 		}
 	}()
@@ -1593,7 +1594,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		}
 	}
 
-	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step+1, ps)
+	warmLocality, err = ii.buildWarmLocality(ctx, decomp, step+1, ps)
 	if err != nil {
 		return InvertedFiles{}, fmt.Errorf("buildWarmLocality: %w", err)
 	}
@@ -1632,51 +1633,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	ii.files.Set(fi)
 
 	ii.reCalcRoFiles()
-}
-
-func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
-	keysCursor, err := tx.CursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	idxC, err := tx.CursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-	k, v, err = keysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	txTo := txFrom + ii.aggregationStep
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = txFrom + limit
-	}
-	for ; k != nil; k, v, err = keysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		_, _ = idxC.SeekBothRange(v, k)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
 }
 
 func (ii *InvertedIndex) DisableReadAhead() {

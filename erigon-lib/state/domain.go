@@ -63,7 +63,6 @@ var (
 
 	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
 	mxRunningFilesBuilding    = metrics.GetOrCreateCounter("domain_running_files_building")
-	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
 	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
 	mxPruneTookHistory        = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
@@ -616,32 +615,32 @@ func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return dc.wal.addValue(key1, key2, nil)
 }
 
-func (d *DomainContext) update(key []byte, tx kv.RwTx) error {
+func (dc *DomainContext) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(d.hc.ic.txNum / d.d.aggregationStep))
+	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.hc.ic.txNum / dc.d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(d.d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(dc.d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *DomainContext) put(key, val []byte, tx kv.RwTx) error {
-	if err := d.update(key, tx); err != nil {
+func (dc *DomainContext) put(key, val []byte, tx kv.RwTx) error {
+	if err := dc.update(key, tx); err != nil {
 		return err
 	}
-	invertedStep := ^(d.hc.ic.txNum / d.d.aggregationStep)
+	invertedStep := ^(dc.hc.ic.txNum / dc.d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(d.d.valsTable, keySuffix, val)
+	return tx.Put(dc.d.valsTable, keySuffix, val)
 }
 
 // Deprecated
-func (d *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
+func (dc *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, _, err := d.GetLatest(key, nil, tx)
+	original, _, err := dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
@@ -649,23 +648,23 @@ func (d *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
 		return nil
 	}
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = d.hc.AddPrevValue(key1, key2, original); err != nil {
+	if err = dc.hc.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	return d.put(key, val, tx)
+	return dc.put(key, val, tx)
 }
 
 // Deprecated
-func (d *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
+func (dc *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, found, err := d.GetLatest(key, nil, tx)
+	original, found, err := dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return nil
 	}
-	return d.DeleteWithPrev(key1, key2, original)
+	return dc.DeleteWithPrev(key1, key2, original)
 }
 
 func (dc *DomainContext) SetTxNum(v uint64) {
@@ -1024,15 +1023,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}
 
-	mxRunningCollations.Inc()
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
-		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(started)
 	}()
 
-	coll.HistoryCollation, err = d.History.collate(step, txFrom, txTo, roTx)
+	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
@@ -1076,7 +1073,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if err != nil {
 			return coll, err
 		}
-		if !bytes.Equal(stepBytes, stepInDB) {
+		if !bytes.Equal(stepBytes, stepInDB) { // [txFrom; txTo)
 			continue
 		}
 
@@ -1104,7 +1101,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
-	mxCollationSize.Add(coll.valuesCount)
+	mxCollationSize.Set(uint64(coll.valuesCount))
 	return coll, nil
 }
 
@@ -1143,6 +1140,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	start := time.Now()
 	defer func() {
 		d.stats.LastFileBuildingTook = time.Since(start)
+		mxBuildTook.UpdateDuration(start)
 	}()
 
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
@@ -1150,8 +1148,13 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, err
 	}
 	valuesComp := collation.valuesComp
-	var valuesDecomp *compress.Decompressor
-	var valuesIdx *recsplit.Index
+
+	var (
+		valuesDecomp *compress.Decompressor
+		valuesIdx    *recsplit.Index
+		bt           *BtIndex
+		bloom        *ExistenceFilter
+	)
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -1164,6 +1167,12 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			}
 			if valuesIdx != nil {
 				valuesIdx.Close()
+			}
+			if bt != nil {
+				bt.Close()
+			}
+			if bloom != nil {
+				bloom.Close()
 			}
 		}
 	}()
@@ -1186,7 +1195,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 	}
 
-	var bt *BtIndex
 	{
 		btPath := d.kvBtFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
@@ -1194,7 +1202,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	var bloom *ExistenceFilter
 	{
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		if dir.FileExist(fPath) {
@@ -1519,58 +1526,6 @@ func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
 		return false, err
 	}
 	return k == nil && k2 == nil && isEmptyHist, nil
-}
-
-// nolint
-func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
-	domainKeysCursor, err := tx.CursorDupSort(d.keysTable)
-	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
-	}
-	defer domainKeysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	idxC, err := tx.CursorDupSort(d.keysTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-	valsC, err := tx.Cursor(d.valsTable)
-	if err != nil {
-		return err
-	}
-	defer valsC.Close()
-	k, v, err := domainKeysCursor.Seek(txKey[:])
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	txFrom = binary.BigEndian.Uint64(k)
-	txTo := txFrom + d.aggregationStep
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = txFrom + limit
-	}
-	for ; k != nil; k, v, err = domainKeysCursor.Next() {
-		if err != nil {
-			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
-		}
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		_, _, _ = valsC.Seek(v[len(v)-8:])
-		_, _ = idxC.SeekBothRange(v[:len(v)-8], k)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
-	return d.History.warmup(ctx, txFrom, limit, tx)
 }
 
 func (dc *DomainContext) Rotate() flusher {
