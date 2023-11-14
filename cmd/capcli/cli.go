@@ -538,7 +538,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
 			return nil
 		}
-		header, _, _, err := snReader.ReadHeader(i)
+		header, _, _, err := csn.ReadHeader(i)
 		if err != nil {
 			return err
 		}

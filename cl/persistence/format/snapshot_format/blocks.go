@@ -18,11 +18,6 @@ var buffersPool = sync.Pool{
 	New: func() interface{} { return &bytes.Buffer{} },
 }
 
-type ExecutionBlockReaderByNumber interface {
-	TransactionsSSZ(w io.Writer, number uint64, hash libcommon.Hash) error
-	WithdrawalsSZZ(w io.Writer, number uint64, hash libcommon.Hash) error
-}
-
 const (
 	blockBaseOffset = 100 /* Signature + Block Offset */ +
 		84 /* Slot + ProposerIndex + ParentRoot + StateRoot + Body Offset */ +
@@ -141,7 +136,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 }
 
 // ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.
-func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()

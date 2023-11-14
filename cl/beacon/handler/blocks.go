@@ -3,9 +3,10 @@ package handler
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"io"
 	"net/http"
+
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -99,17 +100,14 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 		return
 	}
 
-	blockReader, err = a.blockSource.BlockReader(ctx, blkHeader.Header.Slot, root)
+	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return
 	}
 	defer blockReader.Close()
-	blk := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
+	// Pack the response
 	version = new(clparams.StateVersion)
 	*version = a.beaconChainCfg.GetCurrentStateVersion(blkHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
-	if err = ssz_snappy.DecodeAndReadNoForkDigest(blockReader, blk, *version); err != nil {
-		return
-	}
 	data = blk
 	finalized = new(bool)
 	httpStatus = http.StatusAccepted
@@ -155,12 +153,11 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 		return
 	}
 
-	blockReader, err = a.blockSource.BlockReader(ctx, blkHeader.Header.Slot, root)
+	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return
 	}
 	defer blockReader.Close()
-	blk := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
 	version = new(clparams.StateVersion)
 	*version = a.beaconChainCfg.GetCurrentStateVersion(blkHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
 	if err = ssz_snappy.DecodeAndReadNoForkDigest(blockReader, blk, *version); err != nil {
