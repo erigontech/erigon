@@ -884,7 +884,7 @@ var (
 		Value: 5,
 	}
 	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
-		Name:  "beacon.api.write.timeout",
+		Name:  "beacon.api.ide.timeout",
 		Usage: "Sets the seconds for a write time out in the beacon api",
 		Value: 25,
 	}
