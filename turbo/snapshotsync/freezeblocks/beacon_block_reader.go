@@ -112,11 +112,9 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 	// root non-canonical? BAD
 	if !canonical {
-		fmt.Println("A")
 		return nil, nil
 	}
 	if signedHeader == nil {
-		fmt.Println("B")
 		return nil, nil
 	}
 	slot := signedHeader.Header.Slot
@@ -126,18 +124,15 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return data.Data, err
 	}
 	if r.eth1Getter == nil {
-		fmt.Println("D")
 		return nil, nil
 	}
 
 	seg, ok := view.BeaconBlocksSegment(slot)
 	if !ok {
-		fmt.Println("E")
 		return nil, nil
 	}
 
 	if seg.idxSlot == nil {
-		fmt.Println("F")
 		return nil, nil
 	}
 	if slot < seg.idxSlot.BaseDataID() {
@@ -148,14 +143,12 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	gg := seg.seg.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
-		fmt.Println("X")
 		return nil, nil
 	}
 
 	buf = buf[:0]
 	buf, _ = gg.Next(buf)
 	if len(buf) == 0 {
-		fmt.Println("XA")
 		return nil, nil
 	}
 	// Decompress this thing
