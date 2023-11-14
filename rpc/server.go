@@ -124,13 +124,13 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
 		if err != io.EOF {
-			codec.writeJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
+			codec.WriteJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
 		}
 		return
 	}
 	if batch {
 		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
-			codec.writeJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs))))
+			codec.WriteJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs))))
 		} else {
 			h.handleBatch(reqs)
 		}

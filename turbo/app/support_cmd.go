@@ -12,16 +12,27 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/net/http2"
 )
+
+const (
+	wsReadBuffer       = 1024
+	wsWriteBuffer      = 1024
+	wsPingInterval     = 60 * time.Second
+	wsPingWriteTimeout = 5 * time.Second
+	wsMessageSizeLimit = 32 * 1024 * 1024
+)
+
+var wsBufferPool = new(sync.Pool)
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
@@ -119,17 +130,14 @@ func (c *conn) SetWriteDeadline(time time.Time) error {
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
+// tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
+// needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-	diagnosticsClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
-	defer diagnosticsClient.CloseIdleConnections()
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
-
-	// Create a request object to send to the server
-	reader, writer := io.Pipe()
 
 	go func() {
 		select {
@@ -137,8 +145,6 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			cancel()
 		case <-ctx1.Done():
 		}
-		reader.Close()
-		writer.Close()
 	}()
 
 	type enode struct {
@@ -206,21 +212,19 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx1, http.MethodPost, diagnosticsUrl, reader)
+	dialer := websocket.Dialer{
+		ReadBufferSize:  wsReadBuffer,
+		WriteBufferSize: wsWriteBuffer,
+		WriteBufferPool: wsBufferPool,
+	}
+
+	conn, resp, err := dialer.DialContext(ctx1, diagnosticsUrl, nil)
 
 	if err != nil {
 		return err
 	}
 
-	// Create a connection
-	// Apply given context to the sent request
-	resp, err := diagnosticsClient.Do(req)
-
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusSwitchingProtocols {
 		return fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
 	}
 
@@ -230,7 +234,10 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		Nodes    []*info  `json:"nodes"`
 	}
 
-	err = json.NewEncoder(writer).Encode(&connectionInfo{
+	codec := rpc.NewWebsocketCodec(conn)
+	defer codec.Close()
+
+	err = codec.WriteJSON(ctx1, &connectionInfo{
 		Version:  Version,
 		Sessions: sessionIds,
 		Nodes: func() (replies []*info) {
@@ -247,12 +254,6 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 
 	logger.Info("Connected")
-
-	codec := rpc.NewCodec(&conn{
-		ReadCloser: resp.Body,
-		PipeWriter: writer,
-	})
-	defer codec.Close()
 
 	for {
 		requests, _, err := codec.ReadBatch()
@@ -306,11 +307,10 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				}
 
 				debugURL := node.debugURL + "/debug/" + requests[0].Method + queryString
-
 				debugResponse, err := metricsClient.Get(debugURL)
 
 				if err != nil {
-					return json.NewEncoder(writer).Encode(&nodeResponse{
+					return codec.WriteJSON(ctx1, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    http.StatusFailedDependency,
@@ -322,9 +322,10 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 				defer debugResponse.Body.Close()
 
-				if resp.StatusCode != http.StatusOK {
+				//Websocket ok message
+				if resp.StatusCode != http.StatusSwitchingProtocols {
 					body, _ := io.ReadAll(debugResponse.Body)
-					return json.NewEncoder(writer).Encode(&nodeResponse{
+					return codec.WriteJSON(ctx1, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    int64(resp.StatusCode),
@@ -339,7 +340,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				switch debugResponse.Header.Get("Content-Type") {
 				case "application/json":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return json.NewEncoder(writer).Encode(&nodeResponse{
+						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    http.StatusInternalServerError,
@@ -347,10 +348,11 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 							},
 							Last: true,
 						})
+
 					}
 				case "application/octet-stream":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return json.NewEncoder(writer).Encode(&nodeResponse{
+						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    int64(http.StatusInternalServerError),
@@ -376,7 +378,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					buffer = bytes.NewBuffer(data)
 
 					if err != nil {
-						return json.NewEncoder(writer).Encode(&nodeResponse{
+						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    int64(http.StatusInternalServerError),
@@ -387,7 +389,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					}
 
 				default:
-					return json.NewEncoder(writer).Encode(&nodeResponse{
+					return codec.WriteJSON(ctx1, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    int64(http.StatusInternalServerError),
@@ -397,7 +399,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					})
 				}
 
-				return json.NewEncoder(writer).Encode(&nodeResponse{
+				return codec.WriteJSON(ctx1, &nodeResponse{
 					Id:     requestId,
 					Result: json.RawMessage(buffer.Bytes()),
 					Last:   true,
