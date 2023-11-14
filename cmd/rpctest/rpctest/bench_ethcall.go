@@ -98,14 +98,18 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			nTransactions = nTransactions + 1
 
 			var request string
+			var insertedOnlyIfSuccess bool
 			if latest {
 				request = reqGen.ethCallLatest(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input)
+				insertedOnlyIfSuccess = true
 			} else {
 				request = reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+				insertedOnlyIfSuccess = false
 			}
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
 
-			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+				insertedOnlyIfSuccess); err != nil {
 				return err
 			}
 		}

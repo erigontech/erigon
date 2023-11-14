@@ -73,7 +73,7 @@ func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64
 		reqGen.reqID++
 		request := reqGen.traceBlock(bn)
 		errCtx := fmt.Sprintf("block %d", bn)
-		if err := requestAndCompare(request, "trace_block", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+		if err := requestAndCompare(request, "trace_block", errCtx, reqGen, needCompare, rec, errs, nil, /* insertOnlyIfSuccess */false); err != nil {
 			fmt.Println(err)
 			return
 		}

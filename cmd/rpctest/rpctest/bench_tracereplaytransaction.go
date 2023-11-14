@@ -59,7 +59,8 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 			reqGen.reqID++
 			request := reqGen.traceReplayTransaction(tx.Hash)
 			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "trace_replayTransaction", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+			if err := requestAndCompare(request, "trace_replayTransaction", errCtx, reqGen, needCompare, rec, errs, nil,
+                               /* insertOnlyIfSuccess */false); err != nil {
 				fmt.Println(err)
 				return
 			}

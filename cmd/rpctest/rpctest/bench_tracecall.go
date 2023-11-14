@@ -75,7 +75,7 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 			reqGen.reqID++
 			request := reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "trace_call", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+			if err := requestAndCompare(request, "trace_call", errCtx, reqGen, needCompare, rec, errs, nil, /* insertOnlyIfSuccess */false); err != nil {
 				return
 			}
 		}
