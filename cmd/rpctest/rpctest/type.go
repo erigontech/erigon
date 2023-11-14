@@ -263,9 +263,6 @@ type ParityListStorageKeysResult struct {
 	Result []hexutility.Bytes `json:"result"`
 }
 
-type OtsUncle struct {
-}
-
 type OtsTransaction struct {
 	BlockHash        libcommon.Hash     `json:"blockHash"`
 	BlockNumber      hexutil.Uint64     `json:"blockNumber"`
@@ -296,26 +293,26 @@ type OtsReceipt struct {
 
 type OtsFullBlock struct {
 	Difficulty hexutil.Big `json:"difficulty"`
-	//ExtraData        libcommon.Hash    `json:"extraData"` // To check
+	//ExtraData        libcommon.Hash    `json:"extraData"`
 	GasLimit hexutil.Big    `json:"gasLimit"`
 	GasUsed  hexutil.Big    `json:"gasUsed"`
 	Hash     libcommon.Hash `json:"hash"`
 	//Bloom    hexutility.Bytes  `json:"logsBloom" gencodec:"required"`
 	Miner libcommon.Address `json:"miner"`
-	//MixHash          libcommon.Hash    `json:"mixHash"` // To check
+	//MixHash          libcommon.Hash    `json:"mixHash"`
 	//Nonce  hexutil.Uint64 `json:"nonce"`
 	Number hexutil.Big `json:"number"`
-	//ParentHash       libcommon.Hash    `json:"parentHash"`   // To check
-	//ReceiptsRoot     libcommon.Hash    `json:"receiptsRoot"` // To check
-	//Sha3Uncles       libcommon.Hash    `json:"sha3Uncles"`   // To check
+	//ParentHash       libcommon.Hash    `json:"parentHash"`
+	//ReceiptsRoot     libcommon.Hash    `json:"receiptsRoot"`
+	//Sha3Uncles       libcommon.Hash    `json:"sha3Uncles"`
 	Size hexutil.Big `json:"size"`
-	//StateRoot        libcommon.Hash    `json:"stateRoot"` // To check
-	//Timestamp        hexutil.Big       `json:"timestamp"` // To check
+	//StateRoot        libcommon.Hash    `json:"stateRoot"`
+	//Timestamp        hexutil.Big       `json:"timestamp"`
 	TotalDifficulty  hexutil.Big      `json:"totalDifficulty"`
 	TransactionCount uint64           `json:"transactionCount"`
 	Transactions     []OtsTransaction `json:"transactions"`
 	TxRoot           libcommon.Hash   `json:"transactionsRoot"`
-	uncles           []OtsUncle       `json:"uncles"`
+	// uncles           []string       `json:"uncles"`
 }
 
 type OtsBlockTransactionsResult struct {
