@@ -104,7 +104,6 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 	if err != nil {
 		return
 	}
-	defer blockReader.Close()
 	// Pack the response
 	version = new(clparams.StateVersion)
 	*version = a.beaconChainCfg.GetCurrentStateVersion(blkHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
@@ -157,7 +156,6 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 	if err != nil {
 		return
 	}
-	defer blockReader.Close()
 	version = new(clparams.StateVersion)
 	*version = a.beaconChainCfg.GetCurrentStateVersion(blkHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
 	if err = ssz_snappy.DecodeAndReadNoForkDigest(blockReader, blk, *version); err != nil {
