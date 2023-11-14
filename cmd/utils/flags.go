@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 
@@ -862,6 +863,41 @@ var (
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
 	}
+	BeaconAPIFlag = cli.BoolFlag{
+		Name:  "beacon.api",
+		Usage: "Enable beacon API",
+		Value: false,
+	}
+	BeaconApiProtocolFlag = cli.StringFlag{
+		Name:  "beacon.api.protocol",
+		Usage: "Protocol for beacon API",
+		Value: "tcp",
+	}
+	BeaconApiReadTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.read.timeout",
+		Usage: "Sets the seconds for a read time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiWriteTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 25,
+	}
+	BeaconApiAddrFlag = cli.StringFlag{
+		Name:  "beacon.api.addr",
+		Usage: "sets the host to listen for beacon api requests",
+		Value: "localhost",
+	}
+	BeaconApiPortFlag = cli.UintFlag{
+		Name:  "beacon.api.port",
+		Usage: "sets the port to listen for beacon api requests",
+		Value: 5555,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1482,6 +1518,15 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.BeaconRouter.Active = ctx.Bool(BeaconAPIFlag.Name)
+	cfg.BeaconRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
+	cfg.BeaconRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
+	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
+}
+
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
 	if ctx.IsSet(SilkwormExecutionFlag.Name) {
@@ -1599,6 +1644,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
+	setBeaconAPI(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
