@@ -1,6 +1,7 @@
 package beacon
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 
 func ListenAndServe(api *handler.ApiHandler, routerCfg beacon_router_configuration.RouterConfiguration) {
 	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
+	fmt.Println(routerCfg.Address, routerCfg.Protocol)
 	server := &http.Server{
 		Handler:      newBeaconMiddleware(api),
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
