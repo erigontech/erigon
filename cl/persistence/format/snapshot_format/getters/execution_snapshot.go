@@ -119,6 +119,7 @@ func (r *ExecutionSnapshotReader) WithdrawalsSZZ(w io.Writer, number uint64, has
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 	// Get the body and fill both caches
 	body, err := r.blockReader.BodyWithTransactions(r.ctx, tx, hash, number)
 	if err != nil {
