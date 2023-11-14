@@ -3,24 +3,13 @@ package beacon
 import (
 	"net"
 	"net/http"
-	"time"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/log/v3"
 )
 
-// TODO(enriavil1): Make this configurable via flags
-type RouterConfiguration struct {
-	Active   bool
-	Protocol string
-	Address  string
-
-	ReadTimeTimeout time.Duration
-	IdleTimeout     time.Duration
-	WriteTimeout    time.Duration
-}
-
-func ListenAndServe(api *handler.ApiHandler, routerCfg *RouterConfiguration) {
+func ListenAndServe(api *handler.ApiHandler, routerCfg beacon_router_configuration.RouterConfiguration) {
 	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
 	server := &http.Server{
 		Handler:      newBeaconMiddleware(api),
