@@ -175,6 +175,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiPortFlag,
 	&utils.BeaconApiReadTimeoutFlag,
 	&utils.BeaconApiWriteTimeoutFlag,
+	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
 	&utils.TrustedSetupFile,
