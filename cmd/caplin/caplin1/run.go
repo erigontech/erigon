@@ -96,7 +96,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	logger := log.New("app", "caplin")
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
-	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconDB, beaconConfig)
+	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconDB, beaconConfig)
 
 	if caplinFreezer != nil {
 		if err := freezer2.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
