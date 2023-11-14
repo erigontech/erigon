@@ -3,10 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
-
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -68,7 +65,6 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 		blockId     *segmentID
 		root        libcommon.Hash
 		blkHeader   *cltypes.SignedBeaconBlockHeader
-		blockReader io.ReadCloser
 		isCanonical bool
 	)
 
@@ -120,7 +116,6 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 		blockId     *segmentID
 		root        libcommon.Hash
 		blkHeader   *cltypes.SignedBeaconBlockHeader
-		blockReader io.ReadCloser
 		isCanonical bool
 	)
 
@@ -158,10 +153,6 @@ func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized 
 	}
 	version = new(clparams.StateVersion)
 	*version = a.beaconChainCfg.GetCurrentStateVersion(blkHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
-	if err = ssz_snappy.DecodeAndReadNoForkDigest(blockReader, blk, *version); err != nil {
-		return
-	}
-
 	data = blk.Block.Body.Attestations
 	finalized = new(bool)
 	httpStatus = http.StatusAccepted
