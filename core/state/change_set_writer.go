@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
+var TraceLog bool
+
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
 	db             kv.RwTx
@@ -87,7 +89,9 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	//fmt.Printf("balance,%x,%d\n", address, &account.Balance)
+	if TraceLog {
+		fmt.Printf("balance,%x,%d\n", address, &account.Balance)
+	}
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
@@ -95,12 +99,16 @@ func (w *ChangeSetWriter) UpdateAccountData(address libcommon.Address, original,
 }
 
 func (w *ChangeSetWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
-	//fmt.Printf("code,%x,%x\n", address, code)
+	if TraceLog {
+		fmt.Printf("code,%x,%x\n", address, code)
+	}
 	return nil
 }
 
 func (w *ChangeSetWriter) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
-	//fmt.Printf("delete,%x\n", address)
+	if TraceLog {
+		fmt.Printf("delete,%x\n", address)
+	}
 	if original == nil || !original.Initialised {
 		return nil
 	}
@@ -109,7 +117,9 @@ func (w *ChangeSetWriter) DeleteAccount(address libcommon.Address, original *acc
 }
 
 func (w *ChangeSetWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
-	//fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
+	if TraceLog {
+		fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
+	}
 	if *original == *value {
 		return nil
 	}

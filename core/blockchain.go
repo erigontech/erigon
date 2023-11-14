@@ -19,7 +19,6 @@ package core
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -30,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -101,6 +101,9 @@ func ExecuteBlockEphemerally(
 		receipts    types.Receipts
 	)
 
+	state.TraceLog = block.NumberU64() == 14595203
+	ibs.SetTrace(state.TraceLog)
+
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
 		return nil, err
 	}
@@ -108,6 +111,10 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
+		if state.TraceLog {
+			fmt.Printf("XXX transaction %d, %x\n", i, tx.Hash())
+		}
+
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
