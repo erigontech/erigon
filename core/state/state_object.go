@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -251,8 +252,17 @@ func (so *stateObject) setState(key *libcommon.Hash, value uint256.Int) {
 
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(stateWriter StateWriter) error {
-	for key, value := range so.dirtyStorage {
-		value := value
+	keys := make([]string, len(so.dirtyStorage))
+	i := 0
+	for k := range so.dirtyStorage {
+		keys[i] = k.Hex()
+		i++
+	}
+	slices.Sort(keys)
+
+	for _, keyHex := range keys {
+		key := libcommon.HexToHash(keyHex)
+		value := so.dirtyStorage[key]
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
