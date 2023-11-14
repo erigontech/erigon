@@ -14,6 +14,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/format/chunk_encoding"
 )
 
+type ExecutionBlockReaderByNumber interface {
+	TransactionsSSZ(w io.Writer, number uint64, hash libcommon.Hash) error
+	WithdrawalsSZZ(w io.Writer, number uint64, hash libcommon.Hash) error
+}
+
 var buffersPool = sync.Pool{
 	New: func() interface{} { return &bytes.Buffer{} },
 }

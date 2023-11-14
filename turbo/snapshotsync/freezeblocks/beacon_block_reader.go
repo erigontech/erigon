@@ -56,9 +56,12 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	defer view.Close()
 
 	var buf []byte
-	if slot < r.sn.BlocksAvailable() {
+	if slot > r.sn.BlocksAvailable() {
 		data, err := r.beaconDB.GetBlock(ctx, tx, slot)
 		return data.Data, err
+	}
+	if r.eth1Getter == nil {
+		return nil, nil
 	}
 
 	seg, ok := view.BeaconBlocksSegment(slot)
@@ -116,9 +119,12 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 	slot := signedHeader.Header.Slot
 	var buf []byte
-	if slot < r.sn.BlocksAvailable() {
+	if slot > r.sn.BlocksAvailable() {
 		data, err := r.beaconDB.GetBlock(ctx, tx, slot)
 		return data.Data, err
+	}
+	if r.eth1Getter == nil {
+		return nil, nil
 	}
 
 	seg, ok := view.BeaconBlocksSegment(slot)

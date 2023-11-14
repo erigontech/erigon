@@ -384,6 +384,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+
 	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 	if err != nil {
 		return nil, err

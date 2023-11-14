@@ -11,24 +11,24 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type cacheEntry struct {
 	number uint64
 	hash   libcommon.Hash
 }
-type executionSnapshotReader struct {
+type ExecutionSnapshotReader struct {
 	ctx context.Context
 
-	blockReader freezeblocks.BlockReader
+	blockReader services.FullBlockReader
 
 	db               kv.RoDB
 	txsCache         *lru.Cache[cacheEntry, []byte]
 	withdrawalsCache *lru.Cache[cacheEntry, []byte]
 }
 
-func NewExecutionSnapshotReader(ctx context.Context, blockReader freezeblocks.BlockReader) ExecutionBlockReaderByNumber {
+func NewExecutionSnapshotReader(ctx context.Context, blockReader services.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
 	txsCache, err := lru.New[cacheEntry, []byte]("txsCache", 96)
 	if err != nil {
 		panic(err)
@@ -37,10 +37,10 @@ func NewExecutionSnapshotReader(ctx context.Context, blockReader freezeblocks.Bl
 	if err != nil {
 		panic(err)
 	}
-	return executionSnapshotReader{ctx: ctx, blockReader: blockReader, withdrawalsCache: withdrawalsCache, txsCache: txsCache}
+	return &ExecutionSnapshotReader{ctx: ctx, blockReader: blockReader, withdrawalsCache: withdrawalsCache, txsCache: txsCache, db: db}
 }
 
-func (r executionSnapshotReader) TransactionsSSZ(w io.Writer, number uint64, hash libcommon.Hash) error {
+func (r *ExecutionSnapshotReader) TransactionsSSZ(w io.Writer, number uint64, hash libcommon.Hash) error {
 	ok, err := r.lookupTransactionsInCache(w, number, hash)
 	if err != nil {
 		return err
@@ -107,13 +107,17 @@ func convertWithdrawalsToBytesSSZ(ws []*types.Withdrawal) []byte {
 	return ret
 }
 
-func (r executionSnapshotReader) WithdrawalsSZZ(w io.Writer, number uint64, hash libcommon.Hash) error {
+func (r *ExecutionSnapshotReader) WithdrawalsSZZ(w io.Writer, number uint64, hash libcommon.Hash) error {
 	ok, err := r.lookupWithdrawalsInCache(w, number, hash)
 	if err != nil {
 		return err
 	}
 	if ok {
 		return nil
+	}
+	tx, err := r.db.BeginRo(r.ctx)
+	if err != nil {
+		return err
 	}
 	// Get the body and fill both caches
 	body, err := r.blockReader.BodyWithTransactions(r.ctx, tx, hash, number)
@@ -140,7 +144,7 @@ func (r executionSnapshotReader) WithdrawalsSZZ(w io.Writer, number uint64, hash
 	return err
 }
 
-func (r executionSnapshotReader) lookupWithdrawalsInCache(w io.Writer, number uint64, hash libcommon.Hash) (bool, error) {
+func (r *ExecutionSnapshotReader) lookupWithdrawalsInCache(w io.Writer, number uint64, hash libcommon.Hash) (bool, error) {
 	var wsBytes []byte
 	var ok bool
 	if wsBytes, ok = r.withdrawalsCache.Get(cacheEntry{number: number, hash: hash}); !ok {
@@ -150,7 +154,7 @@ func (r executionSnapshotReader) lookupWithdrawalsInCache(w io.Writer, number ui
 	return true, err
 }
 
-func (r executionSnapshotReader) lookupTransactionsInCache(w io.Writer, number uint64, hash libcommon.Hash) (bool, error) {
+func (r *ExecutionSnapshotReader) lookupTransactionsInCache(w io.Writer, number uint64, hash libcommon.Hash) (bool, error) {
 	var wsBytes []byte
 	var ok bool
 	if wsBytes, ok = r.txsCache.Get(cacheEntry{number: number, hash: hash}); !ok {
