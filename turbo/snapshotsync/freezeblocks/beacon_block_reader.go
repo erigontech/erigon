@@ -113,8 +113,10 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	// root non-canonical? BAD
 	if !canonical {
 		return nil, nil
+		fmt.Println("A")
 	}
 	if signedHeader == nil {
+		fmt.Println("B")
 		return nil, nil
 	}
 	slot := signedHeader.Header.Slot
