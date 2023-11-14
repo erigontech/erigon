@@ -90,6 +90,21 @@ func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (libcommon.Hash, error) {
 	return blockRoot, nil
 }
 
+func WriteLastBeaconSnapshot(tx kv.RwTx, slot uint64) error {
+	return tx.Put(kv.LastBeaconSnapshot, []byte(kv.LastBeaconSnapshotKey), base_encoding.Encode64(slot))
+}
+
+func ReadLastBeaconSnapshot(tx kv.Tx) (uint64, error) {
+	val, err := tx.GetOne(kv.LastBeaconSnapshot, []byte(kv.LastBeaconSnapshotKey))
+	if err != nil {
+		return 0, err
+	}
+	if len(val) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64(val), nil
+}
+
 func MarkRootCanonical(ctx context.Context, tx kv.RwTx, slot uint64, blockRoot libcommon.Hash) error {
 	return tx.Put(kv.CanonicalBlockRoots, base_encoding.Encode64(slot), blockRoot[:])
 }

@@ -3,13 +3,14 @@ package devnet
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"math/big"
 	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	devnet_args "github.com/ledgerwatch/erigon/cmd/devnet/args"

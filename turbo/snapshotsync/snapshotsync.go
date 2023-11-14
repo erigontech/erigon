@@ -184,10 +184,6 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
-		return nil
-	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
-
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err == nil && stats.Completed {
