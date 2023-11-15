@@ -598,7 +598,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -735,7 +735,11 @@ Loop:
 				}
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
+					if errors.Is(txTask.Error, context.Canceled) {
+						return err
+					}
 					if txTask.Error != nil {
+						logger.Warn(fmt.Sprintf("[%s] Execution failed2", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", txTask.Error)
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err) //same as in stage_exec.go
 					}
 					if txTask.Final {
@@ -753,8 +757,11 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
+					if errors.Is(err, context.Canceled) {
+						return err
+					}
 					if !errors.Is(err, context.Canceled) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+						logger.Warn(fmt.Sprintf("[%s] Execution failed1", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
