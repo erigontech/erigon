@@ -252,9 +252,10 @@ func ExecV3(ctx context.Context,
 		outputTxNum.Store(inputTxNum)
 		//outputTxNum.Add(1)
 
+		_ = _max
+		//fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
-		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
 		return nil
 	}
 	if applyTx != nil {
