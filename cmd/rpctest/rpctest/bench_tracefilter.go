@@ -95,14 +95,14 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
 				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil, /* insertOnlyIfSuccess */false); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
 					fmt.Println(err)
 					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
 				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil, /* insertOnlyIfSuccess */false); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
 					fmt.Println(err)
 					return
 				}
