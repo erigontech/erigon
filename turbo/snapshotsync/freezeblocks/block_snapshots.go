@@ -1542,7 +1542,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 	fName := snaptype.IdxFileName(sn.From, sn.To, sn.T.String())
 	var result = true
 	switch sn.T {
-	case snaptype.Headers, snaptype.Bodies, snaptype.BorEvents, snaptype.BorSpans:
+	case snaptype.Headers, snaptype.Bodies, snaptype.BorEvents, snaptype.BorSpans, snaptype.BeaconBlocks:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false

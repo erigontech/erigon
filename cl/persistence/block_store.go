@@ -65,7 +65,7 @@ func (b *BeaconRpcSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, co
 }
 
 // a noop for rpc source since we always return new data
-func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ kv.RwTx, from uint64, count uint64) error {
+func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
 	return nil
 }
 
@@ -131,7 +131,7 @@ func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count
 	return out, nil
 }
 
-func (b *GossipSource) PurgeRange(ctx context.Context, _ kv.RwTx, from uint64, count uint64) error {
+func (b *GossipSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	initSize := count

@@ -354,3 +354,21 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 func IsLocal(path string) bool {
 	return isLocal(path)
 }
+
+func saveTorrent(torrentFilePath string, res []byte) error {
+	if len(res) == 0 {
+		return fmt.Errorf("try to write 0 bytes to file: %s", torrentFilePath)
+	}
+	f, err := os.Create(torrentFilePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err = f.Write(res); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}

@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"math/big"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -79,7 +80,7 @@ func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg, db kv.RoDB, blockReader
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) {
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, e.logger)
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, e.logger)
 
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
 	// e.startEngineMessageHandler()
