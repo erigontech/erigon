@@ -228,10 +228,13 @@ func ExecV3(ctx context.Context,
 		if inputTxNum == 0 {
 			return nil
 		}
+
 		inputTxNum++ // start execution from next txn
 		//++ may change blockNum, re-read it
+
 		var ok bool
 		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
+		fmt.Printf("[commitment] found block %d -> %d, %d -> %d\n", doms.BlockNum(), blockNum, inputTxNum, maxTxNum)
 		if err != nil {
 			return err
 		}
@@ -253,7 +256,7 @@ func ExecV3(ctx context.Context,
 		//outputTxNum.Add(1)
 
 		_ = _max
-		//fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
+		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
@@ -695,9 +698,9 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
 			}
-			//fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
+			fmt.Printf("[dbg] txNum: %d, hist=%t, blockNum=%d offsetFromBlockBeginning=%d\n", txTask.TxNum, txTask.HistoryExecution, blockNum, offsetFromBlockBeginning)
 			if txTask.HistoryExecution {
-				fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
+				//fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
