@@ -1,8 +1,11 @@
 package requests
 
 import (
+	"context"
 	"fmt"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -36,7 +39,7 @@ type StorageResult struct {
 func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
 	var result hexutility.Bytes
 
-	if err := reqGen.rpcCall(&result, Methods.ETHGetCode, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetCode, address, blockRef); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +49,7 @@ func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.
 func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.rpcCall(&result, Methods.ETHGetBalance, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetBalance, address, blockRef); err != nil {
 		return nil, err
 	}
 
@@ -56,7 +59,7 @@ func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockRef r
 func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.rpcCall(&result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {
 		return nil, err
 	}
 

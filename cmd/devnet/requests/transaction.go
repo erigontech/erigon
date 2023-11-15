@@ -2,6 +2,7 @@ package requests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -101,7 +102,7 @@ func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) 
 func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 	var result hexutil.Big
 
-	if err := reqGen.rpcCall(&result, Methods.ETHGasPrice); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGasPrice); err != nil {
 		return nil, err
 	}
 
@@ -111,7 +112,7 @@ func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
 	var result hexutility.Bytes
 
-	if err := reqGen.rpcCall(&result, Methods.ETHCall, args, blockRef, overrides); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHCall, args, blockRef, overrides); err != nil {
 		return nil, err
 	}
 
@@ -126,7 +127,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 		return libcommon.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if err := reqGen.rpcCall(&result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
 		return libcommon.Hash{}, err
 	}
 
@@ -149,17 +150,17 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
 	var result jsonrpc.RPCTransaction
 
-	if err := req.rpcCall(&result, Methods.ETHGetTransactionByHash, hash); err != nil {
+	if err := req.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error) {
+func (req *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error) {
 	var result types.Receipt
 
-	if err := req.rpcCall(&result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+	if err := req.rpcCall(ctx, &result, Methods.ETHGetTransactionReceipt, hash); err != nil {
 		return nil, err
 	}
 
