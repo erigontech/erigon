@@ -56,7 +56,7 @@ type SharedDomains struct {
 	txNum    uint64
 	blockNum atomic.Uint64
 	estSize  int
-	trace    bool
+	trace    bool //nolint
 	//muMaps   sync.RWMutex
 	walLock sync.RWMutex
 
@@ -196,13 +196,6 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 
 func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	return sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, sinceTx, untilTx)
-}
-
-func max64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
