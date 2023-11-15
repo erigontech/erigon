@@ -504,7 +504,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 
 	br := &snapshot_format.MockBlockReader{}
-	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconDB, beaconConfig)
 	for i := c.Slot; i < to; i++ {
 		// Read the original canonical slot
 		data, err := beaconDB.GetBlock(ctx, tx, i)
@@ -522,7 +522,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		if blk.Version() >= clparams.BellatrixVersion {
 			br.Block = blk.Block.Body.ExecutionPayload
 		}
-		blk2, err := snReader.ReadBlock(i)
+		blk2, err := snReader.ReadBlockBySlot(ctx, tx, i)
 		if err != nil {
 			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
 			return nil
@@ -538,7 +538,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
 			return nil
 		}
-		header, _, _, err := snReader.ReadHeader(i)
+		header, _, _, err := csn.ReadHeader(i)
 		if err != nil {
 			return err
 		}
@@ -574,7 +574,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -598,10 +598,10 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	}
 
 	br := &snapshot_format.MockBlockReader{}
-	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconDB, beaconConfig)
 	start := time.Now()
 	for i := c.Slot; i < to; i++ {
-		snReader.ReadBlock(i)
+		snReader.ReadBlockBySlot(ctx, tx, i)
 	}
 	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
 	return nil

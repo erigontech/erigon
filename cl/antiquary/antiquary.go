@@ -26,7 +26,6 @@ type Antiquary struct {
 	downloader proto_downloader.DownloaderClient
 	logger     log.Logger
 	sn         *freezeblocks.CaplinSnapshots
-	reader     freezeblocks.BeaconSnapshotReader
 	ctx        context.Context
 	beaconDB   persistence.BlockSource
 	backfilled *atomic.Bool
@@ -43,7 +42,6 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 		logger:     logger,
 		sn:         sn,
 		beaconDB:   beaconDB,
-		reader:     reader,
 		ctx:        ctx,
 		backfilled: backfilled,
 		cfg:        cfg,
@@ -92,11 +90,14 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	logInterval := time.NewTicker(30 * time.Second)
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
 	defer logInterval.Stop()
 	// Now write the snapshots as indicies
-	for i := from; i < a.reader.FrozenSlots(); i++ {
+	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
-		header, elBlockNumber, elBlockHash, err := a.reader.ReadHeader(i)
+		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i)
 		if err != nil {
 			return err
 		}
@@ -118,12 +119,13 @@ func (a *Antiquary) Loop() error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Antiquary]: Processed snapshots", "progress", i, "target", a.reader.FrozenSlots())
+			log.Info("[Antiquary]: Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
 		case <-a.ctx.Done():
 		default:
 		}
 	}
-	frozenSlots := a.reader.FrozenSlots()
+
+	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
 		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
 			return err
