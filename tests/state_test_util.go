@@ -237,7 +237,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
@@ -267,7 +267,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	if ethconfig.EnableHistoryV4InTest {
 		var root libcommon.Hash
-		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, false)
+		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, false, header.Number.Uint64())
 		if err != nil {
 			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 		}
