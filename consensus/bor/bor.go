@@ -443,7 +443,7 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, fmt.Errorf("BeginRwNosync not implemented")
 }
 
-// This is used by the rpcdaemon which needs read only access to the provided data services
+// This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContract, logger log.Logger) *Bor {
 	// get bor config

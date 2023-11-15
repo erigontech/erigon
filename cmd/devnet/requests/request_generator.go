@@ -74,7 +74,7 @@ type RequestGenerator interface {
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 
-	GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error)
+	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error)
 }
 
 type requestGenerator struct {

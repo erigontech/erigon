@@ -141,7 +141,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 	}
 
 	if zeroHash {
-		return libcommon.Hash{}, fmt.Errorf("Hash: %s, nonce  %d: returned a zero transaction hash", signedTx.Hash().Hex(), signedTx.GetNonce())
+		return libcommon.Hash{}, fmt.Errorf("hash: %s, nonce  %d: returned a zero transaction hash", signedTx.Hash().Hex(), signedTx.GetNonce())
 	}
 
 	return result, nil

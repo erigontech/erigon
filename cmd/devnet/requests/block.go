@@ -134,10 +134,10 @@ func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum r
 	return &result, nil
 }
 
-func (req *requestGenerator) GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	var result string
 
-	if err := req.rpcCall(context.Background(), &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
+	if err := req.rpcCall(ctx, &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
 		return libcommon.Hash{}, err
 	}
 

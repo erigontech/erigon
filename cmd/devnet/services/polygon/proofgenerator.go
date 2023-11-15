@@ -86,14 +86,14 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 
 	if err != nil {
 		if errors.Is(err, ErrTokenIndexOutOfRange) {
-			return nil, fmt.Errorf("Block not included: %w", err)
+			return nil, fmt.Errorf("block not included: %w", err)
 		}
 
-		return nil, fmt.Errorf("Null receipt received")
+		return nil, fmt.Errorf("null receipt received")
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("Null result received")
+		return nil, fmt.Errorf("null result received")
 	}
 
 	return result, nil
@@ -148,11 +148,11 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	node := devnet.SelectBlockProducer(ctx)
 
 	if node == nil {
-		return nil, fmt.Errorf("No node available")
+		return nil, fmt.Errorf("no node available")
 	}
 
 	if index < 0 {
-		return nil, fmt.Errorf("Index must not negative")
+		return nil, fmt.Errorf("index must not negative")
 	}
 
 	var receipt *types.Receipt
@@ -166,7 +166,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if lastChildBlockNum < txBlockNum {
-		return nil, fmt.Errorf("Burn transaction has not been checkpointed as yet")
+		return nil, fmt.Errorf("burn transaction has not been checkpointed as yet")
 	}
 
 	// step 2-  get transaction receipt from txhash and
@@ -202,7 +202,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		return nil, err
 	}
 
-	blockProof, err := getBlockProof(node, txBlockNum, start, end)
+	blockProofs, err := getBlockProofs(ctx, node, txBlockNum, start, end)
 
 	if err != nil {
 		return nil, err
@@ -243,7 +243,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	return rlp.EncodeToBytes(
 		[]interface{}{
 			rootBlockNumber,
-			blockProof,
+			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
 			txBlockNum,
 			block.Time,
 			hexutility.Encode(block.TxHash[:]),
@@ -332,17 +332,7 @@ func getReceiptProof(ctx context.Context, receipt *types.Receipt, block *request
 	}, nil
 }
 
-func getBlockProof(node devnet.Node, txBlockNum, startBlock, endBlock uint64) (string, error) {
-	proofs, err := getFastMerkleProof(node, txBlockNum, startBlock, endBlock)
-
-	if err != nil {
-		return "", err
-	}
-
-	return hexutility.Encode(bytes.Join(proofs, []byte{})), nil
-}
-
-func getFastMerkleProof(node requests.RequestGenerator, blockNumber, startBlock, endBlock uint64) ([][]byte, error) {
+func getBlockProofs(ctx context.Context, node requests.RequestGenerator, blockNumber, startBlock, endBlock uint64) ([][]byte, error) {
 	merkleTreeDepth := int(math.Ceil(math.Log2(float64(endBlock - startBlock + 1))))
 
 	// We generate the proof root down, whereas we need from leaf up
@@ -354,7 +344,7 @@ func getFastMerkleProof(node requests.RequestGenerator, blockNumber, startBlock,
 	rightBound := endBlock - offset
 
 	//   console.log("Searching for", targetIndex);
-	for depth := 0; depth < merkleTreeDepth; depth += 1 {
+	for depth := 0; depth < merkleTreeDepth; depth++ {
 		nLeaves := uint64(2) << (merkleTreeDepth - depth)
 
 		// The pivot leaf is the last leaf which is included in the left subtree
@@ -363,7 +353,7 @@ func getFastMerkleProof(node requests.RequestGenerator, blockNumber, startBlock,
 		if targetIndex > pivotLeaf {
 			// Get the root hash to the merkle subtree to the left
 			newLeftBound := pivotLeaf + 1
-			subTreeMerkleRoot, err := node.GetRootHash(offset+leftBound, offset+pivotLeaf)
+			subTreeMerkleRoot, err := node.GetRootHash(ctx, offset+leftBound, offset+pivotLeaf)
 
 			if err != nil {
 				return nil, err
@@ -401,7 +391,7 @@ func getFastMerkleProof(node requests.RequestGenerator, blockNumber, startBlock,
 				// We need to build a tree which has heightDifference layers
 
 				// The first leaf will hold the root hash as returned by the RPC
-				remainingNodesHash, err := node.GetRootHash(offset+pivotLeaf+1, offset+rightBound)
+				remainingNodesHash, err := node.GetRootHash(ctx, offset+pivotLeaf+1, offset+rightBound)
 
 				if err != nil {
 					return nil, err
@@ -411,14 +401,23 @@ func getFastMerkleProof(node requests.RequestGenerator, blockNumber, startBlock,
 				leafRoots := recursiveZeroHash(subTreeHeight)
 
 				// Build a merkle tree of correct size for the subtree using these merkle roots
-				leaves := make([][]byte, 2<<heightDifference)
+				var leafCount int
+
+				if heightDifference > 0 {
+					leafCount = 2 << heightDifference
+				} else {
+					leafCount = 1
+				}
+
+				leaves := make([]interface{}, leafCount)
+
 				leaves[0] = remainingNodesHash[:]
 
 				for i := 1; i < len(leaves); i++ {
 					leaves[i] = leafRoots[:]
 				}
 
-				subTreeMerkleRoot, err := merkle_tree.HashTreeRoot(leaves)
+				subTreeMerkleRoot, err := merkle_tree.HashTreeRoot(leaves...)
 
 				if err != nil {
 					return nil, err
