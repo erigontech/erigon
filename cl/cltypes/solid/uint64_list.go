@@ -2,8 +2,10 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 type uint64ListSSZ struct {
@@ -71,6 +73,7 @@ func (arr *uint64ListSSZ) Cap() int {
 }
 
 func (arr *uint64ListSSZ) HashSSZ() ([32]byte, error) {
+	fmt.Println(len(utils.CompressSnappy(arr.u.u[:arr.u.l])))
 	return arr.u.HashListSSZ()
 }
 
