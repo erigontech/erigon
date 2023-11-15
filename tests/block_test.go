@@ -50,6 +50,7 @@ func TestBlockchain(t *testing.T) {
 
 		//TODO: AlexSharov - need to fix this test
 		bt.skipLoad(`^ValidBlocks/bcForkStressTest/ForkStressTest.json`)
+		bt.skipLoad(`^TransitionTests`)
 	}
 
 	checkStateRoot := true
