@@ -737,7 +737,7 @@ Loop:
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if txTask.Error != nil {
-						return fmt.Errorf("%w, blockNum=%d", txTask.Error, txTask.BlockNum)
+						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err) //same as in stage_exec.go
 					}
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
@@ -1133,7 +1133,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 			// resolve first conflict right here: it's faster and conflict-free
 			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, txTask.Error
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
 			i++
 		}
