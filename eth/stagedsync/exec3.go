@@ -179,6 +179,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 	}
+
 	if !useExternalTx && !parallel {
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx) //nolint
