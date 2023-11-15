@@ -902,13 +902,15 @@ Loop:
 		waitWorkers()
 	}
 
-	if b != nil && !u.HasUnwindPoint() {
-		_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
-		if err != nil {
-			return err
+	if !u.HasUnwindPoint() {
+		if b != nil {
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
+			if err != nil {
+				return err
+			}
+		} else {
+			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
-	} else {
-		fmt.Printf("[dbg] mmmm... do we need action here????\n")
 	}
 
 	//dumpPlainStateDebug(applyTx, doms)

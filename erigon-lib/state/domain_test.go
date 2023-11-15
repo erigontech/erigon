@@ -178,7 +178,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	err = dc.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	{
-		c, err := d.collate(ctx, 0, 0, 7, tx)
+		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
 		require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
@@ -1788,7 +1788,7 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.MakeContext()
 			defer uc.Close()
 
-			et, err := ectx.hc.HistoryRange(int(unwindTo), -1, order.Asc, -1, etx)
+			et, err := ectx.hc.HistoryRange(int(unwindTo)+1, -1, order.Asc, -1, etx)
 			require.NoError(t, err)
 
 			ut, err := uc.hc.HistoryRange(int(unwindTo), -1, order.Asc, -1, utx)
