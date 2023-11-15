@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/anacrolix/torrent/bencode"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -21,6 +20,7 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -44,6 +44,7 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, s3tokens, urls, files)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
