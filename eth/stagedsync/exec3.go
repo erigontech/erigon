@@ -739,8 +739,7 @@ Loop:
 						return err
 					}
 					if txTask.Error != nil {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed2", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", txTask.Error)
-						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err) //same as in stage_exec.go
+						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
@@ -757,9 +756,9 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return err
-					}
+					//if errors.Is(err, context.Canceled) {
+					//	return err
+					//}
 					if !errors.Is(err, context.Canceled) {
 						logger.Warn(fmt.Sprintf("[%s] Execution failed1", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
