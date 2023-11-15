@@ -6,6 +6,14 @@ on:
       - alpha
       - e35
       - 'release/**'
+  pull_request:
+    branches:
+      - e35
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
