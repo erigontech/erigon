@@ -143,6 +143,9 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	if lastK == nil {
 		return false, 0, nil
 	}
+	if len(lastK) != 8 {
+		return false, 0, fmt.Errorf("seems broken TxNum value: %x\n", lastK)
+	}
 	lastBlockNum := binary.BigEndian.Uint64(lastK)
 
 	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(i int) bool {

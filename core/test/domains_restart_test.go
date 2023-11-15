@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -233,7 +234,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, "", "")
+	err = reset2.ResetExec(ctx, db, networkname.DevChainName, "")
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -378,7 +379,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	// ======== delete datadir and restart domains ========
 	err = os.RemoveAll(datadir)
 	require.NoError(t, err)
-	t.Logf("datadir has been removed")
+	//t.Logf("datadir has been removed")
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
@@ -398,7 +399,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, "", "")
+	err = reset2.ResetExec(ctx, db, networkname.DevChainName, "")
 	require.NoError(t, err)
 	// ======== reset domains end ========
 

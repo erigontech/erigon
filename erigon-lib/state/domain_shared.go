@@ -271,8 +271,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
 		}
 		if txn == lastTxInBlock || txn+1 == lastTxInBlock {
-			blockNum++
-			txn = lastTxInBlock + 1
+			txn = lastTxInBlock
 		} else if txn > firstTxInBlock {
 			// snapshots are counted in transactions and can stop in the middle of block
 			txsFromBlockBeginning = txn - firstTxInBlock
