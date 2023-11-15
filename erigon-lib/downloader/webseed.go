@@ -250,13 +250,14 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
 					continue
 				}
-				//Erigon3: doesn't provide history of commitment (.v, .ef files), but does provide .kv
-				if strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent") {
+				//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
+				// - prohibit v1-commitment...v, v2-commitment...ef, etc...
+				// - allow v1-commitment...kv
+				e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
+				if e3blackListed {
 					_, fName := filepath.Split(name)
-					if strings.Contains(fName, "commitment") { // not prefix, to support v1-/v2-/...
-						d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", name)
-						continue
-					}
+					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", fName)
+					continue
 				}
 				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
