@@ -241,7 +241,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
 					continue
 				}
-				if !strings.HasSuffix(name, ".seg.torrent") {
+				whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
+					strings.HasSuffix(name, ".kv.torrent") ||
+					strings.HasSuffix(name, ".v.torrent") ||
+					strings.HasSuffix(name, ".ef.torrent")
+				if !whiteListed {
 					_, fName := filepath.Split(name)
 					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
 					continue
