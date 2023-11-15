@@ -36,8 +36,8 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms.branchFn, ms.accountFn, ms.storageFn)
-		hphAnother := NewHexPatriciaHashed(20, ms2.branchFn, ms2.accountFn, ms2.storageFn)
+		hph := NewHexPatriciaHashed(20, ms)
+		hphAnother := NewHexPatriciaHashed(20, ms2)
 
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
@@ -50,21 +50,21 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
+		rootHash, err := hph.ProcessKeys(ctx, plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		ms.applyBranchNodeUpdates(branchNodeUpdates)
+		//ms.applyBranchNodeUpdates(branchNodeUpdates)
 		if len(rootHash) != 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		rootHashAnother, branchNodeUpdates, err := hphAnother.ProcessKeys(ctx, plainKeys)
+		rootHashAnother, err := hphAnother.ProcessKeys(ctx, plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ms2.applyBranchNodeUpdates(branchNodeUpdates)
+		//ms2.applyBranchNodeUpdates(branchNodeUpdates)
 
 		if len(rootHashAnother) > 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
@@ -142,8 +142,8 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms.branchFn, ms.accountFn, ms.storageFn)
-		hphAnother := NewHexPatriciaHashed(20, ms2.branchFn, ms2.accountFn, ms2.storageFn)
+		hph := NewHexPatriciaHashed(20, ms)
+		hphAnother := NewHexPatriciaHashed(20, ms2)
 
 		plainKeys, updates := builder.Build()
 
@@ -153,18 +153,18 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		err := ms.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashReview, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
+		rootHashReview, err := hph.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
 
-		ms.applyBranchNodeUpdates(branchNodeUpdates)
+		//ms.applyBranchNodeUpdates(branchNodeUpdates)
 		require.Len(t, rootHashReview, length.Hash, "invalid root hash length")
 
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashAnother, branchUpdatesAnother, err := hphAnother.ProcessKeys(ctx, plainKeys)
+		rootHashAnother, err := hphAnother.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
-		ms2.applyBranchNodeUpdates(branchUpdatesAnother)
+		//ms2.applyBranchNodeUpdates(branchUpdatesAnother)
 
 		require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
 		require.EqualValues(t, rootHashReview, rootHashAnother, "storage-based and update-based rootHash mismatch")
@@ -199,7 +199,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		}
 
 		ms := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
+		hph := NewHexPatriciaHashed(length.Addr, ms)
 
 		hph.SetTrace(false)
 
@@ -208,10 +208,10 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ProcessKeys(ctx, plainKeys)
+		rootHash, err := hph.ProcessKeys(ctx, plainKeys)
 		require.NoError(t, err)
 
-		ms.applyBranchNodeUpdates(branchNodeUpdates)
+		//ms.applyBranchNodeUpdates(branchNodeUpdates)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})
 }

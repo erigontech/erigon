@@ -25,12 +25,16 @@ import (
 	"hash"
 	"io"
 	"math/bits"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/etl"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -61,47 +65,41 @@ type HexPatriciaHashed struct {
 	accountKeyLen int
 	// Rows of the grid correspond to the level of depth in the patricia tree
 	// Columns of the grid correspond to pointers to the nodes further from the root
-	grid         [128][16]Cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
-	currentKey   [128]byte     // For each row indicates which column is currently selected
-	depths       [128]int      // For each row, the depth of cells in that row
-	branchBefore [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap     [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap     [128]uint16   // For each row, bitmap of cells that were present after modification
-	keccak       keccakState
-	keccak2      keccakState
-	rootChecked  bool // Set to false if it is not known whether the root is empty, set to true if it is checked
-	rootTouched  bool
-	rootPresent  bool
-	trace        bool
-	// Function used to load branch node and fill up the cells
-	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
-	// and for the extension, account, and leaf type, the `l` and `k`
-	branchFn func(prefix []byte) ([]byte, error)
-	// Function used to fetch account with given plain key
-	accountFn func(plainKey []byte, cell *Cell) error
-	// Function used to fetch storage with given plain key
-	storageFn func(plainKey []byte, cell *Cell) error
-
+	grid          [128][16]Cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
+	currentKey    [128]byte     // For each row indicates which column is currently selected
+	depths        [128]int      // For each row, the depth of cells in that row
+	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
+	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
+	keccak        keccakState
+	keccak2       keccakState
+	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	rootTouched   bool
+	rootPresent   bool
+	trace         bool
+	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchMerger  *BranchMerger
+	branchEncoder *BranchEncoder
 }
 
-func NewHexPatriciaHashed(accountKeyLen int,
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
-) *HexPatriciaHashed {
-	return &HexPatriciaHashed{
+func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
+	hph := &HexPatriciaHashed{
+		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
-		branchFn:      branchFn,
-		accountFn:     accountFn,
-		storageFn:     storageFn,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		branchMerger:  NewHexBranchMerger(1024),
 	}
+	tdir := os.TempDir()
+	if ctx != nil {
+		tdir = ctx.TempDir()
+	}
+	tdir = filepath.Join(tdir, "branch-encoder")
+	hph.branchEncoder = NewBranchEncoder(1024, tdir)
+	return hph
 }
 
 type Cell struct {
@@ -813,18 +811,23 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 	return unfolding
 }
 
+var temporalReplacementForEmpty = []byte("root")
+
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) (bool, error) {
 	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
 	if len(key) == 0 {
-		key = []byte("root")
+		key = temporalReplacementForEmpty
 	}
-	branchData, err := hph.branchFn(key)
+	branchData, err := hph.ctx.GetBranch(key)
 	if err != nil {
 		return false, err
 	}
+	if len(branchData) >= 2 {
+		branchData = branchData[2:] // skip touch map and hold aftermap and rest
+	}
 	if hph.trace {
-		fmt.Printf("unfoldBranchNode ^%x^[%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
+		fmt.Printf("unfoldBranchNode prefix '%x', compacted [%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
 	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
@@ -846,7 +849,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 		hph.afterMap[row] = bitmap
 		hph.touchMap[row] = 0
 	}
-	//fmt.Printf("unfoldBranchNode [%x], afterMap = [%016b], touchMap = [%016b]\n", branchData, hph.afterMap[row], hph.touchMap[row])
+	//fmt.Printf("unfoldBranchNode prefix '%x' [%x], afterMap = [%016b], touchMap = [%016b]\n", key, branchData, hph.afterMap[row], hph.touchMap[row])
 	// Loop iterating over the set bits of modMask
 	for bitset, j := bitmap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
@@ -862,16 +865,16 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 			fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
 		}
 		if cell.apl > 0 {
-			if err = hph.accountFn(cell.apk[:cell.apl], cell); err != nil {
-				return false, fmt.Errorf("unfoldBranchNode accountFn: %w", err)
+			if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+				return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
 			}
 			if hph.trace {
-				fmt.Printf("accountFn[%x] return balance=%d, nonce=%d code=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash[:])
+				fmt.Printf("GetAccount[%x] return balance=%d, nonce=%d code=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash[:])
 			}
 		}
 		if cell.spl > 0 {
-			if err = hph.storageFn(cell.spk[:cell.spl], cell); err != nil {
-				return false, fmt.Errorf("unfoldBranchNode accountFn: %w", err)
+			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+				return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
 			}
 		}
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
@@ -986,10 +989,10 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
-func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, err error) {
+func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
-		return nil, nil, fmt.Errorf("cannot fold - no active rows")
+		return fmt.Errorf("cannot fold - no active rows")
 	}
 	if hph.trace {
 		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", hph.activeRows, hph.currentKey[:hph.currentKeyLen], hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
@@ -1013,9 +1016,9 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 
 	depth := hph.depths[row]
-	updateKey = hexToCompact(hph.currentKey[:updateKeyLen])
+	updateKey := hexToCompact(hph.currentKey[:updateKeyLen])
 	if len(updateKey) == 0 {
-		updateKey = []byte("root")
+		updateKey = temporalReplacementForEmpty
 	}
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
@@ -1046,9 +1049,9 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell.extLen = 0
 		upCell.downHashedLen = 0
 		if hph.branchBefore[row] {
-			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			_, err := hph.branchEncoder.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
-				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
 		}
 		hph.activeRows--
@@ -1074,9 +1077,9 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			_, err := hph.branchEncoder.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
-				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
 		}
 		hph.activeRows--
@@ -1115,7 +1118,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		hph.keccak2.Reset()
 		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], totalBranchLen)
 		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
-			return nil, nil, err
+			return err
 		}
 
 		b := [...]byte{0x80}
@@ -1147,14 +1150,13 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		var lastNibble int
 		var err error
 
-		//branchData, lastNibble, err = hph.EncodeBranchDirectAccess(bitmap, row, depth, branchData)
-		branchData, lastNibble, err = EncodeBranch(bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err = hph.branchEncoder.CollectUpdate(updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to encode branch update: %w", err)
+			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 		for i := lastNibble; i < 17; i++ {
 			if _, err := hph.keccak2.Write(b[:]); err != nil {
-				return nil, nil, err
+				return err
 			}
 			if hph.trace {
 				fmt.Printf("%x: empty(%d,%x)\n", i, row, i)
@@ -1172,7 +1174,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 		upCell.spl = 0
 		upCell.hl = 32
 		if _, err := hph.keccak2.Read(upCell.h[:]); err != nil {
-			return nil, nil, err
+			return err
 		}
 		if hph.trace {
 			fmt.Printf("} [%x]\n", upCell.h[:])
@@ -1184,13 +1186,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 			hph.currentKeyLen = 0
 		}
 	}
-	if branchData != nil {
-		if hph.trace {
-			hh := CompactedKeyToHex(updateKey)
-			fmt.Printf("fold: update key: '%x' (len %d), branchData: [%x]\n", hh, len(hh), branchData)
-		}
-	}
-	return branchData, updateKey, nil
+	return nil
 }
 
 func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
@@ -1277,9 +1273,8 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	branchNodeUpdates = make(map[string]BranchData)
-
+// Process keys and updates in a single pass. Branch updates are written to PatriciaContext if no error occurs.
+func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, err error) {
 	pks := make(map[string]int, len(plainKeys))
 	hashedKeys := make([][]byte, len(plainKeys))
 	for i, pk := range plainKeys {
@@ -1295,7 +1290,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	for i, hashedKey := range hashedKeys {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
@@ -1304,41 +1299,39 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
-			if branchData, updateKey, err := hph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				branchNodeUpdates[string(updateKey)] = branchData
+			if err := hph.fold(); err != nil {
+				return nil, fmt.Errorf("fold: %w", err)
 			}
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
+				return nil, fmt.Errorf("unfold: %w", err)
 			}
 		}
 
 		// Update the cell
 		stagedCell.reset()
 		if len(plainKey) == hph.accountKeyLen {
-			if err := hph.accountFn(plainKey, stagedCell); err != nil {
-				return nil, nil, fmt.Errorf("accountFn for key %x failed: %w", plainKey, err)
+			if err := hph.ctx.GetAccount(plainKey, stagedCell); err != nil {
+				return nil, fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 			if !stagedCell.Delete {
 				cell := hph.updateCell(plainKey, hashedKey)
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
 
 				if hph.trace {
-					fmt.Printf("accountFn update key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
+					fmt.Printf("GetAccount update key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
 				}
 			}
 		} else {
-			if err = hph.storageFn(plainKey, stagedCell); err != nil {
-				return nil, nil, fmt.Errorf("storageFn for key %x failed: %w", plainKey, err)
+			if err = hph.ctx.GetStorage(plainKey, stagedCell); err != nil {
+				return nil, fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 			if !stagedCell.Delete {
 				hph.updateCell(plainKey, hashedKey).setStorage(stagedCell.Storage[:stagedCell.StorageLen])
 				if hph.trace {
-					fmt.Printf("storageFn reading key %x => %x\n", plainKey, stagedCell.Storage[:stagedCell.StorageLen])
+					fmt.Printf("GetStorage reading key %x => %x\n", plainKey, stagedCell.Storage[:stagedCell.StorageLen])
 				}
 			}
 		}
@@ -1349,26 +1342,30 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			}
 			hph.deleteCell(hashedKey)
 		}
+		mxCommitmentKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		if branchData, updateKey, err := hph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			branchNodeUpdates[string(updateKey)] = branchData
+		if err := hph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
-		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return rootHash, branchNodeUpdates, nil
+
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+
+	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, err
+	}
+	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	branchNodeUpdates = make(map[string]BranchData)
-
+func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {
 	for i, pk := range plainKeys {
 		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
 		updates[i].plainKey = pk
@@ -1381,7 +1378,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 	for i, update := range updates {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 		if hph.trace {
@@ -1390,16 +1387,14 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(update.hashedKey) {
-			if branchData, updateKey, err := hph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				branchNodeUpdates[string(updateKey)] = branchData
+			if err := hph.fold(); err != nil {
+				return nil, fmt.Errorf("fold: %w", err)
 			}
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(update.hashedKey); unfolding > 0; unfolding = hph.needUnfolding(update.hashedKey) {
 			if err := hph.unfold(update.hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
+				return nil, fmt.Errorf("unfold: %w", err)
 			}
 		}
 
@@ -1412,7 +1407,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 		} else {
 			cell := hph.updateCell(update.plainKey, update.hashedKey)
 			if hph.trace && len(update.plainKey) == hph.accountKeyLen {
-				fmt.Printf("accountFn updated key %x =>", update.plainKey)
+				fmt.Printf("GetAccount updated key %x =>", update.plainKey)
 			}
 			if update.Flags&BalanceUpdate != 0 {
 				if hph.trace {
@@ -1442,21 +1437,27 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 				}
 			}
 		}
+
+		mxCommitmentKeys.Inc()
 	}
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		if branchData, updateKey, err := hph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			branchNodeUpdates[string(updateKey)] = branchData
+		if err := hph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
-		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return rootHash, branchNodeUpdates, nil
+
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, err
+	}
+	return rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool) { hph.trace = trace }
@@ -1465,7 +1466,6 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
-	hph.rootChecked = false
 	hph.root.hl = 0
 	hph.root.downHashedLen = 0
 	hph.root.apl = 0
@@ -1476,17 +1476,12 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.root.Balance.Clear()
 	hph.root.Nonce = 0
 	hph.rootTouched = false
+	hph.rootChecked = false
 	hph.rootPresent = true
 }
 
-func (hph *HexPatriciaHashed) ResetFns(
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
-) {
-	hph.branchFn = branchFn
-	hph.accountFn = accountFn
-	hph.storageFn = storageFn
+func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
+	hph.ctx = ctx
 }
 
 type stateRootFlag int8
@@ -1749,6 +1744,8 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
+	hph.Reset()
+
 	if buf == nil {
 		// reset state to 'empty'
 		hph.currentKeyLen = 0
@@ -1763,19 +1760,16 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			hph.touchMap[i] = 0
 			hph.afterMap[i] = 0
 		}
-		hph.root = Cell{}
 		return nil
 	}
 	if hph.activeRows != 0 {
-		return fmt.Errorf("has active rows, could not reset state")
+		return fmt.Errorf("target trie has active rows, could not reset state before fold")
 	}
 
 	var s state
 	if err := s.Decode(buf); err != nil {
 		return err
 	}
-
-	hph.Reset()
 
 	if err := hph.root.Decode(s.Root); err != nil {
 		return err
@@ -1790,11 +1784,11 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	copy(hph.afterMap[:], s.AfterMap[:])
 
 	if hph.root.apl > 0 {
-		if err := hph.accountFn(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
+		if err := hph.ctx.GetAccount(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
 			return err
 		}
 	} else if hph.root.spl > 0 {
-		if err := hph.storageFn(hph.root.spk[:hph.root.spl], &hph.root); err != nil {
+		if err := hph.ctx.GetStorage(hph.root.spk[:hph.root.spl], &hph.root); err != nil {
 			return err
 		}
 		//hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)

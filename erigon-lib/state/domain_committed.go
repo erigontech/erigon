@@ -262,12 +262,8 @@ func (d *DomainCommitted) Reset() {
 	d.patriciaTrie.Reset()
 }
 
-func (d *DomainCommitted) ResetFns(
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *commitment.Cell) error,
-	storageFn func(plainKey []byte, cell *commitment.Cell) error,
-) {
-	d.patriciaTrie.ResetFns(branchFn, accountFn, storageFn)
+func (d *DomainCommitted) ResetFns(ctx commitment.PatriciaContext) {
+	d.patriciaTrie.ResetContext(ctx)
 }
 
 func (d *DomainCommitted) Hasher() hash.Hash {
@@ -494,19 +490,18 @@ func (d *DomainCommitted) Close() {
 }
 
 // Evaluates commitment for processed state.
-func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, err error) {
 	if dbg.DiscardCommitment() {
 		d.updates.List(true)
-		return nil, nil, nil
+		return nil, nil
 	}
 	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
 	//fmt.Printf("[commitment] ComputeCommitment %d keys\n", len(touchedKeys))
-	mxCommitmentKeys.Add(len(touchedKeys))
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
-		return rootHash, nil, err
+		return rootHash, err
 	}
 
 	if !d.justRestored.Load() {
@@ -518,23 +513,23 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
+		rootHash, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
+		rootHash, err = d.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	case CommitmentModeDisabled:
-		return nil, nil, nil
+		return nil, nil
 	default:
-		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
+		return nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
 	d.justRestored.Store(false)
 
-	return rootHash, branchNodeUpdates, err
+	return rootHash, err
 }
 
 // by that key stored latest root hash and tree state
