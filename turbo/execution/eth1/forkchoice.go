@@ -235,23 +235,31 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
+	// Truncate tx nums
+	if e.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
 		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
 
-		b := rawdb.ReadBlock(tx, canonicalSegment.hash, canonicalSegment.number)
+		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
+		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
 
-		if b == nil {
+		if b == nil || h == nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number))
 			return
 		}
 
-		if err := e.engine.VerifyHeader(chainReader, b.Header(), true); err != nil {
+		if err := e.engine.VerifyHeader(chainReader, h, true); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
 
-		if err := e.engine.VerifyUncles(chainReader, b.Header(), b.Uncles()); err != nil {
+		if err := e.engine.VerifyUncles(chainReader, h, b.Uncles); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}

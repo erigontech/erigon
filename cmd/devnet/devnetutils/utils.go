@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ var ErrInvalidEnodeString = errors.New("invalid enode string")
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting nodes' data folders")
 
-	files, err := ioutil.ReadDir(dataDir)
+	files, err := os.ReadDir(dataDir)
 
 	if err != nil {
 		return err

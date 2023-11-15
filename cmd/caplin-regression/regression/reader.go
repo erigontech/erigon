@@ -2,7 +2,7 @@ package regression
 
 import (
 	"io/fs"
-	"io/ioutil"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -14,7 +14,7 @@ import (
 )
 
 func (r *RegressionTester) readStartingState() (*state.CachingBeaconState, error) {
-	stateFile, err := ioutil.ReadFile(path.Join(r.testDirectory, regressionPath, startingStatePath))
+	stateFile, err := os.ReadFile(path.Join(r.testDirectory, regressionPath, startingStatePath))
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (r *RegressionTester) initBlocks() error {
 		if info == nil || info.IsDir() || info.Name() != "data.bin" {
 			return nil
 		}
-		f, err := ioutil.ReadFile(path)
+		f, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
