@@ -250,13 +250,13 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		offsetFromBlockBeginning = inputTxNum - _min
-		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		inputTxNum = _min
+
+		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
-		//outputTxNum.Add(1)
 
 		_ = _max
-		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
+		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
@@ -772,7 +772,7 @@ Loop:
 				}
 
 				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask, agg); err != nil {
+				if err := rs.ApplyState4(ctx, txTask); err != nil {
 					return err
 				}
 
@@ -1141,7 +1141,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 		}
 
 		if txTask.Final {
-			err := rs.ApplyState4(ctx, txTask, agg)
+			err := rs.ApplyState4(ctx, txTask)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}

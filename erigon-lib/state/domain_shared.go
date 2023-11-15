@@ -15,6 +15,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon/common/math"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -196,7 +197,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 }
 
 func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
-	return sd.Commitment.SeekCommitment(tx, sinceTx, untilTx, sd.aggCtx.commitment)
+	return sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, sinceTx, untilTx)
 }
 
 func max64(a, b uint64) uint64 {
@@ -207,8 +208,7 @@ func max64(a, b uint64) uint64 {
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	fromTx, toTx := uint64(0), uint64(math2.MaxUint64)
-	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, fromTx, toTx, sd.aggCtx.commitment)
+	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, 0, math.MaxUint64)
 	if err != nil {
 		return 0, err
 	}
@@ -221,14 +221,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if len(bnBytes) == 8 {
 			bn = binary.BigEndian.Uint64(bnBytes)
 			txn, err = rawdbv3.TxNums.Max(tx, bn)
-			if err != nil {
-				return 0, err
-			}
-		}
-		snapTxNum := max64(sd.Account.endTxNumMinimax(), sd.Storage.endTxNumMinimax())
-		if snapTxNum > txn {
-			txn = snapTxNum
-			_, bn, err = rawdbv3.TxNums.FindBlockNum(tx, toTx)
 			if err != nil {
 				return 0, err
 			}
@@ -629,18 +621,22 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 	sd.roTx = tx
 }
 
+func (sd *SharedDomains) StepSize() uint64 {
+	return sd.Account.aggregationStep
+}
+
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
-	if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
-		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
-		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
-		_, err := sd.ComputeCommitment(ctx, true, sd.trace, sd.blockNum.Load())
-		if err != nil {
-			panic(err)
-		}
-	}
+	//if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
+	//	// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
+	//	// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
+	//	//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
+	//	_, err := sd.ComputeCommitment(ctx, true, sd.trace, sd.blockNum.Load())
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//}
 
 	sd.txNum = txNum
 	sd.aggCtx.account.SetTxNum(txNum)
