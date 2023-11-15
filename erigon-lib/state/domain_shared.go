@@ -212,7 +212,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
-	//fmt.Printf("SeekCommitment1: %d %d %t\n", bn, txn, ok)
+	fmt.Printf("SeekCommitment1: %d %d %t\n", bn, txn, ok)
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
@@ -264,17 +264,21 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		panic(fmt.Errorf("why blockNumInCommitment=%d not equal to blockNum=%d, for txn=%d", bn, blockNum, txn))
 	}
 
-	firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
-	if err != nil {
-		return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
-	}
-	if sd.trace {
-		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock)
-	}
-	txsFromBlockBeginning = txn - firstTxInBlock
-	if sd.trace {
-		fmt.Printf("[commitment] block %d tx range -%d |%d\n", blockNum, txsFromBlockBeginning, txn)
-	}
+	//firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
+	//if err != nil {
+	//	return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+	//}
+	//lastTxInBlock, err := rawdbv3.TxNums.Max(tx, blockNum)
+	//if err != nil {
+	//	return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
+	//}
+	////if sd.trace {
+	//fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
+	////}
+	//txsFromBlockBeginning = txn - firstTxInBlock
+	////if sd.trace {
+	//fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
+	////}
 
 	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(ctx, txn)
@@ -691,7 +695,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, assertBlocks ...uint64) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -711,7 +715,11 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 		if !been {
 			prevState = nil
 		}
-
+		if len(assertBlocks) > 0 {
+			if sd.blockNum.Load() != assertBlocks[0] {
+				panic(fmt.Errorf("%d != %d", sd.blockNum.Load(), assertBlocks[0]))
+			}
+		}
 		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash, prevState); err != nil {
 			return nil, err
 		}

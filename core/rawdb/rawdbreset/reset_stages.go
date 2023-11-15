@@ -179,7 +179,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 				}
 			}
 			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
-			log.Info("[reset] exec", "to", blockNum)
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum())
 		}
 
 		return nil
