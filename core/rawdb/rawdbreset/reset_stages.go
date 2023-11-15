@@ -169,11 +169,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			defer ct.Close()
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
-			_, err = doms.SeekCommitment(ctx, tx)
-			if err != nil {
-				return err
-			}
-
 			blockNum := doms.BlockNum()
 			if blockNum == 0 {
 				genesis := core.GenesisBlockByChainName(chain)

@@ -34,11 +34,6 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
 	domains.SetTxNum(ctx, toTxNum)
