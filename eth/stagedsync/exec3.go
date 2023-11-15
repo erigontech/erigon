@@ -366,7 +366,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(3 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
@@ -464,7 +464,7 @@ func ExecV3(ctx context.Context,
 						if doms.BlockNum() != outputBlockNum.Get() {
 							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.Get()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false)
+						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.Get())
 						if err != nil {
 							return err
 						}
@@ -1081,7 +1081,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false)
+	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}

@@ -165,7 +165,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	return sd.Flush(ctx, rwTx)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx) ([]byte, error) {
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
 	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math2.MaxInt64, order.Asc, -1, rwTx)
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx) ([]b
 	}
 
 	sd.Commitment.Reset()
-	return sd.ComputeCommitment(ctx, true, false)
+	return sd.ComputeCommitment(ctx, true, false, blockNum)
 }
 
 func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
@@ -212,7 +212,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
-	fmt.Printf("SeekCommitment1: %d %d %t\n", bn, txn, ok)
 	if !ok {
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
@@ -236,7 +235,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		}
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(ctx, txn)
-		newRh, err := sd.rebuildCommitment(ctx, tx)
+		newRh, err := sd.rebuildCommitment(ctx, tx, bn)
 		if err != nil {
 			return 0, err
 		}
@@ -250,18 +249,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(ctx, txn)
 	return 0, nil
-
-	//ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
-	//if err != nil {
-	//	return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
-	//}
-	//if !ok {
-	//	return 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", txn)
-	//}
-	//if bn != blockNum {
-	//	panic(fmt.Errorf("why blockNumInCommitment=%d not equal to blockNum=%d, for txn=%d", bn, blockNum, txn))
-	//}
-
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -649,7 +636,7 @@ func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
-		_, err := sd.ComputeCommitment(ctx, true, sd.trace)
+		_, err := sd.ComputeCommitment(ctx, true, sd.trace, sd.blockNum.Load())
 		if err != nil {
 			panic(err)
 		}
@@ -674,7 +661,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -694,7 +681,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 		if !been {
 			prevState = nil
 		}
-		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash, prevState); err != nil {
+		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, blockNum, rootHash, prevState); err != nil {
 			return nil, err
 		}
 	}

@@ -225,7 +225,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
-		_, err := domains.ComputeCommitment(ctx, true, false)
+		_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
 		if err != nil {
 			return nil, nil, err
 		}
