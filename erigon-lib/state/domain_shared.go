@@ -247,42 +247,21 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		}
 		//fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 	}
-	if bn == 0 && txn == 0 {
-		sd.SetBlockNum(bn)
-		sd.SetTxNum(ctx, txn)
-		return 0, nil
-	}
-
-	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
-	if err != nil {
-		return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
-	}
-	if !ok {
-		return 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", txn)
-	}
-	if bn != blockNum {
-		panic(fmt.Errorf("why blockNumInCommitment=%d not equal to blockNum=%d, for txn=%d", bn, blockNum, txn))
-	}
-
-	//firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
-	//if err != nil {
-	//	return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
-	//}
-	//lastTxInBlock, err := rawdbv3.TxNums.Max(tx, blockNum)
-	//if err != nil {
-	//	return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
-	//}
-	////if sd.trace {
-	//fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
-	////}
-	//txsFromBlockBeginning = txn - firstTxInBlock
-	////if sd.trace {
-	//fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
-	////}
-
-	sd.SetBlockNum(blockNum)
+	sd.SetBlockNum(bn)
 	sd.SetTxNum(ctx, txn)
-	return
+	return 0, nil
+
+	//ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
+	//if err != nil {
+	//	return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+	//}
+	//if !ok {
+	//	return 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", txn)
+	//}
+	//if bn != blockNum {
+	//	panic(fmt.Errorf("why blockNumInCommitment=%d not equal to blockNum=%d, for txn=%d", bn, blockNum, txn))
+	//}
+
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {

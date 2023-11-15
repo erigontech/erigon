@@ -662,7 +662,6 @@ Loop:
 			}
 		}
 		inputBlockNum.Store(blockNum)
-		doms.SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
