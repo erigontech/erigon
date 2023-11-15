@@ -1,8 +1,10 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,8 +16,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/c2h5oh/datasize"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -29,6 +36,7 @@ type WebSeeds struct {
 	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
 	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
 	downloadTorrentFile bool
+	torrentHashes       []string
 
 	logger    log.Logger
 	verbosity log.Lvl
@@ -36,6 +44,7 @@ type WebSeeds struct {
 
 func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, s3tokens, urls, files)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
@@ -194,4 +203,113 @@ func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSee
 	}
 	d.logger.Debug("[snapshots.webseed] get from File provider", "urls", len(response), "file", fileName)
 	return response, nil
+}
+
+// downloadTorrentFilesFromProviders - if they are not exist on file-system
+func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
+	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
+	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
+	//  - maybe need download new files if --snap.stop=true
+	if !d.downloadTorrentFile {
+		return
+	}
+	if len(d.TorrentUrls()) == 0 {
+		return
+	}
+	var addedNew int
+	e, ctx := errgroup.WithContext(ctx)
+	urlsByName := d.TorrentUrls()
+	//TODO:
+	// - what to do if node already synced?
+	for name, tUrls := range urlsByName {
+		tPath := filepath.Join(rootDir, name)
+		if dir.FileExist(tPath) {
+			continue
+		}
+		addedNew++
+		if !strings.HasSuffix(name, ".seg.torrent") {
+			_, fName := filepath.Split(name)
+			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
+			continue
+		}
+		name := name
+		tUrls := tUrls
+		e.Go(func() error {
+			for _, url := range tUrls {
+				res, err := d.callTorrentHttpProvider(ctx, url)
+				if err != nil {
+					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
+					continue
+				}
+				whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
+					strings.HasSuffix(name, ".kv.torrent") ||
+					strings.HasSuffix(name, ".v.torrent") ||
+					strings.HasSuffix(name, ".ef.torrent")
+				if !whiteListed {
+					_, fName := filepath.Split(name)
+					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
+					continue
+				}
+				//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
+				// - prohibit v1-commitment...v, v2-commitment...ef, etc...
+				// - allow v1-commitment...kv
+				e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
+				if e3blackListed {
+					_, fName := filepath.Split(name)
+					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", fName)
+					continue
+				}
+				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
+				if err := saveTorrent(tPath, res); err != nil {
+					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					continue
+				}
+				return nil
+			}
+			return nil
+		})
+	}
+	if err := e.Wait(); err != nil {
+		d.logger.Debug("[snapshots] webseed discover", "err", err)
+	}
+}
+
+func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
+	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	request = request.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+	}
+	defer resp.Body.Close()
+	//protect against too small and too big data
+	if resp.ContentLength == 0 || resp.ContentLength > int64(128*datasize.MB) {
+		return nil, nil
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+	}
+	if err = validateTorrentBytes(res, d.torrentHashes); err != nil {
+		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
+	}
+	return res, nil
+}
+
+func validateTorrentBytes(b []byte, torrentHashes []string) error {
+	var mi metainfo.MetaInfo
+	if len(torrentHashes) == 0 {
+		return nil
+	}
+	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
+		return err
+	}
+	torrentHash := mi.HashInfoBytes()
+	if !slices.Contains(torrentHashes, torrentHash.String()) {
+		return fmt.Errorf("invalid torrent file, expected hash %s", torrentHash.String())
+	}
+	return nil
 }

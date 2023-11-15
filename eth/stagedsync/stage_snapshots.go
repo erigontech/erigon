@@ -123,9 +123,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 	cstate := snapshotsync.NoCaplin
-	// if cfg.caplin { //TODO(Giulio2002): uncomment
-	// 	cstate = snapshotsync.AlsoCaplin
-	// }
+	if cfg.caplin { //TODO(Giulio2002): uncomment
+		cstate = snapshotsync.AlsoCaplin
+	}
 
 	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
