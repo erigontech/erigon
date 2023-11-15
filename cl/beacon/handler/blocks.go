@@ -96,6 +96,7 @@ func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, versi
 		return
 	}
 
+	
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return

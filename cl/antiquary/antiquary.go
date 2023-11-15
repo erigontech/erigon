@@ -90,6 +90,9 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	logInterval := time.NewTicker(30 * time.Second)
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
 	defer logInterval.Stop()
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
@@ -121,6 +124,7 @@ func (a *Antiquary) Loop() error {
 		default:
 		}
 	}
+
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
 		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
