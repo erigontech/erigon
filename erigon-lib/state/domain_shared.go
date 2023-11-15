@@ -695,7 +695,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, assertBlocks ...uint64) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -714,11 +714,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, 
 
 		if !been {
 			prevState = nil
-		}
-		if len(assertBlocks) > 0 {
-			if sd.blockNum.Load() != assertBlocks[0] {
-				panic(fmt.Errorf("%d != %d", sd.blockNum.Load(), assertBlocks[0]))
-			}
 		}
 		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, sd.blockNum.Load(), rootHash, prevState); err != nil {
 			return nil, err

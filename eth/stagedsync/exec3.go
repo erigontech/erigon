@@ -276,7 +276,6 @@ func ExecV3(ctx context.Context,
 			if !ok {
 				return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
 			}
-
 			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 			if err != nil {
 				return err
@@ -287,7 +286,7 @@ func ExecV3(ctx context.Context,
 			}
 			offsetFromBlockBeginning = inputTxNum - _min
 			outputTxNum.Store(inputTxNum)
-			outputTxNum.Add(1)
+			//outputTxNum.Add(1)
 
 			doms.SetBlockNum(blockNum)
 			doms.SetTxNum(ctx, inputTxNum)
@@ -310,28 +309,28 @@ func ExecV3(ctx context.Context,
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	if doms.TxNum() > 0 {
-		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
-		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
-		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
-		inputTxNum++ // start exec from next txn
-
-		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			err := fmt.Errorf("blockNum not found for txNum: %d\n", inputTxNum)
-			panic(err)
-		}
-		blockNum = _blockNum
-		if blockNum != doms.BlockNum() {
-			panic(fmt.Errorf("%d != %d", blockNum, doms.BlockNum()))
-		}
-		doms.SetBlockNum(blockNum)
-		doms.SetTxNum(ctx, inputTxNum)
-	}
-	outputTxNum.Store(inputTxNum)
+	//if doms.TxNum() > 0 {
+	//	// has to start from Txnum-Offset (offset > 0 when we have half-block data)
+	//	// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
+	//	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
+	//	inputTxNum++ // start exec from next txn
+	//
+	//	ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if !ok {
+	//		err := fmt.Errorf("blockNum not found for txNum: %d\n", inputTxNum)
+	//		panic(err)
+	//	}
+	//	blockNum = _blockNum
+	//	if blockNum != doms.BlockNum() {
+	//		panic(fmt.Errorf("%d != %d", blockNum, doms.BlockNum()))
+	//	}
+	//	doms.SetBlockNum(blockNum)
+	//	doms.SetTxNum(ctx, inputTxNum)
+	//}
+	//outputTxNum.Store(inputTxNum)
 
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
@@ -462,6 +461,9 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
+						if doms.BlockNum() != outputBlockNum.Get() {
+							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.Get()))
+						}
 						_, err := doms.ComputeCommitment(ctx, true, false)
 						if err != nil {
 							return err
@@ -1077,7 +1079,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
+	if doms.BlockNum() != header.Number.Uint64() {
+		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
+	}
+	rh, err := doms.ComputeCommitment(ctx, true, false)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
