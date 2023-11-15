@@ -1,8 +1,10 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
