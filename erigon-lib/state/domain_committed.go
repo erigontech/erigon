@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -259,7 +260,9 @@ func (d *DomainCommitted) PatriciaState() ([]byte, error) {
 }
 
 func (d *DomainCommitted) Reset() {
-	d.patriciaTrie.Reset()
+	if !d.justRestored.Load() {
+		d.patriciaTrie.Reset()
+	}
 }
 
 func (d *DomainCommitted) ResetFns(ctx commitment.PatriciaContext) {
@@ -326,6 +329,9 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 	return nil
 }
 
+// After commitment state is retored, method .Reset() should NOT be called until new updates.
+// Otherwise state should be Restore()d again.
+
 func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
@@ -338,7 +344,7 @@ func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 		if err := hext.SetState(cs.trieState); err != nil {
 			return 0, 0, fmt.Errorf("failed restore state : %w", err)
 		}
-		d.justRestored.Store(true)
+		d.justRestored.Store(true) // to prevent double reset
 		if d.trace {
 			rh, err := hext.RootHash()
 			if err != nil {
@@ -498,15 +504,13 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
-	//fmt.Printf("[commitment] ComputeCommitment %d keys\n", len(touchedKeys))
+	//fmt.Printf("[commitment] ComputeCommitment %d keys (mode=%s)\n", len(touchedKeys), d.mode)
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, err
 	}
 
-	if !d.justRestored.Load() {
-		d.patriciaTrie.Reset()
-	}
+	d.Reset()
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	d.patriciaTrie.SetTrace(trace)
@@ -537,7 +541,7 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, ok bool, err error) {
+func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	if dbg.DiscardCommitment() {
 		return 0, 0, false, nil
 	}
@@ -546,7 +550,8 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *
 	}
 
 	if d.trace {
-		fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
+		block, lastTxnum, _ := rawdbv3.TxNums.Last(tx)
+		fmt.Printf("[commitment] SeekCommitment up to txnum [in files %d, db <= %d, block %d]\n", cd.maxTxNumInFiles(true), lastTxnum, block)
 	}
 
 	var latestState []byte
@@ -569,38 +574,6 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, sinceTx, untilTx uint64, cd *
 		return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
 	}
 	if !ok {
-		//idx, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(untilTx+d.aggregationStep), order.Asc, -1, tx)
-		//if err != nil {
-		//      return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
-		//}
-		//topTxNum := uint64(0)
-		//for idx.HasNext() {
-		//      tn, err := idx.Next()
-		//      if err != nil {
-		//              return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
-		//      }
-		//      if tn < sinceTx {
-		//              continue
-		//      }
-		//      if tn <= untilTx {
-		//              if d.trace {
-		//                      fmt.Printf("[commitment] Seek found committed txn %d\n", tn)
-		//              }
-		//              topTxNum = tn
-		//              continue
-		//      }
-		//      if tn > untilTx {
-		//              topTxNum = tn
-		//              break
-		//      }
-		//}
-		//latestState, ok, err = cd.hc.GetNoStateWithRecent(keyCommitmentState, topTxNum, tx)
-		//if err != nil {
-		//      return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
-		//}
-		//if !ok {
-		//      return 0, 0, false, nil
-		//}
 		return 0, 0, false, nil
 	}
 	blockNum, txNum, err = d.Restore(latestState)
