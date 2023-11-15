@@ -610,6 +610,7 @@ func ExecV3(ctx context.Context,
 	//var err error
 
 	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
