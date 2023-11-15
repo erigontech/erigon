@@ -225,34 +225,36 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if inputTxNum > 0 {
-			inputTxNum++ // start execution from next txn
-			var ok bool
-			ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
-			}
-			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-			_max, err := rawdbv3.TxNums.Max(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-			offsetFromBlockBeginning = inputTxNum - _min
-			// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
-			inputTxNum = _min
-			outputTxNum.Store(inputTxNum)
-			//outputTxNum.Add(1)
-
-			doms.SetBlockNum(blockNum)
-			doms.SetTxNum(ctx, inputTxNum)
-			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
+		if inputTxNum == 0 {
+			return nil
 		}
+		inputTxNum++ // start execution from next txn
+		//++ may change blockNum, re-read it
+		var ok bool
+		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
+		}
+		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
+		if err != nil {
+			return err
+		}
+		_max, err := rawdbv3.TxNums.Max(applyTx, blockNum)
+		if err != nil {
+			return err
+		}
+		offsetFromBlockBeginning = inputTxNum - _min
+		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
+		inputTxNum = _min
+		outputTxNum.Store(inputTxNum)
+		//outputTxNum.Add(1)
+
+		doms.SetBlockNum(blockNum)
+		doms.SetTxNum(ctx, inputTxNum)
+		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", blockNum, inputTxNum, blockNum, _min, _max)
 		return nil
 	}
 	if applyTx != nil {
@@ -604,6 +606,7 @@ Loop:
 			}
 		}
 		inputBlockNum.Store(blockNum)
+		doms.SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
