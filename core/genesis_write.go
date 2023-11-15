@@ -457,6 +457,9 @@ func ChiadoGenesisBlock() *types.Genesis {
 		Alloc:      readPrealloc("allocs/chiado.json"),
 	}
 }
+func TestGenesisBlock() *types.Genesis {
+	return &types.Genesis{Config: params.TestChainConfig}
+}
 
 // Pre-calculated version of:
 //
@@ -671,6 +674,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.Test:
+		return TestGenesisBlock()
 	default:
 		return nil
 	}

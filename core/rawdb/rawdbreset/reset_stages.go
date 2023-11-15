@@ -169,11 +169,13 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			defer doms.Close()
 			blockNum := doms.BlockNum()
 			if blockNum == 0 {
+				fmt.Printf("write gen1\n")
 				genesis := core.GenesisBlockByChainName(chain)
 				if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
 					return err
 				}
 			} else {
+				fmt.Printf("write gen2\n")
 				if err := doms.Flush(ctx, tx); err != nil {
 					return err
 				}
