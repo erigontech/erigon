@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
@@ -310,15 +309,17 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
-			doms := state.NewSharedDomains(tx)
-			defer doms.Close()
-			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo)
-			if err != nil {
-				return err
-			}
-			if ok && unwindTo != blockNumWithCommitment {
-				unwindTo = blockNumWithCommitment // not all blocks have commitment
-			}
+			//doms := state.NewSharedDomains(tx)
+			//defer doms.Close()
+			//blockNumWithCommitment := doms.BlockNum()
+			//
+			//blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo)
+			//if err != nil {
+			//	return err
+			//}
+			//if ok && unwindTo != blockNumWithCommitment {
+			//	unwindTo = blockNumWithCommitment // not all blocks have commitment
+			//}
 			//unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
 			//if err != nil {
 			//	return err

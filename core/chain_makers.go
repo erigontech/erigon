@@ -331,7 +331,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(domains)
 	}
-	txNum := -1
+	txNum := 0
 	setBlockNum := func(blockNum uint64) {
 		if histV3 {
 			domains.SetBlockNum(blockNum)
@@ -388,7 +388,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				//	return nil, nil, err
 				//}
 				//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-
 				stateRoot, err := domains.ComputeCommitment(ctx, true, false, b.header.Number.Uint64())
 				if err != nil {
 					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
@@ -423,7 +422,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		receipts[i] = receipt
 		parent = block
 	}
-
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil

@@ -129,6 +129,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	defer logEvery.Stop()
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
+	fmt.Printf("aggregator unwind step %d txUnwindTo %d stepsRangeInDB %s\n", step, txUnwindTo, sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 
 	if err := sd.Flush(ctx, rwTx); err != nil {
 		return err
@@ -160,9 +161,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	}
 
 	sd.ClearRam(true)
-	if _, err := sd.SeekCommitment(ctx, rwTx); err != nil {
-		return err
-	}
+	//return nil
 	return sd.Flush(ctx, rwTx)
 }
 
@@ -225,6 +224,9 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, err
 			}
 		}
+		if bn == 0 && txn == 0 {
+			return 0, nil
+		}
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(ctx, txn)
 		newRh, err := sd.rebuildCommitment(ctx, tx, bn)
@@ -256,6 +258,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 
 	sd.storage = btree2.NewMap[string, []byte](128)
 	sd.estSize = 0
+	sd.SetTxNum(context.Background(), 0)
+	sd.SetBlockNum(0)
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
@@ -818,6 +822,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 func (sd *SharedDomains) Close() {
 	sd.FinishWrites()
+	sd.SetBlockNum(0)
+	sd.SetTxNum(context.Background(), 0)
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
@@ -889,6 +895,8 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
+	sd.SetTxNum(context.Background(), 0)
+	sd.SetBlockNum(0)
 
 	if sd.aggCtx != nil {
 		sd.aggCtx.account.FinishWrites()

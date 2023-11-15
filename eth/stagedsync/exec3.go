@@ -234,7 +234,7 @@ func ExecV3(ctx context.Context,
 
 		var ok bool
 		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-		fmt.Printf("[commitment] found block %d -> %d, %d -> %d\n", doms.BlockNum(), blockNum, inputTxNum, maxTxNum)
+		fmt.Printf("[commitment] found block %d -> %d, txnum %d -> %d\n", doms.BlockNum(), blockNum, inputTxNum, maxTxNum)
 		if err != nil {
 			return err
 		}
@@ -249,14 +249,28 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		offsetFromBlockBeginning = inputTxNum - _min
-		inputTxNum = _min
+		if inputTxNum == _max {
+			inputTxNum++
+			blockNum++
+			_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
+			if err != nil {
+				return err
+			}
+			_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
+			if err != nil {
+				return err
+			}
+		} else {
+
+			offsetFromBlockBeginning = inputTxNum - _min + 1
+			inputTxNum = _min
+		}
 
 		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
 
 		_ = _max
-		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, blockNum, _min, _max)
+		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
@@ -595,7 +609,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -1036,6 +1050,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
+	doms.SetTxNum(context.Background(), doms.TxNum()-1)
 	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
