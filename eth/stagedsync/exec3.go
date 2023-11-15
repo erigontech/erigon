@@ -262,7 +262,7 @@ func ExecV3(ctx context.Context,
 			}
 		} else {
 
-			offsetFromBlockBeginning = inputTxNum - _min + 1
+			offsetFromBlockBeginning = inputTxNum - _min
 			inputTxNum = _min
 		}
 

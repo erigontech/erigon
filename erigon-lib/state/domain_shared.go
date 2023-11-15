@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	math2 "math"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,7 +15,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-	"github.com/ledgerwatch/erigon/common/math"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -135,28 +134,28 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 		return err
 	}
 
-	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
+	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
+	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
+	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
+	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.logTopics.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := sd.aggCtx.logTopics.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := sd.aggCtx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery); err != nil {
 		return err
 	}
 
@@ -166,7 +165,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math2.MaxInt64, order.Asc, -1, rwTx)
+	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +177,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchAccount)
 	}
 
-	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math2.MaxInt64, order.Asc, -1, rwTx)
+	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
 	if err != nil {
 		return nil, err
 	}
