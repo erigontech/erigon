@@ -3,6 +3,7 @@ package db_config
 import (
 	"bytes"
 	"context"
+	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -10,7 +11,7 @@ import (
 
 type DatabaseConfiguration struct{ PruneDepth uint64 }
 
-var DefaultDatabaseConfiguration = DatabaseConfiguration{PruneDepth: 1000}
+var DefaultDatabaseConfiguration = DatabaseConfiguration{PruneDepth: math.MaxUint64}
 
 // should be 1_000_000
 
