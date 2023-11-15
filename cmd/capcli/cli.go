@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
@@ -388,6 +389,7 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
@@ -422,10 +424,9 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon)
-	cfg := stages.StageHistoryReconstruction(downloader, beaconDB, db, nil, genesisConfig, beaconConfig, db_config.DatabaseConfiguration{
-		PruneDepth: math.MaxUint64,
-	}, bRoot, bs.Slot(), "/tmp", log.Root())
+
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, dirs, nil, nil, nil, nil, nil, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -537,6 +538,15 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
 			return nil
 		}
+		header, _, _, err := snReader.ReadHeader(i)
+		if err != nil {
+			return err
+		}
+		hash3, _ := header.Header.HashSSZ()
+		if hash3 != hash2 {
+			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash3))
+			return nil
+		}
 		log.Info("Successfully checked", "slot", i)
 	}
 	return nil
@@ -640,7 +650,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	downloaderCfg.DownloadTorrentFilesFromWebseed = true
-	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo)
+	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo, true)
 	if err != nil {
 		return err
 	}

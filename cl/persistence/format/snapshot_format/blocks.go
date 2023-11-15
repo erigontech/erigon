@@ -120,11 +120,11 @@ func WriteBlockForSnapshot(w io.Writer, block *cltypes.SignedBeaconBlock, reusab
 	return reusable, chunk_encoding.WriteChunk(w, encoded, chunk_encoding.ChunkDataType)
 }
 
-func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, error) {
+func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, libcommon.Hash, error) {
 	if _, err := r.Read(b); err != nil {
-		return 0, err
+		return 0, libcommon.Hash{}, err
 	}
-	return clparams.StateVersion(b[0]), nil
+	return clparams.StateVersion(b[0]), libcommon.BytesToHash(b[1:]), nil
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
@@ -140,10 +140,59 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	return block, block.DecodeSSZ(buffer.Bytes(), int(v))
 }
 
+// ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.
+func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+
+	metadataSlab := make([]byte, 33)
+	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	chunk1, dT1, err := chunk_encoding.ReadChunkToBytes(r)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	if dT1 != chunk_encoding.ChunkDataType {
+		return nil, 0, libcommon.Hash{}, fmt.Errorf("malformed beacon block, invalid chunk 1 type %d, expected: %d", dT1, chunk_encoding.ChunkDataType)
+	}
+
+	var signature libcommon.Bytes96
+	copy(signature[:], chunk1[4:100])
+	header := &cltypes.SignedBeaconBlockHeader{
+		Signature: signature,
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:          binary.LittleEndian.Uint64(chunk1[100:108]),
+			ProposerIndex: binary.LittleEndian.Uint64(chunk1[108:116]),
+			ParentRoot:    libcommon.BytesToHash(chunk1[116:148]),
+			Root:          libcommon.BytesToHash(chunk1[148:180]),
+			BodyRoot:      bodyRoot,
+		}}
+	if v <= clparams.AltairVersion {
+		return header, 0, libcommon.Hash{}, nil
+	}
+	if _, err := r.Read(make([]byte, 1)); err != nil {
+		return header, 0, libcommon.Hash{}, nil
+	}
+	// Read the first eth 1 block chunk
+	_, err = chunk_encoding.ReadChunk(r, io.Discard)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	// lastly read the executionBlock ptr
+	blockNumber, blockHash, err := readExecutionBlockPtr(r)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	return header, blockNumber, blockHash, nil
+}
+
 func ReadRawBlockFromSnapshot(r io.Reader, out io.Writer, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (clparams.StateVersion, error) {
 	metadataSlab := make([]byte, 33)
 	// Metadata section is just the current hardfork of the block.
-	v, err := readMetadataForBlock(r, metadataSlab)
+	v, _, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return v, err
 	}
