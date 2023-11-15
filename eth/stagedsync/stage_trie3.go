@@ -78,7 +78,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 		return nil
 	}
-	err = collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
+	err := collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err
 	}
