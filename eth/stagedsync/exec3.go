@@ -208,58 +208,17 @@ func ExecV3(ctx context.Context,
 	blockComplete := atomic.Bool{}
 	blockComplete.Store(true)
 
-	var inputTxNum uint64
-	if execStage.BlockNumber > 0 {
-		//blockNum = execStage.BlockNumber + 1
-	} else if !useExternalTx { //nolint
-		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
-		//if err != nil {
-		//	return err
-		//}
-		//if found {
-		//	stageProgress = _downloadedBlockNum - 1
-		//	block = _downloadedBlockNum - 1
-		//}
-	}
-	{
-		//itttt, err := applyTx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, -1, -1, order.Asc, -1)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//for itttt.HasNext() {
-		//	k, v, _ := itttt.Next()
-		//	fmt.Printf("hist: %x, %x\n", k, v)
-		//}
-	}
-	{
-		//itttt2, err := applyTx.(kv.TemporalTx).IndexRange(kv.AccountsHistoryIdx, common.FromHex("0xF29A6c0f8eE500dC87d0d4EB8B26a6faC7A76767"), 2734370, -1, order.Asc, -1)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//for itttt2.HasNext() {
-		//	v, _ := itttt2.Next()
-		//	fmt.Printf("idx: %d\n", v)
-		//}
-	}
-
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
-	_, err := doms.SeekCommitment(ctx, applyTx)
-	if err != nil {
-		return err
-	}
-
-	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			doms.DiscardHistory()
-		}
-	}
 
 	blockNum = doms.BlockNum()
-	inputTxNum = doms.TxNum()
+	inputTxNum := doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
+	// Cases:
+	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
+	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	restoreTxNum := func(applyTx kv.Tx) error {
 		var err error
 		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
@@ -308,31 +267,12 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	// Cases:
-	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
-	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	//if doms.TxNum() > 0 {
-	//	// has to start from Txnum-Offset (offset > 0 when we have half-block data)
-	//	// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
-	//	inputTxNum = doms.TxNum() - offsetFromBlockBeginning
-	//	inputTxNum++ // start exec from next txn
-	//
-	//	ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	if !ok {
-	//		err := fmt.Errorf("blockNum not found for txNum: %d\n", inputTxNum)
-	//		panic(err)
-	//	}
-	//	blockNum = _blockNum
-	//	if blockNum != doms.BlockNum() {
-	//		panic(fmt.Errorf("%d != %d", blockNum, doms.BlockNum()))
-	//	}
-	//	doms.SetBlockNum(blockNum)
-	//	doms.SetTxNum(ctx, inputTxNum)
-	//}
-	//outputTxNum.Store(inputTxNum)
+	if applyTx != nil {
+		if dbg.DiscardHistory() {
+			doms.DiscardHistory()
+		}
+	}
+	var err error
 
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
