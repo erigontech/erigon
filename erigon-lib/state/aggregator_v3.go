@@ -1320,7 +1320,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			close(fin)
 			return
 		}
-		return
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
