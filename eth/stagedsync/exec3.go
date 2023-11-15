@@ -698,10 +698,9 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
 			}
-			fmt.Printf("[dbg] txNum: %d, hist=%t, blockNum=%d offsetFromBlockBeginning=%d\n", txTask.TxNum, txTask.HistoryExecution, blockNum, offsetFromBlockBeginning)
-			if txTask.HistoryExecution {
-				//fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
-			}
+			//if txTask.HistoryExecution { // nolint
+			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
+			//}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
