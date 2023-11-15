@@ -254,45 +254,26 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	}
 
 	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txn)
-	if ok {
-		if err != nil {
-			return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
-		}
+	if err != nil {
+		return txsFromBlockBeginning, fmt.Errorf("failed to find blockNum for txNum %d ok=%t : %w", txn, ok, err)
+	}
+	if !ok {
+		return 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", txn)
+	}
+	if bn != blockNum {
+		panic(fmt.Errorf("why blockNumInCommitment=%d not equal to blockNum=%d, for txn=%d", bn, blockNum, txn))
+	}
 
-		firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
-		if err != nil {
-			return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
-		}
-		lastTxInBlock, err := rawdbv3.TxNums.Max(tx, blockNum)
-		if err != nil {
-			return txsFromBlockBeginning, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
-		}
-		if sd.trace {
-			fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d, lastTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock, lastTxInBlock)
-		}
-		if txn == lastTxInBlock || txn+1 == lastTxInBlock {
-			txn = lastTxInBlock
-		} else if txn > firstTxInBlock {
-			// snapshots are counted in transactions and can stop in the middle of block
-			txsFromBlockBeginning = txn - firstTxInBlock
-			//txn++ // has to move txn cuz state committed at txNum-1 to be included in latest file
-			// we have to proceed those txs  (if >0) in history mode before we can start to use committed state
-
-			//example: txn=1,firstTxInBlock=0 -> txsFromBlockBeginning=1
-		} else {
-			txn = firstTxInBlock
-		}
-		if sd.trace {
-			fmt.Printf("[commitment] block %d tx range -%d |%d| %d\n", blockNum, txsFromBlockBeginning, txn, lastTxInBlock-txn)
-		}
-	} else {
-		blockNum = bn
-		if blockNum != 0 {
-			txn++
-		}
-		if sd.trace {
-			fmt.Printf("[commitment] found block %d tx %d. No DB info about block first/last txnum has been found\n", blockNum, txn)
-		}
+	firstTxInBlock, err := rawdbv3.TxNums.Min(tx, blockNum)
+	if err != nil {
+		return txsFromBlockBeginning, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
+	}
+	if sd.trace {
+		fmt.Printf("[commitment] found block %d tx %d. DB found block %d, firstTxInBlock %d\n", bn, txn, blockNum, firstTxInBlock)
+	}
+	txsFromBlockBeginning = txn - firstTxInBlock
+	if sd.trace {
+		fmt.Printf("[commitment] block %d tx range -%d |%d\n", blockNum, txsFromBlockBeginning, txn)
 	}
 
 	sd.SetBlockNum(blockNum)
