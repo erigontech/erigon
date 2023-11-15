@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -221,47 +220,22 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	// Try finding the data to our peers
-	uniquePeers := map[peer.ID]struct{}{}
-	doneCh := make(chan *sentinelrpc.ResponseData)
-	go func() {
-		for i := 0; i < peers.MaxBadResponses; i++ {
-			// this is using return statements instead of continue, since it saves a few lines
-			// but me writing this comment has put them back.. oh no!!! anyways, returning true means we stop.
-			if func() bool {
-				peer, done, err := s.sentinel.Peers().Request()
-				if err != nil {
-					return false
-				}
-				defer done()
-				pid := peer.Id()
-				_, ok := uniquePeers[pid]
-				if ok {
-					return false
-				}
-				resp, err := s.requestPeer(ctx, pid, req)
-				if err != nil {
-					s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
-					// we simply retry
-					return false
-				}
-				uniquePeers[pid] = struct{}{}
-				doneCh <- resp
-				return true
-			}() {
-				break
-			}
-		}
-	}()
-	select {
-	case resp := <-doneCh:
-		return resp, nil
-	case <-ctx.Done():
-		return &sentinelrpc.ResponseData{
-			Data:  []byte("request timeout"),
-			Error: true,
-			Peer:  &sentinelrpc.Peer{Pid: ""},
-		}, nil
+	// this is using return statements instead of continue, since it saves a few lines
+	// but me writing this comment has put them back.. oh no!!! anyways, returning true means we stop.
+	peer, done, err := s.sentinel.Peers().Request()
+	if err != nil {
+		return nil, err
 	}
+	defer done()
+	pid := peer.Id()
+
+	resp, err := s.requestPeer(ctx, pid, req)
+	if err != nil {
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
+		return nil, err
+	}
+	return resp, nil
+
 }
 
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {

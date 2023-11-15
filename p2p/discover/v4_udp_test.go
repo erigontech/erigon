@@ -87,7 +87,7 @@ func newUDPTestContext(ctx context.Context, t *testing.T, logger log.Logger) *ud
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey, logger)
-	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
+	test.udp, err = ListenV4(ctx, "test", test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
 
@@ -237,7 +237,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 			p.errc = nilErr
 			test.udp.addReplyMatcher <- p
 			time.AfterFunc(randomDuration(60*time.Millisecond), func() {
-				if !test.udp.handleReply(p.from, p.ip, testPacket(p.ptype)) {
+				if !test.udp.handleReply(p.from, p.ip, p.port, testPacket(p.ptype)) {
 					t.Logf("not matched: %v", p)
 				}
 			})
@@ -643,7 +643,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV4(ctx, socket, ln, cfg)
+	udp, err := ListenV4(ctx, "test", socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

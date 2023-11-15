@@ -442,6 +442,9 @@ const (
 	BlockRootToBlockNumber = "BlockRootToBlockNumber"
 	BlockRootToBlockHash   = "BlockRootToBlockHash"
 
+	LastBeaconSnapshot    = "LastBeaconSnapshot"
+	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
@@ -614,6 +617,7 @@ var ChaindataTables = []string{
 	LightClientUpdates,
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
+	LastBeaconSnapshot,
 }
 
 const (

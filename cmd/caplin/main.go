@@ -128,5 +128,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		WriteTimeout:    cfg.BeaconApiWriteTimeout,
 		IdleTimeout:     cfg.BeaconApiWriteTimeout,
 		Active:          !cfg.NoBeaconApi,
-	})
+	}, nil, false)
 }

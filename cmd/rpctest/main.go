@@ -290,6 +290,19 @@ func main() {
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchDebugTraceBlockByNumberCmd = &cobra.Command{
+		Use:   "benchDebugTraceBlockByNumber",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchDebugTraceBlockByNumber(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchDebugTraceBlockByNumberCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
 	var benchTxReceiptCmd = &cobra.Command{
 		Use:   "benchTxReceipt",
 		Short: "",
@@ -384,6 +397,7 @@ func main() {
 		benchTraceCallManyCmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
+		benchDebugTraceBlockByNumberCmd,
 		benchTxReceiptCmd,
 		compareAccountRange,
 		benchTraceReplayTransactionCmd,

@@ -29,6 +29,7 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
@@ -51,6 +52,7 @@ type Cfg struct {
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
 	WebSeedS3Tokens                 []string
+	ExpectedTorrentFilesHashes      []string
 	DownloadTorrentFilesFromWebseed bool
 	ChainName                       string
 
@@ -105,6 +107,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
 		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
+	}
+
+	torrentsHashes := []string{}
+	snapCfg := snapcfg.KnownCfg(chainName, nil, nil)
+	for _, item := range snapCfg.Preverified {
+		torrentsHashes = append(torrentsHashes, item.Hash)
 	}
 
 	// debug
@@ -173,6 +181,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
+		DownloadTorrentFilesFromWebseed: false, ExpectedTorrentFilesHashes: torrentsHashes,
 	}, nil
 }
 

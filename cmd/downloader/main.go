@@ -72,6 +72,7 @@ var (
 	targetFile                     string
 	disableIPV6                    bool
 	disableIPV4                    bool
+	seedbox                        bool
 )
 
 func init() {
@@ -92,6 +93,7 @@ func init() {
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
+	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "seedbox determines to either download .torrent from webseed or not")
 	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
 
 	withDataDir(createTorrent)
@@ -178,7 +180,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 4 * runtime.NumCPU()
+	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -189,7 +191,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
 	cfg.DownloadTorrentFilesFromWebseed = true // enable it only for standalone mode now. feature is not fully ready yet
-	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo)
+	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
 	}
