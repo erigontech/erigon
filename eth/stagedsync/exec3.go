@@ -267,7 +267,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if inputTxNum > 0 {
-			inputTxNum++
+			inputTxNum++ // start execution from next txn
 			var ok bool
 			ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
 			if err != nil {
@@ -285,6 +285,8 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			offsetFromBlockBeginning = inputTxNum - _min
+			// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
+			inputTxNum = _min
 			outputTxNum.Store(inputTxNum)
 			//outputTxNum.Add(1)
 
@@ -749,6 +751,7 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
 			}
+			//fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			if txTask.HistoryExecution {
 				fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			}
