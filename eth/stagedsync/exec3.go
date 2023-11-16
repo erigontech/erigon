@@ -213,7 +213,7 @@ func ExecV3(ctx context.Context,
 	defer doms.Close()
 
 	blockNum = doms.BlockNum()
-	inputTxNum := doms.TxNum()
+	var inputTxNum = doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
 	// Cases:
@@ -234,7 +234,6 @@ func ExecV3(ctx context.Context,
 
 		var ok bool
 		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-		fmt.Printf("[commitment] found block %d -> %d, txnum %d -> %d\n", doms.BlockNum(), blockNum, inputTxNum, maxTxNum)
 		if err != nil {
 			return err
 		}
@@ -249,28 +248,29 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if inputTxNum == _max {
-			inputTxNum++
-			blockNum++
-			_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-			_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-		} else {
+		//fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
+		//if inputTxNum == _max {
+		//	inputTxNum++
+		//	blockNum++
+		//	_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//} else {
 
-			offsetFromBlockBeginning = inputTxNum - _min
-			inputTxNum = _min
-		}
+		offsetFromBlockBeginning = inputTxNum - _min
+		inputTxNum = _min
+		//}
 
 		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
 
 		_ = _max
-		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
+		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
@@ -609,7 +609,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -771,17 +771,15 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					//if errors.Is(err, context.Canceled) {
-					//	return err
-					//}
-					if !errors.Is(err, context.Canceled) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed1", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
-						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-						}
-						if cfg.badBlockHalt {
-							return err
-						}
+					if errors.Is(err, context.Canceled) {
+						return err
+					}
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+					}
+					if cfg.badBlockHalt {
+						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
 						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
@@ -1092,22 +1090,23 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
+	unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(applyTx, 0, unwindTo)
+	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
-	if ok && unwindTo != blockNumWithCommitment {
-		unwindTo = blockNumWithCommitment // not all blocks have commitment
-	}
-
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
-	if err != nil {
-		return false, err
+	if !ok {
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
 	}
 	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)

@@ -194,6 +194,26 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 	return sd.ComputeCommitment(ctx, true, false, blockNum)
 }
 
+func (sd *SharedDomains) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
+	return sd.aggCtx.CanUnwindDomainsToBlockNum(tx)
+}
+func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
+	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	// not all blocks have commitment
+	blockNumWithCommitment, _, ok, err := sd.SeekCommitment2(tx, sd.aggCtx.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		return 0, false, nil
+	}
+	return blockNumWithCommitment, true, nil
+}
+
+func (sd *SharedDomains) CanUnwindDomainsToTxNum() uint64 { return sd.aggCtx.CanUnwindDomainsToTxNum() }
 func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	return sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, sinceTx, untilTx)
 }

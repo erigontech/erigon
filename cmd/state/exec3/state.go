@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -183,7 +182,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	rules := txTask.Rules
 	var err error
 	header := txTask.Header
-	fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:

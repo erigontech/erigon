@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -320,9 +320,9 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 		return err
 	}
 
-	//if d.trace {
-	fmt.Printf("[commitment] put txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
-	//}
+	if d.trace {
+		fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
+	}
 	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
 		return err
 	}
@@ -345,13 +345,13 @@ func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 			return 0, 0, fmt.Errorf("failed restore state : %w", err)
 		}
 		d.justRestored.Store(true) // to prevent double reset
-		//if d.trace {
-		rh, err := hext.RootHash()
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+		if d.trace {
+			rh, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
 		}
-		fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
-		//}
 	} else {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
@@ -539,7 +539,7 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 // by that key stored latest root hash and tree state
 var keyCommitmentState = []byte("state")
 
-// SeekCommitment searches for last encoded state from DomainCommitted
+// SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	if dbg.DiscardCommitment() {
@@ -549,34 +549,23 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 		return 0, 0, false, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	if d.trace {
-		block, lastTxnum, _ := rawdbv3.TxNums.Last(tx)
-		fmt.Printf("[commitment] SeekCommitment up to txnum [in files %d, db <= %d, block %d]\n", cd.maxTxNumInFiles(true), lastTxnum, block)
-	}
-
-	var latestState []byte
-	err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
-		if len(value) < 16 {
-			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
-		}
-		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
-		if d.trace {
-			fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
-		}
-
-		if txn >= sinceTx && txn <= untilTx {
-			latestState = value
-			ok = true
-		}
-		return nil
-	})
+	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
-		return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
+		return 0, 0, false, err
 	}
-	if !ok {
+	if !it.HasNext() {
 		return 0, 0, false, nil
 	}
-	blockNum, txNum, err = d.Restore(latestState)
+	txn, err := it.Next()
+	if err != nil {
+		return 0, 0, false, err
+	}
+	v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+	//v, ok, err := cd.hc.GetNoStateWithRecent()
+	if err != nil {
+		return 0, 0, false, err
+	}
+	blockNum, txNum, err = d.Restore(v)
 	return blockNum, txNum, true, err
 }
 
