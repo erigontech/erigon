@@ -263,6 +263,9 @@ func (s DistinctNetSet) Contains(ip net.IP) bool {
 // Len returns the number of tracked IPs.
 func (s DistinctNetSet) Len() int {
 	n := uint(0)
+	if s.members == nil {
+		return 0
+	}
 	s.members.Range(func(_, v interface{}) bool {
 		n += v.(uint)
 		return true
