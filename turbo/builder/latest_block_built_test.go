@@ -8,6 +8,7 @@ import (
 )
 
 func TestLatestBlockBuilt(t *testing.T) {
+	t.Parallel()
 	s := NewLatestBlockBuiltStore()
 	b := types.NewBlockWithHeader(&types.Header{})
 	s.AddBlockBuilt(b)
