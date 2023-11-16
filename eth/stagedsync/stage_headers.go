@@ -316,8 +316,8 @@ Loop:
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
 
-			searchUpTo, _ := rawdbv3.TxNums.Max(tx, unwindTo)
-			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, searchUpTo)
+			unwindToTxNum, _ := rawdbv3.TxNums.Max(tx, unwindTo)
+			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, doms.CanUnwindDomainsToTxNum(), unwindToTxNum)
 			if err != nil {
 				return err
 			}
@@ -326,7 +326,12 @@ Loop:
 					unwindTo = blockNumWithCommitment // not all blocks have commitment
 				}
 			} else {
-				unwindTo = 0
+				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
+				if err != nil {
+					return err
+				}
+				err = fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
+				panic(err)
 			}
 			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
 			if err != nil {
