@@ -63,7 +63,7 @@ type R2CaplinAutomation struct {
 	chainCfg
 
 	UploadPeriod time.Duration `help:"upload period" default:"1440h"`
-	R2           string        `help:"r2 address" default:"http://localhost:8080"`
+	Bucket       string        `help:"r2 address" default:"http://localhost:8080"`
 }
 
 func (c *R2CaplinAutomation) Run(ctx *Context) error {
@@ -72,22 +72,37 @@ func (c *R2CaplinAutomation) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started the checking process", "chain", c.Chain)
+	log.Info("Started the automation tool", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	tickerTriggerer := time.NewTicker(c.UploadPeriod)
+	defer tickerTriggerer.Stop()
+	// do the checking at first run
+	if err := checkSnapshots(ctx, beaconConfig, dirs); err != nil {
+		return err
+	}
+	// next upload to R2
+	command := "rclone"
+	args := []string{"sync", dirs.Snap, c.Bucket, "--include", "*beaconblocks*"}
+	if err := exec.Command(command, args...).Run(); err != nil {
+		return fmt.Errorf("rclone failed, make sure rclone is installed and is properly configured: %s", err)
+	}
 	for {
 		select {
 		case <-tickerTriggerer.C:
+			log.Info("Checking snapshots")
 			if err := checkSnapshots(ctx, beaconConfig, dirs); err != nil {
 				return err
 			}
+			log.Info("Finishing snapshots")
 			// next upload to R2
 			command := "rclone"
-			args := []string{"sync", dirs.Snap, c.R2, "--include", "*beaconblocks*"}
+			args := []string{"sync", dirs.Snap, c.Bucket, "--include", "*beaconblocks*"}
+			log.Info("Uploading snapshots to R2 bucket")
 			if err := exec.Command(command, args...).Run(); err != nil {
 				return fmt.Errorf("rclone failed, make sure rclone is installed and is properly configured: %s", err)
 			}
+			log.Info("Finished snapshots to R2 bucket")
 		case <-ctx.Done():
 			return nil
 		}
