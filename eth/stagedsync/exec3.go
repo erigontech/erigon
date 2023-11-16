@@ -248,7 +248,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
+		//fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
 		//if inputTxNum == _max {
 		//	inputTxNum++
 		//	blockNum++
