@@ -26,9 +26,10 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -321,7 +322,7 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 	}
 
 	if d.trace {
-		fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
+		fmt.Printf("[commitment] put txnInDC %d block %d rh %x\n", cs.txNum, blockNum, rh)
 	}
 	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
 		return err
@@ -331,7 +332,6 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
 // Otherwise state should be Restore()d again.
-
 func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {

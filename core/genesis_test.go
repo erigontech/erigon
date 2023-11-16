@@ -6,21 +6,24 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
@@ -100,6 +103,38 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
+}
+
+func TestCommitGenesisIdempotencyV3(t *testing.T) {
+	logger := log.New()
+	v3, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	if !v3 {
+		t.Skip("this test is for v3 only")
+	}
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
+	_, gblock, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+	require.NoError(t, err)
+	seq, err := tx.ReadSequence(kv.EthTx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), seq)
+
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+	require.NoError(t, err)
+	seq, err = tx.ReadSequence(kv.EthTx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), seq)
+
+	domains := state2.NewSharedDomains(tx)
+	defer domains.Close()
+	require.EqualValues(t, 1, domains.TxNum())
+
+	restoredHash, err := domains.ComputeCommitment(context.Background(), false, false, domains.BlockNum())
+	require.NoError(t, err)
+	require.EqualValues(t, gblock.Root().Bytes(), restoredHash)
 }
 
 func TestAllocConstructor(t *testing.T) {
