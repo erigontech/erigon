@@ -557,7 +557,6 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 		return 0, 0, false, nil
 	}
 	txn, err := it.Next()
-	fmt.Printf("iter: %d\n", txn)
 	if err != nil {
 		return 0, 0, false, err
 	}
