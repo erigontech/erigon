@@ -279,9 +279,9 @@ type OtsTransaction struct {
 }
 
 type OtsReceipt struct {
-	BlockHash   libcommon.Hash `json:"blockHash"`
-	BlockNumber hexutil.Uint64 `json:"blockNumber"`
-	//ContractAddress   libcommon.Address `json:"contractAddress"`
+	BlockHash         libcommon.Hash     `json:"blockHash"`
+	BlockNumber       hexutil.Uint64     `json:"blockNumber"`
+	ContractAddress   string             `json:"contractAddress"`
 	CumulativeGasUsed hexutil.Big        `json:"cumulativeGasUsed"`
 	EffectiveGasPrice hexutil.Big        `json:"effectiveGasPrice"`
 	From              libcommon.Address  `json:"from"`
@@ -292,27 +292,29 @@ type OtsReceipt struct {
 }
 
 type OtsFullBlock struct {
-	Difficulty hexutil.Big `json:"difficulty"`
-	//ExtraData        libcommon.Hash    `json:"extraData"`
-	GasLimit hexutil.Big    `json:"gasLimit"`
-	GasUsed  hexutil.Big    `json:"gasUsed"`
-	Hash     libcommon.Hash `json:"hash"`
-	//Bloom    hexutility.Bytes  `json:"logsBloom" gencodec:"required"`
-	Miner libcommon.Address `json:"miner"`
-	//MixHash          libcommon.Hash    `json:"mixHash"`
-	//Nonce  hexutil.Uint64 `json:"nonce"`
-	Number hexutil.Big `json:"number"`
-	//ParentHash       libcommon.Hash    `json:"parentHash"`
-	//ReceiptsRoot     libcommon.Hash    `json:"receiptsRoot"`
-	//Sha3Uncles       libcommon.Hash    `json:"sha3Uncles"`
-	Size hexutil.Big `json:"size"`
-	//StateRoot        libcommon.Hash    `json:"stateRoot"`
-	//Timestamp        hexutil.Big       `json:"timestamp"`
+	Difficulty hexutil.Big       `json:"difficulty"`
+	ExtraData  string            `json:"extraData"`
+	GasLimit   hexutil.Big       `json:"gasLimit"`
+	GasUsed    hexutil.Big       `json:"gasUsed"`
+	Hash       libcommon.Hash    `json:"hash"`
+	Bloom      string            `json:"logsBloom" gencodec:"required"`
+	Miner      libcommon.Address `json:"miner"`
+	MixHash    string            `json:"mixHash"`
+	Nonce      string            `json:"nonce"`
+	Number     hexutil.Big       `json:"number"`
+
+	ParentHash   string      `json:"parentHash"`
+	ReceiptsRoot string      `json:"receiptsRoot"`
+	Sha3Uncles   string      `json:"sha3Uncles"`
+	Size         hexutil.Big `json:"size"`
+	StateRoot    string      `json:"stateRoot"`
+	Timestamp    string      `json:"timestamp"`
+
 	TotalDifficulty  hexutil.Big      `json:"totalDifficulty"`
 	TransactionCount uint64           `json:"transactionCount"`
 	Transactions     []OtsTransaction `json:"transactions"`
 	TxRoot           libcommon.Hash   `json:"transactionsRoot"`
-	// uncles           []string       `json:"uncles"`
+	Uncles           []string         `json:"uncles"`
 }
 
 type OtsBlockTransactionsResult struct {
