@@ -23,7 +23,7 @@ import (
 )
 
 var CLI struct {
-	R2CaplinAutomation R2CaplinAutomation `cmd:"" help:"migrate from one state to another"`
+	BucketCaplinAutomation BucketCaplinAutomation `cmd:"" help:"migrate from one state to another"`
 }
 
 type chainCfg struct {
@@ -58,7 +58,7 @@ type withDatadir struct {
 // 	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
 // }
 
-type R2CaplinAutomation struct {
+type BucketCaplinAutomation struct {
 	withDatadir
 	chainCfg
 
@@ -66,7 +66,7 @@ type R2CaplinAutomation struct {
 	Bucket       string        `help:"r2 address" default:"http://localhost:8080"`
 }
 
-func (c *R2CaplinAutomation) Run(ctx *Context) error {
+func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
