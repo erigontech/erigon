@@ -13,9 +13,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
@@ -309,22 +311,24 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
-			//doms := state.NewSharedDomains(tx)
-			//defer doms.Close()
-			//blockNumWithCommitment := doms.BlockNum()
-			//
-			//blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo)
-			//if err != nil {
-			//	return err
-			//}
-			//if ok && unwindTo != blockNumWithCommitment {
-			//	unwindTo = blockNumWithCommitment // not all blocks have commitment
-			//}
-			//unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
-			//if err != nil {
-			//	return err
-			//}
-			//unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
+
+			doms := state.NewSharedDomains(tx)
+			defer doms.Close()
+
+			blockNumWithCommitment := doms.BlockNum()
+
+			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo+1)
+			if err != nil {
+				return err
+			}
+			if ok && unwindTo != blockNumWithCommitment {
+				unwindTo = blockNumWithCommitment // not all blocks have commitment
+			}
+			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+			if err != nil {
+				return err
+			}
+			unwindTo = cmp.Max(unwindTo+1, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
