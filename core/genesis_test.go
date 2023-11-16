@@ -37,7 +37,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
-		require.Equal(t, block.Hash().Bytes(), expect.Bytes(), network)
+		require.EqualValues(t, block.Hash(), *expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -69,6 +69,15 @@ func TestGenesisBlockRoots(t *testing.T) {
 	}
 	if block.Hash() != params.ChiadoGenesisHash {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
+	}
+
+	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), "")
+	require.NoError(err)
+	if block.Root() != params.TestGenesisStateRoot {
+		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
+	}
+	if block.Hash() != params.TestGenesisHash {
+		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
 	}
 }
 

@@ -248,10 +248,6 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
-
 	length := 10
 
 	// Make first chain starting from genesis
@@ -1109,9 +1105,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 //
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := mock.Mock(t), mock.Mock(t)
 
@@ -1233,9 +1226,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
 

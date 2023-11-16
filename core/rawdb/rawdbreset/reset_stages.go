@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,10 +12,12 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
@@ -44,7 +44,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir, 0); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir); err != nil {
 		return err
 	}
 	return nil
@@ -130,7 +130,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, blockNum uint64) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
@@ -151,16 +151,35 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, blo
 			}
 		}
 
-		_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
-
 		if err := backup.ClearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
 			return nil
 		}
-		if blockNum == 0 && !historyV3 {
+		if !historyV3 {
+			_ = stages.SaveStageProgress(tx, stages.Execution, 0)
 			genesis := core.GenesisBlockByChainName(chain)
 			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
 				return err
 			}
+		} else {
+			v3db := db.(*temporal.DB)
+			agg := v3db.Agg()
+			ct := agg.MakeContext()
+			defer ct.Close()
+			doms := state.NewSharedDomains(tx)
+			defer doms.Close()
+			blockNum := doms.BlockNum()
+			if blockNum == 0 {
+				genesis := core.GenesisBlockByChainName(chain)
+				if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
+					return err
+				}
+			} else {
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
+			}
+			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum())
 		}
 
 		return nil
@@ -202,7 +221,7 @@ var stateHistoryBuckets = []string{
 	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
+	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
 	kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
 	kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
 	kv.TblLogAddressKeys, kv.TblLogAddressIdx,

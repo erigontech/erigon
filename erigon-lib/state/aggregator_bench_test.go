@@ -85,7 +85,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, false)
+			_, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
 			require.NoError(b, err)
 		}
 	}

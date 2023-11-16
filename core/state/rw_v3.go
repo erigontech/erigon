@@ -197,7 +197,7 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	rs.domains.SetTxNum(ctx, txTask.TxNum)
@@ -211,6 +211,16 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask, agg *libstat
 
 	if err := rs.ApplyLogsAndTraces4(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
+	}
+
+	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
+		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
+		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
+		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
+		_, err := rs.domains.ComputeCommitment(ctx, true, false, txTask.BlockNum)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	txTask.ReadLists, txTask.WriteLists = nil, nil

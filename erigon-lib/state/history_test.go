@@ -52,6 +52,14 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	valsTable := "AccountVals"
 	settingsTable := "Settings"
 	db := mdbx.NewMDBX(logger).InMem(dirs.SnapDomain).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		if largeValues {
+			return kv.TableCfg{
+				keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
+				indexTable:    kv.TableCfgItem{Flags: kv.DupSort},
+				valsTable:     kv.TableCfgItem{Flags: kv.DupSort},
+				settingsTable: kv.TableCfgItem{},
+			}
+		}
 		return kv.TableCfg{
 			keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:    kv.TableCfgItem{Flags: kv.DupSort},
@@ -664,10 +672,30 @@ func TestIterateChanged2(t *testing.T) {
 			{txNum: 900, k: "0100000000000001", v: "ff00000000000383"},
 			{txNum: 1000, k: "0100000000000001", v: "ff000000000003e7"},
 		}
+		var firstKey [8]byte
+		binary.BigEndian.PutUint64(firstKey[:], 1)
+		firstKey[0] = 1 //mark key to simplify debug
+
 		var keys, vals []string
 		t.Run("before merge", func(t *testing.T) {
 			hc, require := h.MakeContext(), require.New(t)
 			defer hc.Close()
+
+			{ //check IdxRange
+				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
+				require.NoError(err)
+				cnt, err := iter.CountU64(idxIt)
+				require.NoError(err)
+				require.Equal(1000, cnt)
+
+				idxIt, err = hc.IdxRange(firstKey[:], 2, 20, order.Asc, -1, roTx)
+				require.NoError(err)
+				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
+				require.NoError(err)
+				descArr, err := iter.ToU64Arr(idxItDesc)
+				require.NoError(err)
+				iter.ExpectEqualU64(t, idxIt, iter.ReverseArray(descArr))
+			}
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
