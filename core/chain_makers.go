@@ -396,6 +396,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 			var err error
 			if histV3 {
+
 				// commitment is written as of last tx in block, after any kind of finalization is done.
 				stateRoot, err := domains.ComputeCommitment(ctx, true, false, b.header.Number.Uint64())
 				if err != nil {
