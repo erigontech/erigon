@@ -86,6 +86,12 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
+func ProcessCallTracesForBlock(tx kv.RwTx, block uint64, tmpdir string) error {
+	const maxDuration time.Duration = 1<<63 - 1
+
+	return promoteCallTraces("processing call traces", tx, block, block+1, math.MaxUint64, maxDuration, nil, tmpdir)
+}
+
 func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, tmpdir string) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()

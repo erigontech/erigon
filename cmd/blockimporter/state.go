@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"os"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -198,6 +200,20 @@ func (state *State) ProcessBlock(block types.Block) error {
 	rawdb.WriteTxLookupEntries(tx, &block)
 
 	state.blockNum.Add(state.blockNum, big.NewInt(1))
+
+	if err := callTracer.WriteToDb(tx, &block, vmConfig); err != nil {
+		return err
+	}
+
+	tmpDir, err := ioutil.TempDir("", fmt.Sprintf("block_%d_traces", block.NumberU64()))
+	if err != nil {
+		return fmt.Errorf("failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := stagedsync.ProcessCallTracesForBlock(tx, block.NumberU64(), tmpDir); err != nil {
+		return err
+	}
 
 	log.Info(fmt.Sprintf("processed block %d", block.NumberU64()))
 	return tx.Commit()
