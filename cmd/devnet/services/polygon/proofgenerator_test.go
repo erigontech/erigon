@@ -391,15 +391,15 @@ func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack
 	rand := randutil.NewMathRandomGenerator()
 
 	return blocks.GenerateBlocks(t, data.genesisSpec, number, map[int]blocks.TxGen{
-		0: blocks.TxGen{
+		0: {
 			Fn:  getBlockTx(data.addresses[0], data.addresses[1], uint256.NewInt(uint64(rand.Intn(5000))+1)),
 			Key: data.keys[0],
 		},
-		1: blocks.TxGen{
+		1: {
 			Fn:  getBlockTx(data.addresses[1], data.addresses[2], uint256.NewInt(uint64(rand.Intn(5000))+1)),
 			Key: data.keys[1],
 		},
-		2: blocks.TxGen{
+		2: {
 			Fn:  getBlockTx(data.addresses[2], data.addresses[0], uint256.NewInt(uint64(rand.Intn(5000))+1)),
 			Key: data.keys[2],
 		},
