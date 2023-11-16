@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -316,28 +314,17 @@ Loop:
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
 
-			unwindToTxNum, _ := rawdbv3.TxNums.Max(tx, unwindTo)
-			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, doms.CanUnwindDomainsToTxNum(), unwindToTxNum)
+			unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}
-			if ok {
-				if unwindTo != blockNumWithCommitment {
-					unwindTo = blockNumWithCommitment // not all blocks have commitment
-				}
-			} else {
+			if !ok {
 				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
 				if err != nil {
 					return err
 				}
-				err = fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
-				panic(err)
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
 			}
-			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
-			if err != nil {
-				return err
-			}
-			unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)

@@ -609,7 +609,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -1090,35 +1090,24 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
+	unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	unwindToTxNum, _ := rawdbv3.TxNums.Max(applyTx, unwindTo)
-	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(applyTx, doms.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
-	if ok {
-		if unwindTo != blockNumWithCommitment {
-			unwindTo = blockNumWithCommitment // not all blocks have commitment
-		}
-	} else {
-		unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
-		if err != nil {
-			return false, err
-		}
-		err = fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
-		panic(err)
-		unwindTo = 0
+	if !ok {
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
 	}
-
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
-	if err != nil {
-		return false, err
-	}
-	fmt.Printf("unwindToLimit: %d %d\n", unwindToLimit, unwindTo)
 	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
