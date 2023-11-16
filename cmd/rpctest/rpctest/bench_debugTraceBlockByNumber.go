@@ -50,7 +50,7 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 		reqGen.reqID++
 		request := reqGen.debugTraceBlockByNumber(bn)
 		errCtx := fmt.Sprintf("block %d", bn)
-		if err := requestAndCompare(request, "debug_traceBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+		if err := requestAndCompare(request, "debug_traceBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh /* insertOnlyIfSuccess */, false); err != nil {
 			return err
 		}
 	}
