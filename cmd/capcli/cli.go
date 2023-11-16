@@ -529,6 +529,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			return err
 		}
 		previousBlockSlot = currentHeader.Header.Slot
+		if i%2000 == 0 {
+			log.Info("Successfully checked", "slot", i)
+		}
 	}
 	return nil
 }
