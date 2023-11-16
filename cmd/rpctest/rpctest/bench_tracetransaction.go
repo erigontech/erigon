@@ -58,7 +58,8 @@ func BenchTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blockFro
 		reqGen.reqID++
 		request := reqGen.traceBlockByHash(b.Result.Hash.Hex())
 		errCtx := fmt.Sprintf("block %d, tx %s", bn, b.Result.Hash.Hex())
-		if err := requestAndCompare(request, "debug_traceBlockByHash", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+		if err := requestAndCompare(request, "debug_traceBlockByHash", errCtx, reqGen, needCompare, rec, errs, nil,
+			/* insertOnlyIfSuccess */ false); err != nil {
 			fmt.Println(err)
 			return
 		}
@@ -116,7 +117,8 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 			reqGen.reqID++
 			request := reqGen.traceTransaction(tx.Hash)
 			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, nil,
+				/* insertOnlyIfSuccess */ false); err != nil {
 				fmt.Println(err)
 				return
 			}

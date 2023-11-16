@@ -77,7 +77,8 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 			reqGen.reqID++
 			request := reqGen.getTransactionReceipt(tx.Hash)
 			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "eth_getTransactionReceipt", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+			if err := requestAndCompare(request, "eth_getTransactionReceipt", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+				/* insertOnlyIfSuccess */ false); err != nil {
 				return err
 			}
 		}

@@ -93,7 +93,8 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 				reqGen.reqID++
 				request := reqGen.getLogs(prevBn, bn, account)
 				errCtx := fmt.Sprintf("account %x blocks %d-%d", account, prevBn, bn)
-				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+					/* insertOnlyIfSuccess */ false); err != nil {
 					fmt.Println(err)
 					return
 				}
@@ -103,7 +104,8 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					reqGen.reqID++
 					request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
 					errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
-					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+						/* insertOnlyIfSuccess */ false); err != nil {
 						fmt.Println(err)
 						return
 					}
@@ -118,7 +120,8 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					reqGen.reqID++
 					request = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
 					errCtx := fmt.Sprintf("account %x topic1 %x topic2 %x blocks %d-%d", account, topics[idx1], topics[idx2], prevBn, bn)
-					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+						/* insertOnlyIfSuccess */ false); err != nil {
 						fmt.Println(err)
 						return
 					}

@@ -95,7 +95,7 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 
 		request := reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1)
 		errCtx := fmt.Sprintf("block %d", bn)
-		if err := requestAndCompare(request, "trace_callMany", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+		if err := requestAndCompare(request, "trace_callMany", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
 			fmt.Println(err)
 			return
 		}
