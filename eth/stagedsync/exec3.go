@@ -208,26 +208,83 @@ func ExecV3(ctx context.Context,
 	blockComplete := atomic.Bool{}
 	blockComplete.Store(true)
 
-	var inputTxNum uint64
-	if execStage.BlockNumber > 0 {
-		blockNum = execStage.BlockNumber + 1
-	} else if !useExternalTx { //nolint
-		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
-		//if err != nil {
-		//	return err
-		//}
-		//if found {
-		//	stageProgress = _downloadedBlockNum - 1
-		//	block = _downloadedBlockNum - 1
-		//}
-	}
-
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
-	offsetFromBlockBeginning, err := doms.SeekCommitment(ctx, applyTx)
-	if err != nil {
-		return err
+
+	blockNum = doms.BlockNum()
+	var inputTxNum = doms.TxNum()
+	var offsetFromBlockBeginning uint64
+
+	// Cases:
+	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
+	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
+	restoreTxNum := func(applyTx kv.Tx) error {
+		var err error
+		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
+		if err != nil {
+			return err
+		}
+		if inputTxNum == 0 {
+			return nil
+		}
+
+		inputTxNum++ // start execution from next txn
+		//++ may change blockNum, re-read it
+
+		var ok bool
+		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
+		}
+		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
+		if err != nil {
+			return err
+		}
+		_max, err := rawdbv3.TxNums.Max(applyTx, blockNum)
+		if err != nil {
+			return err
+		}
+		//fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
+		//if inputTxNum == _max {
+		//	inputTxNum++
+		//	blockNum++
+		//	_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//} else {
+
+		offsetFromBlockBeginning = inputTxNum - _min
+		inputTxNum = _min
+		//}
+
+		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
+		outputTxNum.Store(inputTxNum)
+
+		_ = _max
+		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
+		doms.SetBlockNum(blockNum)
+		doms.SetTxNum(ctx, inputTxNum)
+		return nil
+	}
+	if applyTx != nil {
+		if err := restoreTxNum(applyTx); err != nil {
+			return err
+		}
+	} else {
+		if err := chainDb.View(ctx, func(tx kv.Tx) error {
+			return restoreTxNum(applyTx)
+		}); err != nil {
+			return err
+		}
 	}
 
 	if applyTx != nil {
@@ -235,56 +292,7 @@ func ExecV3(ctx context.Context,
 			doms.DiscardHistory()
 		}
 	}
-
-	if applyTx != nil {
-		var err error
-		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
-		if err != nil {
-			return err
-		}
-		if blockNum > 0 {
-			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
-			if err != nil {
-				return err
-			}
-			outputTxNum.Store(_outputTxNum)
-			outputTxNum.Add(1)
-			inputTxNum = outputTxNum.Load()
-		}
-	} else {
-		if err := chainDb.View(ctx, func(tx kv.Tx) error {
-			var err error
-			maxTxNum, err = rawdbv3.TxNums.Max(tx, maxBlockNum)
-			if err != nil {
-				return err
-			}
-			if blockNum > 0 {
-				_outputTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-				if err != nil {
-					return err
-				}
-				outputTxNum.Store(_outputTxNum)
-				outputTxNum.Add(1)
-				inputTxNum = outputTxNum.Load()
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	// Cases:
-	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
-	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-	if doms.TxNum() > 0 {
-		inputTxNum = doms.TxNum() - offsetFromBlockBeginning
-		// has to start from Txnum-Offset (offset > 0 when we have half-block data)
-		// because we need to re-execute all txs we already seen in history mode to get correct gas check etc.
-	}
-	if doms.BlockNum() > 0 {
-		blockNum = doms.BlockNum()
-	}
-	outputTxNum.Store(inputTxNum)
+	var err error
 
 	log.Warn("execv3 starting",
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
@@ -320,7 +328,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
@@ -415,7 +423,10 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						_, err := doms.ComputeCommitment(ctx, true, false)
+						if doms.BlockNum() != outputBlockNum.Get() {
+							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.Get()))
+						}
+						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.Get())
 						if err != nil {
 							return err
 						}
@@ -598,7 +609,8 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	//fmt.Printf("exec: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -699,8 +711,11 @@ Loop:
 				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
 			}
+			//if txTask.HistoryExecution { // nolint
+			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
+			//}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
@@ -756,17 +771,15 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					//if errors.Is(err, context.Canceled) {
-					//	return err
-					//}
-					if !errors.Is(err, context.Canceled) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed1", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
-						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-						}
-						if cfg.badBlockHalt {
-							return err
-						}
+					if errors.Is(err, context.Canceled) {
+						return err
+					}
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+					}
+					if cfg.badBlockHalt {
+						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
 						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
@@ -777,7 +790,7 @@ Loop:
 				}
 
 				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask, agg); err != nil {
+				if err := rs.ApplyState4(ctx, txTask); err != nil {
 					return err
 				}
 
@@ -1033,8 +1046,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
-	doms.SetBlockNum(header.Number.Uint64())
-	rh, err := doms.ComputeCommitment(context.Background(), true, false)
+	if doms.BlockNum() != header.Number.Uint64() {
+		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
+	}
+	//doms.SetTxNum(context.Background(), doms.TxNum()-1) //
+	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
@@ -1074,22 +1090,23 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
+	unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	minBlockNum = cmp.Max(minBlockNum, unwindToLimit)
+
 	// Binary search, but not too deep
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(applyTx, 0, unwindTo)
+	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
-	if ok && unwindTo != blockNumWithCommitment {
-		unwindTo = blockNumWithCommitment // not all blocks have commitment
-	}
-
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
-	if err != nil {
-		return false, err
+	if !ok {
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
 	}
 	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
@@ -1144,7 +1161,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 		}
 
 		if txTask.Final {
-			err := rs.ApplyState4(ctx, txTask, agg)
+			err := rs.ApplyState4(ctx, txTask)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}

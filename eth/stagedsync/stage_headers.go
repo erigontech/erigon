@@ -310,20 +310,21 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
+
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
-			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo)
+
+			unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}
-			if ok && unwindTo != blockNumWithCommitment {
-				unwindTo = blockNumWithCommitment // not all blocks have commitment
+			if !ok {
+				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
 			}
-			//unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
-			//if err != nil {
-			//	return err
-			//}
-			//unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)

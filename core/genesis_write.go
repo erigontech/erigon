@@ -225,7 +225,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
-		_, err := domains.ComputeCommitment(ctx, true, false)
+		_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -457,6 +457,9 @@ func ChiadoGenesisBlock() *types.Genesis {
 		Alloc:      readPrealloc("allocs/chiado.json"),
 	}
 }
+func TestGenesisBlock() *types.Genesis {
+	return &types.Genesis{Config: params.TestChainConfig}
+}
 
 // Pre-calculated version of:
 //
@@ -671,6 +674,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.Test:
+		return TestGenesisBlock()
 	default:
 		return nil
 	}
