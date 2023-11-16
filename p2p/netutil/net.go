@@ -307,7 +307,6 @@ func (s DistinctNetSet) String() string {
 	buf.WriteString("{")
 	if s.members == nil {
 		s.members = &sync.Map{}
-		s.buf = make(net.IP, 17)
 	}
 	keys := make([]string, 0, 16)
 	s.members.Range(func(k, v interface{}) bool {
