@@ -17,7 +17,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
@@ -464,8 +463,6 @@ type CheckSnapshots struct {
 	chainCfg
 	outputFolder
 	withPPROF
-
-	Slot uint64 `name:"slot" help:"slot to check"`
 }
 
 func (c *CheckSnapshots) Run(ctx *Context) error {
@@ -480,7 +477,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -503,51 +500,38 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	br := &snapshot_format.MockBlockReader{}
-	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconDB, beaconConfig)
-	for i := c.Slot; i < to; i++ {
-		// Read the original canonical slot
-		data, err := beaconDB.GetBlock(ctx, tx, i)
+	genesisHeader, _, _, err := csn.ReadHeader(0)
+	if err != nil {
+		return err
+	}
+	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
+	if err != nil {
+		return err
+	}
+	previousBlockSlot := genesisHeader.Header.Slot
+	for i := uint64(1); i < to; i++ {
+		if utils.Min64(0, i-320) > previousBlockSlot {
+			return fmt.Errorf("snapshot %d has invalid slot", i)
+		}
+		// Checking of snapshots is a chain contiguity problem
+		currentHeader, _, _, err := csn.ReadHeader(i)
 		if err != nil {
 			return err
 		}
-		if data == nil {
+		if currentHeader == nil {
 			continue
 		}
-		blk := data.Data
-		if blk == nil {
-			continue
+		if currentHeader.Header.ParentRoot != previousBlockRoot {
+			return fmt.Errorf("snapshot %d has invalid parent root", i)
 		}
-		// first thing if the block is bellatrix update the mock block reader
-		if blk.Version() >= clparams.BellatrixVersion {
-			br.Block = blk.Block.Body.ExecutionPayload
-		}
-		blk2, err := snReader.ReadBlockBySlot(ctx, tx, i)
-		if err != nil {
-			log.Error("Error detected in decoding snapshots", "err", err, "slot", i)
-			return nil
-		}
-		if blk2 == nil {
-			log.Error("Block not found in snapshot", "slot", i)
-			return nil
-		}
-
-		hash1, _ := blk.Block.HashSSZ()
-		hash2, _ := blk2.Block.HashSSZ()
-		if hash1 != hash2 {
-			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash2))
-			return nil
-		}
-		header, _, _, err := csn.ReadHeader(i)
+		previousBlockRoot, err = currentHeader.Header.HashSSZ()
 		if err != nil {
 			return err
 		}
-		hash3, _ := header.Header.HashSSZ()
-		if hash3 != hash2 {
-			log.Error("Mismatching blocks", "slot", i, "gotSlot", blk2.Block.Slot, "datadir", libcommon.Hash(hash1), "snapshot", libcommon.Hash(hash3))
-			return nil
+		previousBlockSlot = currentHeader.Header.Slot
+		if i%2000 == 0 {
+			log.Info("Successfully checked", "slot", i)
 		}
-		log.Info("Successfully checked", "slot", i)
 	}
 	return nil
 }
