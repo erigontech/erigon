@@ -959,15 +959,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err := reset2.ResetExec(ctx, db, chain, ""); err != nil {
 			return err
 		}
-
-		//br, bw := blocksIO(db, logger)
-		//chainConfig := fromdb.ChainConfig(db)
-		//return db.Update(ctx, func(tx kv.RwTx) error {
-		//	if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
-		//		return err
-		//	}
-		//	return nil
-		//})
 		return nil
 	}
 
@@ -1012,19 +1003,22 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if unwind > 0 {
-		//if historyV3 {
-		//	doms := libstate.NewSharedDomains(tx)
-		//	defer doms.Close()
-		//	unwindToTxNum, _ := rawdbv3.TxNums.Min(tx, unwind)
-		//	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindToTxNum)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	if ok {
-		//		fmt.Printf("blockNumWithCommitment: %d, %d\n", blockNumWithCommitment, unwind)
-		//	}
-		//	panic(1)
-		//}
+		if historyV3 {
+			doms := libstate.NewSharedDomains(tx)
+			defer doms.Close()
+			blockNumWithCommitment, ok, err := doms.CanUnwindBeforeBlockNum(doms.BlockNum()-unwind, tx)
+			if err != nil {
+				return err
+			}
+			if ok {
+				_min, err := doms.CanUnwindDomainsToBlockNum(tx)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("too deep unwind requested: %d, minimum alowed: %d\n", unwind, _min)
+			}
+			unwind = s.BlockNumber - blockNumWithCommitment
+		}
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
 		if err != nil {
