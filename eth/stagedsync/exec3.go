@@ -270,7 +270,7 @@ func ExecV3(ctx context.Context,
 		outputTxNum.Store(inputTxNum)
 
 		_ = _max
-		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
+		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
@@ -609,7 +609,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	//var err error
 
-	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
