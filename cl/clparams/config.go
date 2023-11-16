@@ -266,9 +266,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		// "https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		// "https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
@@ -1003,4 +1003,8 @@ func EmbeddedSupported(id uint64) bool {
 // (sufficient number of light-client peers) as to be enabled by default
 func EmbeddedEnabledByDefault(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
+}
+
+func SupportBackfilling(networkId uint64) bool {
+	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
 }

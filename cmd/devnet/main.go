@@ -105,8 +105,8 @@ var (
 	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
+		Name:  "diagnostics.addr",
+		Usage: "Address of the diagnostics system provided by the support team, include unique session PIN",
 	}
 
 	insecureFlag = cli.BoolFlag{

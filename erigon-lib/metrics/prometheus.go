@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -72,7 +73,7 @@ func Handler(reg Registry) http.Handler {
 			prevTypeName = typeName
 		}
 		w.Header().Add("Content-Type", "text/plain")
-		w.Header().Add("Content-Length", fmt.Sprint(c.buff.Len()))
+		w.Header().Add("Content-Length", strconv.Itoa(c.buff.Len()))
 		w.Write(c.buff.Bytes())
 	})
 }

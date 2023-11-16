@@ -2,15 +2,16 @@ package tests
 
 import (
 	"fmt"
+	"os"
+	"runtime"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
-	"os"
-	"runtime"
-	"testing"
 )
 
 func initDevnet(chainName string, dataDir string, logger log.Logger) (devnet.Devnet, error) {

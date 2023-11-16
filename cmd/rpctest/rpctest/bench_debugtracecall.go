@@ -93,7 +93,8 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil,
+				/* insertOnlyIfSuccess*/ false); err != nil {
 				fmt.Println(err)
 				return
 			}

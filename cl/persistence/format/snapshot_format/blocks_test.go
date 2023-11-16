@@ -61,12 +61,29 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 		require.NoError(t, err)
 		blk2, err := snapshot_format.ReadBlockFromSnapshot(&b, &br, &clparams.MainnetBeaconConfig)
 		require.NoError(t, err)
-		_ = blk2
+
 		hash1, err := blk.HashSSZ()
 		require.NoError(t, err)
 		hash2, err := blk2.HashSSZ()
 		require.NoError(t, err)
+		// Rewrite for header test
+		b.Reset()
+		_, err = snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
+		require.NoError(t, err)
+		header, bn, bHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(&b)
+		require.NoError(t, err)
+		hash3, err := header.HashSSZ()
+		require.NoError(t, err)
 
 		require.Equal(t, hash1, hash2)
+
+		require.Equal(t, header.Signature, blk.Signature)
+		require.Equal(t, header.Header.Slot, blk.Block.Slot)
+
+		if blk.Version() >= clparams.BellatrixVersion {
+			require.Equal(t, bn, blk.Block.Body.ExecutionPayload.BlockNumber)
+			require.Equal(t, bHash, blk.Block.Body.ExecutionPayload.BlockHash)
+		}
+		require.Equal(t, hash3, hash2)
 	}
 }

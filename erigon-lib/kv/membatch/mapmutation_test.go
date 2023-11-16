@@ -2,12 +2,13 @@ package membatch
 
 import (
 	"context"
+	"os"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-	"os"
-	"testing"
 )
 
 func TestMapmutation_Flush_Close(t *testing.T) {

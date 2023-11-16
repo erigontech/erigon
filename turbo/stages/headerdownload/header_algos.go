@@ -896,24 +896,40 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
+
 	// Now we can decide wether this header will create a change in the canonical head
-	if td.Cmp(hi.localTd) > 0 {
-		hi.newCanonical = true
-		forkingPoint, err := hi.ForkingPoint(db, header, parent)
-		if err != nil {
-			return nil, err
+	if td.Cmp(hi.localTd) >= 0 {
+		reorg := true
+
+		// TODO: Add bor check here if required
+		// Borrowed from https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L81
+		if td.Cmp(hi.localTd) == 0 {
+			if blockHeight > hi.highest {
+				reorg = false
+			} else if blockHeight == hi.highest {
+				// Compare hashes of block in case of tie breaker. Lexicographically larger hash wins.
+				reorg = bytes.Compare(hi.highestHash.Bytes(), hash.Bytes()) < 0
+			}
 		}
-		hi.highest = blockHeight
-		hi.highestHash = hash
-		hi.highestTimestamp = header.Time
-		hi.canonicalCache.Add(blockHeight, hash)
-		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
-		if forkingPoint < hi.unwindPoint {
-			hi.unwindPoint = forkingPoint
-			hi.unwind = true
+
+		if reorg {
+			hi.newCanonical = true
+			forkingPoint, err := hi.ForkingPoint(db, header, parent)
+			if err != nil {
+				return nil, err
+			}
+			hi.highest = blockHeight
+			hi.highestHash = hash
+			hi.highestTimestamp = header.Time
+			hi.canonicalCache.Add(blockHeight, hash)
+			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
+			if forkingPoint < hi.unwindPoint {
+				hi.unwindPoint = forkingPoint
+				hi.unwind = true
+			}
+			// This makes sure we end up choosing the chain with the max total difficulty
+			hi.localTd.Set(td)
 		}
-		// This makes sure we end up choosing the chain with the max total difficulty
-		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
@@ -948,6 +964,10 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash l
 	hi.highestTimestamp = header.Time
 
 	return nil
+}
+
+func (hi *HeaderInserter) GetLocalTd() *big.Int {
+	return hi.localTd
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {

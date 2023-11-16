@@ -30,10 +30,11 @@ package mmap
 import (
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
-	"os"
 )
 
 // cgroupsMemoryLimit will try to discover
