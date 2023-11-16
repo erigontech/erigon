@@ -14,12 +14,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -95,18 +93,18 @@ func openDBDefault(opts kv2.MdbxOpts, applyMigrations, enableV3IfDBNotExists boo
 	}
 
 	if opts.GetLabel() == kv.ChainDB {
-		if enableV3IfDBNotExists {
-			logger.Info("history V3 is forcibly enabled")
-			err := db.Update(context.Background(), func(tx kv.RwTx) error {
-				if err := snap.ForceSetFlags(tx, ethconfig.BlocksFreezing{Enabled: true}); err != nil {
-					return err
-				}
-				return kvcfg.HistoryV3.ForceWrite(tx, true)
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
+		//if enableV3IfDBNotExists {
+		//	logger.Info("history V3 is forcibly enabled")
+		//	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		//		if err := snap.ForceSetFlags(tx, ethconfig.BlocksFreezing{Enabled: true}); err != nil {
+		//			return err
+		//		}
+		//		return kvcfg.HistoryV3.ForceWrite(tx, true)
+		//	})
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//}
 
 		var h3 bool
 		var err error

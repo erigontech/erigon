@@ -992,6 +992,31 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, historyV3, dirs, br, nil, genesis, syncCfg, agg, nil)
 
+	if unwind > 0 && historyV3 {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			doms := libstate.NewSharedDomains(tx)
+			defer doms.Close()
+			if doms.BlockNum() < unwind {
+				return fmt.Errorf("too deep unwind requested: %d, current progress: %d\n", unwind, doms.BlockNum())
+			}
+			blockNumWithCommitment, ok, err := doms.CanUnwindBeforeBlockNum(doms.BlockNum()-unwind, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				_min, err := doms.CanUnwindDomainsToBlockNum(tx)
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", doms.BlockNum()-unwind, _min)
+			}
+			unwind = s.BlockNumber - blockNumWithCommitment
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
 	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
 	if noCommit {
 		var err error
@@ -1003,22 +1028,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if unwind > 0 {
-		if historyV3 {
-			doms := libstate.NewSharedDomains(tx)
-			defer doms.Close()
-			blockNumWithCommitment, ok, err := doms.CanUnwindBeforeBlockNum(doms.BlockNum()-unwind, tx)
-			if err != nil {
-				return err
-			}
-			if ok {
-				_min, err := doms.CanUnwindDomainsToBlockNum(tx)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("too deep unwind requested: %d, minimum alowed: %d\n", unwind, _min)
-			}
-			unwind = s.BlockNumber - blockNumWithCommitment
-		}
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
 		if err != nil {
