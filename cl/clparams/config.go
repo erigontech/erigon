@@ -1006,5 +1006,5 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
+	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork) || networkId == uint64(GnosisNetwork)
 }
