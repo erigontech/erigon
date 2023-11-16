@@ -107,8 +107,6 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs) error {
