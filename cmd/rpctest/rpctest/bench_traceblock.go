@@ -72,5 +72,5 @@ func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64
 			return err
 		}
 	}
-        return nil
+	return nil
 }
