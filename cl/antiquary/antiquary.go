@@ -173,11 +173,11 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
+			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
+			to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 			if to-from < snaptype.Erigon2RecentMergeLimit {
 				continue
 			}
-			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 			if err := a.antiquate(from, to); err != nil {
 				return err
 			}
