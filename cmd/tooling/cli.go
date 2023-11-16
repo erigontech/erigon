@@ -81,12 +81,14 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	if err := checkSnapshots(ctx, beaconConfig, dirs); err != nil {
 		return err
 	}
+	log.Info("Uploading snapshots to R2 bucket")
 	// next upload to R2
 	command := "rclone"
 	args := []string{"sync", dirs.Snap, c.Bucket, "--include", "*beaconblocks*"}
 	if err := exec.Command(command, args...).Run(); err != nil {
 		return fmt.Errorf("rclone failed, make sure rclone is installed and is properly configured: %s", err)
 	}
+	log.Info("Finished snapshots to R2 bucket")
 	for {
 		select {
 		case <-tickerTriggerer.C:

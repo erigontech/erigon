@@ -230,10 +230,9 @@ type DistinctNetSet struct {
 // number of existing IPs in the defined range exceeds the limit.
 func (s *DistinctNetSet) Add(ip net.IP) bool {
 	key := s.key(ip)
-	nI, ok := s.members.Load(string(key))
 	n := uint(0)
-	if ok {
-		n = nI.(uint)
+	if value, ok := s.members.Load(string(key)); ok {
+		n = value.(uint)
 	}
 	if n < s.Limit {
 		s.members.Store(string(key), n+1)
@@ -306,9 +305,9 @@ func (s DistinctNetSet) String() string {
 	var buf bytes.Buffer
 	buf.WriteString("{")
 	if s.members == nil {
-		s.members = &sync.Map{}
+		return "{}"
 	}
-	keys := make([]string, 0, 16)
+	keys := []string{}
 	s.members.Range(func(k, v interface{}) bool {
 		keys = append(keys, k.(string))
 		return true
