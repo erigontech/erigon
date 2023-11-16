@@ -218,10 +218,14 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		WriteBufferPool: wsBufferPool,
 	}
 
-	conn, resp, err := dialer.DialContext(ctx1, diagnosticsUrl, nil)
+	conn, resp, err := dialer.DialContext(ctx1, "wss://"+diagnosticsUrl, nil)
 
 	if err != nil {
-		return err
+		conn, resp, err = dialer.DialContext(ctx1, "ws://"+diagnosticsUrl, nil)
+
+		if err != nil {
+			return err
+		}
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
