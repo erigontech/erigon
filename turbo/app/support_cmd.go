@@ -41,7 +41,7 @@ var (
 	}
 
 	debugURLsFlag = cli.StringSliceFlag{
-		Name:  "debug.urls",
+		Name:  "debug.addrs",
 		Usage: "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
 	}
 
@@ -84,7 +84,11 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	debugURLs := cliCtx.StringSlice(debugURLsFlag.Name)
+	debugURLs := []string{}
+
+	for _, debugURL := range cliCtx.StringSlice(debugURLsFlag.Name) {
+		debugURLs = append(debugURLs, "http://"+debugURL)
+	}
 
 	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name) + "/bridge"
 
