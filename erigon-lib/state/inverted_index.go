@@ -1108,7 +1108,6 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
-			fmt.Printf("alex: %s, %s\n", k, it.key)
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
