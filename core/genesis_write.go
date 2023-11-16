@@ -26,12 +26,12 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
@@ -40,7 +40,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -225,6 +224,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
+		domains.SetTxNum(context.Background(), 1)
 		_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
 		if err != nil {
 			return nil, nil, err
@@ -557,14 +557,16 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 
 	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+
+		genesisTmpDB := memdb.New(tmpDir)
 		defer genesisTmpDB.Close()
-		var tx kv.RwTx
-		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+
+		tx, err := genesisTmpDB.BeginRw(context.Background())
+		if err != nil {
 			return
 		}
+
 		defer tx.Rollback()
 
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)

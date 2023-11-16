@@ -331,7 +331,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(domains)
 	}
-	txNum := -1
+
+	txIndex := 0
 	setBlockNum := func(blockNum uint64) {
 		if histV3 {
 			domains.SetBlockNum(blockNum)
@@ -341,13 +342,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		}
 	}
 	txNumIncrement := func() {
-		txNum++
+		txIndex++
 		if histV3 {
-			domains.SetTxNum(ctx, uint64(txNum))
+			domains.SetTxNum(ctx, uint64(txIndex))
 		}
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
+
 		txNumIncrement()
 
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1),
@@ -364,12 +366,22 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
 		}
+
+		// commit current tx number, inside block
+		_, err := domains.ComputeCommitment(ctx, true, false, b.header.Number.Uint64())
+		if err != nil {
+			return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+		}
+
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
@@ -380,14 +392,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
+			//fmt.Printf("block %d [%d] sealed with %d txs\n", i, domains.TxNum(), len(b.txs))
 
 			var err error
 			if histV3 {
-				//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
-				//if err = domains.Flush(ctx, tx); err != nil {
-				//	return nil, nil, err
-				//}
-				//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
+
+				// commitment is written as of last tx in block, after any kind of finalization is done.
 				stateRoot, err := domains.ComputeCommitment(ctx, true, false, b.header.Number.Uint64())
 				if err != nil {
 					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
@@ -395,11 +405,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				if err = domains.Flush(ctx, tx); err != nil {
 					return nil, nil, err
 				}
-				if err != nil {
-					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-				}
 				b.header.Root = libcommon.BytesToHash(stateRoot)
 			} else {
+				//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
+				// if err = domains.Flush(ctx, tx); err != nil {
+				// 	return nil, nil, err
+				// }
 				b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, false)
 			}
 			_ = err
