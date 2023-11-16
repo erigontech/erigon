@@ -36,8 +36,8 @@ var wsBufferPool = new(sync.Pool)
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
+		Name:  "diagnostics.addr",
+		Usage: "Address of the diagnostics system provided by the support team, include unique session PIN",
 	}
 
 	debugURLsFlag = cli.StringSliceFlag{
@@ -60,7 +60,7 @@ var supportCommand = cli.Command{
 	Action:    MigrateFlags(connectDiagnostics),
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
-	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
+	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Flags: []cli.Flag{
 		&debugURLsFlag,
 		&diagnosticsURLFlag,

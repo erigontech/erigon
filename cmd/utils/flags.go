@@ -822,8 +822,8 @@ var (
 	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team",
+		Name:  "diagnostics.addr",
+		Usage: "Address of the diagnostics system provided by the support team",
 	}
 
 	DiagnosticsInsecureFlag = cli.BoolFlag{
