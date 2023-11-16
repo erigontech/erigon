@@ -72,7 +72,7 @@ func (c *R2CaplinAutomation) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started the automation tool", "chain", c.Chain)
+	log.Info("Started the automation tool for automatic snapshot sanity check and R2 uploading (caplin only)", "chain", c.Chain)
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	tickerTriggerer := time.NewTicker(c.UploadPeriod)
