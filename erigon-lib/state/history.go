@@ -2195,7 +2195,9 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 			if err != nil {
 				return nil, err
 			}
+
 			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				fmt.Printf("ier1: %x, %x\n", k, v)
 				if len(k) < 8 {
 					return 0, fmt.Errorf("unexpected large key length %d", len(k))
 				}
@@ -2222,6 +2224,7 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 				return nil, err
 			}
 			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				fmt.Printf("ier2: %x, %x\n", k, v)
 				if len(k) < 8 {
 					return 0, fmt.Errorf("unexpected large key length %d", len(k))
 				}
@@ -2243,14 +2246,35 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 			if err != nil {
 				return nil, err
 			}
-			dbIt = iter.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				fmt.Printf("ier3: %x, %x\n", k, v)
 				if len(v) < 8 {
 					return 0, fmt.Errorf("unexpected small value length %d", len(v))
 				}
 				return binary.BigEndian.Uint64(v), nil
 			})
 		} else {
-			panic("implement me")
+			var from, to []byte
+			if startTxNum >= 0 {
+				from = make([]byte, 8)
+				binary.BigEndian.PutUint64(from, uint64(startTxNum))
+			}
+			if endTxNum >= 0 {
+				to = make([]byte, 8)
+				binary.BigEndian.PutUint64(to, uint64(endTxNum))
+			}
+			fmt.Printf("IdxRange:(%d, %d), (%x, %x)\n", startTxNum, endTxNum, from, to)
+			it, err := roTx.RangeDupSort(hc.h.historyValsTable, key, from, to, asc, limit)
+			if err != nil {
+				return nil, err
+			}
+			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+				if len(v) < 8 {
+					return 0, fmt.Errorf("unexpected small value length %d", len(v))
+				}
+				fmt.Printf("ier4: %s, %d\n", k, binary.BigEndian.Uint64(v))
+				return binary.BigEndian.Uint64(v), nil
+			})
 		}
 	}
 

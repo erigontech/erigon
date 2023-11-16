@@ -213,7 +213,7 @@ func ExecV3(ctx context.Context,
 	defer doms.Close()
 
 	blockNum = doms.BlockNum()
-	inputTxNum := doms.TxNum()
+	var inputTxNum = doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
 	// Cases:
@@ -225,16 +225,21 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+		fmt.Printf("exec see inputTxNum: %d\n", inputTxNum)
 		if inputTxNum == 0 {
+			fmt.Printf("zeeeeeroooo at block: %x\n", maxTxNum)
 			return nil
 		}
+
+		//lastCommitmentTxNum := doms.TxNum()
+		//_ = lastCommitmentTxNum
+		//inputTxNum = lastCommitmentTxNum
 
 		inputTxNum++ // start execution from next txn
 		//++ may change blockNum, re-read it
 
 		var ok bool
 		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
-		fmt.Printf("[commitment] found block %d -> %d, txnum %d -> %d\n", doms.BlockNum(), blockNum, inputTxNum, maxTxNum)
 		if err != nil {
 			return err
 		}
@@ -249,22 +254,23 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if inputTxNum == _max {
-			inputTxNum++
-			blockNum++
-			_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-			_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
-			if err != nil {
-				return err
-			}
-		} else {
+		fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
+		//if inputTxNum == _max {
+		//	inputTxNum++
+		//	blockNum++
+		//	_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//} else {
 
-			offsetFromBlockBeginning = inputTxNum - _min
-			inputTxNum = _min
-		}
+		offsetFromBlockBeginning = inputTxNum - _min
+		inputTxNum = _min
+		//}
 
 		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
@@ -771,17 +777,15 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					//if errors.Is(err, context.Canceled) {
-					//	return err
-					//}
-					if !errors.Is(err, context.Canceled) {
-						logger.Warn(fmt.Sprintf("[%s] Execution failed1", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
-						if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-						}
-						if cfg.badBlockHalt {
-							return err
-						}
+					if errors.Is(err, context.Canceled) {
+						return err
+					}
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+					}
+					if cfg.badBlockHalt {
+						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
 						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))

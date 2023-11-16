@@ -352,6 +352,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err != nil {
 		return err
 	}
+	fmt.Printf("unwind tooo: %d, %d\n", u.UnwindPoint+1, txNum)
 	if err := rs.Unwind(ctx, tx, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
@@ -464,7 +465,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, cfg.engine, false)
 		defer clean()
 	}
-	//fmt.Printf("exec: %d -> %d\n", stageProgress+1, to)
+	fmt.Printf("exec blocks: %d -> %d\n", stageProgress+1, to)
 
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
@@ -716,7 +717,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
-	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
+	fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}

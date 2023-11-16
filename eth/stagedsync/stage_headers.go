@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -315,20 +317,40 @@ Loop:
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
 
-			blockNumWithCommitment := doms.BlockNum()
-
-			blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindTo+1)
+			searchUpTo, _ := rawdbv3.TxNums.Max(tx, unwindTo)
+			fmt.Printf("stage_headers1: %d, %d\n", unwindTo, searchUpTo)
+			blockNumWithCommitment, txnnnnn, ok, err := doms.SeekCommitment2(tx, 0, searchUpTo)
 			if err != nil {
 				return err
 			}
-			if ok && unwindTo != blockNumWithCommitment {
-				unwindTo = blockNumWithCommitment // not all blocks have commitment
+			fmt.Printf("stage_headers2(%d): %d, %d, %t\n", searchUpTo, blockNumWithCommitment, txnnnnn, ok)
+			{
+				blockNumWithCommitment, txnnnnn, ok, err := doms.SeekCommitment2(tx, 0, math.MaxUint64)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("stage_headers2(%d): %d, %d, %t\n", unwindTo+2, blockNumWithCommitment, txnnnnn, ok)
+				blockNumWithCommitment, txnnnnn, ok, err = doms.SeekCommitment2(tx, 0, unwindTo+3)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("stage_headers2(%d): %d, %d, %t\n", unwindTo+3, blockNumWithCommitment, txnnnnn, ok)
+
 			}
+			if ok {
+				if unwindTo != blockNumWithCommitment {
+					unwindTo = blockNumWithCommitment // not all blocks have commitment
+				}
+			} else {
+				unwindTo = 0
+			}
+			fmt.Printf("stage_headers3: %d\n", unwindTo)
 			unwindToLimit, err := tx.(state.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
 			if err != nil {
 				return err
 			}
-			unwindTo = cmp.Max(unwindTo+1, unwindToLimit) // don't go too far
+			fmt.Printf("stage_headers4: %d\n", unwindToLimit)
+			unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)

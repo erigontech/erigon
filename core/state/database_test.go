@@ -20,10 +20,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1338,6 +1340,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 }
 
 func TestRecreateAndRewind(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1477,6 +1482,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err1)
 	}
 
+	fmt.Printf("-------- start ------\n")
 	// BLOCKS 1 and 2
 	if err = m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatal(err)
