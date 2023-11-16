@@ -160,7 +160,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	}
 
 	sd.ClearRam(true)
-	//return nil
 	return sd.Flush(ctx, rwTx)
 }
 
