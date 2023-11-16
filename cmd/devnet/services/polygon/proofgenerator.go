@@ -74,11 +74,11 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	isCheckpointed, err := pg.isCheckPointed(ctx, burnTxHash)
 
 	if err != nil {
-		return nil, fmt.Errorf("Error getting burn transaction: %w", err)
+		return nil, fmt.Errorf("error getting burn transaction: %w", err)
 	}
 
 	if !isCheckpointed {
-		return nil, fmt.Errorf("Burn transaction has not been checkpointed yet")
+		return nil, fmt.Errorf("eurn transaction has not been checkpointed yet")
 	}
 
 	// build payload for exit
@@ -209,7 +209,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	// step 5- create receipt proof
-	receiptProof, err := getReceiptProof(ctx, receipt, block, node, nil)
+	receiptProof, err := getReceiptProof(ctx, node, receipt, block, nil)
 
 	if err != nil {
 		return nil, err
@@ -263,7 +263,7 @@ type receiptProof struct {
 	value       interface{}
 }
 
-func getReceiptProof(ctx context.Context, receipt *types.Receipt, block *requests.Block, node devnet.Node, receipts []*types.Receipt) (*receiptProof, error) {
+func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receipt *types.Receipt, block *requests.Block, receipts []*types.Receipt) (*receiptProof, error) {
 	stateSyncTxHash := types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 	receiptsTrie := trie.New(trie.EmptyRoot)
 

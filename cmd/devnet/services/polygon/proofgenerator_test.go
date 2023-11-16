@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -24,21 +26,67 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pion/randutil"
 )
 
 type requestGenerator struct {
+	sync.Mutex
 	requests.NopRequestGenerator
-	bor *bor.Bor
+	sentry     *mock.MockSentry
+	bor        *bor.Bor
+	chain      *core.ChainPack
+	txBlockMap map[libcommon.Hash]*types.Block
 }
 
-func (rg requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
+	db := memdb.New("")
+
+	tx, err := db.BeginRw(context.Background())
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err = rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
+		return nil, err
+	}
+
+	if err = rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
+		return nil, err
+	}
+
+	tx.Commit()
+
+	reader := blockReader{
+		chain: chain,
+	}
+
+	return &requestGenerator{
+		chain:  chain,
+		sentry: sentry,
+		bor: bor.NewRo(params.BorDevnetChainConfig, db, reader,
+			&spanner{
+				span.NewChainSpanner(contract.ValidatorSet(), params.BorDevnetChainConfig, false, log.Root()),
+				libcommon.Address{},
+				span.Span{}},
+			genesisContract{}, log.Root()),
+		txBlockMap: map[libcommon.Hash]*types.Block{},
+	}, nil
+}
+
+func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	tx, err := rg.bor.DB.BeginRo(context.Background())
 
 	if err != nil {
@@ -54,6 +102,96 @@ func (rg requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, e
 	}
 
 	return libcommon.HexToHash(result), nil
+}
+
+func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*requests.Block, error) {
+	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
+		block := rg.chain.Blocks[bn]
+
+		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
+
+		for i, tx := range block.Transactions() {
+			rg.txBlockMap[tx.Hash()] = block
+			transactions[i] = jsonrpc.NewRPCTransaction(tx, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+		}
+
+		return &requests.Block{
+			BlockWithTxHashes: requests.BlockWithTxHashes{
+				Header: block.Header(),
+				Hash:   block.Hash(),
+			},
+			Transactions: transactions,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("block %d not found", blockNum.Uint64())
+}
+
+func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error) {
+	rg.Lock()
+	defer rg.Unlock()
+
+	block, ok := rg.txBlockMap[hash]
+
+	if !ok {
+		return nil, fmt.Errorf("can't find block to tx: %s", hash)
+	}
+
+	engine := rg.bor
+	chainConfig := params.BorDevnetChainConfig
+
+	reader := blockReader{
+		chain: rg.chain,
+	}
+
+	tx, err := rg.sentry.DB.BeginRo(context.Background())
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer tx.Rollback()
+
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var usedGas uint64
+	var usedBlobGas uint64
+
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+
+	noopWriter := state.NewNoopWriter()
+
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, e := reader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
+	}
+
+	header := block.Header()
+
+	for i, txn := range block.Transactions() {
+
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
+
+		if err != nil {
+			return nil, err
+		}
+
+		if txn.Hash() == hash {
+			receipt.BlockHash = block.Hash()
+			return receipt, nil
+		}
+	}
+
+	return nil, fmt.Errorf("tx not found in block")
 }
 
 type blockReader struct {
@@ -102,7 +240,7 @@ func TestMerkle(t *testing.T) {
 
 func TestBlockGeneration(t *testing.T) {
 
-	chain, err := generateBlocks(t, 1600)
+	_, chain, err := generateBlocks(t, 1600)
 
 	if err != nil {
 		t.Fatal(err)
@@ -168,41 +306,16 @@ func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, 
 }
 
 func TestBlockProof(t *testing.T) {
-	chain, err := generateBlocks(t, 1600)
+	sentry, chain, err := generateBlocks(t, 1600)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	db := memdb.New("")
-
-	tx, err := db.BeginRw(context.Background())
+	rg, err := newRequestGenerator(sentry, chain)
 
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	if err = rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
-		t.Fatal(err)
-	}
-
-	if err = rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
-		t.Fatal(err)
-	}
-
-	tx.Commit()
-
-	reader := blockReader{
-		chain: chain,
-	}
-
-	rg := requestGenerator{
-		bor: bor.NewRo(params.BorDevnetChainConfig, db, reader,
-			&spanner{
-				span.NewChainSpanner(contract.ValidatorSet(), params.BorDevnetChainConfig, false, log.Root()),
-				libcommon.Address{},
-				span.Span{}},
-			genesisContract{}, log.Root()),
 	}
 
 	_, err = rg.GetRootHash(context.Background(), 0, 1599)
@@ -226,13 +339,58 @@ func TestBlockProof(t *testing.T) {
 	}
 }
 
-func generateBlocks(t *testing.T, number int) (*core.ChainPack, error) {
+func TestReceiptProof(t *testing.T) {
+	sentry, chain, err := generateBlocks(t, 1)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rg, err := newRequestGenerator(sentry, chain)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var block *requests.Block
+	var blockNo uint64
+
+	for block == nil {
+		block, err = rg.GetBlockByNumber(context.Background(), rpc.AsBlockNumber(blockNo), true)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(block.Transactions) == 0 {
+			block = nil
+			blockNo++
+		}
+	}
+
+	receipt, err := rg.GetTransactionReceipt(context.Background(), block.Transactions[len(block.Transactions)-1].Hash)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//TODO the receiptProof needs parents formatted from trie - need to confirm format for that
+	_ /*receiptProof*/, err = getReceiptProof(context.Background(), rg, receipt, block, nil)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//fmt.Println(receiptProof)
+}
+
+func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack, error) {
 
 	data := getGenesis(3)
 
 	rand := randutil.NewMathRandomGenerator()
 
-	_ /*sentry*/, chain, err := blocks.GenerateBlocks(t, data.genesisSpec, number, map[int]blocks.TxGen{
+	return blocks.GenerateBlocks(t, data.genesisSpec, number, map[int]blocks.TxGen{
 		0: blocks.TxGen{
 			Fn:  getBlockTx(data.addresses[0], data.addresses[1], uint256.NewInt(uint64(rand.Intn(5000))+1)),
 			Key: data.keys[0],
@@ -248,8 +406,6 @@ func generateBlocks(t *testing.T, number int) (*core.ChainPack, error) {
 	}, func(_ int) int {
 		return rand.Intn(10)
 	})
-
-	return chain, err
 }
 
 func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.Int) blocks.TxFn {

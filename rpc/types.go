@@ -20,11 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -198,6 +199,8 @@ func AsBlockNumber(no interface{}) BlockNumber {
 		return no
 	case *BlockNumber:
 		return *no
+	case int:
+		return BlockNumber(no)
 	case int64:
 		return BlockNumber(no)
 	case uint64:
