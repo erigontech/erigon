@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
@@ -114,7 +113,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
-		panic(err)
+
 	}
 	return sd
 }
@@ -164,7 +163,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+	it, err := sd.aggCtx.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +175,19 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchAccount)
 	}
 
-	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+	it, err = sd.aggCtx.DomainRangeLatest(rwTx, kv.CodeDomain, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
+
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchCode)
+	}
+	it, err = sd.aggCtx.DomainRangeLatest(rwTx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +249,25 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if bn == 0 && txn == 0 {
 			return 0, nil
 		}
+		snapTx := sd.aggCtx.maxTxNumInFiles(true)
+		if snapTx > txn {
+			snapTx = txn
+		}
+
+		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, snapTx)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+
+		}
+
+		_min, err := rawdbv3.TxNums.Min(tx, bn)
+		if err != nil {
+			return 0, err
+		}
+		txsFromBlockBeginning = snapTx - _min
+
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(ctx, txn)
 		newRh, err := sd.rebuildCommitment(ctx, tx, bn)
