@@ -320,9 +320,9 @@ func (d *DomainCommitted) storeCommitmentState(dc *DomainContext, blockNum uint6
 		return err
 	}
 
-	//if d.trace {
-	fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
-	//}
+	if d.trace {
+		fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
+	}
 	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
 		return err
 	}
@@ -345,13 +345,13 @@ func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 			return 0, 0, fmt.Errorf("failed restore state : %w", err)
 		}
 		d.justRestored.Store(true) // to prevent double reset
-		//if d.trace {
-		rh, err := hext.RootHash()
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+		if d.trace {
+			rh, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
 		}
-		fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
-		//}
 	} else {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}

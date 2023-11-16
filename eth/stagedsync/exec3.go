@@ -225,15 +225,9 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		fmt.Printf("exec see inputTxNum: %d\n", inputTxNum)
 		if inputTxNum == 0 {
-			fmt.Printf("zeeeeeroooo at block: %x\n", maxTxNum)
 			return nil
 		}
-
-		//lastCommitmentTxNum := doms.TxNum()
-		//_ = lastCommitmentTxNum
-		//inputTxNum = lastCommitmentTxNum
 
 		inputTxNum++ // start execution from next txn
 		//++ may change blockNum, re-read it
