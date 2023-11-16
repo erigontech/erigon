@@ -2175,107 +2175,55 @@ func (hs *HistoryStep) Clone() *HistoryStep {
 func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	var dbIt iter.U64
 	if hc.h.historyLargeValues {
-		if asc {
-			from := make([]byte, len(key)+8)
-			copy(from, key)
-			var fromTxNum uint64
-			if startTxNum >= 0 {
-				fromTxNum = uint64(startTxNum)
-			}
-			binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-
-			to := common.Copy(from)
-			toTxNum := uint64(math.MaxUint64)
-			if endTxNum >= 0 {
-				toTxNum = uint64(endTxNum)
-			}
-			binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-
-			it, err := roTx.RangeAscend(hc.h.historyValsTable, from, to, limit)
-			if err != nil {
-				return nil, err
-			}
-
-			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-				fmt.Printf("ier1: %x, %x\n", k, v)
-				if len(k) < 8 {
-					return 0, fmt.Errorf("unexpected large key length %d", len(k))
-				}
-				return binary.BigEndian.Uint64(k[len(k)-8:]), nil
-			})
-		} else {
-			from := make([]byte, len(key)+8)
-			copy(from, key)
-			var fromTxNum uint64
-			if startTxNum >= 0 {
-				fromTxNum = uint64(startTxNum)
-			}
-			binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-
-			to := common.Copy(from)
-			toTxNum := uint64(math.MaxUint64)
-			if endTxNum >= 0 {
-				toTxNum = uint64(endTxNum)
-			}
-			binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-
-			it, err := roTx.RangeDescend(hc.h.historyValsTable, from, to, limit)
-			if err != nil {
-				return nil, err
-			}
-			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-				fmt.Printf("ier2: %x, %x\n", k, v)
-				if len(k) < 8 {
-					return 0, fmt.Errorf("unexpected large key length %d", len(k))
-				}
-				return binary.BigEndian.Uint64(k[len(k)-8:]), nil
-			})
+		from := make([]byte, len(key)+8)
+		copy(from, key)
+		var fromTxNum uint64
+		if startTxNum >= 0 {
+			fromTxNum = uint64(startTxNum)
 		}
+		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
+		to := common.Copy(from)
+		toTxNum := uint64(math.MaxUint64)
+		if endTxNum >= 0 {
+			toTxNum = uint64(endTxNum)
+		}
+		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
+		var it iter.KV
+		var err error
+		if asc {
+			it, err = roTx.RangeAscend(hc.h.historyValsTable, from, to, limit)
+		} else {
+			it, err = roTx.RangeDescend(hc.h.historyValsTable, from, to, limit)
+		}
+		if err != nil {
+			return nil, err
+		}
+		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+			if len(k) < 8 {
+				return 0, fmt.Errorf("unexpected large key length %d", len(k))
+			}
+			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+		})
 	} else {
-		if asc {
-			var from, to []byte
-			if startTxNum >= 0 {
-				from = make([]byte, 8)
-				binary.BigEndian.PutUint64(from, uint64(startTxNum))
-			}
-			if endTxNum >= 0 {
-				to = make([]byte, 8)
-				binary.BigEndian.PutUint64(to, uint64(endTxNum))
-			}
-			it, err := roTx.RangeDupSort(hc.h.historyValsTable, key, from, to, asc, limit)
-			if err != nil {
-				return nil, err
-			}
-			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-				fmt.Printf("ier3: %x, %x\n", k, v)
-				if len(v) < 8 {
-					return 0, fmt.Errorf("unexpected small value length %d", len(v))
-				}
-				return binary.BigEndian.Uint64(v), nil
-			})
-		} else {
-			var from, to []byte
-			if startTxNum >= 0 {
-				from = make([]byte, 8)
-				binary.BigEndian.PutUint64(from, uint64(startTxNum))
-			}
-			if endTxNum >= 0 {
-				to = make([]byte, 8)
-				binary.BigEndian.PutUint64(to, uint64(endTxNum))
-			}
-			fmt.Printf("IdxRange:(%d, %d), (%x, %x)\n", startTxNum, endTxNum, from, to)
-			it, err := roTx.RangeDupSort(hc.h.historyValsTable, key, from, to, asc, limit)
-			if err != nil {
-				return nil, err
-			}
-			dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-				if len(v) < 8 {
-					return 0, fmt.Errorf("unexpected small value length %d", len(v))
-				}
-				fmt.Printf("ier4: %s, %d\n", k, binary.BigEndian.Uint64(v))
-				return binary.BigEndian.Uint64(v), nil
-			})
+		var from, to []byte
+		if startTxNum >= 0 {
+			from = make([]byte, 8)
+			binary.BigEndian.PutUint64(from, uint64(startTxNum))
 		}
+		if endTxNum >= 0 {
+			to = make([]byte, 8)
+			binary.BigEndian.PutUint64(to, uint64(endTxNum))
+		}
+		it, err := roTx.RangeDupSort(hc.h.historyValsTable, key, from, to, asc, limit)
+		if err != nil {
+			return nil, err
+		}
+		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+			if len(v) < 8 {
+				return 0, fmt.Errorf("unexpected small value length %d", len(v))
+			}
+			return binary.BigEndian.Uint64(v), nil
+		})
 	}
 
 	return dbIt, nil

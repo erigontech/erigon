@@ -549,7 +549,6 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 		return 0, 0, false, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	fmt.Printf("IdxRange1111:(%d, %d), %s\n", int(untilTx), int(sinceTx)-1, dbg.Stack())
 	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
 		return 0, 0, false, err
@@ -566,10 +565,6 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 	if err != nil {
 		return 0, 0, false, err
 	}
-	fmt.Printf("GetAsOf(%s, %d) -> %x\n", keyCommitmentState, txn, v)
-	//if !ok {
-	//	panic(1)
-	//}
 	blockNum, txNum, err = d.Restore(v)
 	return blockNum, txNum, true, err
 }

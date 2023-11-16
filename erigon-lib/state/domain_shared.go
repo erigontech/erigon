@@ -654,7 +654,6 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64) (rootHash []byte, err error) {
-	fmt.Printf("============ ComputeCommitment %d, %d, %d\n", blockNum, sd.blockNum, sd.txNum)
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -941,8 +940,6 @@ func (sd *SharedDomains) rotate() []flusher {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	fmt.Printf("============ Flush \n")
-
 	defer mxFlushTook.UpdateDuration(time.Now())
 	flushers := sd.rotate()
 	for _, f := range flushers {
