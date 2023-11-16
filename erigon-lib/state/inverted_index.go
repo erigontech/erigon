@@ -875,6 +875,9 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 			if startTxNum >= 0 && ic.files[i].endTxNum <= uint64(startTxNum) {
 				break
 			}
+			if ic.files[i].src.index.KeyCount() == 0 {
+				continue
+			}
 			it.stack = append(it.stack, ic.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
@@ -888,6 +891,9 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 			}
 			if startTxNum >= 0 && ic.files[i].startTxNum > uint64(startTxNum) {
 				break
+			}
+			if ic.files[i].src.index.KeyCount() == 0 {
+				continue
 			}
 
 			it.stack = append(it.stack, ic.files[i])

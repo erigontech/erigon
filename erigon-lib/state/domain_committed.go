@@ -561,14 +561,15 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 	if err != nil {
 		return 0, 0, false, err
 	}
-	v, ok, err := cd.hc.GetNoStateWithRecent(keyCommitmentState, txn, tx)
+	v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +!???
+	//v, ok, err := cd.hc.GetNoStateWithRecent()
 	if err != nil {
 		return 0, 0, false, err
 	}
-	fmt.Printf("seek3(%d, %d): %d, %t, %x\n", int(sinceTx), int(untilTx+1), txn, ok, v)
-	if !ok {
-		panic(1)
-	}
+	fmt.Printf("GetAsOf(%s, %d) -> %x\n", keyCommitmentState, txn, v)
+	//if !ok {
+	//	panic(1)
+	//}
 	blockNum, txNum, err = d.Restore(v)
 	return blockNum, txNum, true, err
 }
