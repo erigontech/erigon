@@ -278,24 +278,12 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
-	if to <= s.BlockNumber {
+	if to < s.BlockNumber {
 		return nil
 	}
 	if to > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	//defer func() {
-	//	if tx != nil {
-	//		fmt.Printf("after exec: %d->%d\n", s.BlockNumber, to)
-	//		cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
-	//			vv, err := accounts.ConvertV3toV2(v)
-	//			if err != nil {
-	//				panic(err)
-	//			}
-	//			fmt.Printf("acc: %x, %x\n", k, vv)
-	//		}, tx)
-	//	}
-	//}()
 
 	parallel := tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, to, logger, initialCycle); err != nil {
@@ -507,7 +495,6 @@ Loop:
 		}
 
 		if err != nil {
-			fmt.Printf("dbg: %T, %+v %#v\n", err, err, err)
 			if errors.Is(err, silkworm.ErrInterrupted) {
 				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "block", blockNum, "err", err)
 				// Remount the termination signal

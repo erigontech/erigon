@@ -119,11 +119,11 @@ func TestSetupGenesis(t *testing.T) {
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
 
-				chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
+				chainBlocks, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {
 					return nil, nil, err
 				}
-				if err = m.InsertChain(chain); err != nil {
+				if err = m.InsertChain(chainBlocks); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
