@@ -384,14 +384,14 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		domainLargeValues: cfg.domainLargeValues,
 		indexList:         withBTree,
 	}
-	if d.withExistenceIndex {
-		d.indexList |= withExistence
-	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
+	}
+	if d.withExistenceIndex {
+		d.indexList |= withExistence
 	}
 
 	return d, nil
