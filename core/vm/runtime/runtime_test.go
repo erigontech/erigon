@@ -39,6 +39,7 @@ import (
 )
 
 func TestDefaults(t *testing.T) {
+	t.Parallel()
 	cfg := new(Config)
 	setDefaults(cfg)
 
@@ -67,6 +68,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestEVM(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("crashed with: %v", r)
@@ -87,6 +89,7 @@ func TestEVM(t *testing.T) {
 }
 
 func TestExecute(t *testing.T) {
+	t.Parallel()
 	ret, _, err := Execute([]byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -106,6 +109,7 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	state := state.New(state.NewDbStateReader(tx))
 	address := libcommon.HexToAddress("0xaa")
@@ -264,6 +268,7 @@ func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally
 // requires access to a chain reader.
 func TestBlockhash(t *testing.T) {
+	t.Parallel()
 	// Current head
 	n := uint64(1000)
 	parentHash := libcommon.Hash{}

@@ -39,6 +39,7 @@ func bitvecToUint64Slice(b bitvec) []uint64 {
 }
 
 func TestJumpDestAnalysis(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code  []byte
 		exp   uint64

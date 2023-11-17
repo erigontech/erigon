@@ -438,6 +438,13 @@ const (
 	// [Block Root] => [State Root]
 	BlockRootToStateRoot = "BlockRootToStateRoot"
 	StateRootToBlockRoot = "StateRootToBlockRoot"
+
+	BlockRootToBlockNumber = "BlockRootToBlockNumber"
+	BlockRootToBlockHash   = "BlockRootToBlockHash"
+
+	LastBeaconSnapshot    = "LastBeaconSnapshot"
+	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
@@ -608,6 +615,9 @@ var ChaindataTables = []string{
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
+	BlockRootToBlockHash,
+	BlockRootToBlockNumber,
+	LastBeaconSnapshot,
 }
 
 const (

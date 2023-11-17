@@ -21,6 +21,29 @@ type PeerStatisticsGetter interface {
 }
 
 type PeerStatistics struct {
-	BytesIn  uint64
-	BytesOut uint64
+	BytesIn      uint64
+	BytesOut     uint64
+	CapBytesIn   map[string]uint64
+	CapBytesOut  map[string]uint64
+	TypeBytesIn  map[string]uint64
+	TypeBytesOut map[string]uint64
+}
+
+type DownloadStatistics struct {
+	Downloaded       uint64  `json:"downloaded"`
+	Total            uint64  `json:"total"`
+	TotalTime        float64 `json:"totalTime"`
+	DownloadRate     uint64  `json:"downloadRate"`
+	UploadRate       uint64  `json:"uploadRate"`
+	Peers            int32   `json:"peers"`
+	Files            int32   `json:"files"`
+	Connections      uint64  `json:"connections"`
+	Alloc            uint64  `json:"alloc"`
+	Sys              uint64  `json:"sys"`
+	DownloadFinished bool    `json:"downloadFinished"`
+	StagePrefix      string  `json:"stagePrefix"`
+}
+
+func (ti DownloadStatistics) Type() Type {
+	return TypeOf(ti)
 }

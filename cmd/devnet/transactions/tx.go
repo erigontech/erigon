@@ -41,7 +41,7 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	}
 
 	if expectedPendingSize >= 0 && pendingSize != expectedPendingSize {
-		logger.Error("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
+		logger.Debug("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
 		return
 	}
 
@@ -51,7 +51,7 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	}
 
 	if expectedBaseFeeSize >= 0 && baseFeeSize != expectedBaseFeeSize {
-		logger.Error("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
+		logger.Debug("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
 	}
 
 	logger.Info("Subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
@@ -335,7 +335,12 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 
 		devnet.Logger(ctx).Info("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
-		signedTransaction, err := types.SignTx(transaction, signer, accounts.SigKey(fromAddress))
+		signerKey := accounts.SigKey(fromAddress)
+		if signerKey == nil {
+			return nil, fmt.Errorf("devnet.signEIP1559TxsHigherThanBaseFee failed to SignTx: private key not found for address %s", fromAddress)
+		}
+
+		signedTransaction, err := types.SignTx(transaction, signer, signerKey)
 		if err != nil {
 			return nil, err
 		}

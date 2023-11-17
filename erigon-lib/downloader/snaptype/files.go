@@ -44,6 +44,8 @@ const (
 	BeaconBlocks
 )
 
+var BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
 func (ft Type) String() string {
 	switch ft {
 	case Headers:
@@ -90,7 +92,7 @@ const (
 
 func (it IdxType) String() string { return string(it) }
 
-var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
+var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
@@ -122,7 +124,7 @@ func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
 
 func IsCorrectFileName(name string) bool {
 	parts := strings.Split(name, "-")
-	return len(parts) == 4 && parts[3] != "v1"
+	return len(parts) == 4
 }
 
 func IsCorrectHistoryFileName(name string) bool {
@@ -155,7 +157,15 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 }
 
 const Erigon3SeedableSteps = 32
-const Erigon2SegmentSize = 500_000
+
+// Use-cases:
+//   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
+//     Some networks have no much archive peers, also ConsensusLayer clients are not-good(not-incentivised) at serving history.
+//   - avoiding having too much files:
+//     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
+//     less files - means small files will be removed after merge (no peers for this files).
+const Erigon2RecentMergeLimit = 100_000 //nolint
+const Erigon2MergeLimit = 500_000
 const Erigon2MinSegmentSize = 1_000
 
 // FileInfo - parsed file metadata
@@ -167,8 +177,10 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2SegmentSize }
-func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Seedable() bool {
+	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
+}
+func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }

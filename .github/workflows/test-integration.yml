@@ -29,6 +29,11 @@ jobs:
       - name: test-integration
         run: make test-integration
 
+      - name: Test erigon as a library
+        env:
+          GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: make test-erigon-ext GIT_COMMIT=$GIT_COMMIT
+
   #        name: history-v3-test-integration
   #        run: make test3-integration
 

@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/beacon"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
@@ -121,12 +121,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon.RouterConfiguration{
+	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
 		Protocol:        cfg.BeaconProtocol,
 		Address:         cfg.BeaconAddr,
 		ReadTimeTimeout: cfg.BeaconApiReadTimeout,
 		WriteTimeout:    cfg.BeaconApiWriteTimeout,
 		IdleTimeout:     cfg.BeaconApiWriteTimeout,
 		Active:          !cfg.NoBeaconApi,
-	})
+	}, nil, nil, false)
 }

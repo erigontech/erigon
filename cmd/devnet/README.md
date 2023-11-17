@@ -23,8 +23,8 @@ The devnet runs as a single `go` process which can be started with the following
 | metrics | N | false | Enable metrics collection and reporting from devnet nodes |
 | metrics.node | N | 0 | At the moment only one node on the network can produce metrics.  This value specifies index of the node in the cluster to attach to |
 | metrics.port | N | 6060 | The network port of the node to connect to for gather ing metrics |
-| diagnostics.url | N | | URL of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
-| insecure | N | false | Used if `diagnostics.url` is set to allow communication with diagnostics system using self-signed TLS certificates |
+| diagnostics.addr | N | | Address of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
+| insecure | N | false | Used if `diagnostics.addr` is set to allow communication with diagnostics system
 
 ## Network Configuration
 

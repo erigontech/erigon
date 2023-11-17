@@ -231,7 +231,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 	return nil
 }
 
-func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult) error {
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult, insertOnlyIfSuccess bool) error {
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {
@@ -242,9 +242,6 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		if !needCompare && channel == nil {
 			return fmt.Errorf("error invoking %s (Erigon): %d %s", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
-	}
-	if channel != nil {
-		channel <- res
 	}
 	if needCompare {
 		resg := reqGen.Geth2(methodName, request)
@@ -279,7 +276,14 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		} else {
 			return compareErrors(errVal, errValg, methodName, errCtx, errs)
 		}
+	} else {
+		if channel != nil {
+			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
+				channel <- res
+			}
+		}
 	}
+
 	if recording {
 		fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 	}

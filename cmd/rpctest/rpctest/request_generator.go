@@ -3,10 +3,11 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/valyala/fastjson"
 
@@ -56,6 +57,11 @@ func (g *RequestGenerator) storageRangeAt(hash libcommon.Hash, i int, to *libcom
 func (g *RequestGenerator) traceBlockByHash(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["%s"],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID)
+}
+
+func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":[%d],"id":%d}`
+	return fmt.Sprintf(template, blockNum, g.reqID)
 }
 
 func (g *RequestGenerator) traceTransaction(hash string) string {

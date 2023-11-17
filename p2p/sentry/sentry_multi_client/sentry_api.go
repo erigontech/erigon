@@ -1,4 +1,4 @@
-package sentry
+package sentry_multi_client
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -72,7 +73,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
 		}
-		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }
@@ -119,7 +120,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
 		}
-		return ConvertH512ToPeerID(sentPeers.Peers[0]), true
+		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
 	}
 	return [64]byte{}, false
 }

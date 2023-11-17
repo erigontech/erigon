@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -19,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -39,8 +41,10 @@ type Cfg struct {
 	indiciesDB      kv.RwDB
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
+	sn              *freezeblocks.CaplinSnapshots
+	antiquary       *antiquary.Antiquary
 
-	hasDownloaded bool
+	hasDownloaded, backfilling bool
 }
 
 type Args struct {
@@ -54,6 +58,7 @@ type Args struct {
 
 func ClStagesCfg(
 	rpc *rpc.BeaconRpcP2P,
+	antiquary *antiquary.Antiquary,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
@@ -62,11 +67,14 @@ func ClStagesCfg(
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconDB persistence.BeaconChainDatabase,
 	indiciesDB kv.RwDB,
+	sn *freezeblocks.CaplinSnapshots,
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
+	backfilling bool,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
+		antiquary:       antiquary,
 		genesisCfg:      genesisCfg,
 		beaconCfg:       beaconCfg,
 		state:           state,
@@ -77,6 +85,8 @@ func ClStagesCfg(
 		beaconDB:        beaconDB,
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
+		sn:              sn,
+		backfilling:     backfilling,
 	}
 }
 
@@ -171,6 +181,9 @@ func ConsensusClStages(ctx context.Context,
 			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
 			return err
 		}
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+			return err
+		}
 		// Write block to database optimistically if we are very behind.
 		return cfg.beaconDB.WriteBlock(ctx, tx, block, false)
 	}
@@ -246,10 +259,11 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					// This stage is special so use context.Background() TODO(Giulio2002): make the context be passed in
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc)
+					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.dbConfig, startingRoot, startingSlot, cfg.tmpdir, logger), ctx, logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -284,6 +298,7 @@ func ConsensusClStages(ctx context.Context,
 						// If we got an empty packet ban the peer
 						if len(blocks.Data) == 0 {
 							cfg.rpc.BanPeer(blocks.Peer)
+							log.Debug("no data received from peer in epoch download")
 							continue MainLoop
 						}
 
@@ -353,8 +368,8 @@ func ConsensusClStages(ctx context.Context,
 					if totalRequest > 2 {
 						sources = append(sources, rpcSource)
 					}
-					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
-					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
+					// 15 seconds is a good timeout for this
+					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
 					defer cn()
 
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -545,10 +560,11 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
-					err = cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
-					if err != nil {
-						return err
-					}
+					// TODO(Giulio2002): schedule snapshots retirement if needed.
+					// err = cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
+					// if err != nil {
+					// 	return err
+					// }
 					return tx.Commit()
 				},
 			},

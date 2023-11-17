@@ -1627,6 +1627,11 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 	}
 }
 
+// txMaxBroadcastSize is the max size of a transaction that will be broadcasted.
+// All transactions with a higher size will be announced and need to be fetched
+// by the peer.
+const txMaxBroadcastSize = 4 * 1024
+
 // MainLoop - does:
 // send pending byHash to p2p:
 //   - new byHash
@@ -1725,7 +1730,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							localTxSizes = append(localTxSizes, size)
 							localTxHashes = append(localTxHashes, hash...)
 
-							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							if t != types.BlobTxType {
 								localTxRlps = append(localTxRlps, slotRlp)
 								broadCastedHashes = append(broadCastedHashes, hash...)
 							}
@@ -1733,7 +1739,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							remoteTxTypes = append(remoteTxTypes, t)
 							remoteTxSizes = append(remoteTxSizes, size)
 							remoteTxHashes = append(remoteTxHashes, hash...)
-							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+
+							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							if t != types.BlobTxType && len(slotRlp) < txMaxBroadcastSize {
 								remoteTxRlps = append(remoteTxRlps, slotRlp)
 							}
 						}

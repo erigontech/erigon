@@ -21,10 +21,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -170,6 +171,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 }
 
 func TestLastBlock(t *testing.T) {
+	t.Parallel()
 	m := newCanonical(t, 0)
 	var err error
 
@@ -192,6 +194,7 @@ func TestLastBlock(t *testing.T) {
 func TestExtendCanonicalBlocks(t *testing.T) { testExtendCanonical(t) }
 
 func testExtendCanonical(t *testing.T) {
+	t.Parallel()
 	length := 5
 
 	// Make first chain starting from genesis
@@ -213,11 +216,13 @@ func testExtendCanonical(t *testing.T) {
 // Tests that given a starting canonical chain of a given size, creating shorter
 // forks do not take canonical ownership.
 func TestShorterForkBlocks(t *testing.T) {
+	t.Parallel()
 	t.Skip("Erigon does not insert shorter forks")
 	testShorterFork(t)
 }
 
 func testShorterFork(t *testing.T) {
+	t.Parallel()
 	length := 10
 
 	// Make first chain starting from genesis
@@ -268,6 +273,7 @@ func testLongerFork(t *testing.T, full bool) {
 func TestBrokenBlockChain(t *testing.T) { testBrokenChain(t) }
 
 func testBrokenChain(t *testing.T) {
+	t.Parallel()
 	// Make chain starting from genesis
 	m := newCanonical(t, 10)
 
@@ -285,6 +291,7 @@ func testBrokenChain(t *testing.T) {
 func TestReorgLongBlocks(t *testing.T) { testReorgLong(t) }
 
 func testReorgLong(t *testing.T) {
+	t.Parallel()
 	testReorg(t, []int64{0, 0, -9}, []int64{0, 0, 0, -9}, 393280)
 }
 
@@ -293,6 +300,7 @@ func testReorgLong(t *testing.T) {
 func TestReorgShortBlocks(t *testing.T) { testReorgShort(t) }
 
 func testReorgShort(t *testing.T) {
+	t.Parallel()
 	// Create a long easy chain vs. a short heavy one. Due to difficulty adjustment
 	// we need a fairly long chain of blocks with different difficulties for a short
 	// one to become heavyer than a long one. The 96 is an empirical value.
@@ -367,6 +375,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 func TestBadBlockHashes(t *testing.T) { testBadHashes(t) }
 
 func testBadHashes(t *testing.T) {
+	t.Parallel()
 	t.Skip("to support this error in Erigon")
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
@@ -386,6 +395,7 @@ func testBadHashes(t *testing.T) {
 
 // Tests that chain reorganisations handle transaction removals and reinsertions.
 func TestChainTxReorgs(t *testing.T) {
+	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -556,6 +566,7 @@ func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
+	t.Parallel()
 	m := newCanonical(t, 0)
 
 	chain, err2 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {})
@@ -596,6 +607,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 }
 
 func TestEIP155Transition(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chai
 
 	var (
@@ -701,6 +713,7 @@ func TestEIP155Transition(t *testing.T) {
 }
 
 func TestModes(t *testing.T) {
+	t.Parallel()
 	// run test on all combination of flags
 	runWithModesPermuations(
 		t,
@@ -709,6 +722,7 @@ func TestModes(t *testing.T) {
 }
 
 func TestBeforeModes(t *testing.T) {
+	t.Parallel()
 	mode := prune.DefaultMode
 	mode.History = prune.Before(0)
 	mode.Receipts = prune.Before(1)
@@ -937,6 +951,7 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, c
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1025,6 +1040,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
+	t.Parallel()
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1101,6 +1117,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 //
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
+	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := mock.Mock(t), mock.Mock(t)
 
@@ -1163,6 +1180,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
+	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := mock.Mock(t), mock.Mock(t)
@@ -1222,6 +1240,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
 
@@ -1293,6 +1312,7 @@ func TestLowDiffLongChain(t *testing.T) {
 // each transaction, so this works ok. The rework accumulated writes in memory
 // first, but the journal wiped the entire state object on create-revert.
 func TestDeleteCreateRevert(t *testing.T) {
+	t.Parallel()
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		bb = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
@@ -1361,6 +1381,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
+	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1488,6 +1509,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 }
 
 func TestCVE2020_26265(t *testing.T) {
+	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1592,6 +1614,7 @@ func TestCVE2020_26265(t *testing.T) {
 // regular value-transfer
 // Expected outcome is that _all_ slots are cleared from A
 func TestDeleteRecreateAccount(t *testing.T) {
+	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1669,6 +1692,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
+	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1876,6 +1900,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 // We need to either roll back the snapDestructs, or not place it into snapDestructs
 // in the first place.
 func TestInitThenFailCreateContract(t *testing.T) {
+	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -1986,6 +2011,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 // checking that the gas usage of a hot SLOAD and a cold SLOAD are calculated
 // correctly.
 func TestEIP2718Transition(t *testing.T) {
+	t.Parallel()
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
@@ -2076,6 +2102,7 @@ func TestEIP2718Transition(t *testing.T) {
 //     feeCap - tip < baseFee.
 //  6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
+	t.Parallel()
 	t.Skip("needs fixing")
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
