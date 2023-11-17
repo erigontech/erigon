@@ -522,7 +522,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		select {
 		case <-logInterval.C:
 			// up to 2 decimal places
-			rate := float64(currentSlot-previousLogBlock) / 30
+			rate := float64(previousLogBlock-currentSlot) / 30
 			log.Info("Successfully processed", "slot", currentSlot, "blk/sec", fmt.Sprintf("%.2f", rate))
 			previousLogBlock = currentBlock.Block.Slot
 		case <-ctx.Done():
