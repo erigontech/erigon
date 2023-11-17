@@ -160,7 +160,7 @@ func ListenV4(ctx context.Context, protocol string, c UDPConn, ln *enode.LocalNo
 		localNode:           ln,
 		db:                  ln.Database(),
 		gotreply:            make(chan reply, 10),
-		addReplyMatcher:     make(chan *replyMatcher),
+		addReplyMatcher:     make(chan *replyMatcher, 10),
 		gotkey:              make(chan v4wire.Pubkey, 10),
 		gotnodes:            make(chan nodes, 10),
 		replyTimeout:        cfg.ReplyTimeout,
