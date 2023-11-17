@@ -17,7 +17,7 @@ import (
 //	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -27,8 +27,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
 		}
 		defer f.Close()
 		rec = bufio.NewWriter(f)
@@ -38,8 +37,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
 		}
 		defer ferr.Close()
 		errs = bufio.NewWriter(ferr)
@@ -62,12 +60,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		fmt.Printf("Could not get block number: %v\n", res.Err)
-		return
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
 	}
 	if blockNumber.Error != nil {
-		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-		return
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 
@@ -80,12 +76,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			fmt.Printf("Could not get modified accounts (Erigon): %v\n", res.Err)
-			return
+			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 		}
 		if mag.Error != nil {
-			fmt.Printf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
-			return
+			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
@@ -96,7 +90,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 					/* insertOnlyIfSuccess */ false); err != nil {
 					fmt.Println(err)
-					return
+					return err
 				}
 				topics := getTopics(res.Result)
 				// All combination of account and one topic
@@ -107,7 +101,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 						/* insertOnlyIfSuccess */ false); err != nil {
 						fmt.Println(err)
-						return
+						return err
 					}
 				}
 				// Random combinations of two topics
@@ -123,7 +117,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 						/* insertOnlyIfSuccess */ false); err != nil {
 						fmt.Println(err)
-						return
+						return err
 					}
 				}
 			}
@@ -131,4 +125,5 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 		prevBn = bn
 	}
+	return nil
 }
