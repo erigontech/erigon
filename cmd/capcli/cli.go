@@ -480,6 +480,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
 		return nil
 	}
+	previousLogBlock := currentBlock.Block.Slot
 
 	logInterval := time.NewTicker(30 * time.Second)
 	defer logInterval.Stop()
@@ -520,7 +521,10 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Successfully processed", "slot", currentSlot)
+			// up to 2 decimal places
+			rate := float64(currentSlot-previousLogBlock) / 30
+			log.Info("Successfully processed", "slot", currentSlot, "blk/sec", fmt.Sprintf("%.2f", rate))
+			previousLogBlock = currentBlock.Block.Slot
 		case <-ctx.Done():
 		default:
 		}
