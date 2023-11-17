@@ -5,10 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

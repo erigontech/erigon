@@ -52,7 +52,7 @@ func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 			copy(leaves[pos:], root[:])
 		default:
 			// If the element does not match any supported types, panic with an error message
-			panic(fmt.Sprintf("get it out of my face, u put a bad component in the schema. index %d", i))
+			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", i, obj))
 		}
 
 		// Move the position pointer to the next leaf

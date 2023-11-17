@@ -55,12 +55,13 @@ const (
 	bucketIPLimit, bucketSubnet = 2, 24 // at most 2 addresses from the same /24
 	tableIPLimit, tableSubnet   = 10, 24
 
-	refreshInterval    = 30 * time.Minute
-	revalidateInterval = 5 * time.Second
-	copyNodesInterval  = 30 * time.Second
-	seedMinTableTime   = 5 * time.Minute
-	seedCount          = 30
-	seedMaxAge         = 5 * 24 * time.Hour
+	minRefreshInterval  = 30 * time.Second
+	refreshInterval     = 30 * time.Minute
+	revalidateInterval  = 5 * time.Second
+	maintenanceInterval = 60 * time.Second
+	seedMinTableTime    = 5 * time.Minute
+	seedCount           = 30
+	seedMaxAge          = 5 * 24 * time.Hour
 )
 
 // Table is the 'node table', a Kademlia-like index of neighbor nodes. The table keeps
@@ -84,6 +85,12 @@ type Table struct {
 	closed     chan struct{}
 
 	nodeAddedHook func(*node) // for testing
+
+	// diagnostics
+	errors      map[string]uint
+	dbseeds     int
+	revalidates int
+	protocol    string
 }
 
 // transport is implemented by the UDP transports.
@@ -93,6 +100,9 @@ type transport interface {
 	lookupRandom() []*enode.Node
 	lookupSelf() []*enode.Node
 	ping(*enode.Node) (seq uint64, err error)
+	Version() string
+	Errors() map[string]uint
+	LenUnsolicited() int
 }
 
 // bucket contains nodes, ordered by their last activity. the entry
@@ -105,24 +115,25 @@ type bucket struct {
 
 func newTable(
 	t transport,
+	protocol string,
 	db *enode.DB,
 	bootnodes []*enode.Node,
 	revalidateInterval time.Duration,
 	logger log.Logger,
 ) (*Table, error) {
 	tab := &Table{
-		net:        t,
-		db:         db,
-		refreshReq: make(chan chan struct{}),
-		initDone:   make(chan struct{}),
-		closeReq:   make(chan struct{}),
-		closed:     make(chan struct{}),
-		rand:       mrand.New(mrand.NewSource(0)), // nolint: gosec
-		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
-
+		net:                t,
+		db:                 db,
+		refreshReq:         make(chan chan struct{}),
+		initDone:           make(chan struct{}),
+		closeReq:           make(chan struct{}),
+		closed:             make(chan struct{}),
+		rand:               mrand.New(mrand.NewSource(0)), // nolint: gosec
+		ips:                netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
+		errors:             map[string]uint{},
 		revalidateInterval: revalidateInterval,
-
-		log: logger,
+		protocol:           protocol,
+		log:                logger,
 	}
 	if err := tab.setFallbackNodes(bootnodes); err != nil {
 		return nil, err
@@ -147,8 +158,8 @@ func (tab *Table) seedRand() {
 	crand.Read(b[:])
 
 	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
 	tab.rand.Seed(int64(binary.BigEndian.Uint64(b[:])))
-	tab.mutex.Unlock()
 }
 
 // ReadRandomNodes fills the given slice with random nodes from the table. The results
@@ -157,6 +168,7 @@ func (tab *Table) ReadRandomNodes(buf []*enode.Node) (n int) {
 	if !tab.isInitDone() {
 		return 0
 	}
+
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
@@ -230,20 +242,28 @@ func (tab *Table) refresh() <-chan struct{} {
 // loop schedules runs of doRefresh, doRevalidate and copyLiveNodes.
 func (tab *Table) loop() {
 	var (
-		revalidate     = time.NewTimer(tab.revalidateInterval)
-		refresh        = time.NewTicker(refreshInterval)
-		copyNodes      = time.NewTicker(copyNodesInterval)
-		refreshDone    = make(chan struct{})           // where doRefresh reports completion
-		revalidateDone chan struct{}                   // where doRevalidate reports completion
-		waiting        = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
+		revalidate      = time.NewTimer(tab.revalidateInterval)
+		refresh         = time.NewTicker(refreshInterval)
+		tableMainenance = time.NewTicker(maintenanceInterval)
+		refreshDone     = make(chan struct{})           // where doRefresh reports completion
+		revalidateDone  chan struct{}                   // where doRevalidate reports completion
+		waiting         = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
 	)
 	defer debug.LogPanic()
 	defer refresh.Stop()
 	defer revalidate.Stop()
-	defer copyNodes.Stop()
+	defer tableMainenance.Stop()
 
 	// Start initial refresh.
 	go tab.doRefresh(refreshDone)
+
+	var minRefreshTimer *time.Timer
+
+	defer func() {
+		if minRefreshTimer != nil {
+			minRefreshTimer.Stop()
+		}
+	}()
 
 loop:
 	for {
@@ -266,13 +286,49 @@ loop:
 			}
 			waiting, refreshDone = nil, nil
 		case <-revalidate.C:
-			revalidateDone = make(chan struct{})
-			go tab.doRevalidate(revalidateDone)
+			if revalidateDone == nil {
+				revalidateDone = make(chan struct{})
+				go tab.doRevalidate(revalidateDone)
+			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
+					minRefreshTimer = nil
+					tab.net.lookupRandom()
+					tab.refresh()
+				})
+			}
 			revalidateDone = nil
-		case <-copyNodes.C:
-			go tab.copyLiveNodes()
+		case <-tableMainenance.C:
+			live := tab.live()
+
+			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(),
+				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
+
+			func() {
+				tab.mutex.Lock()
+				defer tab.mutex.Unlock()
+
+				for err, count := range tab.errors {
+					vals = append(vals, err, count)
+				}
+
+				for err, count := range tab.net.Errors() {
+					vals = append(vals, err, count)
+				}
+			}()
+
+			tab.log.Debug("[p2p] Discovery table", vals...)
+
+			if live != 0 {
+				if revalidateDone == nil {
+					revalidateDone = make(chan struct{})
+					go tab.doRevalidate(revalidateDone)
+				}
+			} else {
+				go tab.copyLiveNodes()
+			}
 		case <-tab.closeReq:
 			break loop
 		}
@@ -316,7 +372,10 @@ func (tab *Table) doRefresh(done chan struct{}) {
 }
 
 func (tab *Table) loadSeedNodes() {
-	seeds := wrapNodes(tab.db.QuerySeeds(seedCount, seedMaxAge))
+	dbseeds := tab.db.QuerySeeds(seedCount, seedMaxAge)
+	tab.dbseeds = len(dbseeds)
+
+	seeds := wrapNodes(dbseeds)
 	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
 	seeds = append(seeds, tab.nursery...)
 	for i := range seeds {
@@ -333,6 +392,8 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	defer debug.LogPanic()
 	defer func() { done <- struct{}{} }()
 
+	tab.revalidates++
+
 	last, bi := tab.nodeToRevalidate()
 	if last == nil {
 		// No non-empty bucket found.
@@ -343,11 +404,14 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	remoteSeq, rErr := tab.net.ping(unwrapNode(last))
 
 	// Also fetch record if the node replied and returned a higher sequence number.
-	if last.Seq() < remoteSeq {
-		if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
-			tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
-		} else {
-			last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
+	if rErr == nil {
+		if last.Seq() < remoteSeq {
+			if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
+				rErr = err
+				tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
+			} else {
+				last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
+			}
 		}
 	}
 
@@ -360,7 +424,10 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 		tab.log.Trace("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)
 		tab.bumpInBucket(b, last)
 		return
+	} else {
+		tab.addError(rErr)
 	}
+
 	// No reply received, pick a replacement or delete the node if there aren't
 	// any replacements.
 	if r := tab.replace(b, last); r != nil {
@@ -444,6 +511,26 @@ func (tab *Table) len() (n int) {
 	return n
 }
 
+func (tab *Table) live() (n int) {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	for _, b := range &tab.buckets {
+		for _, e := range b.entries {
+			if e.livenessChecks > 0 {
+				n++
+			}
+		}
+	}
+
+	return n
+}
+
+func (tab *Table) addError(err error) {
+	str := err.Error()
+	tab.errors[str] = tab.errors[str] + 1
+}
+
 // bucketLen returns the number of nodes in the bucket for the given ID.
 func (tab *Table) bucketLen(id enode.ID) int {
 	tab.mutex.Lock()
@@ -477,6 +564,7 @@ func (tab *Table) addSeenNode(n *node) {
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
+
 	b := tab.bucket(n.ID())
 	if contains(b.entries, n.ID()) {
 		// Already in bucket, don't add.
@@ -519,6 +607,7 @@ func (tab *Table) addVerifiedNode(n *node) {
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
+
 	b := tab.bucket(n.ID())
 	if tab.bumpInBucket(b, n) {
 		// Already in bucket, moved to front.

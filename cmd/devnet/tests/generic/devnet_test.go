@@ -4,6 +4,9 @@ package generic
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
@@ -12,8 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {

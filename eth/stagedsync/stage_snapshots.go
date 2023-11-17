@@ -60,6 +60,7 @@ type SnapshotsCfg struct {
 	notifier           *shards.Notifications
 
 	historyV3        bool
+	caplin           bool
 	agg              *state.AggregatorV3
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
@@ -74,6 +75,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	notifier *shards.Notifications,
 	historyV3 bool,
 	agg *state.AggregatorV3,
+	caplin bool,
 	silkworm *silkworm.Silkworm,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
@@ -85,6 +87,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		blockReader:        blockReader,
 		notifier:           notifier,
 		historyV3:          historyV3,
+		caplin:             caplin,
 		agg:                agg,
 		silkworm:           silkworm,
 	}
@@ -172,8 +175,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
+	cstate := snapshotsync.NoCaplin
+	if cfg.caplin { //TODO(Giulio2002): uncomment
+		cstate = snapshotsync.AlsoCaplin
+	}
 
-	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, snapshotsync.NoCaplin, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
 

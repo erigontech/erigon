@@ -24,6 +24,7 @@ import (
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	check := func(network string) {
@@ -45,6 +46,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 }
 
 func TestGenesisBlockRoots(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 	var err error
 
@@ -73,6 +75,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	tx, err := db.BeginRw(context.Background())
@@ -94,6 +97,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 }
 
 func TestAllocConstructor(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 	assert := assert.New(t)
 

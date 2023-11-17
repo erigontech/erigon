@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.20
 
 require (
-	github.com/erigontech/mdbx-go v0.35.2-0.20231101074031-9f999220e9ed
+	github.com/erigontech/mdbx-go v0.27.21
 	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -86,12 +86,12 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.6
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/crypto v0.14.0
+	golang.org/x/crypto v0.15.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
-	golang.org/x/net v0.17.0
-	golang.org/x/sync v0.4.0
-	golang.org/x/sys v0.13.0
-	golang.org/x/time v0.3.0
+	golang.org/x/net v0.18.0
+	golang.org/x/sync v0.5.0
+	golang.org/x/sys v0.14.0
+	golang.org/x/time v0.4.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.31.0
@@ -99,7 +99,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.26.0
+	modernc.org/sqlite v1.27.0
 	pgregory.net/rapid v1.1.0
 )
 
@@ -186,7 +186,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231102060711-19219b948f46 // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231106204511-f1e556dd5c50 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -268,7 +268,7 @@ require (
 	go.uber.org/fx v1.20.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.13.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
@@ -276,7 +276,7 @@ require (
 	lukechampine.com/uint128 v1.3.0 // indirect
 	modernc.org/cc/v3 v3.41.0 // indirect
 	modernc.org/ccgo/v3 v3.16.15 // indirect
-	modernc.org/libc v1.24.1 // indirect
+	modernc.org/libc v1.29.0 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.7.2 // indirect
 	modernc.org/opt v0.1.3 // indirect
@@ -288,4 +288,4 @@ require (
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
-replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.4
+replace github.com/VictoriaMetrics/metrics => github.com/ledgerwatch/victoria-metrics v0.0.7

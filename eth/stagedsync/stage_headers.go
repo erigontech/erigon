@@ -206,6 +206,7 @@ Loop:
 		if req != nil {
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
+				logger.Debug(fmt.Sprintf("[%s] Requested header", logPrefix), "from", req.Number, "length", req.Length)
 				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
 				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
@@ -235,6 +236,7 @@ Loop:
 			if req != nil {
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
+					logger.Debug(fmt.Sprintf("[%s] Requested skeleton", logPrefix), "from", req.Number, "length", req.Length)
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
 				}

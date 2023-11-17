@@ -391,7 +391,7 @@ func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope
 		// format stack
 		var a []string
 		for _, elem := range stack.Data {
-			a = append(a, fmt.Sprintf("%v", elem.String()))
+			a = append(a, elem.String())
 		}
 		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)

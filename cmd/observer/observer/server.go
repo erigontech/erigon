@@ -183,5 +183,5 @@ func (server *Server) Listen(ctx context.Context) (*discover.UDPv4, error) {
 
 	server.logger.Debug("Discovery UDP listener is up", "addr", realAddr)
 
-	return discover.ListenV4(ctx, conn, server.localNode, server.discConfig)
+	return discover.ListenV4(ctx, "any", conn, server.localNode, server.discConfig)
 }

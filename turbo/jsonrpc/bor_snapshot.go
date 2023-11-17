@@ -241,6 +241,7 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	if err != nil {
 		return false, err
 	}
+	defer tx.Rollback()
 
 	service := whitelist.GetWhitelistingService()
 

@@ -8,7 +8,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-const UsePrometheusClient = false
+const UsePrometheusClient = true
 
 type Summary interface {
 	UpdateDuration(time.Time)

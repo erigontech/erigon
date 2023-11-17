@@ -14,6 +14,7 @@ func (api *ErigonImpl) CacheCheck() (*kvcache.CacheValidationResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	result, err := cache.ValidateCurrentRoot(ctx, tx)
 	if err != nil {
