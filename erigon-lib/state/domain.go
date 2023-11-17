@@ -85,7 +85,7 @@ var (
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
-const asserts = true
+const asserts = false
 const trace = false
 
 // filesItem corresponding to a pair of files (.dat and .idx)
