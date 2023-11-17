@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -340,7 +341,7 @@ func TestBlockProof(t *testing.T) {
 }
 
 func TestReceiptProof(t *testing.T) {
-	sentry, chain, err := generateBlocks(t, 1)
+	sentry, chain, err := generateBlocks(t, 10)
 
 	if err != nil {
 		t.Fatal(err)
@@ -374,14 +375,19 @@ func TestReceiptProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//TODO the receiptProof needs parents formatted from trie - need to confirm format for that
-	_ /*receiptProof*/, err = getReceiptProof(context.Background(), rg, receipt, block, nil)
+	receiptProof, err := getReceiptProof(context.Background(), rg, receipt, block, nil)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	//fmt.Println(receiptProof)
+	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println(hexutility.Encode(parentNodesBytes), hexutility.Encode(append([]byte{0}, receiptProof.path...)))
 }
 
 func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack, error) {

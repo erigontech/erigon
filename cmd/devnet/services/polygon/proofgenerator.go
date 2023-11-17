@@ -244,7 +244,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		[]interface{}{
 			rootBlockNumber,
 			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
-			txBlockNum,
+			block.Number.Uint64(),
 			block.Time,
 			hexutility.Encode(block.TxHash[:]),
 			hexutility.Encode(block.ReceiptHash[:]),
@@ -309,7 +309,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 	}
 
 	path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
-	result, ok := receiptsTrie.Get(path)
+	result, parents, ok := receiptsTrie.FindPath(path)
 
 	if !ok {
 		return nil, fmt.Errorf("node does not contain the key")
@@ -325,7 +325,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 
 	return &receiptProof{
 		blockHash:   receipt.BlockHash,
-		parentNodes: nil, //TODO - not sure how to get this result.stack.map(s => s.raw()),
+		parentNodes: parents,
 		root:        block.ReceiptHash[:],
 		path:        path,
 		value:       nodeValue,
