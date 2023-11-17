@@ -312,15 +312,15 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 			}
 			if (l&withBTree != 0) && item.bindex == nil {
 				panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
+				//continue
 			}
 			if (l&withHashMap != 0) && item.index == nil {
 				panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
+				//continue
 			}
 			if (l&withExistence != 0) && item.existence == nil {
 				panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
-				continue
+				//continue
 			}
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
