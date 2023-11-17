@@ -55,7 +55,8 @@ import (
 
 type InvertedIndex struct {
 	iiCfg
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	indexList idxList
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
@@ -120,6 +121,11 @@ func NewInvertedIndex(
 		withExistenceIndex: withExistenceIndex,
 		logger:             logger,
 	}
+	ii.indexList = withHashMap
+	if ii.withExistenceIndex {
+		ii.indexList |= withExistence
+	}
+
 	ii.roFiles.Store(&[]ctxItem{})
 
 	if ii.withLocalityIndex {
@@ -277,7 +283,7 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 		//for _, subSet := range subSets {
 		//	ii.files.Delete(subSet)
 		//}
-		if addNewFile {
+		if addNewFile && newFile != nil {
 			ii.files.Set(newFile)
 		}
 	}
@@ -301,6 +307,9 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 			}
 
 			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
+			if item.decompressor == nil {
+				continue
+			}
 			if (l&withBTree != 0) && item.bindex == nil {
 				panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
@@ -336,13 +345,7 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 }
 
 func (ii *InvertedIndex) reCalcRoFiles() {
-	var flags idxList
-	if ii.withExistenceIndex {
-		flags |= withExistence
-	}
-	flags |= withHashMap
-
-	roFiles := ctxFiles(ii.files, flags)
+	roFiles := ctxFiles(ii.files, ii.indexList)
 	ii.roFiles.Store(&roFiles)
 }
 

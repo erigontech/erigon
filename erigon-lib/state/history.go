@@ -56,7 +56,8 @@ type History struct {
 	// Files:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	indexList idxList
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
@@ -101,6 +102,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		compressWorkers:    1,
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
+		indexList:          withHashMap,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
@@ -766,8 +768,7 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcRoFiles() {
-	flags := withHashMap
-	roFiles := ctxFiles(h.files, flags)
+	roFiles := ctxFiles(h.files, h.indexList)
 	h.roFiles.Store(&roFiles)
 }
 

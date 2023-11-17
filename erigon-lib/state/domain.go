@@ -335,7 +335,8 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 //  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
 	*History
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	indexList idxList
 
 	// roFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
@@ -381,6 +382,10 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		domainLargeValues: cfg.domainLargeValues,
+		indexList:         withBTree,
+	}
+	if d.withExistenceIndex {
+		d.indexList |= withExistence
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
@@ -642,12 +647,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	flags := withBTree
-	if d.withExistenceIndex {
-		flags |= withExistence
-	}
-
-	roFiles := ctxFiles(d.files, flags)
+	roFiles := ctxFiles(d.files, d.indexList)
 	d.roFiles.Store(&roFiles)
 }
 

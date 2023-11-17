@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -555,8 +555,13 @@ func TestCtxFiles(t *testing.T) {
 	}
 	ii.scanStateFiles(files)
 	require.Equal(t, 10, ii.files.Len())
+	ii.files.Scan(func(item *filesItem) bool {
+		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+		item.decompressor = &compress.Decompressor{FileName1: fName}
+		return true
+	})
 
-	roFiles := ctxFiles(ii.files, withHashMap)
+	roFiles := ctxFiles(ii.files, 0)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
