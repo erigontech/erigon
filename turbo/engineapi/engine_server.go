@@ -540,8 +540,8 @@ func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []lib
 	}
 
 	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
-	for idx := range bodies {
-		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
 	}
 	return resp, nil
 }
@@ -566,8 +566,8 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 	}
 
 	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
-	for idx := range bodies {
-		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
 	}
 	return resp, nil
 }
