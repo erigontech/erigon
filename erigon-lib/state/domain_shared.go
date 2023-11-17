@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
@@ -164,7 +163,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+	it, err := sd.aggCtx.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +174,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		}
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchAccount)
 	}
-
-	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+	it, err = sd.aggCtx.DomainRangeLatest(rwTx, kv.CodeDomain, nil, nil, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +184,18 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
+		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchCode)
+	}
+	it, err = sd.aggCtx.DomainRangeLatest(rwTx, kv.StorageDomain, nil, nil, -1)
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchStorage)
+	}
+	if sd.Commitment.updates.Size() == 0 {
+		return commitment.EmptyRootHash, nil
 	}
 
 	sd.Commitment.Reset()
@@ -238,18 +247,32 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if bn == 0 && txn == 0 {
 			return 0, nil
 		}
+		snapTx := sd.Account.endTxNumMinimax()
+		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, snapTx)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+
+		}
+		if txn <= 1 {
+			sd.SetBlockNum(0)
+			sd.SetTxNum(ctx, 0)
+			return 0, nil
+		}
+
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(ctx, txn)
 		newRh, err := sd.rebuildCommitment(ctx, tx, bn)
 		if err != nil {
 			return 0, err
 		}
+		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 		if bytes.Equal(newRh, commitment.EmptyRootHash) {
 			sd.SetBlockNum(0)
 			sd.SetTxNum(ctx, 0)
 			return 0, nil
 		}
-		//fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 	}
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(ctx, txn)

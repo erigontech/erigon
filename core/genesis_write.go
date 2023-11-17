@@ -184,7 +184,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 }
 
 func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	ctx := context.Background()
 	block, statedb, err := GenesisToBlock(g, tmpDir)
 	if err != nil {
 		return nil, nil, err
@@ -224,14 +223,14 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	if histV3 {
-		domains.SetTxNum(context.Background(), 1)
-		_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := domains.Flush(ctx, tx); err != nil {
-			return nil, nil, err
-		}
+		//domains.SetTxNum(context.Background(), 1)
+		//_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
+		//if err != nil {
+		//	return nil, nil, err
+		//}
+		//if err := domains.Flush(ctx, tx); err != nil {
+		//	return nil, nil, err
+		//}
 	} else {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
