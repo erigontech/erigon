@@ -81,7 +81,6 @@ func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig
 		return nil, fmt.Errorf("checkpoint sync read failed, too short")
 	}
 	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
-	fmt.Println(currentSlot)
 	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
 
 	block := cltypes.NewSignedBeaconBlock(beaconConfig)
