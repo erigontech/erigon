@@ -766,7 +766,8 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcRoFiles() {
-	roFiles := ctxFiles(h.files, true, false)
+	flags := withHashMap
+	roFiles := ctxFiles(h.files, flags)
 	h.roFiles.Store(&roFiles)
 }
 
@@ -1033,6 +1034,10 @@ type HistoryContext struct {
 func (h *History) MakeContext() *HistoryContext {
 	files := *h.roFiles.Load()
 	for i := 0; i < len(files); i++ {
+		if asserts && files[i].src.index == nil {
+			panic(fmt.Errorf("why no index file: %s", files[i].src.decompressor.FileName()))
+		}
+
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}

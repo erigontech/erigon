@@ -556,7 +556,7 @@ func TestCtxFiles(t *testing.T) {
 	ii.scanStateFiles(files)
 	require.Equal(t, 10, ii.files.Len())
 
-	roFiles := ctxFiles(ii.files, true, false)
+	roFiles := ctxFiles(ii.files, withHashMap)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

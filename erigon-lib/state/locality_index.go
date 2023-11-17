@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 
 	_ "github.com/FastFilter/xorfilter"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -622,10 +621,8 @@ func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromSte
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
 			continue
 		}
-		if assert.Enable {
-			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
-				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
-			}
+		if asserts && (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
+			panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 		}
 		item.src.decompressor.EnableReadAhead() // disable in destructor of iterator
 		si.involvedFiles = append(si.involvedFiles, item.src.decompressor)

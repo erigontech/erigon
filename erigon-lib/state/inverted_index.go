@@ -284,7 +284,15 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 	return garbageFiles
 }
 
-func ctxFiles(files *btree2.BTreeG[*filesItem], requireHashIndex, requireBTreeIndex bool) (roItems []ctxItem) {
+type idxList int
+
+var (
+	withBTree     idxList = 0b1
+	withHashMap   idxList = 0b10
+	withExistence idxList = 0b100
+)
+
+func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 	roFiles := make([]ctxItem, 0, files.Len())
 	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -293,12 +301,15 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], requireHashIndex, requireBTreeIn
 			}
 
 			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			//if requireHashIndex && item.index == nil {
-			//	continue
-			//}
-			//if requireBTreeIndex && item.bindex == nil {
-			//	continue
-			//}
+			if (l&withBTree != 0) && item.bindex == nil {
+				continue
+			}
+			if (l&withHashMap != 0) && item.index == nil {
+				continue
+			}
+			if (l&withExistence != 0) && item.existence == nil {
+				continue
+			}
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
@@ -322,7 +333,13 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], requireHashIndex, requireBTreeIn
 }
 
 func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := ctxFiles(ii.files, true, false)
+	var flags idxList
+	if ii.withExistenceIndex {
+		flags |= withExistence
+	}
+	flags |= withHashMap
+
+	roFiles := ctxFiles(ii.files, flags)
 	ii.roFiles.Store(&roFiles)
 }
 
@@ -661,6 +678,9 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	files := *ii.roFiles.Load()
 	for i := 0; i < len(files); i++ {
+		if asserts && files[i].src.index == nil {
+			panic(fmt.Errorf("why no index file: %s", files[i].src.decompressor.FileName()))
+		}
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
@@ -891,6 +911,10 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 			}
 			if startTxNum >= 0 && ic.files[i].startTxNum > uint64(startTxNum) {
 				break
+			}
+			if ic.files[i].src.index == nil { // assert
+				err := fmt.Errorf("why file has not index: %s\n", ic.files[i].src.decompressor.FileName())
+				panic(err)
 			}
 			if ic.files[i].src.index.KeyCount() == 0 {
 				continue

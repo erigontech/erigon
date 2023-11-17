@@ -84,6 +84,8 @@ var (
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
+const asserts = true
+
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
 	decompressor *compress.Decompressor
@@ -586,7 +588,11 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, true, true)
+	flags := withBTree
+	if d.withExistenceIndex {
+		flags |= withExistence
+	}
+	roFiles := ctxFiles(d.files, flags)
 	d.roFiles.Store(&roFiles)
 }
 
@@ -758,7 +764,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	kl := len(key1) + len(key2)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
-	if (d.dc.hc.ic.txNum / d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
+	if asserts && (d.dc.hc.ic.txNum/d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
 		panic(fmt.Sprintf("assert: %d != %d", d.dc.hc.ic.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.dc.stepBytes[:])))
 	}
 
@@ -981,6 +987,10 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 func (d *Domain) MakeContext() *DomainContext {
 	files := *d.roFiles.Load()
 	for i := 0; i < len(files); i++ {
+		if asserts && files[i].src.bindex == nil {
+			panic(fmt.Errorf("why no index file: %s", files[i].src.decompressor.FileName()))
+		}
+
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
@@ -1551,12 +1561,26 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
+		fmt.Printf("alex: ")
 		if dc.d.withExistenceIndex {
 			//if dc.files[i].src.existence == nil {
 			//	panic(dc.files[i].src.decompressor.FileName())
 			//}
-			if dc.files[i].src.existence != nil && !dc.files[i].src.existence.ContainsHash(hi) {
-				continue
+			if dc.files[i].src.existence != nil {
+				if !dc.files[i].src.existence.ContainsHash(hi) {
+					if TRACE && dc.d.filenameBase == "accounts" {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> skip\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+					}
+					continue
+				} else {
+					if TRACE && dc.d.filenameBase == "accounts" {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> skip\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+					}
+				}
+			} else {
+				if TRACE && dc.d.filenameBase == "accounts" {
+					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+				}
 			}
 		}
 
@@ -1576,7 +1600,7 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 		return v, true, nil
 	}
 	if TRACE && dc.d.filenameBase == "accounts" {
-		fmt.Printf("GetLatest(%s, %x) -> not found\n", dc.d.filenameBase, filekey)
+		fmt.Printf("GetLatest(%s, %x) -> not found in files\n", dc.d.filenameBase, filekey)
 	}
 
 	return nil, false, nil
@@ -1881,6 +1905,10 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
+	} else {
+		if TRACE && dc.d.filenameBase == "accounts" {
+			fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+		}
 	}
 	//LatestStateReadDBNotFound.UpdateDuration(t)
 
@@ -1891,7 +1919,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	return v, found, nil
 }
 
-const TRACE = false
+const TRACE = true
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	var cp CursorHeap
