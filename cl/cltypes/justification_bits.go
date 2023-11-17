@@ -1,8 +1,11 @@
 package cltypes
 
 import (
+	"errors"
+
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const JustificationBitsLength = 4
@@ -61,4 +64,19 @@ func (j JustificationBits) CheckRange(start int, end int) bool {
 
 func (j JustificationBits) Copy() JustificationBits {
 	return JustificationBits{j[0], j[1], j[2], j[3]}
+}
+
+func (j JustificationBits) MarshalJSON() ([]byte, error) {
+	enc, err := j.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []byte("0x" + common.Bytes2Hex(enc)), nil
+}
+
+func (j *JustificationBits) UnmarshalJSON(input []byte) error {
+	if len(input) != 3 {
+		return errors.New("invalid justification bits length")
+	}
+	return j.DecodeSSZ(common.FromHex(string(input[1:len(input)-1])), 0)
 }
