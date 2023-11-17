@@ -95,8 +95,13 @@ func (a *ApiHandler) init() {
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {
+			r.Route("/debug", func(r chi.Router) {
+				r.Route("/beacon", func(r chi.Router) {
+					r.Get("/states/{state_id}", beaconHandlerWrapper(a.getFullState, true))
+				})
+			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Post("/blocks/{slot}", nil) //otterscan
+				r.Get("/blocks/{slot}", nil) //otterscan
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", nil)

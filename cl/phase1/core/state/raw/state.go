@@ -102,7 +102,7 @@ func (b *BeaconState) init() error {
 	return nil
 }
 
-func (b *BeaconState) MarshalJson() ([]byte, error) {
+func (b *BeaconState) MarshalJSON() ([]byte, error) {
 	obj := map[string]interface{}{
 		"genesis_time":                  b.genesisTime,
 		"genesis_validators_root":       b.genesisValidatorsRoot,
