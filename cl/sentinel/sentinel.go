@@ -241,7 +241,7 @@ func New(
 	mux := chi.NewRouter()
 	handler := httpreqresp.NewRequestHandler(host)
 	mux.Group(func(r chi.Router) {
-		r.Get("/", handler)
+		r.Mount("/", handler)
 	})
 
 	s.httpApi = mux
