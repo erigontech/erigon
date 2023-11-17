@@ -53,7 +53,7 @@ func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChain
 }
 
 func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
-	log.Info("[Checkpoint Sync] Requesting beacon block", "uri", uri)
+	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return nil, err

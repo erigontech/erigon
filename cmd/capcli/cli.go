@@ -517,12 +517,6 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 			if err != nil {
 				return err
 			}
-			// check if the expected root is in db
-			c, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
-			if err != nil {
-				return err
-			}
-			currentSlot = *c
 		}
 		select {
 		case <-logInterval.C:
