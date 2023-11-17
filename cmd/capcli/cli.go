@@ -528,6 +528,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		case <-logInterval.C:
 			log.Info("Successfully processed", "slot", currentSlot)
 		case <-ctx.Done():
+		default:
 		}
 		if currentSlot == 0 {
 			break
