@@ -4,6 +4,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,14 +21,18 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 		filenameBase: "test", aggregationStep: aggStep, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
 func TestFindMergeRangeCornerCases(t *testing.T) {
-
 	t.Run("> 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-
+		ii.withExistenceIndex = false
 		ii.scanStateFiles([]string{
 			"test.0-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
+		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		ii.reCalcRoFiles()
 
@@ -49,6 +54,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 		ic = ii.MakeContext()
 		defer ic.Close()
@@ -64,6 +74,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.1-2.v",
 			"test.2-3.v",
 			"test.3-4.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 		ic.Close()
@@ -83,12 +98,22 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -109,12 +134,22 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
 			"test.0-1.v",
 			"test.1-2.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -136,6 +171,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.3-4.ef",
 			"test.0-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -144,6 +184,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.1-2.v",
 			"test.2-3.v",
 			"test.3-4.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -164,6 +209,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.scanStateFiles([]string{
 			"test.0-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -172,6 +222,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.1-2.v",
 			"test.2-3.v",
 			"test.3-4.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -192,6 +247,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-1.ef",
 			"test.1-2.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
@@ -200,6 +260,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-1.v",
 			"test.1-2.v",
 			"test.0-2.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -224,6 +289,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.2-3.ef",
 			"test.3-4.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -233,6 +303,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-2.v",
 			"test.2-3.v",
 			"test.3-4.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -256,6 +331,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-2.ef",
 			"test.2-3.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -263,6 +343,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-1.v",
 			"test.1-2.v",
 			"test.2-3.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -285,6 +370,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.1-2.ef",
 			"test.0-2.ef",
 		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
+		})
 		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -293,6 +383,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.1-2.v",
 			"test.0-2.v",
 			"test.2-3.v",
+		})
+		h.files.Scan(func(item *filesItem) bool {
+			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		h.reCalcRoFiles()
 
@@ -310,6 +405,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"test.0-2.ef",
 			"test.2-3.ef",
 			"test.3-4.ef",
+		})
+		ii.files.Scan(func(item *filesItem) bool {
+			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+			item.decompressor = &compress.Decompressor{FileName1: fName}
+			return true
 		})
 		ii.reCalcRoFiles()
 		ic := ii.MakeContext()
