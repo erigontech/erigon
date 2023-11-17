@@ -123,7 +123,6 @@ Loop:
 				}
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
-					fmt.Println(err)
 					return
 				}
 				if responses == nil {

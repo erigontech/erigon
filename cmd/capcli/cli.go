@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/debug"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -68,6 +72,7 @@ var CLI struct {
 	CheckSnapshots    CheckSnapshots    `cmd:"" help:"check snapshot folder against content of chain data"`
 	DownloadSnapshots DownloadSnapshots `cmd:"" help:"download snapshots from webseed"`
 	LoopSnapshots     LoopSnapshots     `cmd:"" help:"loop over snapshots"`
+	ChainEndpoint     ChainEndpoint     `cmd:"" help:"chain endpoint"`
 }
 
 type chainCfg struct {
@@ -428,6 +433,108 @@ func (c *Chain) Run(ctx *Context) error {
 	downloader.SetNeverSkip(false)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, dirs, nil, nil, nil, nil, nil, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
+}
+
+type ChainEndpoint struct {
+	Endpoint string `help:"endpoint" default:""`
+	chainCfg
+	outputFolder
+}
+
+func (c *ChainEndpoint) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	dirs := datadir.New(c.Datadir)
+	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
+	if err != nil {
+		return err
+	}
+	log.Info("Hooked", "uri", baseUri)
+	// Let's fetch the head first
+	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	if err != nil {
+		return err
+	}
+	currentRoot, err := currentBlock.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	currentRoot = currentBlock.Block.ParentRoot
+	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+		return nil
+	}
+
+	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
+	for {
+		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+		// Let's fetch the head first
+		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		if err != nil {
+			return err
+		}
+		currentRoot, err = currentBlock.Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+			return nil
+		}
+		currentRoot = currentBlock.Block.ParentRoot
+		currentSlot := currentBlock.Block.Slot
+		// it will stop if we end finding a gap or if we reach the maxIterations
+		for {
+			// check if the expected root is in db
+			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
+			if err != nil {
+				return err
+			}
+			if slot == nil || *slot == 0 {
+				break
+			}
+			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
+				return err
+			}
+			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
+			if err != nil {
+				return err
+			}
+			// check if the expected root is in db
+			c, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
+			if err != nil {
+				return err
+			}
+			currentSlot = *c
+		}
+		select {
+		case <-logInterval.C:
+			log.Info("Successfully processed", "slot", currentSlot)
+		case <-ctx.Done():
+		}
+		if currentSlot == 0 {
+			break
+		}
+	}
+
+	return nil
 }
 
 type DumpSnapshots struct {
