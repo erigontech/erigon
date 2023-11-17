@@ -302,12 +302,15 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 
 			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
 			if (l&withBTree != 0) && item.bindex == nil {
+				panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withHashMap != 0) && item.index == nil {
+				panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withExistence != 0) && item.existence == nil {
+				panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 				continue
 			}
 
@@ -386,9 +389,6 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count() / 2
-	if count < 2 {
-		return nil
-	}
 
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
@@ -678,9 +678,6 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	files := *ii.roFiles.Load()
 	for i := 0; i < len(files); i++ {
-		if asserts && files[i].src.index == nil {
-			panic(fmt.Errorf("why no index file: %s", files[i].src.decompressor.FileName()))
-		}
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
@@ -1659,6 +1656,10 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+	if asserts && ii.withExistenceIndex && sf.existence == nil {
+		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
+	}
+
 	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)

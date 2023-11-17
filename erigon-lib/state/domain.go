@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"math"
 	"os"
 	"path/filepath"
@@ -85,6 +86,7 @@ var (
 const StepsInColdFile = 32
 
 const asserts = true
+const trace = false
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
@@ -108,7 +110,8 @@ type filesItem struct {
 }
 
 type ExistenceFilter struct {
-	*bloomfilter.Filter
+	filter             *bloomfilter.Filter
+	empty              bool
 	FileName, FilePath string
 	f                  *os.File
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
@@ -118,14 +121,47 @@ func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, er
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
-	bloom, err := bloomfilter.New(m)
-	if err != nil {
-		return nil, fmt.Errorf("%w, %s", err, fileName)
+	e := &ExistenceFilter{FilePath: filePath, FileName: fileName}
+	if keysCount < 2 {
+		e.empty = true
+	} else {
+		var err error
+		e.filter, err = bloomfilter.New(m)
+		if err != nil {
+			return nil, fmt.Errorf("%w, %s", err, fileName)
+		}
 	}
-	return &ExistenceFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
+	return e, nil
 }
 
+func (b *ExistenceFilter) AddHash(hash uint64) {
+	if b.empty {
+		return
+	}
+	b.filter.AddHash(hash)
+}
+func (b *ExistenceFilter) ContainsHash(v uint64) bool {
+	if b.empty {
+		return true
+	}
+	return b.filter.ContainsHash(v)
+}
+func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
+	if b.empty {
+		return true
+	}
+	return b.filter.Contains(v)
+}
 func (b *ExistenceFilter) Build() error {
+	if b.empty {
+		cf, err := os.Create(b.FilePath)
+		if err != nil {
+			return err
+		}
+		defer cf.Close()
+		return nil
+	}
+
 	log.Trace("[agg] write file", "file", b.FileName)
 	tmpFilePath := b.FilePath + ".tmp"
 	cf, err := os.Create(tmpFilePath)
@@ -133,7 +169,8 @@ func (b *ExistenceFilter) Build() error {
 		return err
 	}
 	defer cf.Close()
-	if _, err := b.Filter.WriteTo(cf); err != nil {
+
+	if _, err := b.filter.WriteTo(cf); err != nil {
 		return err
 	}
 	if err = b.fsync(cf); err != nil {
@@ -167,10 +204,27 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 	_, fileName := filepath.Split(filePath)
 	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	var err error
-	f.Filter, _, err = bloomfilter.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+	if !dir.FileExist(filePath) {
+		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
+	}
+	{
+		ff, err := os.Open(filePath)
+		if err != nil {
+			return nil, err
+		}
+		stat, err := ff.Stat()
+		if err != nil {
+			return nil, err
+		}
+		f.empty = stat.Size() == 0
+	}
+
+	if !f.empty {
+		var err error
+		f.filter, _, err = bloomfilter.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+		}
 	}
 	return f, nil
 }
@@ -592,6 +646,7 @@ func (d *Domain) reCalcRoFiles() {
 	if d.withExistenceIndex {
 		flags |= withExistence
 	}
+
 	roFiles := ctxFiles(d.files, flags)
 	d.roFiles.Store(&roFiles)
 }
@@ -987,10 +1042,6 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 func (d *Domain) MakeContext() *DomainContext {
 	files := *d.roFiles.Load()
 	for i := 0; i < len(files); i++ {
-		if asserts && files[i].src.bindex == nil {
-			panic(fmt.Errorf("why no index file: %s", files[i].src.decompressor.FileName()))
-		}
-
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
@@ -1561,7 +1612,6 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		fmt.Printf("alex: ")
 		if dc.d.withExistenceIndex {
 			//if dc.files[i].src.existence == nil {
 			//	panic(dc.files[i].src.decompressor.FileName())
@@ -1918,8 +1968,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	}
 	return v, found, nil
 }
-
-const trace = false
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	var cp CursorHeap
