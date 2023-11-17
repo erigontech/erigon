@@ -519,6 +519,16 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	go mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 
+	if histV3 {
+		c := &core.ChainPack{
+			Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
+			Blocks:   []*types.Block{mock.Genesis},
+			TopBlock: mock.Genesis,
+		}
+		if err = mock.InsertChain(c); err != nil {
+			tb.Fatal(err)
+		}
+	}
 	return mock
 }
 
@@ -726,8 +736,9 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if err != nil {
 		return err
 	}
-	if execAt == 0 {
-		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress = 0")
+
+	if execAt < chain.TopBlock.NumberU64() {
+		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress: %d < %d", execAt, chain.TopBlock.NumberU64())
 	}
 
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
