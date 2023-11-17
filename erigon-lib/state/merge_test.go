@@ -23,6 +23,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 	t.Run("> 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
+
 		ii.scanStateFiles([]string{
 			"test.0-2.ef",
 			"test.2-3.ef",
