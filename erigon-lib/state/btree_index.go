@@ -775,15 +775,13 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
-	var bloom *ExistenceFilter
-	var err error
-	if kv.Count() >= 2 {
-		bloom, err = NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
-		if err != nil {
-			return err
-		}
-		bloom.DisableFsync()
 
+	bloom, err := NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+	if err != nil {
+		return err
+	}
+	if noFsync {
+		bloom.DisableFsync()
 	}
 	hasher := murmur3.New128WithSeed(salt)
 
