@@ -895,7 +895,6 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 			if ic.files[i].src.index.KeyCount() == 0 {
 				continue
 			}
-
 			it.stack = append(it.stack, ic.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
@@ -1124,33 +1123,39 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 		}
 
 		//TODO: add seek method
-		//Asc:  [from, to) AND from > to
-		//Desc: [from, to) AND from < to
+		//Asc:  [from, to) AND from < to
+		//Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.efIt.HasNext() {
 				n, _ := it.efIt.Next()
-				if it.endTxNum >= 0 && int(n) >= it.endTxNum {
+				isBeforeRange := int(n) < it.startTxNum
+				if isBeforeRange { //skip
+					continue
+				}
+				isAfterRange := it.endTxNum >= 0 && int(n) >= it.endTxNum
+				if isAfterRange { // terminate
 					it.hasNext = false
 					return
 				}
-				if int(n) >= it.startTxNum {
-					it.hasNext = true
-					it.nextN = n
-					return
-				}
+				it.hasNext = true
+				it.nextN = n
+				return
 			}
 		} else {
 			for it.efIt.HasNext() {
 				n, _ := it.efIt.Next()
-				if int(n) <= it.endTxNum {
+				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
+				if isAfterRange { //skip
+					continue
+				}
+				isBeforeRange := it.endTxNum >= 0 && int(n) <= it.endTxNum
+				if isBeforeRange { // terminate
 					it.hasNext = false
 					return
 				}
-				if it.startTxNum >= 0 && int(n) <= it.startTxNum {
-					it.hasNext = true
-					it.nextN = n
-					return
-				}
+				it.hasNext = true
+				it.nextN = n
+				return
 			}
 		}
 		it.efIt = nil // Exhausted this iterator
@@ -1200,8 +1205,8 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 			it.hasNext = false
 			return
 		}
-		//Asc:  [from, to) AND from > to
-		//Desc: [from, to) AND from < to
+		//Asc:  [from, to) AND from < to
+		//Desc: [from, to) AND from > to
 		var keyBytes [8]byte
 		if it.startTxNum > 0 {
 			binary.BigEndian.PutUint64(keyBytes[:], uint64(it.startTxNum))
@@ -1236,8 +1241,8 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 		}
 	}
 
-	//Asc:  [from, to) AND from > to
-	//Desc: [from, to) AND from < to
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
 	if it.orderAscend {
 		for ; v != nil; _, v, err = it.cursor.NextDup() {
 			if err != nil {
