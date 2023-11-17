@@ -41,6 +41,7 @@ import (
 
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -81,6 +82,7 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -149,6 +151,7 @@ func TestBodyStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -259,6 +262,7 @@ func TestBlockStorage(t *testing.T) {
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -305,6 +309,7 @@ func TestPartialBlockStorage(t *testing.T) {
 
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -349,6 +354,7 @@ func TestTdStorage(t *testing.T) {
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -394,6 +400,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage2(t *testing.T) {
+	t.Parallel()
 	_, db := memdb.NewTestTx(t)
 
 	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
@@ -421,6 +428,7 @@ func TestHeadStorage2(t *testing.T) {
 
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -444,6 +452,7 @@ func TestHeadStorage(t *testing.T) {
 
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -536,6 +545,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -672,6 +682,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 // Tests pre-shanghai body to make sure withdrawals doesn't panic
 func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 
 	const bodyRlp = "f902bef8bef85d0101019471562b71999873db5b286df957af199ec94617f701801ca023f4aad9a71341d2990012a732366c3bc8a4ce9ff54c05546a9487445ac67692a0290d3a1411c2a675a4c12c98af60e34ea4d689f0ddfe0250a9e09c0819dfe3bff85d0201029471562b71999873db5b286df957af199ec94617f701801ca0f824d7edc241758aca948ff34d3797e4e31003f76cc9e05fb9c19e967fc48113a070e1389f0fa23fe765a04b23e98f98db6d630e3a035c1c7c968142ababb85a1df901fbf901f8a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080808080808b7465737420686561646572a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
@@ -686,6 +697,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 
 // Tests pre-shanghai bodyForStorage to make sure withdrawals doesn't panic
 func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 
 	const bodyForStorageRlp = "c38002c0"
@@ -700,6 +712,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 
 // Tests shanghai bodyForStorage to make sure withdrawals are present
 func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 
 	const bodyForStorageRlp = "f83f8002c0f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9"
@@ -715,6 +728,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 
 // Tests shanghai bodyForStorage to make sure when no withdrawals the slice is empty (not nil)
 func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 
 	const bodyForStorageRlp = "c48002c0c0c0"
