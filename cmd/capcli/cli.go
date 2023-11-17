@@ -474,11 +474,13 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
 	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
 	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
-		return nil
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	previousLogBlock := currentBlock.Block.Slot
 
@@ -486,6 +488,10 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	defer logInterval.Stop()
 
 	for {
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
 		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
@@ -497,7 +503,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 			return err
 		}
 		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
-			return nil
+			return err
 		}
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
@@ -518,6 +524,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 			if err != nil {
 				return err
 			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 		select {
 		case <-logInterval.C:
