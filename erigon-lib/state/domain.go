@@ -509,7 +509,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug(fmt.Sprintf("[snapshots] delete file %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
@@ -522,7 +522,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
@@ -535,7 +535,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.InvertedIndex.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
