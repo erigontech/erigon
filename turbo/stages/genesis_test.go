@@ -54,14 +54,14 @@ func TestSetupGenesis(t *testing.T) {
 	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		wantErr    error
-		fn         func(kv.RwDB) (*chain.Config, *types.Block, error)
+		fn         func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error)
 		wantConfig *chain.Config
 		name       string
 		wantHash   libcommon.Hash
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, new(types.Genesis), tmpdir, logger)
 			},
 			wantErr:    types.ErrGenesisNoConfig,
@@ -69,7 +69,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil, tmpdir, logger)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -77,7 +77,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil, tmpdir, logger)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -85,7 +85,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, tmpdir)
 				return core.CommitGenesisBlock(db, nil, tmpdir, logger)
 			},
@@ -94,7 +94,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == sepolia",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, tmpdir)
 				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), tmpdir, logger)
 			},
@@ -104,7 +104,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&oldcustomg, db, tmpdir)
 				return core.CommitGenesisBlock(db, &customg, tmpdir, logger)
 			},
@@ -113,7 +113,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				if ethconfig.EnableHistoryV4InTest {
 					t.Skip("fix me")
 				}
@@ -148,7 +148,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := temporal.NewTestDB(t, datadir.New(tmpdir), nil)
 			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
-			config, genesis, err := test.fn(db)
+			config, genesis, err := test.fn(t, db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
 				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
