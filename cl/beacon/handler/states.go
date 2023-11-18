@@ -201,7 +201,7 @@ func (a *ApiHandler) getFullState(r *http.Request) (data any, finalized *bool, v
 		return
 	}
 
-	data, err = a.forkchoiceStore.GetFullState(blockRoot)
+	data, err = a.forkchoiceStore.GetFullState(blockRoot, true)
 	if err != nil {
 		httpStatus = http.StatusBadRequest
 		return
