@@ -211,15 +211,9 @@ func ExecV3(ctx context.Context,
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
-	txsFrom, err1 := doms.SeekCommitment(ctx, applyTx)
-	if err1 != nil {
-		return err1
-	}
-	fmt.Printf("txsFrom = %d\n", txsFrom)
 
 	blockNum = doms.BlockNum()
 	var inputTxNum = doms.TxNum()
-	fmt.Printf("inputTxNum = %d\n", inputTxNum)
 	var offsetFromBlockBeginning uint64
 
 	// Cases:
@@ -231,7 +225,6 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		fmt.Printf("maxTxNum=%d\n", maxTxNum)
 		if inputTxNum == 0 {
 			return nil
 		}

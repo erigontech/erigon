@@ -246,7 +246,6 @@ func (a *AggregatorV3) OpenFolder() error {
 	if err = a.commitment.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	fmt.Printf("commitment files: %d\n", a.commitment.History.InvertedIndex.files.Len())
 	if err = a.logAddrs.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}

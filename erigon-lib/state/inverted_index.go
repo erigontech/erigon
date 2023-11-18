@@ -221,9 +221,9 @@ func (ii *InvertedIndex) OpenFolder() error {
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	if ii.filenameBase == "commitment" {
-		fmt.Printf("scanning %s\n", fileNames)
-	}
+	// if ii.filenameBase == "commitment" {
+	// 	fmt.Printf("scanning %s\n", fileNames)
+	// }
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
 	for _, name := range fileNames {
