@@ -248,23 +248,9 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("[commitment] block %d, txnums: %d, %d\n", blockNum, _min, _max)
-		//if inputTxNum == _max {
-		//	inputTxNum++
-		//	blockNum++
-		//	_min, err = rawdbv3.TxNums.Min(applyTx, blockNum)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	_max, err = rawdbv3.TxNums.Max(applyTx, blockNum)
-		//	if err != nil {
-		//		return err
-		//	}
-		//} else {
 
 		offsetFromBlockBeginning = inputTxNum - _min
 		inputTxNum = _min
-		//}
 
 		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
