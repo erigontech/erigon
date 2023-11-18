@@ -469,15 +469,15 @@ func (d *Domain) openList(names []string) error {
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
-	d.alignFilesByDomains()
+	d.protectFromHistoryFilesAheadOfDomainFiles()
 	d.reCalcRoFiles()
 	return nil
 }
 
-// alignFilesByDomains - in some corner-cases app may see more .ef/.v files than .kv:
+// protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
-func (d *Domain) alignFilesByDomains() {
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
 }
 
@@ -509,7 +509,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug(fmt.Sprintf("[snapshots] delete file %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
@@ -522,7 +522,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
@@ -535,7 +535,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.InvertedIndex.files.Delete(item)
 		item.closeFilesAndRemove()
 	}
