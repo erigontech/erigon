@@ -457,7 +457,10 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	return d.openList(domainFiles)
+	if err := d.openList(domainFiles); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Domain) openList(names []string) error {
@@ -466,7 +469,16 @@ func (d *Domain) openList(names []string) error {
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
+	d.alignFilesByDomains()
+	d.reCalcRoFiles()
 	return nil
+}
+
+// alignFilesByDomains - in some corner-cases app may see more .ef/.v files than .kv:
+//   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
+//   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
+func (d *Domain) alignFilesByDomains() {
+	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
 }
 
 func (d *Domain) OpenFolder() error {
@@ -477,7 +489,6 @@ func (d *Domain) OpenFolder() error {
 	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
 		return err
 	}
-	d.alignFilesByDomains()
 	return nil
 }
 
@@ -489,64 +500,45 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-// checks latest tx available for domains and drops files with higher txs from indices\history.
-func (d *Domain) alignFilesByDomains() {
-	min := func(a, b uint64) uint64 {
-		if a < b {
-			return a
+func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
+	var toDelete []*filesItem
+	d.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
 		}
-		return b
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete file %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.files.Delete(item)
+		item.closeFilesAndRemove()
 	}
 
-	domainsTop := d.endTxNumMinimax()
-	historyTop := d.History.endTxNumMinimax()
-	indexTop := d.History.InvertedIndex.endTxNumMinimax()
-	lowerBound := min(domainsTop, min(historyTop, indexTop))
-	//fmt.Printf("alignFilesByDomains: domainsTop %d, historyTop %d, indexTop %d\n", domainsTop, historyTop, indexTop)
-
-	if domainsTop == historyTop && historyTop == indexTop {
-		return
-	}
-
-	removed := 0
-	dro := *d.roFiles.Load()
-	toDoms := make([]ctxItem, 0)
-	for _, dfile := range dro {
-		if dfile.startTxNum > lowerBound {
-			dfile.src.closeFilesAndRemove()
-			removed++
-			continue
+	toDelete = toDelete[:0]
+	d.History.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
 		}
-		toDoms = append(toDoms, dfile)
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		d.History.files.Delete(item)
+		item.closeFilesAndRemove()
 	}
-	d.roFiles.Store(&toDoms)
 
-	hro := *d.History.roFiles.Load()
-	toHist := make([]ctxItem, 0)
-
-	for _, hfile := range hro {
-		if hfile.startTxNum > lowerBound {
-			hfile.src.closeFilesAndRemove()
-			removed++
-			continue
+	toDelete = toDelete[:0]
+	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
 		}
-		toHist = append(toHist, hfile)
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug("[snapshots] delete file %s, because creation of this step was not complete", item.decompressor.FileName())
+		d.History.InvertedIndex.files.Delete(item)
+		item.closeFilesAndRemove()
 	}
-	d.History.roFiles.Store(&toHist)
-
-	iro := *d.History.InvertedIndex.roFiles.Load()
-	toIndexes := make([]ctxItem, 0)
-	for _, ifile := range iro {
-		if ifile.startTxNum > lowerBound {
-			ifile.src.closeFilesAndRemove()
-			removed++
-			continue
-		}
-		toIndexes = append(toIndexes, ifile)
-	}
-	d.History.InvertedIndex.roFiles.Store(&toIndexes)
-
-	fmt.Printf("alignFilesByDomains: removed %d files, endTx %d\n", removed, lowerBound)
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -672,10 +664,10 @@ func (d *Domain) openFiles() (err error) {
 		return err
 	}
 	for _, item := range invalidFileItems {
+		fmt.Printf("[dbg]: doms invalidFileItems %s , need close?\n", item.decompressor.FileName())
 		d.files.Delete(item)
 	}
 
-	d.reCalcRoFiles()
 	return nil
 }
 
