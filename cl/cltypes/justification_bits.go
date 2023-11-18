@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -71,12 +72,21 @@ func (j JustificationBits) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []byte("0x" + common.Bytes2Hex(enc)), nil
+	return json.Marshal("0x" + common.Bytes2Hex(enc))
 }
 
 func (j *JustificationBits) UnmarshalJSON(input []byte) error {
-	if len(input) != 3 {
-		return errors.New("invalid justification bits length")
+	var err error
+	var tmp string
+	if err = json.Unmarshal(input, &tmp); err != nil {
+		return err
 	}
-	return j.DecodeSSZ(common.FromHex(string(input[1:len(input)-1])), 0)
+	if len(tmp) < 2 || tmp[:2] != "0x" {
+		return errors.New("invalid input")
+	}
+	enc := common.FromHex(tmp[2:])
+	if err != nil {
+		return err
+	}
+	return j.DecodeSSZ(enc, 0)
 }

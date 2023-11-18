@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -53,7 +52,7 @@ func (a *ApiHandler) rootFromStateId(ctx context.Context, tx kv.Tx, stateId *seg
 		return libcommon.Hash{}, http.StatusInternalServerError, err
 	}
 	if root == (libcommon.Hash{}) {
-		return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.getSlot())
+		return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found")
 	}
 	return
 }
@@ -207,7 +206,6 @@ func (a *ApiHandler) getFullState(r *http.Request) (data any, finalized *bool, v
 		httpStatus = http.StatusBadRequest
 		return
 	}
-	fmt.Println(json.Marshal(data))
 
 	finalized = new(bool)
 	*finalized = false

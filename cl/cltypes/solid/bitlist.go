@@ -191,7 +191,11 @@ func (u *BitList) Bits() int {
 }
 
 func (u *BitList) MarshalJSON() ([]byte, error) {
-	return json.Marshal("0x" + common.Bytes2Hex(u.buf[:u.l]))
+	enc, err := u.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal("0x" + common.Bytes2Hex(enc))
 }
 
 func (u *BitList) UnmarshalJSON(input []byte) error {
