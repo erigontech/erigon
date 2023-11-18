@@ -544,6 +544,8 @@ func (d *Domain) alignFilesByDomains() {
 		}
 		toIndexes = append(toIndexes, ifile)
 	}
+	d.History.InvertedIndex.roFiles.Store(&toIndexes)
+
 	fmt.Printf("alignFilesByDomains: removed %d files, endTx %d\n", removed, lowerBound)
 }
 

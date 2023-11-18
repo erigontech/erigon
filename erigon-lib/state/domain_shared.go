@@ -186,7 +186,11 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		}
 		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchCode)
 	}
+
 	it, err = sd.aggCtx.DomainRangeLatest(rwTx, kv.StorageDomain, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
@@ -234,47 +238,47 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if !ok {
 		return 0, nil
 		// handle case when we have no commitment, but have executed blocks
-		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
-		if err != nil {
-			return 0, err
-		}
-		if len(bnBytes) == 8 {
-			bn = binary.BigEndian.Uint64(bnBytes)
-			txn, err = rawdbv3.TxNums.Max(tx, bn)
-			if err != nil {
-				return 0, err
-			}
-		}
-		if bn == 0 && txn == 0 {
-			return 0, nil
-		}
-		snapTx := sd.Account.endTxNumMinimax()
-		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, snapTx)
-		if err != nil {
-			return 0, err
-		}
-		if !ok {
-
-		}
-		txn = snapTx
-		if txn <= 1 {
-			sd.SetBlockNum(0)
-			sd.SetTxNum(ctx, 0)
-			return 0, nil
-		}
-
-		sd.SetBlockNum(bn)
-		sd.SetTxNum(ctx, txn)
-		newRh, err := sd.rebuildCommitment(ctx, tx, bn)
-		if err != nil {
-			return 0, err
-		}
-		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
-		if bytes.Equal(newRh, commitment.EmptyRootHash) {
-			sd.SetBlockNum(0)
-			sd.SetTxNum(ctx, 0)
-			return 0, nil
-		}
+		//bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
+		//if err != nil {
+		//	return 0, err
+		//}
+		//if len(bnBytes) == 8 {
+		//	bn = binary.BigEndian.Uint64(bnBytes)
+		//	txn, err = rawdbv3.TxNums.Max(tx, bn)
+		//	if err != nil {
+		//		return 0, err
+		//	}
+		//}
+		//if bn == 0 && txn == 0 {
+		//	return 0, nil
+		//}
+		//snapTx := sd.Account.endTxNumMinimax()
+		//ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, snapTx)
+		//if err != nil {
+		//	return 0, err
+		//}
+		//if !ok {
+		//
+		//}
+		//txn = snapTx
+		//if txn <= 1 {
+		//	sd.SetBlockNum(0)
+		//	sd.SetTxNum(ctx, 0)
+		//	return 0, nil
+		//}
+		//
+		//sd.SetBlockNum(bn)
+		//sd.SetTxNum(ctx, txn)
+		//newRh, err := sd.rebuildCommitment(ctx, tx, bn)
+		//if err != nil {
+		//	return 0, err
+		//}
+		//fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
+		//if bytes.Equal(newRh, commitment.EmptyRootHash) {
+		//	sd.SetBlockNum(0)
+		//	sd.SetTxNum(ctx, 0)
+		//	return 0, nil
+		//}
 	}
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(ctx, txn)
