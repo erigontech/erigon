@@ -561,7 +561,6 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 			return 0, 0, false, err
 		}
 		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
-		//v, ok, err := cd.hc.GetNoStateWithRecent()
 		if err != nil {
 			return 0, 0, false, err
 		}
@@ -573,22 +572,21 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 	// in this case `IdxRange` will be empty
 	// and can fallback to fallback to reading lstest commitment from .kv file
 	var latestState []byte
-	err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
+	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
 		if len(value) < 16 {
 			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
 		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
-		fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		_ = bn
+		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}
 		return nil
-	})
-	if err != nil {
-		return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
+	}); err != nil {
+		return 0, 0, false, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
 	}
 	blockNum, txNum, err = d.Restore(latestState)
-	panic(blockNum)
 	return blockNum, txNum, true, err
 }
 
