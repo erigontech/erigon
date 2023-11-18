@@ -1028,19 +1028,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if unwind > 0 {
-		//if historyV3 {
-		//	doms := libstate.NewSharedDomains(tx)
-		//	defer doms.Close()
-		//	unwindToTxNum, _ := rawdbv3.TxNums.Min(tx, unwind)
-		//	blockNumWithCommitment, _, ok, err := doms.SeekCommitment2(tx, 0, unwindToTxNum)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	if ok {
-		//		fmt.Printf("blockNumWithCommitment: %d, %d\n", blockNumWithCommitment, unwind)
-		//	}
-		//	panic(1)
-		//}
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
 		if err != nil {
