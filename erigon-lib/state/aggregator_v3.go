@@ -267,38 +267,6 @@ func (a *AggregatorV3) OpenFolder() error {
 
 	return nil
 }
-func (a *AggregatorV3) OpenList(idxFiles, histFiles, domainFiles []string) error {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
-
-	var err error
-	if err = a.accounts.OpenList(idxFiles, histFiles, domainFiles); err != nil {
-		return err
-	}
-	if err = a.storage.OpenList(idxFiles, histFiles, domainFiles); err != nil {
-		return err
-	}
-	if err = a.code.OpenList(idxFiles, histFiles, domainFiles); err != nil {
-		return err
-	}
-	if err = a.commitment.OpenList(idxFiles, histFiles, domainFiles); err != nil {
-		return err
-	}
-	if err = a.logAddrs.OpenList(idxFiles); err != nil {
-		return err
-	}
-	if err = a.logTopics.OpenList(idxFiles); err != nil {
-		return err
-	}
-	if err = a.tracesFrom.OpenList(idxFiles); err != nil {
-		return err
-	}
-	if err = a.tracesTo.OpenList(idxFiles); err != nil {
-		return err
-	}
-	a.recalcMaxTxNum()
-	return nil
-}
 
 func (a *AggregatorV3) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times

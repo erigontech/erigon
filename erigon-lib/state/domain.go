@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,6 +85,9 @@ var (
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
+const asserts = false
+const trace = false
+
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
 	decompressor *compress.Decompressor
@@ -106,7 +110,8 @@ type filesItem struct {
 }
 
 type ExistenceFilter struct {
-	*bloomfilter.Filter
+	filter             *bloomfilter.Filter
+	empty              bool
 	FileName, FilePath string
 	f                  *os.File
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
@@ -116,14 +121,47 @@ func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, er
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
-	bloom, err := bloomfilter.New(m)
-	if err != nil {
-		return nil, fmt.Errorf("%w, %s", err, fileName)
+	e := &ExistenceFilter{FilePath: filePath, FileName: fileName}
+	if keysCount < 2 {
+		e.empty = true
+	} else {
+		var err error
+		e.filter, err = bloomfilter.New(m)
+		if err != nil {
+			return nil, fmt.Errorf("%w, %s", err, fileName)
+		}
 	}
-	return &ExistenceFilter{FilePath: filePath, FileName: fileName, Filter: bloom}, nil
+	return e, nil
 }
 
+func (b *ExistenceFilter) AddHash(hash uint64) {
+	if b.empty {
+		return
+	}
+	b.filter.AddHash(hash)
+}
+func (b *ExistenceFilter) ContainsHash(v uint64) bool {
+	if b.empty {
+		return true
+	}
+	return b.filter.ContainsHash(v)
+}
+func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
+	if b.empty {
+		return true
+	}
+	return b.filter.Contains(v)
+}
 func (b *ExistenceFilter) Build() error {
+	if b.empty {
+		cf, err := os.Create(b.FilePath)
+		if err != nil {
+			return err
+		}
+		defer cf.Close()
+		return nil
+	}
+
 	log.Trace("[agg] write file", "file", b.FileName)
 	tmpFilePath := b.FilePath + ".tmp"
 	cf, err := os.Create(tmpFilePath)
@@ -131,7 +169,8 @@ func (b *ExistenceFilter) Build() error {
 		return err
 	}
 	defer cf.Close()
-	if _, err := b.Filter.WriteTo(cf); err != nil {
+
+	if _, err := b.filter.WriteTo(cf); err != nil {
 		return err
 	}
 	if err = b.fsync(cf); err != nil {
@@ -165,10 +204,27 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 	_, fileName := filepath.Split(filePath)
 	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	var err error
-	f.Filter, _, err = bloomfilter.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+	if !dir.FileExist(filePath) {
+		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
+	}
+	{
+		ff, err := os.Open(filePath)
+		if err != nil {
+			return nil, err
+		}
+		stat, err := ff.Stat()
+		if err != nil {
+			return nil, err
+		}
+		f.empty = stat.Size() == 0
+	}
+
+	if !f.empty {
+		var err error
+		f.filter, _, err = bloomfilter.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+		}
 	}
 	return f, nil
 }
@@ -279,7 +335,8 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 //  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
 	*History
-	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	indexList idxList
 
 	// roFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
@@ -325,12 +382,16 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		domainLargeValues: cfg.domainLargeValues,
+		indexList:         withBTree,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
+	}
+	if d.withExistenceIndex {
+		d.indexList |= withExistence
 	}
 
 	return d, nil
@@ -396,7 +457,10 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	return d.openList(domainFiles)
+	if err := d.openList(domainFiles); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Domain) openList(names []string) error {
@@ -405,7 +469,16 @@ func (d *Domain) openList(names []string) error {
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
+	d.protectFromHistoryFilesAheadOfDomainFiles()
+	d.reCalcRoFiles()
 	return nil
+}
+
+// protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
+//   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
+//   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
+	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
 }
 
 func (d *Domain) OpenFolder() error {
@@ -413,7 +486,10 @@ func (d *Domain) OpenFolder() error {
 	if err != nil {
 		return err
 	}
-	return d.OpenList(idx, histFiles, domainFiles)
+	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -422,6 +498,47 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 	d.stats = DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	return r
+}
+
+func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
+	var toDelete []*filesItem
+	d.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
+
+	toDelete = toDelete[:0]
+	d.History.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.History.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
+
+	toDelete = toDelete[:0]
+	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.History.InvertedIndex.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -586,7 +703,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, true, true)
+	roFiles := ctxFiles(d.files, d.indexList)
 	d.roFiles.Store(&roFiles)
 }
 
@@ -758,7 +875,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	kl := len(key1) + len(key2)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.dc.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
-	if (d.dc.hc.ic.txNum / d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
+	if asserts && (d.dc.hc.ic.txNum/d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.dc.stepBytes[:]) {
 		panic(fmt.Sprintf("assert: %d != %d", d.dc.hc.ic.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.dc.stepBytes[:])))
 	}
 
@@ -1555,8 +1672,21 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//if dc.files[i].src.existence == nil {
 			//	panic(dc.files[i].src.decompressor.FileName())
 			//}
-			if dc.files[i].src.existence != nil && !dc.files[i].src.existence.ContainsHash(hi) {
-				continue
+			if dc.files[i].src.existence != nil {
+				if !dc.files[i].src.existence.ContainsHash(hi) {
+					if trace && dc.d.filenameBase == "accounts" {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> skip\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+					}
+					continue
+				} else {
+					if trace && dc.d.filenameBase == "accounts" {
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> skip\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
+					}
+				}
+			} else {
+				if trace && dc.d.filenameBase == "accounts" {
+					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+				}
 			}
 		}
 
@@ -1569,14 +1699,14 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
-		if TRACE && dc.d.filenameBase == "accounts" {
+		if trace && dc.d.filenameBase == "accounts" {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
-	if TRACE && dc.d.filenameBase == "accounts" {
-		fmt.Printf("GetLatest(%s, %x) -> not found\n", dc.d.filenameBase, filekey)
+	if trace && dc.d.filenameBase == "accounts" {
+		fmt.Printf("GetLatest(%s, %x) -> not found in files\n", dc.d.filenameBase, filekey)
 	}
 
 	return nil, false, nil
@@ -1732,12 +1862,12 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		// if history returned marker of key creation
 		// domain must return nil
 		if len(v) == 0 {
-			if TRACE && dc.d.filenameBase == "accounts" {
+			if trace && dc.d.filenameBase == "accounts" {
 				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
 			}
 			return nil, nil
 		}
-		if TRACE && dc.d.filenameBase == "accounts" {
+		if trace && dc.d.filenameBase == "accounts" {
 			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
 		}
 		return v, nil
@@ -1876,11 +2006,15 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 				v = v[8:]
 			}
 		}
-		if TRACE && dc.d.filenameBase == "accounts" {
+		if trace && dc.d.filenameBase == "accounts" {
 			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
 		}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
+	} else {
+		if trace && dc.d.filenameBase == "accounts" {
+			fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+		}
 	}
 	//LatestStateReadDBNotFound.UpdateDuration(t)
 
@@ -1890,8 +2024,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	}
 	return v, found, nil
 }
-
-const TRACE = false
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
 	var cp CursorHeap

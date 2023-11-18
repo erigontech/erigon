@@ -927,10 +927,9 @@ func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
 func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
-	sd.SetTxNum(context.Background(), 0)
-	sd.SetBlockNum(0)
-
 	if sd.aggCtx != nil {
+		sd.SetTxNum(context.Background(), 0)
+		sd.SetBlockNum(0)
 		sd.aggCtx.account.FinishWrites()
 		sd.aggCtx.storage.FinishWrites()
 		sd.aggCtx.code.FinishWrites()

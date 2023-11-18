@@ -16,12 +16,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -115,6 +116,39 @@ var snapshotCommand = cli.Command{
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name: "rm-state-snapshots",
+			Action: func(cliCtx *cli.Context) error {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				steprm := cliCtx.String("step")
+				if steprm == "" {
+					return errors.New("step to remove is required (eg 0-2)")
+				}
+				steprm = fmt.Sprintf(".%s.", steprm)
+
+				removed := 0
+				for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
+					filePaths, err := dir.ListFiles(dirPath)
+					if err != nil {
+						return err
+					}
+					for _, filePath := range filePaths {
+						_, fName := filepath.Split(filePath)
+						if !strings.Contains(fName, steprm) {
+							continue
+						}
+
+						if err := os.Remove(filePath); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", fName, err)
+						}
+						removed++
+					}
+				}
+				fmt.Printf("removed %d state snapshot files\n", removed)
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag, &cli.StringFlag{Name: "step", Required: true}}),
 		},
 		{
 			Name:   "diff",
