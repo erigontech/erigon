@@ -170,6 +170,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 	currentParentHash := fcuHeader.ParentHash
+	if fcuHeader.Number.Uint64() == 0 {
+		panic("assert")
+	}
 	currentParentNumber := fcuHeader.Number.Uint64() - 1
 	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 	if err != nil {
@@ -200,6 +203,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			return
 		}
 		currentParentHash = currentHeader.ParentHash
+		if currentHeader.Number.Uint64() == 0 {
+			panic("assert") //uint-underflow
+		}
 		currentParentNumber = currentHeader.Number.Uint64() - 1
 		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
