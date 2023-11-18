@@ -298,7 +298,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 				return fmt.Errorf("Block difference for %d\n", bn)
 			}
 		}
-		nBlocks++;
+		nBlocks++
 
 		for _, tx := range b.Result.Transactions {
 			nTransactions++
