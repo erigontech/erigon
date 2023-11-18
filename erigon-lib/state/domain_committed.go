@@ -549,23 +549,46 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 		return 0, 0, false, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
+	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
+	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
 	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if !it.HasNext() {
-		return 0, 0, false, nil
+	if it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return 0, 0, false, err
+		}
+		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+		//v, ok, err := cd.hc.GetNoStateWithRecent()
+		if err != nil {
+			return 0, 0, false, err
+		}
+		blockNum, txNum, err = d.Restore(v)
+		return blockNum, txNum, true, err
 	}
-	txn, err := it.Next()
+	// corner-case:
+	// it's normal to not have commitment.ef and commitment.v files. They are not determenistic - depend on batchSize, and not very useful.
+	// in this case `IdxRange` will be empty
+	// and can fallback to fallback to reading lstest commitment from .kv file
+	var latestState []byte
+	err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
+		if len(value) < 16 {
+			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
+		}
+		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
+		fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		if txn >= sinceTx && txn <= untilTx {
+			latestState = value
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, false, fmt.Errorf("failed to seek commitment state: %w", err)
 	}
-	v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
-	//v, ok, err := cd.hc.GetNoStateWithRecent()
-	if err != nil {
-		return 0, 0, false, err
-	}
-	blockNum, txNum, err = d.Restore(v)
+	blockNum, txNum, err = d.Restore(latestState)
+	panic(blockNum)
 	return blockNum, txNum, true, err
 }
 
