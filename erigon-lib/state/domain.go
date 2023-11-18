@@ -457,7 +457,10 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
 		return err
 	}
-	return d.openList(domainFiles)
+	if err := d.openList(domainFiles); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Domain) openList(names []string) error {
@@ -466,7 +469,16 @@ func (d *Domain) openList(names []string) error {
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
+	d.protectFromHistoryFilesAheadOfDomainFiles()
+	d.reCalcRoFiles()
 	return nil
+}
+
+// protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
+//   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
+//   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
+	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
 }
 
 func (d *Domain) OpenFolder() error {
@@ -474,7 +486,10 @@ func (d *Domain) OpenFolder() error {
 	if err != nil {
 		return err
 	}
-	return d.OpenList(idx, histFiles, domainFiles)
+	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -483,6 +498,47 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 	d.stats = DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	return r
+}
+
+func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
+	var toDelete []*filesItem
+	d.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
+
+	toDelete = toDelete[:0]
+	d.History.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.History.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
+
+	toDelete = toDelete[:0]
+	d.History.InvertedIndex.files.Scan(func(item *filesItem) bool {
+		if item.startTxNum/d.aggregationStep >= lowerBound {
+			toDelete = append(toDelete, item)
+		}
+		return true
+	})
+	for _, item := range toDelete {
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		d.History.InvertedIndex.files.Delete(item)
+		item.closeFilesAndRemove()
+	}
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
