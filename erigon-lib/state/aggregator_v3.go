@@ -246,6 +246,7 @@ func (a *AggregatorV3) OpenFolder() error {
 	if err = a.commitment.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
+	fmt.Printf("commitment files: %d\n", a.commitment.History.InvertedIndex.files.Len())
 	if err = a.logAddrs.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -1457,6 +1458,7 @@ func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byt
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 }
+
 func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:

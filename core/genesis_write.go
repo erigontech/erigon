@@ -190,6 +190,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err != nil {
 		panic(err)
 	}
+	if histV3 {
+		return block, statedb, nil
+	}
 
 	var stateWriter state.StateWriter
 	if histV3 {

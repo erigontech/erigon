@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -154,10 +155,20 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
-		rw.SetReader(state.NewHistoryReaderV3())
+		sr := state.NewHistoryReaderV3()
+		rw.SetReader(sr)
 	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
-		rw.SetReader(state.NewStateReaderV3(rw.rs))
+		sr := state.NewStateReaderV3(rw.rs)
+		rw.SetReader(sr)
 	}
+	if txTask.BlockNum == 37307587 {
+		fmt.Printf("RunTxTaskNoLock history block=%d, txIndex=%d, txNum=%d, t=%T\n", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, rw.stateReader)
+	}
+	/*
+		if sr, ok := rw.stateReader.(*state.StateReaderV3); ok {
+			sr.SetTrace(txTask.BlockNum == 37307587)
+		}
+	*/
 
 	if rw.background && rw.chainTx == nil {
 		var err error
@@ -188,7 +199,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
-			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs.Tmp)
 			if err != nil {
 				panic(err)
@@ -244,6 +255,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.UsedGas = applyRes.UsedGas
+			if txTask.BlockNum == 37307587 {
+				fmt.Printf("Used gas = %d\n", txTask.UsedGas)
+			}
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)

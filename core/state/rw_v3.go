@@ -413,8 +413,10 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	return nil
 }
 
+var addr1 common.Address = common.HexToAddress("0000000000000000000000000000000000001010")
+
 func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if w.trace {
+	if w.trace || address == addr1 {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), code)

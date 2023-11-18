@@ -33,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -1268,55 +1266,21 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
-	efFilename := filename + ".ef"
-	viFilename := filename + ".vi"
-	vFilename := filename + ".v"
-	efDecomp, err := compress.NewDecompressor(efFilename)
+	kvFilename := filename + ".kv"
+	kvDecomp, err := compress.NewDecompressor(kvFilename)
 	if err != nil {
 		return err
 	}
-	defer efDecomp.Close()
-	viIndex, err := recsplit.OpenIndex(viFilename)
-	if err != nil {
-		return err
-	}
-	defer viIndex.Close()
-	r := recsplit.NewIndexReader(viIndex)
-	vDecomp, err := compress.NewDecompressor(vFilename)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	gv := vDecomp.MakeGetter()
-	g := efDecomp.MakeGetter()
+	defer kvDecomp.Close()
+	g := kvDecomp.MakeGetter()
 	for g.HasNext() {
-		key, _ := g.NextUncompressed()
+		key, _ := g.Next(nil)
 		if bytes.HasPrefix(key, pBytes) {
-			val, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(val)
-			efIt := ef.Iterator()
-			fmt.Printf("[%x] =>", key)
-			cnt := 0
-			for efIt.HasNext() {
-				txNum, _ := efIt.Next()
-				var txKey [8]byte
-				binary.BigEndian.PutUint64(txKey[:], txNum)
-				offset := r.Lookup2(txKey[:], key)
-				gv.Reset(offset)
-				v, _ := gv.Next(nil)
-				fmt.Printf(" %d", txNum)
-				if len(v) == 0 {
-					fmt.Printf("*")
-				}
-				cnt++
-				if cnt == 16 {
-					fmt.Printf("\n")
-					cnt = 0
-				}
-			}
+			val, _ := g.Next(nil)
+			fmt.Printf("[%x] => [%x] size %d", key, val, len(val))
 			fmt.Printf("\n")
 		} else {
-			g.SkipUncompressed()
+			g.Skip()
 		}
 	}
 	return nil
