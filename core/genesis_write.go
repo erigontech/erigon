@@ -540,12 +540,13 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 
 	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
+		// some users creaing > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
-		var tx kv.RwTx
-		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+
+		tx, err := genesisTmpDB.BeginRw(context.Background())
+		if err != nil {
 			return
 		}
 		defer tx.Rollback()
