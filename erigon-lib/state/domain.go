@@ -491,19 +491,43 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 // checks latest tx available for domains and drops files with higher txs from indices\history.
 func (d *Domain) alignFilesByDomains() {
+	min := func(a, b uint64) uint64 {
+		if a < b {
+			return a
+		}
+		return b
+	}
+
 	domainsTop := d.endTxNumMinimax()
 	historyTop := d.History.endTxNumMinimax()
 	indexTop := d.History.InvertedIndex.endTxNumMinimax()
+	lowerBound := min(domainsTop, min(historyTop, indexTop))
+	//fmt.Printf("alignFilesByDomains: domainsTop %d, historyTop %d, indexTop %d\n", domainsTop, historyTop, indexTop)
+
 	if domainsTop == historyTop && historyTop == indexTop {
 		return
 	}
+
+	removed := 0
+	dro := *d.roFiles.Load()
+	toDoms := make([]ctxItem, 0)
+	for _, dfile := range dro {
+		if dfile.startTxNum > lowerBound {
+			dfile.src.closeFilesAndRemove()
+			removed++
+			continue
+		}
+		toDoms = append(toDoms, dfile)
+	}
+	d.roFiles.Store(&toDoms)
 
 	hro := *d.History.roFiles.Load()
 	toHist := make([]ctxItem, 0)
 
 	for _, hfile := range hro {
-		if hfile.startTxNum > domainsTop {
+		if hfile.startTxNum > lowerBound {
 			hfile.src.closeFilesAndRemove()
+			removed++
 			continue
 		}
 		toHist = append(toHist, hfile)
@@ -513,12 +537,14 @@ func (d *Domain) alignFilesByDomains() {
 	iro := *d.History.InvertedIndex.roFiles.Load()
 	toIndexes := make([]ctxItem, 0)
 	for _, ifile := range iro {
-		if ifile.startTxNum > domainsTop {
+		if ifile.startTxNum > lowerBound {
 			ifile.src.closeFilesAndRemove()
+			removed++
 			continue
 		}
 		toIndexes = append(toIndexes, ifile)
 	}
+	fmt.Printf("alignFilesByDomains: removed %d files, endTx %d\n", removed, lowerBound)
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
