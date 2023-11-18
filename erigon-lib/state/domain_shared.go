@@ -88,7 +88,6 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	if tx == nil {
 		panic(fmt.Sprintf("tx is nil"))
 	}
-	fmt.Printf("Create shared domain with %T\n", tx)
 
 	sd := &SharedDomains{
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),

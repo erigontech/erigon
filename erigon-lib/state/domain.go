@@ -2038,7 +2038,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
-	fmt.Printf("IteratePrefix %s len(dc.files)=%d\n", prefix, len(dc.files))
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte

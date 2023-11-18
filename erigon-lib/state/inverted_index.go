@@ -221,9 +221,6 @@ func (ii *InvertedIndex) OpenFolder() error {
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	// if ii.filenameBase == "commitment" {
-	// 	fmt.Printf("scanning %s\n", fileNames)
-	// }
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
 	for _, name := range fileNames {
@@ -889,7 +886,6 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 		limit:       limit,
 		ef:          eliasfano32.NewEliasFano(1, 1),
 	}
-	fmt.Printf("%s, len(ic.files)=%d\n", ic.ii.filenameBase, len(ic.files))
 	if asc {
 		for i := len(ic.files) - 1; i >= 0; i-- {
 			// [from,to) && from < to
