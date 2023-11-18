@@ -224,6 +224,17 @@ Loop:
 			continue
 		}
 
+		j := &senderRecoveryJob{
+			body:        body,
+			key:         k,
+			blockNumber: blockNumber,
+			blockTime:   header.Time,
+			blockHash:   blockHash,
+			index:       int(blockNumber) - int(s.BlockNumber) - 1,
+		}
+		if j.index < 0 {
+			panic(j.index) //uint-underflow
+		}
 		select {
 		case recoveryErr := <-errCh:
 			if recoveryErr.err != nil {
@@ -233,13 +244,7 @@ Loop:
 				}
 				break Loop
 			}
-		case jobs <- &senderRecoveryJob{
-			body:        body,
-			key:         k,
-			blockNumber: blockNumber,
-			blockTime:   header.Time,
-			blockHash:   blockHash,
-			index:       int(blockNumber - s.BlockNumber - 1)}:
+		case jobs <- j:
 		}
 	}
 
