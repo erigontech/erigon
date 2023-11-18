@@ -208,3 +208,9 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 	defer f.mu.Unlock()
 	return f.forkGraph.AnchorSlot()
 }
+
+func (f *ForkChoiceStore) GetFullState(blockRoot libcommon.Hash) (*state2.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetState(blockRoot, true)
+}
