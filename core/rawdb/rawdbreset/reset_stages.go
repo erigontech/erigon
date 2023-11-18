@@ -168,12 +168,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
 			blockNum := doms.BlockNum()
-			if blockNum == 0 {
-				genesis := core.GenesisBlockByChainName(chain)
-				if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
-					return err
-				}
-			} else {
+			if blockNum > 0 {
 				if err := doms.Flush(ctx, tx); err != nil {
 					return err
 				}

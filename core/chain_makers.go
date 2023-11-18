@@ -398,9 +398,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				if err = domains.Flush(ctx, tx); err != nil {
 					return nil, nil, err
 				}
-				if err != nil {
-					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-				}
 				b.header.Root = libcommon.BytesToHash(stateRoot)
 			} else {
 				b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, false)

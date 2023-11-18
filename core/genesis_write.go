@@ -31,13 +31,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -185,7 +182,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 }
 
 func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	ctx := context.Background()
 	block, statedb, err := GenesisToBlock(g, tmpDir)
 	if err != nil {
 		return nil, nil, err
@@ -196,12 +192,8 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	var stateWriter state.StateWriter
-	var domains *state2.SharedDomains
-
 	if histV3 {
-		domains = state2.NewSharedDomains(tx)
-		defer domains.Close()
-		stateWriter = state.NewWriterV4(domains)
+		stateWriter = state.NewNoopWriter()
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {
@@ -219,20 +211,11 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
-
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 
-	if histV3 {
-		_, err := domains.ComputeCommitment(ctx, true, false, block.NumberU64())
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := domains.Flush(ctx, tx); err != nil {
-			return nil, nil, err
-		}
-	} else {
+	if !histV3 {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
 				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
@@ -557,12 +540,13 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 
 	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
-		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
+		// some users creaing > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
-		var tx kv.RwTx
-		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+
+		tx, err := genesisTmpDB.BeginRw(context.Background())
+		if err != nil {
 			return
 		}
 		defer tx.Rollback()
