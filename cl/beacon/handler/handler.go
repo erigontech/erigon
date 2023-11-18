@@ -23,6 +23,8 @@ type ApiHandler struct {
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
+
+	proposerKnight
 }
 
 func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader) *ApiHandler {
@@ -65,7 +67,6 @@ func (a *ApiHandler) init() {
 					r.Post("/sync_committees", nil)
 				})
 				r.Get("/node/syncing", nil)
-
 				r.Route("/states", func(r chi.Router) {
 					r.Get("/head/validators/{index}", nil) // otterscan
 					r.Get("/head/committees", nil)         // otterscan
@@ -80,7 +81,7 @@ func (a *ApiHandler) init() {
 			r.Route("/validator", func(r chi.Router) {
 				r.Route("/duties", func(r chi.Router) {
 					r.Post("/attester/{epoch}", nil)
-					r.Get("/proposer/{epoch}", nil)
+					r.Get("/proposer/{epoch}", beaconHandlerWrapper(a.getDutiesProposer, false))
 					r.Post("/sync/{epoch}", nil)
 				})
 				r.Get("/blinded_blocks/{slot}", nil)
@@ -101,7 +102,7 @@ func (a *ApiHandler) init() {
 				})
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/blocks/{slot}", nil) //otterscan
+				r.Get("/blocks/{block_id}", beaconHandlerWrapper(a.getBlock, true)) //otterscan
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", nil)

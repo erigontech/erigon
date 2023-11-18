@@ -110,6 +110,20 @@ func (c *segmentID) getRoot() *libcommon.Hash {
 	return c.root
 }
 
+func epochFromRequest(r *http.Request) (uint64, error) {
+	// Must only be a number
+	regex := regexp.MustCompile(`^\d+$`)
+	epoch := chi.URLParam(r, "epoch")
+	if !regex.MatchString(epoch) {
+		return 0, fmt.Errorf("invalid path variable: {epoch}")
+	}
+	epochMaybe, err := strconv.ParseUint(epoch, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return epochMaybe, nil
+}
+
 func blockIdFromRequest(r *http.Request) (*segmentID, error) {
 	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|\d+)$`)
 
