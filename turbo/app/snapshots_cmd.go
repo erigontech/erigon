@@ -128,18 +128,21 @@ var snapshotCommand = cli.Command{
 				steprm = fmt.Sprintf(".%s.", steprm)
 
 				removed := 0
-				for _, dir := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
-					files, err := os.ReadDir(dir)
+				for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
+					filePaths, err := dir.ListFiles(dirPath)
 					if err != nil {
 						return err
 					}
-					for _, file := range files {
-						if !file.IsDir() && strings.Contains(file.Name(), steprm) {
-							if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
-								return fmt.Errorf("failed to remove %s: %w", file.Name(), err)
-							}
-							removed++
+					for _, filePath := range filePaths {
+						_, fName := filepath.Split(filePath)
+						if !strings.Contains(fName, steprm) {
+							continue
 						}
+
+						if err := os.Remove(filePath); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", fName, err)
+						}
+						removed++
 					}
 				}
 				fmt.Printf("removed %d state snapshot files\n", removed)
