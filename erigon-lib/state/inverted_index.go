@@ -137,13 +137,13 @@ func NewInvertedIndex(
 }
 
 func (ii *InvertedIndex) efExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efei", ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 }
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
@@ -221,22 +221,22 @@ func (ii *InvertedIndex) OpenFolder() error {
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
+	re := regexp.MustCompile("^v([0-9]+)-" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
-		if len(subs) != 3 {
+		if len(subs) != 4 {
 			if len(subs) != 0 {
 				ii.logger.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			ii.logger.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
 			ii.logger.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
