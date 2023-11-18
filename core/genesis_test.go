@@ -135,6 +135,11 @@ func TestCommitGenesisIdempotencyV3(t *testing.T) {
 	restoredHash, err := domains.ComputeCommitment(context.Background(), false, false, domains.BlockNum())
 	require.NoError(t, err)
 	require.EqualValues(t, gblock.Root().Bytes(), restoredHash)
+
+	// 2-nd call must return same value
+	restoredHash2, err := domains.ComputeCommitment(context.Background(), false, false, domains.BlockNum())
+	require.NoError(t, err)
+	require.EqualValues(t, restoredHash, restoredHash2)
 }
 
 func TestAllocConstructor(t *testing.T) {
