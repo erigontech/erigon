@@ -474,7 +474,11 @@ func (d *Domain) OpenFolder() error {
 	if err != nil {
 		return err
 	}
-	return d.OpenList(idx, histFiles, domainFiles)
+	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+		return err
+	}
+	d.alignFilesByDomains()
+	return nil
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -483,6 +487,38 @@ func (d *Domain) GetAndResetStats() DomainStats {
 
 	d.stats = DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	return r
+}
+
+// checks latest tx available for domains and drops files with higher txs from indices\history.
+func (d *Domain) alignFilesByDomains() {
+	domainsTop := d.endTxNumMinimax()
+	historyTop := d.History.endTxNumMinimax()
+	indexTop := d.History.InvertedIndex.endTxNumMinimax()
+	if domainsTop == historyTop && historyTop == indexTop {
+		return
+	}
+
+	hro := *d.History.roFiles.Load()
+	toHist := make([]ctxItem, 0)
+
+	for _, hfile := range hro {
+		if hfile.startTxNum > domainsTop {
+			hfile.src.closeFilesAndRemove()
+			continue
+		}
+		toHist = append(toHist, hfile)
+	}
+	d.History.roFiles.Store(&toHist)
+
+	iro := *d.History.InvertedIndex.roFiles.Load()
+	toIndexes := make([]ctxItem, 0)
+	for _, ifile := range iro {
+		if ifile.startTxNum > domainsTop {
+			ifile.src.closeFilesAndRemove()
+			continue
+		}
+		toIndexes = append(toIndexes, ifile)
+	}
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -1804,17 +1840,17 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 	}
 	if hOk {
 		// if history returned marker of key creation
-		// domain must return nil
-		if len(v) == 0 {
+		// domain must return VALUE?
+		if len(v) != 0 {
 			if trace && dc.d.filenameBase == "accounts" {
-				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
+				fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
 			}
-			return nil, nil
+			return v, nil
 		}
-		if trace && dc.d.filenameBase == "accounts" {
-			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
-		}
-		return v, nil
+		//if trace && dc.d.filenameBase == "accounts" {
+		//	fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
+		//}
+		//return nil, nil
 	}
 	v, _, err = dc.GetLatest(key, nil, roTx)
 	if err != nil {

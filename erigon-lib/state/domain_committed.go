@@ -560,7 +560,7 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 	if err != nil {
 		return 0, 0, false, err
 	}
-	v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+	v, err := cd.GetAsOf(keyCommitmentState, txn, tx) //WHYYY +1 ???
 	//v, ok, err := cd.hc.GetNoStateWithRecent()
 	if err != nil {
 		return 0, 0, false, err

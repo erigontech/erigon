@@ -232,6 +232,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		return 0, err
 	}
 	if !ok {
+		return 0, nil
 		// handle case when we have no commitment, but have executed blocks
 		bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
 		if err != nil {
@@ -255,6 +256,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		if !ok {
 
 		}
+		txn = snapTx
 		if txn <= 1 {
 			sd.SetBlockNum(0)
 			sd.SetTxNum(ctx, 0)
