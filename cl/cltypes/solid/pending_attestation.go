@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -113,12 +113,12 @@ func (*PendingAttestation) Clone() clonable.Clonable {
 
 func (a *PendingAttestation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		AggregationBits string          `json:"aggregation_bits"`
-		AttestationData AttestationData `json:"attestation_data"`
-		InclusionDelay  uint64          `json:"inclusion_delay"`
-		ProposerIndex   uint64          `json:"proposer_index"`
+		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
+		AttestationData AttestationData  `json:"attestation_data"`
+		InclusionDelay  uint64           `json:"inclusion_delay"`
+		ProposerIndex   uint64           `json:"proposer_index"`
 	}{
-		AggregationBits: "0x" + common2.Bytes2Hex(a.AggregationBits()),
+		AggregationBits: a.AggregationBits(),
 		AttestationData: a.AttestantionData(),
 		InclusionDelay:  a.InclusionDelay(),
 		ProposerIndex:   a.ProposerIndex(),
@@ -128,15 +128,15 @@ func (a *PendingAttestation) MarshalJSON() ([]byte, error) {
 func (a *PendingAttestation) UnmarshalJSON(input []byte) error {
 	var err error
 	var tmp struct {
-		AggregationBits string          `json:"aggregation_bits"`
-		AttestationData AttestationData `json:"attestation_data"`
-		InclusionDelay  uint64          `json:"inclusion_delay"`
-		ProposerIndex   uint64          `json:"proposer_index"`
+		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
+		AttestationData AttestationData  `json:"attestation_data"`
+		InclusionDelay  uint64           `json:"inclusion_delay"`
+		ProposerIndex   uint64           `json:"proposer_index"`
 	}
 	if err = json.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
-	a.SetAggregationBits(common2.FromHex(tmp.AggregationBits))
+	a.SetAggregationBits(tmp.AggregationBits)
 	a.SetAttestationData(tmp.AttestationData)
 	a.SetInclusionDelay(tmp.InclusionDelay)
 	a.SetProposerIndex(tmp.ProposerIndex)

@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"math/bits"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 // BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
@@ -195,9 +195,13 @@ func (u *BitList) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal("0x" + common.Bytes2Hex(enc))
+	return json.Marshal(hexutil.Bytes(enc))
 }
 
 func (u *BitList) UnmarshalJSON(input []byte) error {
-	return u.DecodeSSZ(common.FromHex(string(input[2:])), 0)
+	var hex hexutil.Bytes
+	if err := json.Unmarshal(input, &hex); err != nil {
+		return err
+	}
+	return u.DecodeSSZ(hex, 0)
 }

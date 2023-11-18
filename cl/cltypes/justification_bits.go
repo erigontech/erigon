@@ -2,11 +2,10 @@ package cltypes
 
 import (
 	"encoding/json"
-	"errors"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const JustificationBitsLength = 4
@@ -72,21 +71,13 @@ func (j JustificationBits) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal("0x" + common.Bytes2Hex(enc))
+	return json.Marshal(hexutility.Bytes(enc))
 }
 
 func (j *JustificationBits) UnmarshalJSON(input []byte) error {
-	var err error
-	var tmp string
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	var hex hexutility.Bytes
+	if err := json.Unmarshal(input, &hex); err != nil {
 		return err
 	}
-	if len(tmp) < 2 || tmp[:2] != "0x" {
-		return errors.New("invalid input")
-	}
-	enc := common.FromHex(tmp[2:])
-	if err != nil {
-		return err
-	}
-	return j.DecodeSSZ(enc, 0)
+	return j.DecodeSSZ(hex, 0)
 }
