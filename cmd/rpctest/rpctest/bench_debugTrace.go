@@ -113,7 +113,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 			return fmt.Errorf("retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
 
-		nBlocks++;
+		nBlocks++
 		reqGen.reqID++
 		request := reqGen.traceBlockByHash(b.Result.Hash.Hex())
 		errCtx := fmt.Sprintf("block %d, tx %s", bn, b.Result.Hash.Hex())
@@ -306,7 +306,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil,
+			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess*/ false); err != nil {
 				fmt.Println(err)
 				return err
