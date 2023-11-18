@@ -162,6 +162,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	return sd.Flush(ctx, rwTx)
 }
 
+// nolint
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
 	it, err := sd.aggCtx.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
