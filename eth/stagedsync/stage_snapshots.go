@@ -272,6 +272,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
 					default:
 					}
+					if baseTxNum+txAmount == 0 {
+						panic(baseTxNum + txAmount) //uint-underflow
+					}
 					maxTxNum := baseTxNum + txAmount - 1
 
 					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
