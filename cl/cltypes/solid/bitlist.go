@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"math/bits"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -195,11 +195,11 @@ func (u *BitList) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(hexutil.Bytes(enc))
+	return json.Marshal(hexutility.Bytes(enc))
 }
 
 func (u *BitList) UnmarshalJSON(input []byte) error {
-	var hex hexutil.Bytes
+	var hex hexutility.Bytes
 	if err := json.Unmarshal(input, &hex); err != nil {
 		return err
 	}
