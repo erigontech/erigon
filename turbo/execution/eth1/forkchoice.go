@@ -133,6 +133,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
 		return
 	}
+
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -160,6 +161,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		})
 		return
 	}
+	if fcuHeader.Number.Uint64() == 0 {
+		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+			Status:          execution.ExecutionStatus_Success,
+		})
+		return
+	}
 
 	// If we don't have it, too bad
 	if fcuHeader == nil {
@@ -170,9 +178,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 	currentParentHash := fcuHeader.ParentHash
-	if fcuHeader.Number.Uint64() == 0 {
-		panic("assert")
-	}
 	currentParentNumber := fcuHeader.Number.Uint64() - 1
 	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 	if err != nil {
