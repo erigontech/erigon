@@ -25,7 +25,7 @@ type ForkChoiceStorageReader interface {
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
 	ProposerBoostRoot() common.Hash
-	GetFullState(blockRoot libcommon.Hash) (*state2.CachingBeaconState, error)
+	GetFullState(libcommon.Hash, bool) (*state2.CachingBeaconState, error)
 	Slot() uint64
 	Time() uint64
 }
