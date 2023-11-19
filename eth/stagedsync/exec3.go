@@ -216,6 +216,14 @@ func ExecV3(ctx context.Context,
 	var inputTxNum = doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
+	nothingToExec := func(applyTx kv.Tx) (bool, error) {
+		_, lastTxNum, err := rawdbv3.TxNums.Last(applyTx)
+		if err != nil {
+			return false, err
+		}
+		return lastTxNum == inputTxNum, nil
+	}
+
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
@@ -238,7 +246,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
 		}
 		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 		if err != nil {
@@ -262,14 +270,30 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 	if applyTx != nil {
+		if _nothing, err := nothingToExec(applyTx); err != nil {
+			return err
+		} else if _nothing {
+			return nil
+		}
+
 		if err := restoreTxNum(applyTx); err != nil {
 			return err
 		}
 	} else {
-		if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		var _nothing bool
+		if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
+			if _nothing, err = nothingToExec(applyTx); err != nil {
+				return err
+			} else if _nothing {
+				return nil
+			}
+
 			return restoreTxNum(applyTx)
 		}); err != nil {
 			return err
+		}
+		if _nothing {
+			return nil
 		}
 	}
 
