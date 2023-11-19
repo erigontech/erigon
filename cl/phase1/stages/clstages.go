@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -174,6 +175,7 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
+
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
 	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
@@ -483,6 +485,18 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
+					// Increment validator set
+
+					headState, err := cfg.forkChoice.GetFullState(headRoot, false)
+					if err != nil {
+						return err
+					}
+					start := time.Now()
+					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
+					if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
+						return err
+					}
+					log.Debug("Incremented state history", "elapsed", time.Since(start), "preverifiedValidators", preverifiedValidators)
 
 					var m runtime.MemStats
 					dbg.ReadMemStats(&m)

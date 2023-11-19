@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	jsoniter "github.com/json-iterator/go"

@@ -2,6 +2,7 @@ package solid
 
 import (
 	"bytes"
+	"encoding/json"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -373,4 +374,24 @@ func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index in
 func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
 	v.zeroTreeHash(index)
 	v.Get(index).SetSlashed(slashed)
+}
+
+func (v *ValidatorSet) MarshalJSON() ([]byte, error) {
+	validators := make([]Validator, v.l)
+	for i := 0; i < v.l; i++ {
+		validators[i] = v.Get(i)
+	}
+	return json.Marshal(validators)
+}
+
+func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
+	var validators []Validator
+	if err := json.Unmarshal(data, &validators); err != nil {
+		return err
+	}
+	v.Clear()
+	for _, val := range validators {
+		v.Append(val)
+	}
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 )
 
 func TestWithdrawalsHash(t *testing.T) {
+	t.Parallel()
 	w := &Withdrawal{
 		Index:     0,
 		Validator: 0,

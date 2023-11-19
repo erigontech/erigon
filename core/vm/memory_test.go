@@ -9,6 +9,7 @@ import (
 )
 
 func TestMemoryCopy(t *testing.T) {
+	t.Parallel()
 	// Test cases from https://eips.ethereum.org/EIPS/eip-5656#test-cases
 	for i, tc := range []struct {
 		dst, src, len uint64
