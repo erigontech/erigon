@@ -108,7 +108,7 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bo
 	}
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
-	if expectedSlot != state.Slot() {
+	if expectedSlot > state.Slot() {
 		if err = transition.DefaultMachine.ProcessSlots(state, expectedSlot); err != nil {
 			httpStatus = http.StatusInternalServerError
 			return
