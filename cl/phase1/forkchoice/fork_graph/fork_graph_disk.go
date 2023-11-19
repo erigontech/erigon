@@ -197,6 +197,7 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	lz4Writer := lz4PoolWriterPool.Get().(*lz4.Writer)
 	defer lz4PoolWriterPool.Put(lz4Writer)
 
+	lz4Writer.CompressionLevel = 5
 	lz4Writer.Reset(cacheFile)
 
 	if err := bs.EncodeCaches(lz4Writer); err != nil {
