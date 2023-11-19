@@ -63,6 +63,7 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 }
 
 func TestAccessList(t *testing.T) {
+	t.Parallel()
 	// Some helpers
 	addr := common.HexToAddress
 	slot := common.HexToHash

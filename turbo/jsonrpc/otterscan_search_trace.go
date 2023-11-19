@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 
 		if tracer.Found {
-			rpcTx := newRPCTransaction(tx, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			rpcTx := NewRPCTransaction(tx, block.Hash(), blockNum, uint64(idx), block.BaseFee())
 			mReceipt := marshalReceipt(blockReceipts[idx], tx, chainConfig, block.HeaderNoCopy(), tx.Hash(), true)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)

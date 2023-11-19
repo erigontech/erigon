@@ -77,6 +77,7 @@ func TestRlpIterator(t *testing.T) {
 	if ethconfig.EnableHistoryV4InTest {
 		t.Skip("fix me")
 	}
+	t.Parallel()
 	for _, tt := range []struct {
 		txs      int
 		uncles   int

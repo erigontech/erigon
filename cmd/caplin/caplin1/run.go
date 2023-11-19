@@ -9,6 +9,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -19,6 +20,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -26,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
@@ -35,7 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -79,7 +82,7 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
-	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon.RouterConfiguration,
+	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, backfilling bool) error {
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine, false)
@@ -94,7 +97,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	logger := log.New("app", "caplin")
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
-	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconDB, beaconConfig)
 
 	if caplinFreezer != nil {
 		if err := freezer2.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
@@ -152,8 +155,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool)
-		go beacon.ListenAndServe(apiHandler, &cfg)
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn)
+		go beacon.ListenAndServe(apiHandler, cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 
@@ -178,7 +181,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}()
 	}
 
-	tx, err := db.BeginRo(ctx)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -188,7 +191,14 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	if err != nil {
 		return err
 	}
-	tx.Rollback()
+
+	if err := state_accessors.InitializePublicKeyTable(tx, state); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, db, csn, dirs.Tmp, dbConfig, backfilling)
 	sync := stages.ConsensusClStages(ctx, stageCfg)

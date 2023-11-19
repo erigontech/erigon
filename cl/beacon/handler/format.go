@@ -64,7 +64,9 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(httpStatus)
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
+		}
 	}
 }
 

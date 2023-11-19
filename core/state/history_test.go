@@ -30,6 +30,7 @@ import (
 )
 
 func TestMutationDeleteTimestamp(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
@@ -89,6 +90,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 }
 
 func TestMutationCommit(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := 5
@@ -293,6 +295,7 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 */
 
 func TestWalkAsOfStatePlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
@@ -453,6 +456,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
@@ -659,6 +663,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
@@ -807,6 +812,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
@@ -958,6 +964,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 }
 
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
