@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -207,6 +208,52 @@ func (a *ApiHandler) getFullState(r *http.Request) (data any, finalized *bool, v
 		return
 	}
 
+	finalized = new(bool)
+	*finalized = false
+	httpStatus = http.StatusAccepted
+	return
+}
+
+func (a *ApiHandler) getValidators(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
+	var (
+		tx      kv.Tx
+		blockId *segmentID
+		root    libcommon.Hash
+	)
+
+	ctx := r.Context()
+
+	tx, err = a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		httpStatus = http.StatusInternalServerError
+		return
+	}
+	defer tx.Rollback()
+
+	blockId, err = stateIdFromRequest(r)
+	if err != nil {
+		httpStatus = http.StatusBadRequest
+		return
+	}
+	root, httpStatus, err = a.rootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return
+	}
+
+	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
+	if err != nil {
+		httpStatus = http.StatusInternalServerError
+		return
+	}
+
+	var state *state.CachingBeaconState
+	state, err = a.forkchoiceStore.GetFullState(blockRoot, true)
+	if err != nil {
+		httpStatus = http.StatusBadRequest
+		return
+	}
+
+	data = state.Validators()
 	finalized = new(bool)
 	*finalized = false
 	httpStatus = http.StatusAccepted

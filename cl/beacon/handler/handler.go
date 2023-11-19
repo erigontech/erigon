@@ -71,7 +71,7 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", nil) // otterscan
 					r.Get("/head/committees", nil)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
-						r.Get("/validators", nil)
+						r.Get("/validators", beaconHandlerWrapper(a.getValidators, false))
 						r.Get("/root", beaconHandlerWrapper(a.getStateRoot, false))
 						r.Get("/fork", beaconHandlerWrapper(a.getStateFork, false))
 						r.Get("/validators/{id}", nil)

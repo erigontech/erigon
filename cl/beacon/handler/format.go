@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,6 +31,11 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 	return func(w http.ResponseWriter, r *http.Request) {
 		accept := r.Header.Get("Accept")
 		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
+		start := time.Now()
+		defer func() {
+			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		}()
+
 		data, finalized, version, httpStatus, err := fn(r)
 		if err != nil {
 			w.WriteHeader(httpStatus)

@@ -51,7 +51,7 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bo
 		httpStatus = http.StatusBadRequest
 		return
 	}
-	if epoch >= (a.forkchoiceStore.Slot()/a.beaconChainCfg.SlotsPerEpoch)+a.beaconChainCfg.MaxSeedLookahead {
+	if epoch >= (a.forkchoiceStore.Slot()/a.beaconChainCfg.SlotsPerEpoch)+1 {
 		err = fmt.Errorf("invalid epoch")
 		httpStatus = http.StatusBadRequest
 		return
@@ -106,6 +106,7 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (data any, finalized *bo
 		httpStatus = http.StatusNotFound
 		return
 	}
+
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	if expectedSlot != state.Slot() {
 		if err = transition.DefaultMachine.ProcessSlots(state, expectedSlot); err != nil {
