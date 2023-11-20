@@ -428,16 +428,11 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 func (dc *DomainContext) DiscardHistory() {
 	dc.hc.DiscardHistory()
 	// can't discard domain wal - it required, but can discard history
-	dc.wal = dc.newWriter(dc.d.dirs.Tmp, true, false)
-}
-
-func (dc *DomainContext) StartUnbufferedWrites() {
-	dc.wal = dc.newWriter(dc.d.dirs.Tmp, false, false)
-	dc.hc.StartUnbufferedWrites()
+	dc.wal = dc.newWriter(dc.d.dirs.Tmp, false)
 }
 
 func (dc *DomainContext) StartWrites() {
-	dc.wal = dc.newWriter(dc.d.dirs.Tmp, true, false)
+	dc.wal = dc.newWriter(dc.d.dirs.Tmp, false)
 	dc.hc.StartWrites()
 }
 
@@ -787,25 +782,17 @@ func (dc *DomainContext) SetTxNum(v uint64) {
 	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(v / dc.d.aggregationStep))
 }
 
-func (dc *DomainContext) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
-	if !buffered {
-		panic("non-buffered wal is not supported anymore")
-	}
-
+func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainWAL {
 	w := &domainWAL{dc: dc,
 		tmpdir:      tmpdir,
-		buffered:    buffered,
 		discard:     discard,
 		aux:         make([]byte, 0, 128),
 		largeValues: dc.d.domainLargeValues,
+		keys:        etl.NewCollector(dc.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
+		values:      etl.NewCollector(dc.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
 	}
-
-	if buffered {
-		w.values = etl.NewCollector(dc.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger)
-		w.values.LogLvl(log.LvlTrace)
-		w.keys = etl.NewCollector(dc.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger)
-		w.keys.LogLvl(log.LvlTrace)
-	}
+	w.keys.LogLvl(log.LvlTrace)
+	w.values.LogLvl(log.LvlTrace)
 	return w
 }
 
@@ -815,7 +802,6 @@ type domainWAL struct {
 	values      *etl.Collector
 	aux         []byte
 	tmpdir      string
-	buffered    bool
 	discard     bool
 	largeValues bool
 }
@@ -852,7 +838,7 @@ func loadSkipFunc() etl.LoadFunc {
 }
 
 func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	if d.discard || !d.buffered {
+	if d.discard {
 		return nil
 	}
 	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -1531,7 +1517,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	}
 
 	seen := make(map[string]struct{})
-	restored := dc.newWriter(dc.d.dirs.Tmp, true, false)
+	restored := dc.newWriter(dc.d.dirs.Tmp, false)
 
 	dc.SetTxNum(txNumUnindTo - 1) // todo what if we actually had to decrease current step to provide correct update?
 	for histRng.HasNext() {
@@ -1646,16 +1632,14 @@ func (dc *DomainContext) Rotate() flusher {
 	hf := dc.hc.Rotate()
 	if dc.wal != nil {
 		w := dc.wal
-		if w.buffered {
-			if err := w.keys.Flush(); err != nil {
-				panic(err)
-			}
-			if err := w.values.Flush(); err != nil {
-				panic(err)
-			}
+		if err := w.keys.Flush(); err != nil {
+			panic(err)
+		}
+		if err := w.values.Flush(); err != nil {
+			panic(err)
 		}
 		hf.d = w
-		dc.wal = dc.newWriter(dc.wal.tmpdir, dc.wal.buffered, dc.wal.discard)
+		dc.wal = dc.newWriter(dc.wal.tmpdir, dc.wal.discard)
 	}
 	return hf
 }
