@@ -600,6 +600,9 @@ func PersistValidatorSets(
 					// to speedup: recover signer in background goroutines and save in `sigcache`
 					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 					g.Go(func() error {
+						if header == nil {
+							return nil
+						}
 						_, _ = bor.Ecrecover(header, signatures, config)
 						return nil
 					})
