@@ -1277,11 +1277,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			if step == 54 {
-				panic(1)
-			}
 		}
-		return
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {

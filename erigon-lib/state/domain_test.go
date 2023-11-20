@@ -169,7 +169,6 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		fmt.Printf("%s, %d, %s\n", k, ^binary.BigEndian.Uint64(v[:8]), v[8:])
 		return nil
 	})
-	fmt.Printf("----\n")
 	{
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
