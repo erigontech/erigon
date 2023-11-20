@@ -64,8 +64,8 @@ grpc: protoc-all
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		types/types.proto
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
