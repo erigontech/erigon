@@ -1508,7 +1508,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.OpenFolder(false)
+		/* it's allowed to run "integration" commands without stopping erigon - then open it in read-only mode - to prevent files removal by integration tool*/
+		err = _aggSingleton.OpenFolder(true)
 		if err != nil {
 			panic(err)
 		}
