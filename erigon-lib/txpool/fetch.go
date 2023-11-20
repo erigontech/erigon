@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"sync"
 	"time"
 
@@ -279,19 +280,39 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return err
 		}
-		_ = requestID
+
+		// limit to max 256 transactions in a reply
+		const hashSize = 32
+		hashes = hashes[:cmp.Min(len(hashes), 256*hashSize)]
+
 		var txs [][]byte
-		for i := 0; i < len(hashes); i += 32 {
-			txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
+		responseSize := 0
+		processed := len(hashes)
+
+		for i := 0; i < len(hashes); i += hashSize {
+			if responseSize >= p2pTxPacketLimit {
+				processed = i
+				log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply truncated to fit p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+				break
+			}
+
+			txnHash := hashes[i:cmp.Min(i+hashSize, len(hashes))]
+			txn, err := f.pool.GetRlp(tx, txnHash)
 			if err != nil {
 				return err
 			}
 			if txn == nil {
 				continue
 			}
+
 			txs = append(txs, txn)
+			responseSize += len(txn)
 		}
+
 		encodedRequest = types2.EncodePooledTransactions66(txs, requestID, nil)
+		if len(encodedRequest) > p2pTxPacketLimit {
+			log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+		}
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
 			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
