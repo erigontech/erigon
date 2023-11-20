@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -19,9 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, wg *sync.WaitGroup, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
-	defer wg.Done()
-
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
 	newdbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
