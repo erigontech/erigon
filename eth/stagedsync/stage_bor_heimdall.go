@@ -288,7 +288,7 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 			return fmt.Errorf("persistValidatorSets: %w", err)
 		}
 		if !mine && header != nil {
@@ -497,7 +497,8 @@ func PersistValidatorSets(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
-	logger log.Logger) error {
+	logger log.Logger,
+	logPrefix string) error {
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -559,7 +560,7 @@ func PersistValidatorSets(
 
 		select {
 		case <-logEvery.C:
-			logger.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", blockNum)
+			logger.Info(fmt.Sprintf("[%s] Gathering headers for validator proposer prorities (backwards)", logPrefix), "blockNum", blockNum)
 		default:
 		}
 	}
@@ -585,7 +586,7 @@ func PersistValidatorSets(
 			if err := snap.Store(snapDb); err != nil {
 				return fmt.Errorf("snap.Store (0): %w", err)
 			}
-			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
+			logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
 			g := errgroup.Group{}
 			g.SetLimit(estimate.AlmostAllCPUs())
 			defer g.Wait()
@@ -608,7 +609,7 @@ func PersistValidatorSets(
 					})
 				}
 				if header == nil {
-					log.Debug("[bor] PersistValidatorSets nil header", "blockNum", i)
+					log.Debug(fmt.Sprintf("[%s] PersistValidatorSets nil header", logPrefix), "blockNum", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
@@ -620,7 +621,7 @@ func PersistValidatorSets(
 				}
 				select {
 				case <-logEvery.C:
-					logger.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+					logger.Info(fmt.Sprintf("[%s] Computing validator proposer prorities (forward)", logPrefix), "blockNum", i)
 				default:
 				}
 			}
@@ -666,7 +667,7 @@ func PersistValidatorSets(
 			return fmt.Errorf("snap.Store: %w", err)
 		}
 
-		logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return nil
