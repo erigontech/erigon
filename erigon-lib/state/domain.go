@@ -837,13 +837,6 @@ func loadSkipFunc() etl.LoadFunc {
 		return nil
 	}
 }
-func loadFunc2(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	if err := next(k, k, v); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if d.discard || !d.buffered {
 		return nil
@@ -851,7 +844,7 @@ func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := d.values.Load(tx, d.dc.d.valsTable, loadFunc2, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := d.values.Load(tx, d.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
