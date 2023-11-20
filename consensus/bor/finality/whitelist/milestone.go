@@ -142,8 +142,7 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uin
 		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 
-	milestoneIDLength := float64(len(m.LockedMilestoneIDs))
-	milestoneIdsLengthMeter.Set(milestoneIDLength)
+	milestoneIdsLengthMeter.SetInt(len(m.LockedMilestoneIDs))
 
 	m.finality.Unlock()
 }
