@@ -91,13 +91,6 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
-	// this is done by sharedomains.SetTxNum.
-	// if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
-	// 	if _, err := rs.Commitment(txNum, true); err != nil {
-	// 		panic(fmt.Errorf("txnum %d: %w", txNum, err))
-	// 	}
-	// }
-
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
@@ -194,6 +187,9 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 }
 
 func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
+	if txTask.HistoryExecution {
+		return nil
+	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	rs.domains.SetTxNum(ctx, txTask.TxNum)
@@ -212,10 +208,10 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
+		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
 		_, err := rs.domains.ComputeCommitment(ctx, true, false, txTask.BlockNum)
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
 		}
 	}
 

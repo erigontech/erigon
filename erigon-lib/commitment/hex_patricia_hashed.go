@@ -680,7 +680,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		}
 		singleton := depth <= 64
 		koffset := hph.accountKeyLen
-		if depth == 0 {
+		if depth == 0 && cell.apl == 0 {
+			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
 		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
@@ -694,6 +695,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			aux := make([]byte, 0, 33)
 			if aux, err = hph.leafHashWithKeyVal(aux, cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
 				return nil, err
+			}
+			if hph.trace {
+				fmt.Printf("leafHashWithKeyVal(singleton) storage hash [%x]\n", aux)
 			}
 			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 			storageRootHashIsSet = true
@@ -1786,7 +1790,8 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if err := hph.ctx.GetAccount(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
 			return err
 		}
-	} else if hph.root.spl > 0 {
+	}
+	if hph.root.spl > 0 {
 		if err := hph.ctx.GetStorage(hph.root.spk[:hph.root.spl], &hph.root); err != nil {
 			return err
 		}

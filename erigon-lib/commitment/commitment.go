@@ -177,8 +177,6 @@ func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 				return err
 			}
 			update = merged
-			//} else {
-			//	stateValue = nil
 		}
 		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
