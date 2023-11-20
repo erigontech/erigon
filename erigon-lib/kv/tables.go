@@ -459,6 +459,9 @@ const (
 	LightClient = "LightClient"
 	// Period (one every 27 hours) => LightClientUpdate
 	LightClientUpdates = "LightClientUpdates"
+	// Beacon historical data
+	// ValidatorIndex => [Public Key]
+	ValidatorPublicKeys = "ValidatorPublickeys"
 )
 
 // Keys
@@ -618,6 +621,7 @@ var ChaindataTables = []string{
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	ValidatorPublicKeys,
 }
 
 const (
@@ -702,8 +706,7 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	TblAccountKeys: {Flags: DupSort},
-	//TblAccountVals:           {Flags: DupSort},
+	TblAccountKeys:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
 	TblAccountHistoryVals:    {Flags: DupSort},
 	TblAccountIdx:            {Flags: DupSort},

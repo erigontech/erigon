@@ -55,7 +55,7 @@ type httpConn struct {
 }
 
 // httpConn is treated specially by Client.
-func (hc *httpConn) writeJSON(context.Context, interface{}) error {
+func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
 	panic("writeJSON called on httpConn")
 }
 

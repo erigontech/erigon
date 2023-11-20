@@ -170,7 +170,7 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 	dirs, ctx := datadir.New(t.TempDir()), context.Background()
 	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(false)
 	require.NoError(t, err)
 	return agg
 }
