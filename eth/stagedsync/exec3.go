@@ -283,7 +283,7 @@ func ExecV3(ctx context.Context,
 			execRepeats.Add(float64(conflicts))
 			execTriggers.Add(float64(triggers))
 			if processedBlockNum > lastBlockNum {
-				outputBlockNum.Set(float64(processedBlockNum))
+				outputBlockNum.SetUint64(processedBlockNum)
 				lastBlockNum = processedBlockNum
 			}
 			if processedTxNum > 0 {
@@ -334,7 +334,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), metrics.GetGaugeValueUint64(outputBlockNum), outputTxNum.Load(), metrics.GetCounterValueUint64(execRepeats), stepsInDB)
+					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
 					}
@@ -372,7 +372,7 @@ func ExecV3(ctx context.Context,
 							execRepeats.Add(float64(conflicts))
 							execTriggers.Add(float64(triggers))
 							if processedBlockNum > 0 {
-								outputBlockNum.Set(float64(processedBlockNum))
+								outputBlockNum.SetUint64(processedBlockNum)
 							}
 							if processedTxNum > 0 {
 								outputTxNum.Store(processedTxNum)
@@ -411,7 +411,7 @@ func ExecV3(ctx context.Context,
 						}
 						t3 = time.Since(tt)
 
-						if err = execStage.Update(tx, metrics.GetGaugeValueUint64(outputBlockNum)); err != nil {
+						if err = execStage.Update(tx, outputBlockNum.GetValueUint64()); err != nil {
 							return err
 						}
 
@@ -449,7 +449,7 @@ func ExecV3(ctx context.Context,
 			if err = agg.Flush(ctx, tx); err != nil {
 				return err
 			}
-			if err = execStage.Update(tx, metrics.GetGaugeValueUint64(outputBlockNum)); err != nil {
+			if err = execStage.Update(tx, outputBlockNum.GetValueUint64()); err != nil {
 				return err
 			}
 			if err = tx.Commit(); err != nil {
@@ -669,12 +669,12 @@ Loop:
 		}
 
 		if !parallel {
-			outputBlockNum.Set(float64(blockNum))
+			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, in, rws, count, inputBlockNum.Load(), metrics.GetGaugeValueUint64(outputBlockNum), outputTxNum.Load(), metrics.GetCounterValueUint64(execRepeats), stepsInDB)
+				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -695,7 +695,7 @@ Loop:
 					}
 					t3 = time.Since(tt)
 
-					if err = execStage.Update(applyTx, metrics.GetGaugeValueUint64(outputBlockNum)); err != nil {
+					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
 						return err
 					}
 
@@ -995,7 +995,7 @@ func reconstituteStep(last bool,
 				logger.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", metrics.GetGaugeValueUint64(syncMetrics[stages.Execution]),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].GetValueUint64(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -1106,7 +1106,7 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			syncMetrics[stages.Execution].Set(float64(bn))
+			syncMetrics[stages.Execution].SetUint64(bn)
 		}
 		return err
 	}(); err != nil {

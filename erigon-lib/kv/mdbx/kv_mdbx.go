@@ -631,33 +631,33 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.Set(float64(info.Geo.Current))
-	kv.DbPgopsNewly.Set(float64(info.PageOps.Newly))
-	kv.DbPgopsCow.Set(float64(info.PageOps.Cow))
-	kv.DbPgopsClone.Set(float64(info.PageOps.Clone))
-	kv.DbPgopsSplit.Set(float64(info.PageOps.Split))
-	kv.DbPgopsMerge.Set(float64(info.PageOps.Merge))
-	kv.DbPgopsSpill.Set(float64(info.PageOps.Spill))
-	kv.DbPgopsUnspill.Set(float64(info.PageOps.Unspill))
-	kv.DbPgopsWops.Set(float64(info.PageOps.Wops))
+	kv.DbSize.SetUint64(info.Geo.Current)
+	kv.DbPgopsNewly.SetUint64(info.PageOps.Newly)
+	kv.DbPgopsCow.SetUint64(info.PageOps.Cow)
+	kv.DbPgopsClone.SetUint64(info.PageOps.Clone)
+	kv.DbPgopsSplit.SetUint64(info.PageOps.Split)
+	kv.DbPgopsMerge.SetUint64(info.PageOps.Merge)
+	kv.DbPgopsSpill.SetUint64(info.PageOps.Spill)
+	kv.DbPgopsUnspill.SetUint64(info.PageOps.Unspill)
+	kv.DbPgopsWops.SetUint64(info.PageOps.Wops)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.Set(float64(txInfo.SpaceDirty))
-	kv.TxLimit.Set(float64(tx.db.txSize))
-	kv.TxSpill.Set(float64(txInfo.Spill))
-	kv.TxUnspill.Set(float64(txInfo.Unspill))
+	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
+	kv.TxLimit.SetUint64(tx.db.txSize)
+	kv.TxSpill.SetUint64(txInfo.Spill)
+	kv.TxUnspill.SetUint64(txInfo.Unspill)
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.Set(float64(gc.LeafPages))
-	kv.GcOverflowMetric.Set(float64(gc.OverflowPages))
-	kv.GcPagesMetric.Set(float64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8))
+	kv.GcLeafMetric.SetUint64(gc.LeafPages)
+	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
+	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket

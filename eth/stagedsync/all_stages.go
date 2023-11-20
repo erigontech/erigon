@@ -4,14 +4,13 @@ import (
 	"fmt"
 
 	"github.com/huandu/xstrings"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-var syncMetrics = map[stages.SyncStage]prometheus.Gauge{}
+var syncMetrics = map[stages.SyncStage]metrics.Gauge{}
 
 func init() {
 	for _, v := range stages.AllStages {
@@ -32,7 +31,7 @@ func UpdateMetrics(tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		m.Set(float64(progress))
+		m.SetUint64(progress)
 	}
 	return nil
 }

@@ -31,13 +31,13 @@ type Summary interface {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned counter is safe to use from concurrent goroutines.
-func NewCounter(name string) prometheus.Counter {
-	counter, err := defaultSet.NewCounter(name)
+func NewCounter(name string) Counter {
+	c, err := defaultSet.NewCounter(name)
 	if err != nil {
 		panic(fmt.Errorf("could not create new counter: %w", err))
 	}
 
-	return counter
+	return &counter{c}
 }
 
 // GetOrCreateCounter returns registered counter with the given name
@@ -54,13 +54,13 @@ func NewCounter(name string) prometheus.Counter {
 // The returned counter is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewCounter instead of GetOrCreateCounter.
-func GetOrCreateCounter(name string) prometheus.Counter {
-	counter, err := defaultSet.GetOrCreateCounter(name)
+func GetOrCreateCounter(name string) Counter {
+	c, err := defaultSet.GetOrCreateCounter(name)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new counter: %w", err))
 	}
 
-	return counter
+	return &counter{c}
 }
 
 // NewGauge registers and returns gauge with the given name.
@@ -73,13 +73,13 @@ func GetOrCreateCounter(name string) prometheus.Counter {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned gauge is safe to use from concurrent goroutines.
-func NewGauge(name string) prometheus.Gauge {
-	gauge, err := defaultSet.NewGauge(name)
+func NewGauge(name string) Gauge {
+	g, err := defaultSet.NewGauge(name)
 	if err != nil {
 		panic(fmt.Errorf("could not create new gauge: %w", err))
 	}
 
-	return gauge
+	return &gauge{g}
 }
 
 // GetOrCreateGauge returns registered gauge with the given name
@@ -96,16 +96,15 @@ func NewGauge(name string) prometheus.Gauge {
 // The returned gauge is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func GetOrCreateGauge(name string) prometheus.Gauge {
-	gauge, err := defaultSet.GetOrCreateGauge(name)
+func GetOrCreateGauge(name string) Gauge {
+	g, err := defaultSet.GetOrCreateGauge(name)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new gauge: %w", err))
 	}
 
-	return gauge
+	return &gauge{g}
 }
 
-// TODO remove these
 type summary struct {
 	prometheus.Summary
 }

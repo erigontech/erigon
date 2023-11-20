@@ -712,8 +712,8 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 	mxRunningCollations.Dec()
 	mxCollateTook.UpdateDuration(start)
 
-	mxCollationSize.Set(float64(collation.valuesComp.Count()))
-	mxCollationSizeHist.Set(float64(collation.historyComp.Count()))
+	mxCollationSize.SetInt(collation.valuesComp.Count())
+	mxCollationSizeHist.SetInt(collation.historyComp.Count())
 
 	if err != nil {
 		collation.Close()

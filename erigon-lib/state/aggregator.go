@@ -304,7 +304,7 @@ func (a *Aggregator) SetTx(tx kv.RwTx) {
 }
 
 func (a *Aggregator) SetTxNum(txNum uint64) {
-	mxCurrentTx.Set(float64(txNum))
+	mxCurrentTx.SetUint64(txNum)
 
 	a.txNum = txNum
 	a.accounts.SetTxNum(txNum)
@@ -319,7 +319,7 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 
 func (a *Aggregator) SetBlockNum(blockNum uint64) {
 	a.blockNum = blockNum
-	mxCurrentBlock.Set(float64(blockNum))
+	mxCurrentBlock.SetUint64(blockNum)
 }
 
 func (a *Aggregator) SetWorkers(i int) {
@@ -445,7 +445,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		mxCollateTook.UpdateDuration(start)
 
 		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-		mxCollationSizeHist.Set(float64(collation.historyComp.Count()))
+		mxCollationSizeHist.SetInt(collation.historyComp.Count())
 
 		if err != nil {
 			collation.Close()
@@ -926,7 +926,7 @@ func (a *Aggregator) FinishTx() (err error) {
 		return err
 	}
 	step := a.txNum / a.aggregationStep
-	mxStepCurrent.Set(float64(step))
+	mxStepCurrent.SetUint64(step)
 
 	if step == 0 {
 		a.notifyAggregated(rootHash)

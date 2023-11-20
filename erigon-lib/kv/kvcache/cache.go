@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/prometheus/client_golang/prometheus"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
 
@@ -102,19 +101,19 @@ type CacheView interface {
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
 	hasher               hash.Hash
-	codeEvictLen         prometheus.Gauge
-	codeKeys             prometheus.Gauge
-	keys                 prometheus.Gauge
-	evict                prometheus.Gauge
+	codeEvictLen         metrics.Gauge
+	codeKeys             metrics.Gauge
+	keys                 metrics.Gauge
+	evict                metrics.Gauge
 	latestStateView      *CoherentRoot
-	codeMiss             prometheus.Counter
-	timeout              prometheus.Counter
-	hits                 prometheus.Counter
-	codeHits             prometheus.Counter
+	codeMiss             metrics.Counter
+	timeout              metrics.Counter
+	hits                 metrics.Counter
+	codeHits             metrics.Counter
 	roots                map[uint64]*CoherentRoot
 	stateEvict           *ThreadSafeEvictionList
 	codeEvict            *ThreadSafeEvictionList
-	miss                 prometheus.Counter
+	miss                 metrics.Counter
 	cfg                  CoherentConfig
 	latestStateVersionID uint64
 	lock                 sync.Mutex
@@ -262,10 +261,10 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
 
-	c.keys.Set(float64(c.latestStateView.cache.Len()))
-	c.codeKeys.Set(float64(c.latestStateView.codeCache.Len()))
-	c.evict.Set(float64(c.stateEvict.Len()))
-	c.codeEvictLen.Set(float64(c.codeEvict.Len()))
+	c.keys.SetInt(c.latestStateView.cache.Len())
+	c.codeKeys.SetInt(c.latestStateView.codeCache.Len())
+	c.evict.SetInt(c.stateEvict.Len())
+	c.codeEvictLen.SetInt(c.codeEvict.Len())
 	return r
 }
 

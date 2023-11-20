@@ -653,7 +653,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 }
 
 func (rs *StateV3) DoneCount() uint64 {
-	return metrics.GetCounterValueUint64(execTxsDone)
+	return execTxsDone.GetValueUint64()
 }
 
 func (rs *StateV3) SizeEstimate() (r uint64) {

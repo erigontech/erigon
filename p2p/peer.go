@@ -413,7 +413,7 @@ func (p *Peer) handle(msg Msg) error {
 
 		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics.GetOrCreateGauge(m).Set(float64(msg.meterSize))
+			metrics.GetOrCreateGauge(m).SetUint32(msg.meterSize)
 			metrics.GetOrCreateGauge(m + "_packets").Set(1)
 		}
 		select {

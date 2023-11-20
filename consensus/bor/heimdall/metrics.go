@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
@@ -14,7 +12,7 @@ type (
 	requestType    string
 
 	meter struct {
-		request map[bool]prometheus.Gauge
+		request map[bool]metrics.Gauge
 		timer   metrics.Summary
 	}
 )
@@ -43,28 +41,28 @@ func getRequestType(ctx context.Context) (requestType, bool) {
 var (
 	requestMeters = map[requestType]meter{
 		stateSyncRequest: {
-			request: map[bool]prometheus.Gauge{
+			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_statesync_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_statesync_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_statesync_duration"),
 		},
 		spanRequest: {
-			request: map[bool]prometheus.Gauge{
+			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_span_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_span_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_span_duration"),
 		},
 		checkpointRequest: {
-			request: map[bool]prometheus.Gauge{
+			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_checkpoint_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_checkpoint_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
 		checkpointCountRequest: {
-			request: map[bool]prometheus.Gauge{
+			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_checkpointcount_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_checkpointcount_invalid"),
 			},

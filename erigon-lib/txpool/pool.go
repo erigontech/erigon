@@ -1678,7 +1678,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					p.logger.Error("[txpool] flush is local history", "err", err)
 					continue
 				}
-				writeToDBBytesCounter.Set(float64(written))
+				writeToDBBytesCounter.SetUint64(written)
 				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
 		case announcements := <-newTxs:
@@ -2091,9 +2091,9 @@ func (p *TxPool) logStats() {
 	}
 	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	p.logger.Info("[txpool] stat", ctx...)
-	pendingSubCounter.Set(float64(p.pending.Len()))
-	basefeeSubCounter.Set(float64(p.baseFee.Len()))
-	queuedSubCounter.Set(float64(p.queued.Len()))
+	pendingSubCounter.SetInt(p.pending.Len())
+	basefeeSubCounter.SetInt(p.baseFee.Len())
+	queuedSubCounter.SetInt(p.queued.Len())
 }
 
 // Deprecated need switch to streaming-like
