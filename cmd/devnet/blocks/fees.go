@@ -9,7 +9,7 @@ import (
 )
 
 func BaseFeeFromBlock(ctx context.Context) (uint64, error) {
-	res, err := devnet.SelectNode(ctx).GetBlockByNumber(rpc.LatestBlockNumber, false)
+	res, err := devnet.SelectNode(ctx).GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)

@@ -182,7 +182,7 @@ func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.In
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
 }
 
-func (c ChainReaderWriterEth1) GetBodiesByHases(hashes []libcommon.Hash) []*types.RawBody {
+func (c ChainReaderWriterEth1) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
 	grpcHashes := make([]*types2.H256, len(hashes))
 	for i := range grpcHashes {
 		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
@@ -191,30 +191,28 @@ func (c ChainReaderWriterEth1) GetBodiesByHases(hashes []libcommon.Hash) []*type
 		Hashes: grpcHashes,
 	})
 	if err != nil {
-		log.Error("GetBodiesByHases failed", "err", err)
-		return nil
+		return nil, err
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
 		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
 	}
-	return ret
+	return ret, nil
 }
 
-func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) []*types.RawBody {
+func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
 	resp, err := c.executionModule.GetBodiesByRange(c.ctx, &execution.GetBodiesByRangeRequest{
 		Start: start,
 		Count: count,
 	})
 	if err != nil {
-		log.Error("GetBodiesByHases failed", "err", err)
-		return nil
+		return nil, err
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
 		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
 	}
-	return ret
+	return ret, nil
 }
 
 func (c ChainReaderWriterEth1) Ready() (bool, error) {

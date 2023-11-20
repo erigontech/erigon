@@ -83,7 +83,9 @@ type UDPv4 struct {
 	closeOnce   sync.Once
 	wg          sync.WaitGroup
 
-	addReplyMatcher     chan *replyMatcher
+	addReplyMatcher      chan *replyMatcher
+	addReplyMatcherMutex sync.Mutex
+
 	gotreply            chan reply
 	gotkey              chan v4wire.Pubkey
 	gotnodes            chan nodes
@@ -456,6 +458,13 @@ func (t *UDPv4) pending(id enode.ID, ip net.IP, port int, ptype byte, callback r
 	ch := make(chan error, 1)
 	p := &replyMatcher{from: id, ip: ip, port: port, ptype: ptype, callback: callback, errc: ch}
 
+	t.addReplyMatcherMutex.Lock()
+	defer t.addReplyMatcherMutex.Unlock()
+	if t.addReplyMatcher == nil {
+		ch <- errClosed
+		return p
+	}
+
 	select {
 	case t.addReplyMatcher <- p:
 		// loop will handle it
@@ -582,6 +591,14 @@ func (t *UDPv4) loop() {
 					el.Value.(*replyMatcher).errc <- errClosed
 				}
 			}()
+
+			t.addReplyMatcherMutex.Lock()
+			defer t.addReplyMatcherMutex.Unlock()
+			close(t.addReplyMatcher)
+			for matcher := range t.addReplyMatcher {
+				matcher.errc <- errClosed
+			}
+			t.addReplyMatcher = nil
 			return
 
 		case p := <-t.addReplyMatcher:
