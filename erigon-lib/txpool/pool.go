@@ -68,10 +68,10 @@ var (
 	writeToDBTimer          = metrics.NewSummary(`pool_write_to_db`)
 	propagateToNewPeerTimer = metrics.NewSummary(`pool_propagate_to_new_peer`)
 	propagateNewTxsTimer    = metrics.NewSummary(`pool_propagate_new_txs`)
-	writeToDBBytesCounter   = metrics.GetOrCreateCounter(`pool_write_to_db_bytes`)
-	pendingSubCounter       = metrics.GetOrCreateCounter(`txpool_pending`)
-	queuedSubCounter        = metrics.GetOrCreateCounter(`txpool_queued`)
-	basefeeSubCounter       = metrics.GetOrCreateCounter(`txpool_basefee`)
+	writeToDBBytesCounter   = metrics.GetOrCreateGauge(`pool_write_to_db_bytes`)
+	pendingSubCounter       = metrics.GetOrCreateGauge(`txpool_pending`)
+	queuedSubCounter        = metrics.GetOrCreateGauge(`txpool_queued`)
+	basefeeSubCounter       = metrics.GetOrCreateGauge(`txpool_basefee`)
 )
 
 // Pool is interface for the transaction pool
@@ -1678,7 +1678,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					p.logger.Error("[txpool] flush is local history", "err", err)
 					continue
 				}
-				writeToDBBytesCounter.Set(written)
+				writeToDBBytesCounter.Set(float64(written))
 				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
 		case announcements := <-newTxs:
@@ -2091,9 +2091,9 @@ func (p *TxPool) logStats() {
 	}
 	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	p.logger.Info("[txpool] stat", ctx...)
-	pendingSubCounter.Set(uint64(p.pending.Len()))
-	basefeeSubCounter.Set(uint64(p.baseFee.Len()))
-	queuedSubCounter.Set(uint64(p.queued.Len()))
+	pendingSubCounter.Set(float64(p.pending.Len()))
+	basefeeSubCounter.Set(float64(p.baseFee.Len()))
+	queuedSubCounter.Set(float64(p.queued.Len()))
 }
 
 // Deprecated need switch to streaming-like

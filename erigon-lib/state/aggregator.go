@@ -46,22 +46,22 @@ import (
 const StepsInBiggestFile = 32
 
 var (
-	mxCurrentTx                = metrics.GetOrCreateCounter("domain_tx_processed")
-	mxCurrentBlock             = metrics.GetOrCreateCounter("domain_block_current")
-	mxRunningMerges            = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningCollations        = metrics.GetOrCreateCounter("domain_running_collations")
+	mxCurrentTx                = metrics.GetOrCreateGauge("domain_tx_processed")
+	mxCurrentBlock             = metrics.GetOrCreateGauge("domain_block_current")
+	mxRunningMerges            = metrics.GetOrCreateGauge("domain_running_merges")
+	mxRunningCollations        = metrics.GetOrCreateGauge("domain_running_collations")
 	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")
 	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")
-	mxPruningProgress          = metrics.GetOrCreateCounter("domain_pruning_progress")
-	mxCollationSize            = metrics.GetOrCreateCounter("domain_collation_size")
-	mxCollationSizeHist        = metrics.GetOrCreateCounter("domain_collation_hist_size")
+	mxPruningProgress          = metrics.GetOrCreateGauge("domain_pruning_progress")
+	mxCollationSize            = metrics.GetOrCreateGauge("domain_collation_size")
+	mxCollationSizeHist        = metrics.GetOrCreateGauge("domain_collation_hist_size")
 	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")
 	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepCurrent              = metrics.GetOrCreateCounter("domain_step_current")
+	mxStepCurrent              = metrics.GetOrCreateGauge("domain_step_current")
 	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")
 	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentRunning        = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentRunning        = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")
 	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")
 	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")
@@ -304,7 +304,7 @@ func (a *Aggregator) SetTx(tx kv.RwTx) {
 }
 
 func (a *Aggregator) SetTxNum(txNum uint64) {
-	mxCurrentTx.Set(txNum)
+	mxCurrentTx.Set(float64(txNum))
 
 	a.txNum = txNum
 	a.accounts.SetTxNum(txNum)
@@ -319,7 +319,7 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 
 func (a *Aggregator) SetBlockNum(blockNum uint64) {
 	a.blockNum = blockNum
-	mxCurrentBlock.Set(blockNum)
+	mxCurrentBlock.Set(float64(blockNum))
 }
 
 func (a *Aggregator) SetWorkers(i int) {
@@ -445,7 +445,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		mxCollateTook.UpdateDuration(start)
 
 		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-		mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+		mxCollationSizeHist.Set(float64(collation.historyComp.Count()))
 
 		if err != nil {
 			collation.Close()
@@ -854,7 +854,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		saveStateAfter = false
 	}
 
-	mxCommitmentKeys.Add(int(a.commitment.comKeys))
+	mxCommitmentKeys.Add(float64(a.commitment.comKeys))
 	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
@@ -893,7 +893,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 	return rootHash, nil
 }
 
-// Provides channel which receives commitment hash each time aggregation is occured
+// AggregatedRoots Provides channel which receives commitment hash each time aggregation is occured
 func (a *Aggregator) AggregatedRoots() chan [length.Hash]byte {
 	return a.stepDoneNotice
 }
@@ -926,7 +926,7 @@ func (a *Aggregator) FinishTx() (err error) {
 		return err
 	}
 	step := a.txNum / a.aggregationStep
-	mxStepCurrent.Set(step)
+	mxStepCurrent.Set(float64(step))
 
 	if step == 0 {
 		a.notifyAggregated(rootHash)
@@ -1292,7 +1292,7 @@ func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []
 }
 
 func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarnation uint64) []byte {
-	l := int(1)
+	l := 1
 	if nonce > 0 {
 		l += common.BitLenToByteLen(bits.Len64(nonce))
 	}

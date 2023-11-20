@@ -32,13 +32,12 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -713,8 +712,8 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 	mxRunningCollations.Dec()
 	mxCollateTook.UpdateDuration(start)
 
-	mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-	mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+	mxCollationSize.Set(float64(collation.valuesComp.Count()))
+	mxCollationSizeHist.Set(float64(collation.historyComp.Count()))
 
 	if err != nil {
 		collation.Close()

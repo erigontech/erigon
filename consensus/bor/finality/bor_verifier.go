@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -30,7 +31,7 @@ var (
 	errEndBlock = errors.New("failed to get end block")
 
 	//Metrics for collecting the rewindLength
-	rewindLengthMeter = metrics.GetOrCreateCounter("chain_autorewind_length")
+	rewindLengthMeter = metrics.GetOrCreateGauge("chain_autorewind_length")
 )
 
 type borVerifier struct {
@@ -151,7 +152,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 // Stop the miner if the mining process is running and rewind back the chain
 func rewindBack(head uint64, rewindTo uint64) {
-	rewindLengthMeter.Set(head - rewindTo)
+	rewindLengthMeter.Set(float64(head - rewindTo))
 
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable

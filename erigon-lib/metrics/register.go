@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 )
 
 type Histogram interface {
@@ -22,34 +21,6 @@ type Summary interface {
 	Histogram
 }
 
-type Counter interface {
-	Inc()
-	Dec()
-	Add(n int)
-	Set(n uint64)
-	Get() uint64
-}
-
-type intCounter struct {
-	prometheus.Gauge
-}
-
-func (c intCounter) Add(n int) {
-	c.Gauge.Add(float64(n))
-}
-
-func (c intCounter) Set(n uint64) {
-	c.Gauge.Set(float64(n))
-}
-
-func (c intCounter) Get() uint64 {
-	var m dto.Metric
-	if err := c.Gauge.Write(&m); err != nil {
-		panic(fmt.Errorf("calling intCounter.Get on invalid metric: %w", err))
-	}
-	return uint64(m.GetGauge().GetValue())
-}
-
 // NewCounter registers and returns new counter with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
@@ -60,13 +31,13 @@ func (c intCounter) Get() uint64 {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned counter is safe to use from concurrent goroutines.
-func NewCounter(name string) Counter {
-	counter, err := defaultSet.NewGauge(name)
+func NewCounter(name string) prometheus.Counter {
+	counter, err := defaultSet.NewCounter(name)
 	if err != nil {
 		panic(fmt.Errorf("could not create new counter: %w", err))
 	}
 
-	return intCounter{counter}
+	return counter
 }
 
 // GetOrCreateCounter returns registered counter with the given name
@@ -83,17 +54,16 @@ func NewCounter(name string) Counter {
 // The returned counter is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewCounter instead of GetOrCreateCounter.
-func GetOrCreateCounter(name string, isGauge ...bool) Counter {
-	counter, err := defaultSet.GetOrCreateGauge(name)
+func GetOrCreateCounter(name string) prometheus.Counter {
+	counter, err := defaultSet.GetOrCreateCounter(name)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new counter: %w", err))
 	}
 
-	return intCounter{counter}
+	return counter
 }
 
-// NewGaugeFunc registers and returns gauge with the given name, which calls f
-// to obtain gauge value.
+// NewGauge registers and returns gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
 // For instance,
@@ -102,19 +72,17 @@ func GetOrCreateCounter(name string, isGauge ...bool) Counter {
 //   - foo{bar="baz"}
 //   - foo{bar="baz",aaa="b"}
 //
-// f must be safe for concurrent calls.
-//
 // The returned gauge is safe to use from concurrent goroutines.
-func NewGaugeFunc(name string, f func() float64) prometheus.GaugeFunc {
-	gf, err := defaultSet.NewGaugeFunc(name, f)
+func NewGauge(name string) prometheus.Gauge {
+	gauge, err := defaultSet.NewGauge(name)
 	if err != nil {
-		panic(fmt.Errorf("could not create new gauge func: %w", err))
+		panic(fmt.Errorf("could not create new gauge: %w", err))
 	}
 
-	return gf
+	return gauge
 }
 
-// GetOrCreateGaugeFunc returns registered gauge with the given name
+// GetOrCreateGauge returns registered gauge with the given name
 // or creates new gauge if the registry doesn't contain gauge with
 // the given name.
 //
@@ -128,15 +96,16 @@ func NewGaugeFunc(name string, f func() float64) prometheus.GaugeFunc {
 // The returned gauge is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func GetOrCreateGaugeFunc(name string, f func() float64) prometheus.GaugeFunc {
-	gf, err := defaultSet.GetOrCreateGaugeFunc(name, f)
+func GetOrCreateGauge(name string) prometheus.Gauge {
+	gauge, err := defaultSet.GetOrCreateGauge(name)
 	if err != nil {
-		panic(fmt.Errorf("could not get or create new gauge func: %w", err))
+		panic(fmt.Errorf("could not get or create new gauge: %w", err))
 	}
 
-	return gf
+	return gauge
 }
 
+// TODO remove these
 type summary struct {
 	prometheus.Summary
 }

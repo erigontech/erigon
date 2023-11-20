@@ -34,15 +34,16 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pbnjay/memory"
+	"golang.org/x/exp/maps"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pbnjay/memory"
-	"golang.org/x/exp/maps"
-	"golang.org/x/sync/semaphore"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -630,33 +631,33 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.Set(info.Geo.Current)
-	kv.DbPgopsNewly.Set(info.PageOps.Newly)
-	kv.DbPgopsCow.Set(info.PageOps.Cow)
-	kv.DbPgopsClone.Set(info.PageOps.Clone)
-	kv.DbPgopsSplit.Set(info.PageOps.Split)
-	kv.DbPgopsMerge.Set(info.PageOps.Merge)
-	kv.DbPgopsSpill.Set(info.PageOps.Spill)
-	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
-	kv.DbPgopsWops.Set(info.PageOps.Wops)
+	kv.DbSize.Set(float64(info.Geo.Current))
+	kv.DbPgopsNewly.Set(float64(info.PageOps.Newly))
+	kv.DbPgopsCow.Set(float64(info.PageOps.Cow))
+	kv.DbPgopsClone.Set(float64(info.PageOps.Clone))
+	kv.DbPgopsSplit.Set(float64(info.PageOps.Split))
+	kv.DbPgopsMerge.Set(float64(info.PageOps.Merge))
+	kv.DbPgopsSpill.Set(float64(info.PageOps.Spill))
+	kv.DbPgopsUnspill.Set(float64(info.PageOps.Unspill))
+	kv.DbPgopsWops.Set(float64(info.PageOps.Wops))
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.Set(txInfo.SpaceDirty)
-	kv.TxLimit.Set(tx.db.txSize)
-	kv.TxSpill.Set(txInfo.Spill)
-	kv.TxUnspill.Set(txInfo.Unspill)
+	kv.TxDirty.Set(float64(txInfo.SpaceDirty))
+	kv.TxLimit.Set(float64(tx.db.txSize))
+	kv.TxSpill.Set(float64(txInfo.Spill))
+	kv.TxUnspill.Set(float64(txInfo.Unspill))
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.Set(gc.LeafPages)
-	kv.GcOverflowMetric.Set(gc.OverflowPages)
-	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
+	kv.GcLeafMetric.Set(float64(gc.LeafPages))
+	kv.GcOverflowMetric.Set(float64(gc.OverflowPages))
+	kv.GcPagesMetric.Set(float64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8))
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket
