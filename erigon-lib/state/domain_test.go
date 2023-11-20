@@ -165,10 +165,6 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 
 	err = dc.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
-	tx.ForEach(d.valsTable, nil, func(k, v []byte) error {
-		fmt.Printf("%s, %d, %s\n", k, ^binary.BigEndian.Uint64(v[:8]), v[8:])
-		return nil
-	})
 	{
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
