@@ -446,6 +446,8 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(1024) // we don't want limit much here, but protecting from infinity attack
 	for i := 0; i < int(estBlocksToTrace); i++ {
+		i := i
+
 		var nextBlock uint64
 		var err error
 		nextBlock, hasMore, err = callFromToProvider()
