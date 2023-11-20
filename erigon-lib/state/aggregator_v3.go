@@ -50,13 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
-const (
-	AccDomainLargeValues        = true
-	StorageDomainLargeValues    = true
-	CodeDomainLargeValues       = true
-	CommitmentDomainLargeValues = true
-)
-
 type AggregatorV3 struct {
 	db               kv.RoDB
 	domains          *SharedDomains
