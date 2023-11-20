@@ -223,32 +223,6 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
-	var benchTraceBlockByHashCmd = &cobra.Command{
-		Use:   "benchTraceBlockByHash",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
-		},
-	}
-	with(benchTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
-
-	var benchTraceTransactionCmd = &cobra.Command{
-		Use:   "benchTraceTransaction",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
-		},
-	}
-	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
-
 	var benchTraceCallCmd = &cobra.Command{
 		Use:   "benchTraceCall",
 		Short: "",
@@ -262,6 +236,46 @@ func main() {
 	}
 	with(benchTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	// debug_trace* APIs
+	var benchDebugTraceBlockByNumberCmd = &cobra.Command{
+		Use:   "benchDebugTraceBlockByNumber",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchDebugTraceBlockByNumber(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchDebugTraceBlockByNumberCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
+	var benchDebugTraceBlockByHashCmd = &cobra.Command{
+		Use:   "benchDebugTraceBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchDebugTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchDebugTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
+	var benchDebugTraceTransactionCmd = &cobra.Command{
+		Use:   "benchDebugTraceTransaction",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchDebugTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchDebugTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchDebugTraceCallCmd = &cobra.Command{
 		Use:   "benchDebugTraceCall",
 		Short: "",
@@ -274,6 +288,8 @@ func main() {
 		},
 	}
 	with(benchDebugTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
+	// debug_trace* APIs END
 
 	var benchTraceCallManyCmd = &cobra.Command{
 		Use:   "benchTraceCallMany",
@@ -313,19 +329,6 @@ func main() {
 		},
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
-
-	var benchDebugTraceBlockByNumberCmd = &cobra.Command{
-		Use:   "benchDebugTraceBlockByNumber",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceBlockByNumber(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
-		},
-	}
-	with(benchDebugTraceBlockByNumberCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var benchTxReceiptCmd = &cobra.Command{
 		Use:   "benchTxReceipt",
@@ -424,13 +427,14 @@ func main() {
 		bench7Cmd,
 		benchEthGetLogsCmd,
 		bench9Cmd,
-		benchTraceTransactionCmd,
 		benchTraceCallCmd,
-		benchDebugTraceCallCmd,
 		benchTraceCallManyCmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
 		benchDebugTraceBlockByNumberCmd,
+		benchDebugTraceBlockByHashCmd,
+		benchDebugTraceTransactionCmd,
+		benchDebugTraceCallCmd,
 		benchTxReceiptCmd,
 		compareAccountRange,
 		benchTraceReplayTransactionCmd,
