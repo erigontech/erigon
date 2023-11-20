@@ -233,7 +233,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
-	require.NoError(t, anotherAgg.OpenFolder())
+	require.NoError(t, anotherAgg.OpenFolder(false))
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	newAgg, err := NewAggregatorV3(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
-	require.NoError(t, newAgg.OpenFolder())
+	require.NoError(t, newAgg.OpenFolder(false))
 
 	newTx, err := newDb.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -642,7 +642,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *AggregatorV3
 	agg, err := NewAggregatorV3(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(false)
 	require.NoError(err)
 	agg.DisableFsync()
 	return db, agg

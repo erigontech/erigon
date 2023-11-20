@@ -1508,7 +1508,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.OpenFolder()
+		err = _aggSingleton.OpenFolder(false)
 		if err != nil {
 			panic(err)
 		}

@@ -293,7 +293,7 @@ Finish:
 			return err
 		}
 	}
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(false); err != nil {
 		return err
 	}
 
