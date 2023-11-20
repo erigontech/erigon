@@ -607,6 +607,9 @@ func PersistValidatorSets(
 						return nil
 					})
 				}
+				if header == nil {
+					log.Debug("[bor] PersistValidatorSets nil header", "blockNum", i)
+				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
