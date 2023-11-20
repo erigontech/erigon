@@ -312,7 +312,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 		if err != nil {
 			panic(err)
 		}
-		if err := agg.OpenFolder(); err != nil {
+		if err := agg.OpenFolder(false); err != nil {
 			panic(err)
 		}
 

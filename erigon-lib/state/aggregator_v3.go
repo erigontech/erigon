@@ -219,32 +219,32 @@ func (a *AggregatorV3) DisableFsync() {
 	a.tracesTo.DisableFsync()
 }
 
-func (a *AggregatorV3) OpenFolder() error {
+func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	var err error
-	if err = a.accounts.OpenFolder(); err != nil {
+	if err = a.accounts.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.storage.OpenFolder(); err != nil {
+	if err = a.storage.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.code.OpenFolder(); err != nil {
+	if err = a.code.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.commitment.OpenFolder(); err != nil {
+	if err = a.commitment.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.logAddrs.OpenFolder(); err != nil {
+	if err = a.logAddrs.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.logTopics.OpenFolder(); err != nil {
+	if err = a.logTopics.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.tracesFrom.OpenFolder(); err != nil {
+	if err = a.tracesFrom.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.tracesTo.OpenFolder(); err != nil {
+	if err = a.tracesTo.OpenFolder(readonly); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	a.recalcMaxTxNum()
@@ -335,7 +335,6 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 		}
 		return err
 	}
-	a.OpenFolder()
 	return nil
 }
 
@@ -391,7 +390,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(); err != nil {
+		if err := a.OpenFolder(false); err != nil {
 			return err
 		}
 	}

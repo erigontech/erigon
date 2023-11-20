@@ -1241,7 +1241,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(false); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	return blockReader, blockWriter, allSnapshots, agg, nil
