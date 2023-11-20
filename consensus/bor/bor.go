@@ -1451,22 +1451,13 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
-	_, err := c.blockReader.BlockByNumber(ctx, tx, number)
-
-	if err != nil {
-		return nil, err
-	}
-
 	header, err := c.blockReader.HeaderByNumber(ctx, tx, number)
-
 	if err != nil {
 		return nil, err
 	}
-
 	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", number)
+		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
-
 	return header, nil
 }
 

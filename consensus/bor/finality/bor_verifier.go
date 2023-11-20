@@ -84,10 +84,15 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 		}
 	} else {
 		// in case of milestone(isCheckpoint==false) get the hash of endBlock
-		block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
+		block, err := config.blockReader.BlockByNumber(ctx, roTx, end)
 		if err != nil {
 			log.Debug("[bor] Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
 			return hash, errEndBlock
+		}
+		if block == nil {
+			err := fmt.Errorf("[bor] block not found: %d", end)
+			log.Debug("[bor] Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
+			return hash, err
 		}
 
 		localHash = fmt.Sprintf("%v", block.Hash())[2:]
@@ -135,7 +140,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	}
 
 	// fetch the end block hash
-	block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
+	block, err := config.blockReader.BlockByNumber(ctx, roTx, end)
 	if err != nil {
 		log.Debug("[bor] Failed to get end block hash while whitelisting", "err", err)
 		return hash, errEndBlock
