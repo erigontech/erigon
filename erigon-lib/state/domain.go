@@ -118,6 +118,7 @@ type ExistenceFilter struct {
 }
 
 func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, error) {
+
 	m := bloomfilter.OptimalM(keysCount, 0.01)
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
