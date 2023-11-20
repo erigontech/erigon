@@ -51,7 +51,7 @@ func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, top
 func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	var result []types.Log
 
-	if err := reqGen.rpcCall(&result, Methods.ETHGetLogs, query); err != nil {
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetLogs, query); err != nil {
 		return nil, err
 	}
 

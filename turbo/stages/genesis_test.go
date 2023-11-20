@@ -39,6 +39,7 @@ import (
 )
 
 func TestSetupGenesis(t *testing.T) {
+	t.Parallel()
 	var (
 		customghash = libcommon.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = types.Genesis{
@@ -143,6 +144,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			_, db, _ := temporal.NewTestDB(t, datadir.New(tmpdir), nil)
 			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 			config, genesis, err := test.fn(db)

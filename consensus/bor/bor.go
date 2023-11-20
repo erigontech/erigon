@@ -443,7 +443,7 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, fmt.Errorf("BeginRwNosync not implemented")
 }
 
-// This is used by the rpcdaemon which needs read only access to the provided data services
+// This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContract, logger log.Logger) *Bor {
 	// get bor config
@@ -998,19 +998,19 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		if c.blockReader != nil {
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				c.logger.Error("Error while committing span", "err", err)
+				c.logger.Error("[bor] Error while committing span", "err", err)
 				return nil, types.Receipts{}, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
-				c.logger.Error("Error while committing states", "err", err)
+				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		c.logger.Error("Error changing contract code", "err", err)
+		c.logger.Error("[bor] Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
 
@@ -1033,7 +1033,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 			}
 
 			for addr, account := range allocs {
-				c.logger.Trace("change contract code", "address", addr)
+				c.logger.Trace("[bor] change contract code", "address", addr)
 				state.SetCode(addr, account.Code)
 			}
 		}
@@ -1062,19 +1062,19 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		if c.blockReader != nil {
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				c.logger.Error("Error while committing span", "err", err)
+				c.logger.Error("[bor] Error while committing span", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
-				c.logger.Error("Error while committing states", "err", err)
+				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		c.logger.Error("Error changing contract code", "err", err)
+		c.logger.Error("[bor] Error changing contract code", "err", err)
 		return nil, nil, types.Receipts{}, err
 	}
 
@@ -1123,7 +1123,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.CalculatePeriod(number) == 0 && len(block.Transactions()) == 0 {
-		c.logger.Trace("Sealing paused, waiting for transactions")
+		c.logger.Trace("[bor] Sealing paused, waiting for transactions")
 		return nil
 	}
 
@@ -1161,11 +1161,11 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 
 	go func() {
 		// Wait until sealing is terminated or delay timeout.
-		c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
+		c.logger.Info("[bor] Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
 
 		select {
 		case <-stop:
-			c.logger.Info("Stopped sealing operation for block", "number", number)
+			c.logger.Info("[bor] Stopped sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
 
@@ -1176,7 +1176,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 
 			if wiggle > 0 {
 				c.logger.Info(
-					"Sealed out-of-turn",
+					"[bor] Sealed out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
 					"delay", delay,
@@ -1185,7 +1185,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 				)
 			} else {
 				c.logger.Info(
-					"Sealed in-turn",
+					"[bor] Sealed in-turn",
 					"number", number,
 					"delay", delay,
 					"headerDifficulty", header.Difficulty,
@@ -1572,7 +1572,7 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 	}
 
 	if err := v.UpdateWithChangeSet(changes, logger); err != nil {
-		logger.Error("Error while updating change set", "error", err)
+		logger.Error("[bor] Error while updating change set", "error", err)
 	}
 
 	return v

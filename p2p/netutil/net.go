@@ -24,6 +24,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"sync"
 )
 
 var lan4, lan6, special4, special6 Netlist
@@ -221,7 +222,7 @@ type DistinctNetSet struct {
 	Subnet uint // number of common prefix bits
 	Limit  uint // maximum number of IPs in each subnet
 
-	members map[string]uint
+	members *sync.Map
 	buf     net.IP
 }
 
@@ -229,9 +230,12 @@ type DistinctNetSet struct {
 // number of existing IPs in the defined range exceeds the limit.
 func (s *DistinctNetSet) Add(ip net.IP) bool {
 	key := s.key(ip)
-	n := s.members[string(key)]
+	n := uint(0)
+	if value, ok := s.members.Load(string(key)); ok {
+		n = value.(uint)
+	}
 	if n < s.Limit {
-		s.members[string(key)] = n + 1
+		s.members.Store(string(key), n+1)
 		return true
 	}
 	return false
@@ -240,11 +244,11 @@ func (s *DistinctNetSet) Add(ip net.IP) bool {
 // Remove removes an IP from the set.
 func (s *DistinctNetSet) Remove(ip net.IP) {
 	key := s.key(ip)
-	if n, ok := s.members[string(key)]; ok {
-		if n == 1 {
-			delete(s.members, string(key))
+	if n, ok := s.members.Load(string(key)); ok {
+		if n.(uint) == 1 {
+			s.members.Delete(string(key))
 		} else {
-			s.members[string(key)] = n - 1
+			s.members.Store(string(key), n.(uint)-1)
 		}
 	}
 }
@@ -252,16 +256,20 @@ func (s *DistinctNetSet) Remove(ip net.IP) {
 // Contains whether the given IP is contained in the set.
 func (s DistinctNetSet) Contains(ip net.IP) bool {
 	key := s.key(ip)
-	_, ok := s.members[string(key)]
+	_, ok := s.members.Load(string(key))
 	return ok
 }
 
 // Len returns the number of tracked IPs.
 func (s DistinctNetSet) Len() int {
 	n := uint(0)
-	for _, i := range s.members {
-		n += i
+	if s.members == nil {
+		return 0
 	}
+	s.members.Range(func(_, v interface{}) bool {
+		n += v.(uint)
+		return true
+	})
 	return int(n)
 }
 
@@ -272,7 +280,7 @@ func (s DistinctNetSet) Len() int {
 func (s *DistinctNetSet) key(ip net.IP) net.IP {
 	// Lazily initialize storage.
 	if s.members == nil {
-		s.members = make(map[string]uint)
+		s.members = &sync.Map{}
 		s.buf = make(net.IP, 17)
 	}
 	// Canonicalize ip and bits.
@@ -299,10 +307,14 @@ func (s *DistinctNetSet) key(ip net.IP) net.IP {
 func (s DistinctNetSet) String() string {
 	var buf bytes.Buffer
 	buf.WriteString("{")
-	keys := make([]string, 0, len(s.members))
-	for k := range s.members {
-		keys = append(keys, k)
+	if s.members == nil {
+		return "{}"
 	}
+	keys := []string{}
+	s.members.Range(func(k, v interface{}) bool {
+		keys = append(keys, k.(string))
+		return true
+	})
 	sort.Strings(keys)
 	for i, k := range keys {
 		var ip net.IP
@@ -312,7 +324,12 @@ func (s DistinctNetSet) String() string {
 			ip = make(net.IP, 16)
 		}
 		copy(ip, k[1:])
-		fmt.Fprintf(&buf, "%v×%d", ip, s.members[k])
+		v, ok := s.members.Load(k)
+		vs := uint(0)
+		if ok {
+			vs = v.(uint)
+		}
+		fmt.Fprintf(&buf, "%v×%d", ip, vs)
 		if i != len(keys)-1 {
 			buf.WriteString(" ")
 		}
