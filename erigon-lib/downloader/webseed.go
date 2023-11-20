@@ -304,7 +304,7 @@ func validateTorrentBytes(b []byte, torrentHashes []string) error {
 	}
 	torrentHash := mi.HashInfoBytes()
 	if !slices.Contains(torrentHashes, torrentHash.String()) {
-		return fmt.Errorf("invalid torrent file, expected hash %s", torrentHash.String())
+		return fmt.Errorf("skipping torrent file, hash not found: %s", torrentHash.String())
 	}
 	return nil
 }

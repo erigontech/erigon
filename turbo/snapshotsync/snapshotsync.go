@@ -50,8 +50,12 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				})
 			}
 		} else {
+			if r.Ranges.To-r.Ranges.From < snaptype.Erigon2RecentMergeLimit {
+				continue
+			}
 			if r.Bor {
 				for _, t := range snaptype.BorSnapshotTypes {
+
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
