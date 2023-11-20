@@ -434,15 +434,11 @@ func (hc *HistoryContext) AddPrevValue(key1, key2, original []byte) (err error) 
 
 func (hc *HistoryContext) DiscardHistory() {
 	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false, true)
-}
-func (hc *HistoryContext) StartUnbufferedWrites() {
-	hc.ic.StartUnbufferedWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false, false)
+	hc.wal = hc.newWriter(hc.h.dirs.Tmp, true)
 }
 func (hc *HistoryContext) StartWrites() {
 	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, true, false)
+	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false)
 }
 func (hc *HistoryContext) FinishWrites() {
 	hc.ic.FinishWrites()
@@ -458,13 +454,11 @@ func (hc *HistoryContext) Rotate() historyFlusher {
 
 	if hc.wal != nil {
 		w := hc.wal
-		if w.buffered {
-			if err := w.historyVals.Flush(); err != nil {
-				panic(err)
-			}
+		if err := w.historyVals.Flush(); err != nil {
+			panic(err)
 		}
 		hf.h = w
-		hc.wal = hc.newWriter(hc.wal.tmpdir, hc.wal.buffered, hc.wal.discard)
+		hc.wal = hc.newWriter(hc.wal.tmpdir, hc.wal.discard)
 	}
 	return hf
 }
@@ -500,7 +494,6 @@ type historyWAL struct {
 	tmpdir           string
 	autoIncrementBuf []byte
 	historyKey       []byte
-	buffered         bool
 	discard          bool
 
 	// not large:
@@ -521,25 +514,22 @@ func (h *historyWAL) close() {
 	}
 }
 
-func (hc *HistoryContext) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
+func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyWAL {
 	w := &historyWAL{hc: hc,
-		tmpdir:   tmpdir,
-		buffered: buffered,
-		discard:  discard,
+		tmpdir:  tmpdir,
+		discard: discard,
 
 		autoIncrementBuf: make([]byte, 8),
 		historyKey:       make([]byte, 128),
 		largeValues:      hc.h.historyLargeValues,
+		historyVals:      etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger),
 	}
-	if buffered {
-		w.historyVals = etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger)
-		w.historyVals.LogLvl(log.LvlTrace)
-	}
+	w.historyVals.LogLvl(log.LvlTrace)
 	return w
 }
 
 func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	if h.discard || !h.buffered {
+	if h.discard {
 		return nil
 	}
 	if err := h.historyVals.Load(tx, h.hc.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

@@ -875,35 +875,6 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) StartUnbufferedWrites() *SharedDomains {
-	sd.walLock.Lock()
-	defer sd.walLock.Unlock()
-
-	sd.aggCtx.account.StartUnbufferedWrites()
-	sd.aggCtx.storage.StartUnbufferedWrites()
-	sd.aggCtx.code.StartUnbufferedWrites()
-	sd.aggCtx.commitment.StartUnbufferedWrites()
-	sd.aggCtx.logAddrs.StartUnbufferedWrites()
-	sd.aggCtx.logTopics.StartUnbufferedWrites()
-	sd.aggCtx.tracesFrom.StartUnbufferedWrites()
-	sd.aggCtx.tracesTo.StartUnbufferedWrites()
-
-	if sd.account == nil {
-		sd.account = map[string][]byte{}
-	}
-	if sd.commitment == nil {
-		sd.commitment = map[string][]byte{}
-	}
-	if sd.code == nil {
-		sd.code = map[string][]byte{}
-	}
-	if sd.storage == nil {
-		sd.storage = btree2.NewMap[string, []byte](128)
-	}
-
-	return sd
-}
-
 func (sd *SharedDomains) FinishWrites() {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
