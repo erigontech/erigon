@@ -833,12 +833,12 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	if tx.db.opts.label == kv.ChainDB {
-		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
+		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
 		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Update(latency.Write.Seconds())
-		kv.DbCommitSync.Update(latency.Sync.Seconds())
-		kv.DbCommitEnding.Update(latency.Ending.Seconds())
-		kv.DbCommitTotal.Update(latency.Whole.Seconds())
+		kv.DbCommitWrite.Observe(latency.Write.Seconds())
+		kv.DbCommitSync.Observe(latency.Sync.Seconds())
+		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
+		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
