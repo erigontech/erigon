@@ -146,3 +146,8 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(obj)
 }
+
+// Get validators field
+func (b *BeaconState) Validators() *solid.ValidatorSet {
+	return b.validators
+}

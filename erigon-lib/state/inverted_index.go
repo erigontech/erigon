@@ -188,7 +188,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string) error {
+func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 	{
 		if ii.withLocalityIndex {
 			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
@@ -207,17 +207,18 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("InvertedIndex.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
 	}
+	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder() error {
+func (ii *InvertedIndex) OpenFolder(readonly bool) error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles)
+	return ii.OpenList(idxFiles, readonly)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {

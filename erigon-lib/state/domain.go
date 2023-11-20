@@ -33,6 +33,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -437,23 +438,23 @@ func (dc *DomainContext) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
-	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bool) error {
+	if err := d.History.OpenList(idxFiles, histFiles, readonly); err != nil {
 		return err
 	}
-	if err := d.openList(domainFiles); err != nil {
-		return err
+	if err := d.openList(domainFiles, readonly); err != nil {
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
 	return nil
 }
 
-func (d *Domain) openList(names []string) error {
+func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.garbageFiles = d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
-	d.protectFromHistoryFilesAheadOfDomainFiles()
+	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcRoFiles()
 	return nil
 }
@@ -461,16 +462,16 @@ func (d *Domain) openList(names []string) error {
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
-func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
-	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
+	d.removeFilesAfterStep(d.endTxNumMinimax()/d.aggregationStep, readonly)
 }
 
-func (d *Domain) OpenFolder() error {
+func (d *Domain) OpenFolder(readonly bool) error {
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
-		return err
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
-	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+	if err := d.OpenList(idx, histFiles, domainFiles, readonly); err != nil {
 		return err
 	}
 	return nil
@@ -484,7 +485,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
+func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	var toDelete []*filesItem
 	d.files.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
@@ -493,9 +494,11 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 		d.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 
 	toDelete = toDelete[:0]
@@ -508,7 +511,9 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 	for _, item := range toDelete {
 		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 
 	toDelete = toDelete[:0]
@@ -521,7 +526,9 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 	for _, item := range toDelete {
 		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.InvertedIndex.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 }
 

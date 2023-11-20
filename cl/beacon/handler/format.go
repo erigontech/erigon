@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,6 +31,11 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 	return func(w http.ResponseWriter, r *http.Request) {
 		accept := r.Header.Get("Accept")
 		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
+		start := time.Now()
+		defer func() {
+			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		}()
+
 		data, finalized, version, httpStatus, err := fn(r)
 		if err != nil {
 			w.WriteHeader(httpStatus)
@@ -108,6 +114,20 @@ func (c *segmentID) getSlot() *uint64 {
 
 func (c *segmentID) getRoot() *libcommon.Hash {
 	return c.root
+}
+
+func epochFromRequest(r *http.Request) (uint64, error) {
+	// Must only be a number
+	regex := regexp.MustCompile(`^\d+$`)
+	epoch := chi.URLParam(r, "epoch")
+	if !regex.MatchString(epoch) {
+		return 0, fmt.Errorf("invalid path variable: {epoch}")
+	}
+	epochMaybe, err := strconv.ParseUint(epoch, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return epochMaybe, nil
 }
 
 func blockIdFromRequest(r *http.Request) (*segmentID, error) {

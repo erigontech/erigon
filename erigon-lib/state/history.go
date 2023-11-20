@@ -127,8 +127,8 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string) error {
-	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
+	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
 		return err
 	}
 	return h.openList(histNames)
@@ -138,17 +138,17 @@ func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
 	h.garbageFiles = h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", h.filenameBase, err)
+		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
 	}
 	return nil
 }
 
-func (h *History) OpenFolder() error {
+func (h *History) OpenFolder(readonly bool) error {
 	idxFiles, histFiles, _, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles)
+	return h.OpenList(idxFiles, histFiles, readonly)
 }
 
 // scanStateFiles

@@ -483,7 +483,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		defer hc.Close()
 		// Recreate domain and re-scan the files
 		txNum := hc.ic.txNum
-		require.NoError(h.OpenFolder())
+		require.NoError(h.OpenFolder(false))
 		hc.SetTxNum(txNum)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
