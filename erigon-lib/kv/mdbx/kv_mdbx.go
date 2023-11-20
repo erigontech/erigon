@@ -1767,18 +1767,36 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
 		return s, s.err
 	} else {
-		// seek exactly to given key or previous one
-		s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
-		if s.err != nil {
-			return s, s.err
-		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, s.err = casted.LastDup()
-			}
-		} else { // key not found, go to prev one
+		// to find LAST key with given prefix:
+		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+		if ok {
+			s.nextK, s.nextV, s.err = s.c.SeekExact(nextSubtree)
 			s.nextK, s.nextV, s.err = s.c.Prev()
+			if s.nextK != nil { // go to last value of this key
+				if casted, ok := s.c.(kv.CursorDupSort); ok {
+					s.nextV, s.err = casted.LastDup()
+				}
+			}
+		} else {
+			s.nextK, s.nextV, s.err = s.c.Last()
+			if s.nextK != nil { // go to last value of this key
+				if casted, ok := s.c.(kv.CursorDupSort); ok {
+					s.nextV, s.err = casted.LastDup()
+				}
+			}
 		}
+		//// seek exactly to given key or previous one
+		//s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
+		//if s.err != nil {
+		//	return s, s.err
+		//}
+		//if s.nextK != nil { // go to last value of this key
+		//	if casted, ok := s.c.(kv.CursorDupSort); ok {
+		//		s.nextV, s.err = casted.LastDup()
+		//	}
+		//} else { // key not found, go to prev one
+		//	s.nextK, s.nextV, s.err = s.c.Prev()
+		//}
 		return s, s.err
 	}
 }
@@ -1802,8 +1820,8 @@ func (s *cursor2iter) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from > to
-	//Desc: [from, to) AND from < to
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
@@ -1872,10 +1890,13 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 		s.nextV, s.err = s.c.SeekBothRange(s.key, s.fromPrefix)
 		return s, s.err
 	} else {
-		// seek exactly to given key or previous one
-		_, s.nextV, s.err = s.c.SeekBothExact(s.key, s.fromPrefix)
-		if s.nextV == nil { // no such key
+		// to find LAST key with given prefix:
+		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+		if ok {
+			_, s.nextV, s.err = s.c.SeekBothExact(s.key, nextSubtree)
 			_, s.nextV, s.err = s.c.PrevDup()
+		} else {
+			s.nextV, s.err = s.c.LastDup()
 		}
 		return s, s.err
 	}
@@ -1900,8 +1921,8 @@ func (s *cursorDup2iter) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from > to
-	//Desc: [from, to) AND from < to
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(s.nextV, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }

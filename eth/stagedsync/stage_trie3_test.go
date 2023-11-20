@@ -54,7 +54,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	domains.SetBlockNum(blocksTotal)
 	domains.SetTxNum(ctx, blocksTotal-1) // generated 1tx per block
 
-	expectedRoot, err := domains.ComputeCommitment(ctx, true, false)
+	expectedRoot, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
 	require.NoError(t, err)
 	t.Logf("expected root is %x", expectedRoot)
 

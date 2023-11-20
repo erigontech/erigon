@@ -259,6 +259,9 @@ func BorHeimdallForward(
 			if err != nil {
 				return err
 			}
+			if header == nil {
+				return fmt.Errorf("["+s.LogPrefix()+"] header not found: %d", blockNum)
+			}
 
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
@@ -269,7 +272,7 @@ func BorHeimdallForward(
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
-					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
 		}

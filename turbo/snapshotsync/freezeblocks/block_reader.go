@@ -384,6 +384,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+
 	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
@@ -609,6 +610,9 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf 
 	b, buf, err := r.bodyForStorageFromSnapshot(blockHeight, sn, buf)
 	if err != nil {
 		return nil, 0, 0, buf, err
+	}
+	if b == nil {
+		return nil, 0, 0, buf, nil
 	}
 
 	body := new(types.Body)

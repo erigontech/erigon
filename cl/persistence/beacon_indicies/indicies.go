@@ -75,7 +75,7 @@ func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot libcommon.Hash) (libcommon.Has
 
 	copy(blockRoot[:], bRoot)
 
-	return stateRoot, nil
+	return blockRoot, nil
 }
 
 func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (libcommon.Hash, error) {

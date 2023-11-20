@@ -10,13 +10,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type ApiHandler struct {
 	o   sync.Once
 	mux chi.Router
 
-	blockSource     persistence.RawBeaconBlockChain
+	blockReader     freezeblocks.BeaconSnapshotReader
 	indiciesDB      kv.RoDB
 	genesisCfg      *clparams.GenesisConfig
 	beaconChainCfg  *clparams.BeaconChainConfig
@@ -24,8 +25,8 @@ type ApiHandler struct {
 	operationsPool  pool.OperationsPool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, blockSource: source, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool}
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn}
 }
 
 func (a *ApiHandler) init() {
@@ -94,8 +95,13 @@ func (a *ApiHandler) init() {
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {
+			r.Route("/debug", func(r chi.Router) {
+				r.Route("/beacon", func(r chi.Router) {
+					r.Get("/states/{state_id}", beaconHandlerWrapper(a.getFullState, true))
+				})
+			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Post("/blocks/{slot}", nil) //otterscan
+				r.Get("/blocks/{slot}", nil) //otterscan
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", nil)

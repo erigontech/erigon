@@ -364,7 +364,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
@@ -388,16 +391,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				//	return nil, nil, err
 				//}
 				//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-
-				stateRoot, err := domains.ComputeCommitment(ctx, true, false)
+				stateRoot, err := domains.ComputeCommitment(ctx, true, false, b.header.Number.Uint64())
 				if err != nil {
 					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 				}
 				if err = domains.Flush(ctx, tx); err != nil {
 					return nil, nil, err
-				}
-				if err != nil {
-					return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 				}
 				b.header.Root = libcommon.BytesToHash(stateRoot)
 			} else {
@@ -423,7 +422,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		receipts[i] = receipt
 		parent = block
 	}
-
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil

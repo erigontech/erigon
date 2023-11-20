@@ -34,11 +34,6 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer ccc.Close()
 	defer stc.Close()
 
-	_, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
 	domains.SetTxNum(ctx, toTxNum)
@@ -70,7 +65,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.ComputeCommitment(ctx, true, false)
+			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
 			if err != nil {
 				return err
 			}
@@ -83,13 +78,13 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 		return nil
 	}
-	err = collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
+	err := collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err
 	}
 	collector.Close()
 
-	rh, err := domains.ComputeCommitment(ctx, true, false)
+	rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
 	if err != nil {
 		return nil, err
 	}

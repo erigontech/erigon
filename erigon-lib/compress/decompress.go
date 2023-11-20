@@ -114,7 +114,7 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
-	filePath, fileName string
+	filePath, FileName1 string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
@@ -151,8 +151,8 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	_, fName := filepath.Split(compressedFilePath)
 	d = &Decompressor{
-		filePath: compressedFilePath,
-		fileName: fName,
+		filePath:  compressedFilePath,
+		FileName1: fName,
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -363,7 +363,7 @@ func (d *Decompressor) Close() {
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
-func (d *Decompressor) FileName() string { return d.fileName }
+func (d *Decompressor) FileName() string { return d.FileName1 }
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
@@ -526,7 +526,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.fileName,
+		fName:       d.FileName1,
 	}
 }
 

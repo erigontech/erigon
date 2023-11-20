@@ -1357,7 +1357,6 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-
 	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err

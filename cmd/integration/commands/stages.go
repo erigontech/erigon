@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/turbo/builder"
@@ -957,43 +956,9 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		var blockNum uint64
-		var err error
-
-		if v3db, ok := db.(*temporal.DB); ok {
-			agg := v3db.Agg()
-			err = v3db.Update(ctx, func(tx kv.RwTx) error {
-				ct := agg.MakeContext()
-				defer ct.Close()
-				doms := libstate.NewSharedDomains(tx)
-				defer doms.Close()
-				_, err = doms.SeekCommitment(ctx, tx)
-				if err != nil {
-					return err
-				}
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				blockNum = doms.BlockNum()
-				return err
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		if err := reset2.ResetExec(ctx, db, chain, "", blockNum); err != nil {
+		if err := reset2.ResetExec(ctx, db, chain, ""); err != nil {
 			return err
 		}
-
-		//br, bw := blocksIO(db, logger)
-		//chainConfig := fromdb.ChainConfig(db)
-		//return db.Update(ctx, func(tx kv.RwTx) error {
-		//	if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
-		//		return err
-		//	}
-		//	return nil
-		//})
 		return nil
 	}
 
@@ -1026,6 +991,31 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, historyV3, dirs, br, nil, genesis, syncCfg, agg, nil)
+
+	if unwind > 0 && historyV3 {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			doms := libstate.NewSharedDomains(tx)
+			defer doms.Close()
+			if doms.BlockNum() < unwind {
+				return fmt.Errorf("too deep unwind requested: %d, current progress: %d\n", unwind, doms.BlockNum())
+			}
+			blockNumWithCommitment, ok, err := doms.CanUnwindBeforeBlockNum(doms.BlockNum()-unwind, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				_min, err := doms.CanUnwindDomainsToBlockNum(tx)
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", doms.BlockNum()-unwind, _min)
+			}
+			unwind = s.BlockNumber - blockNumWithCommitment
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 
 	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
 	if noCommit {

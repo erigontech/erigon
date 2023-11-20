@@ -12,7 +12,7 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
+func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -21,8 +21,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
 		}
 		defer f.Close()
 		rec = bufio.NewWriter(f)
@@ -32,8 +31,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
 		}
 		defer ferr.Close()
 		errs = bufio.NewWriter(ferr)
@@ -49,12 +47,10 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		fmt.Printf("Could not get block number: %v\n", res.Err)
-		return
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
 	}
 	if blockNumber.Error != nil {
-		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-		return
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -62,29 +58,24 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-			return
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-			return
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-				return
+				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 			}
 			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-				return
+				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
-				fmt.Printf("Block difference for %d\n", bn)
-				return
+				return fmt.Errorf("Block difference for %d\n", bn)
 			}
 		}
 
@@ -93,10 +84,12 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil,
+				/* insertOnlyIfSuccess*/ false); err != nil {
 				fmt.Println(err)
-				return
+				return err
 			}
 		}
 	}
+	return nil
 }

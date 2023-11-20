@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +42,7 @@ import (
 )
 
 func TestMemoryGasCost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		size     uint64
 		cost     uint64
@@ -96,6 +98,7 @@ func TestEIP2200(t *testing.T) {
 		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
 			address := libcommon.BytesToAddress([]byte("contract"))
 			_, tx := memdb.NewTestTx(t)
 
@@ -141,6 +144,7 @@ var createGasTests = []struct {
 }
 
 func TestCreateGas(t *testing.T) {
+	t.Parallel()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))

@@ -227,9 +227,22 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 		addedNew++
-		if !strings.HasSuffix(name, ".seg.torrent") {
+		whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
+			strings.HasSuffix(name, ".kv.torrent") ||
+			strings.HasSuffix(name, ".v.torrent") ||
+			strings.HasSuffix(name, ".ef.torrent")
+		if !whiteListed {
 			_, fName := filepath.Split(name)
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
+			continue
+		}
+		//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
+		// - prohibit v1-commitment...v, v2-commitment...ef, etc...
+		// - allow v1-commitment...kv
+		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
+		if e3blackListed {
+			_, fName := filepath.Split(name)
+			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", fName)
 			continue
 		}
 		name := name
@@ -239,24 +252,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 				res, err := d.callTorrentHttpProvider(ctx, url)
 				if err != nil {
 					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
-					continue
-				}
-				whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
-					strings.HasSuffix(name, ".kv.torrent") ||
-					strings.HasSuffix(name, ".v.torrent") ||
-					strings.HasSuffix(name, ".ef.torrent")
-				if !whiteListed {
-					_, fName := filepath.Split(name)
-					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
-					continue
-				}
-				//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
-				// - prohibit v1-commitment...v, v2-commitment...ef, etc...
-				// - allow v1-commitment...kv
-				e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
-				if e3blackListed {
-					_, fName := filepath.Split(name)
-					d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because we don't support it yet", "name", fName)
 					continue
 				}
 				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
