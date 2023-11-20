@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
@@ -21,6 +22,7 @@ import (
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -153,8 +155,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}()
 	}
 
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg.Active, beaconConfig)
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn)
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn, syncedDataManager)
 		go beacon.ListenAndServe(apiHandler, cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
@@ -180,7 +183,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}()
 	}
 
-	tx, err := db.BeginRo(ctx)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -190,9 +193,16 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	if err != nil {
 		return err
 	}
-	tx.Rollback()
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, db, csn, dirs.Tmp, dbConfig, backfilling)
+	if err := state_accessors.InitializePublicKeyTable(tx, state); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, db, csn, dirs.Tmp, dbConfig, backfilling, syncedDataManager)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")
