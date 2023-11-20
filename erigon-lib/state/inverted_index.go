@@ -207,7 +207,7 @@ func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("InvertedIndex.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
 	}
 	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil

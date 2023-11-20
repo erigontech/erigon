@@ -224,28 +224,28 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	defer a.filesMutationLock.Unlock()
 	var err error
 	if err = a.accounts.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.storage.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.code.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.commitment.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.logAddrs.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.logTopics.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.tracesFrom.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	if err = a.tracesTo.OpenFolder(readonly); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return err
 	}
 	a.recalcMaxTxNum()
 	mx := a.minimaxTxNumInFiles.Load()
@@ -253,7 +253,6 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 		mx--
 	}
 	a.aggregatedStep.Store(mx / a.aggregationStep)
-
 	return nil
 }
 

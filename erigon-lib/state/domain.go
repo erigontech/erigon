@@ -443,7 +443,7 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bo
 		return err
 	}
 	if err := d.openList(domainFiles, readonly); err != nil {
-		return err
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
 	return nil
 }
@@ -469,7 +469,7 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
 func (d *Domain) OpenFolder(readonly bool) error {
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
-		return err
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
 	if err := d.OpenList(idx, histFiles, domainFiles, readonly); err != nil {
 		return err
