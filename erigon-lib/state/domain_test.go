@@ -52,10 +52,10 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 }
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
-	return testDbAndDomainOfStepValsDup(t, aggStep, logger, false)
+	return testDbAndDomainOfStepValsDup(t, aggStep, logger)
 }
 
-func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logger, dupSortVals bool) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	keysTable := "Keys"
@@ -73,18 +73,14 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 			settingsTable:    kv.TableCfgItem{},
 			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
 		}
-		if dupSortVals {
-			tcfg[valsTable] = kv.TableCfgItem{Flags: kv.DupSort}
-		}
 		return tcfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := domainCfg{
-		domainLargeValues: AccDomainLargeValues,
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: AccDomainLargeValues,
+			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		}}
 	d, err := NewDomain(cfg, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
@@ -96,30 +92,23 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
-	// t.Run("compressDomainVals=false, domainLargeValues=false", func(t *testing.T) {
-	// 	testCollationBuild(t, false, false)
-	// })
-	// t.Run("compressDomainVals=true, domainLargeValues=false", func(t *testing.T) {
-	// 	testCollationBuild(t, true, false)
-	// })
-	t.Run("compressDomainVals=true, domainLargeValues=true", func(t *testing.T) {
-		testCollationBuild(t, true, true)
+	t.Run("compressDomainVals=true", func(t *testing.T) {
+		testCollationBuild(t, true)
 	})
-	t.Run("compressDomainVals=false, domainLargeValues=true", func(t *testing.T) {
-		testCollationBuild(t, false, true)
+	t.Run("compressDomainVals=false", func(t *testing.T) {
+		testCollationBuild(t, false)
 	})
 }
 
-func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool) {
+func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	t.Helper()
 
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomainOfStepValsDup(t, 16, logger, !domainLargeValues)
+	db, d := testDbAndDomainOfStepValsDup(t, 16, logger)
 	ctx := context.Background()
 
-	d.domainLargeValues = domainLargeValues
 	if compressDomainVals {
 		d.compression = CompressKeys | CompressVals
 	}
@@ -153,7 +142,6 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 	_ = p2
 
 	v1, v2 = []byte("value1.2"), []byte("value2.2") //nolint
-	expectedStep1 := uint64(0)
 
 	dc.SetTxNum(6)
 	err = dc.PutWithPrev(k1, nil, v1, p1)
@@ -177,6 +165,11 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 
 	err = dc.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
+	tx.ForEach(d.valsTable, nil, func(k, v []byte) error {
+		fmt.Printf("%s, %d, %s\n", k, ^binary.BigEndian.Uint64(v[:8]), v[8:])
+		return nil
+	})
+	fmt.Printf("----\n")
 	{
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
@@ -201,17 +194,7 @@ func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool
 			w, _ := g.Next(nil)
 			words = append(words, string(w))
 		}
-		switch domainLargeValues {
-		case true:
-			require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
-		default:
-			is := make([]byte, 8)
-			binary.BigEndian.PutUint64(is, ^expectedStep1)
-			v1 := string(is) + "value1.2"
-			//binary.BigEndian.PutUint64(is, ^expectedStep2)
-			v2 := string(is) + "value2.1"
-			require.Equal(t, []string{"key1", v1, "key2", v2}, words)
-		}
+		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
 		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
 		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))
@@ -1462,7 +1445,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
-	d.domainLargeValues = true // false requires dupsort value table for domain
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 
@@ -1533,7 +1515,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
-	d.domainLargeValues = true // false requires dupsort value table for domain
 	d.compression = CompressKeys | CompressVals
 	d.withLocalityIndex = true
 

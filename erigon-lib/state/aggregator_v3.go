@@ -131,7 +131,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
-		domainLargeValues: AccDomainLargeValues,
 	}
 	if a.accounts, err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
@@ -141,7 +140,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
-		domainLargeValues: StorageDomainLargeValues,
 	}
 	if a.storage, err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
@@ -151,7 +149,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
-		domainLargeValues: CodeDomainLargeValues,
 	}
 	if a.code, err = NewDomain(cfg, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
@@ -161,8 +158,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
 		},
-		domainLargeValues: CommitmentDomainLargeValues,
-		compress:          CompressNone,
+		compress: CompressNone,
 	}
 	commitd, err := NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
@@ -1281,7 +1277,11 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
+			if step == 54 {
+				panic(1)
+			}
 		}
+		return
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
