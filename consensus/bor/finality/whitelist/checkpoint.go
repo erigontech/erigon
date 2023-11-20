@@ -45,5 +45,5 @@ func (w *checkpoint) Process(block uint64, hash common.Hash) {
 
 	w.finality.Process(block, hash)
 
-	whitelistedCheckpointNumberMeter.Set(float64(block))
+	whitelistedCheckpointNumberMeter.SetUint64(block)
 }

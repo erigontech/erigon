@@ -280,8 +280,8 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			execRepeats.Add(float64(conflicts))
-			execTriggers.Add(float64(triggers))
+			execRepeats.AddInt(conflicts)
+			execTriggers.AddInt(triggers)
 			if processedBlockNum > lastBlockNum {
 				outputBlockNum.SetUint64(processedBlockNum)
 				lastBlockNum = processedBlockNum
@@ -369,8 +369,8 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 
-							execRepeats.Add(float64(conflicts))
-							execTriggers.Add(float64(triggers))
+							execRepeats.AddInt(conflicts)
+							execTriggers.AddInt(triggers)
 							if processedBlockNum > 0 {
 								outputBlockNum.SetUint64(processedBlockNum)
 							}
@@ -657,7 +657,7 @@ Loop:
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
-				execTriggers.Add(float64(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)))
+				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {

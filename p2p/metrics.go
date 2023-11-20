@@ -61,7 +61,7 @@ func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
 // and the peer ingress traffic meters along the way.
 func (c *meteredConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
-	ingressTrafficMeter.Add(float64(n))
+	ingressTrafficMeter.AddInt(n)
 	return n, err
 }
 
@@ -69,7 +69,7 @@ func (c *meteredConn) Read(b []byte) (n int, err error) {
 // and the peer egress traffic meters along the way.
 func (c *meteredConn) Write(b []byte) (n int, err error) {
 	n, err = c.Conn.Write(b)
-	egressTrafficMeter.Add(float64(n))
+	egressTrafficMeter.AddInt(n)
 	return n, err
 }
 

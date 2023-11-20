@@ -49,11 +49,11 @@ func (g *gauge) SetUint32(v uint32) {
 // This is a convenience function for better UX which is safe for uints up
 // to 2^53 (mantissa bits).
 //
-// This is fine for all usages in our codebase this is fine, and it is
+// This is fine for all usages in our codebase, and it is
 // unlikely we will hit issues with this.
 //
 // If, however there is a new requirement that requires accuracy for more than
-// 2^53 we can implement our own simple intCounter that satisfies the Counter
+// 2^53 we can implement our own simple uintGauge that satisfies the Gauge
 // interface.
 func (g *gauge) SetUint64(v uint64) {
 	g.Set(float64(v))
@@ -65,11 +65,11 @@ func (g *gauge) SetUint64(v uint64) {
 // This is a convenience function for better UX which is safe for uints up
 // to 2^53 (mantissa bits).
 //
-// This is fine for all usages in our codebase this is fine, and it is
+// This is fine for all usages in our codebase, and it is
 // unlikely we will hit issues with this.
 //
 // If, however there is a new requirement that requires accuracy for more than
-// 2^53 we can implement our own simple intCounter that satisfies the Counter
+// 2^53 we can implement our own simple intGauge that satisfies the Gauge
 // interface.
 func (g *gauge) SetInt(v int) {
 	g.Set(float64(v))

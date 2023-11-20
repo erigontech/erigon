@@ -103,7 +103,7 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 		}
 	}
 
-	whitelistedMilestoneMeter.Set(float64(block))
+	whitelistedMilestoneMeter.SetUint64(block)
 
 	m.UnlockSprint(block)
 }
@@ -277,7 +277,7 @@ func (m *milestone) enqueueFutureMilestone(key uint64, hash common.Hash) {
 		log.Error("[bor] Error in writing future milestone data to db", "err", err)
 	}
 
-	futureMilestoneMeter.Set(float64(key))
+	futureMilestoneMeter.SetUint64(key)
 }
 
 // DequeueFutureMilestone remove the future milestone entry from the list.

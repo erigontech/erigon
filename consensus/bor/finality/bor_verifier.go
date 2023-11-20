@@ -157,7 +157,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 // Stop the miner if the mining process is running and rewind back the chain
 func rewindBack(head uint64, rewindTo uint64) {
-	rewindLengthMeter.Set(float64(head - rewindTo))
+	rewindLengthMeter.SetUint64(head - rewindTo)
 
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable

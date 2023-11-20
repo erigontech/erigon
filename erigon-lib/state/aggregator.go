@@ -854,7 +854,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		saveStateAfter = false
 	}
 
-	mxCommitmentKeys.Add(float64(a.commitment.comKeys))
+	mxCommitmentKeys.AddUint64(a.commitment.comKeys)
 	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
