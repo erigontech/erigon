@@ -21,7 +21,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"math/rand"
@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"

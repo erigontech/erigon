@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -102,7 +102,7 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 
 	// Set metrics.
 	msg.meterSize = size
-	// TODO: use 	"github.com/ledgerwatch/erigon-lib/metrics"
+	// TODO: use 	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 	//if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
 	//	m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
 	//	metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))

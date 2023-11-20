@@ -4,8 +4,8 @@ package node
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 

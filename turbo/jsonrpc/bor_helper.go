@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"

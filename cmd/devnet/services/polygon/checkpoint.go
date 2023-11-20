@@ -10,9 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -22,6 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
 )
 
 type CheckpointBlock struct {

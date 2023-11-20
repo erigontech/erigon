@@ -7,9 +7,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -20,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"

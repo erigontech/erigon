@@ -2,7 +2,7 @@ package shuffling_test
 
 import (
 	_ "embed"
-	"github.com/ledgerwatch/erigon-lib/common/eth2shuffle"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/eth2shuffle"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"

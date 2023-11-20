@@ -3,8 +3,8 @@ package httpcfg
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )

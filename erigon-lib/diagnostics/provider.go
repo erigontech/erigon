@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 

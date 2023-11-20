@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
+	common2 "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	mdbx2 "github.com/ledgerwatch/erigon/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"

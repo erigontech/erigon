@@ -21,7 +21,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"reflect"
 	"strings"
 	"testing"

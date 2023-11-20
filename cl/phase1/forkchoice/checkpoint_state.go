@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 )
 

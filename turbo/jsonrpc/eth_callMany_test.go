@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"math/big"
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/kvcache"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"

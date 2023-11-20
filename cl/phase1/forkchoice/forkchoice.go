@@ -14,8 +14,8 @@ import (
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
 )
 
 type checkpointComparable string

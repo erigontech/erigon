@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 type genesisReponse struct {

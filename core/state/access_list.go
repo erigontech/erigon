@@ -17,7 +17,7 @@
 package state
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 type accessList struct {

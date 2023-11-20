@@ -6,9 +6,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -22,6 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"

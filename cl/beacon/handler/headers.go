@@ -7,11 +7,11 @@ import (
 	"io"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {

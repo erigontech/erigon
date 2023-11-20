@@ -6,12 +6,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	accounts_steps "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
 	"github.com/stretchr/testify/require"
 )
 

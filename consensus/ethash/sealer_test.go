@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 

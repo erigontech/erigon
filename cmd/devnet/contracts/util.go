@@ -3,13 +3,13 @@ package contracts
 import (
 	"context"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )

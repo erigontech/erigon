@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 )
 

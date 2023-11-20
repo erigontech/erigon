@@ -25,8 +25,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

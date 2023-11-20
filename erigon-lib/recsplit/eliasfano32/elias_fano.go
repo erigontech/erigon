@@ -25,8 +25,8 @@ import (
 	"sort"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/bitutil"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/bitutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/iter"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html

@@ -8,21 +8,21 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/txpool/txpoolcfg"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common/u256"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	txpool_proto "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"

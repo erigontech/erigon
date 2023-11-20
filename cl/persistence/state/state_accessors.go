@@ -1,12 +1,12 @@
 package state_accessors
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // InitializeValidatorTable initializes the validator table in the database.

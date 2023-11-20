@@ -10,10 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"

@@ -3,13 +3,13 @@ package cltypes
 import (
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/types/ssz"
 )
 
 // ETH1Header represents the ethereum 1 header structure CL-side.

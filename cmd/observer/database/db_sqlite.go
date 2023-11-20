@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"net"
 	"strings"
 	"time"

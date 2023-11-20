@@ -7,10 +7,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"

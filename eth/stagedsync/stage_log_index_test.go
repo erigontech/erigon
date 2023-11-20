@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"

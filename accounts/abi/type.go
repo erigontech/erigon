@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // Type enumerator

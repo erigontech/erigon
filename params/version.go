@@ -19,7 +19,7 @@ package params
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 var (

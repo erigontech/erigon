@@ -12,12 +12,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/net/context"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/downloader/snaptype"
 
 	"github.com/ledgerwatch/log/v3"
 )

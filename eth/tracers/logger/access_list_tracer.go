@@ -18,8 +18,8 @@ package logger
 
 import (
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"

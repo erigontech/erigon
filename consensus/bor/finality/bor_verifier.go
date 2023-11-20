@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"

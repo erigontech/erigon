@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/log/v3"
 )
 

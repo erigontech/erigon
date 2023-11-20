@@ -9,9 +9,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/node"
 )
 

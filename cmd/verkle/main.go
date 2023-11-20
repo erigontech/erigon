@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 

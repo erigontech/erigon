@@ -3,9 +3,9 @@ package tool
 import (
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 func Check(e error) {

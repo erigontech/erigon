@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 

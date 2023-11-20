@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"

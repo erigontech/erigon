@@ -6,7 +6,6 @@ import (
 	"path"
 	"time"
 
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
@@ -15,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
+	proto_downloader "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -34,11 +34,11 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 )
 

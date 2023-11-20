@@ -23,7 +23,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
 	node2 "github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/log/v3"

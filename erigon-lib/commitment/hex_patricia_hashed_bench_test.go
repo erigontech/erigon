@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
 )
 
 func Benchmark_HexPatriciaHahsed_ReviewKeys(b *testing.B) {

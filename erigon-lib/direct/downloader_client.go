@@ -19,7 +19,7 @@ package direct
 import (
 	"context"
 
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	proto_downloader "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/downloader"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

@@ -5,7 +5,7 @@ package types
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/u256"
 )
 
 // golang.org/s/draft-fuzzing-design

@@ -25,8 +25,8 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 const (

@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 )

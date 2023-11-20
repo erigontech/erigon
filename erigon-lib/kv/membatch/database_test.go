@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 )
 

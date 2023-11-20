@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"

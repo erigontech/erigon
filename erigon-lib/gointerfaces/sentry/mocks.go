@@ -5,7 +5,7 @@ package sentry
 
 import (
 	context "context"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	sync "sync"

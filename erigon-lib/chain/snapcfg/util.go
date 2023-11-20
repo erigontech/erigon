@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/exp/slices"
 )

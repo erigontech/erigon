@@ -6,8 +6,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/log/v3"
 	proto "github.com/maticnetwork/polyproto/heimdall"
 	"google.golang.org/grpc"

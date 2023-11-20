@@ -4,10 +4,10 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

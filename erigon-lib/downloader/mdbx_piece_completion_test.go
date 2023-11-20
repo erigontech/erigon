@@ -19,7 +19,7 @@ package downloader
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

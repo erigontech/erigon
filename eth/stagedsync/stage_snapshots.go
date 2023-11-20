@@ -10,14 +10,14 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/etl"
+	proto_downloader "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"

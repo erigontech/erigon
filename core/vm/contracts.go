@@ -20,14 +20,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
+	"github.com/ledgerwatch/erigon/erigon-lib/crypto/blake2b"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	libkzg "github.com/ledgerwatch/erigon/erigon-lib/crypto/kzg"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"

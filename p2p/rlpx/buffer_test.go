@@ -18,7 +18,7 @@ package rlpx
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

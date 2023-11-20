@@ -10,10 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // these are view functions for the beacon state cache

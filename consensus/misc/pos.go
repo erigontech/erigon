@@ -1,8 +1,8 @@
 package misc
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake

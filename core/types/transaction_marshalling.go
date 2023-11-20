@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/types"
 )
 
 // txJSON is the JSON representation of transactions.

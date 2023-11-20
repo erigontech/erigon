@@ -1,10 +1,10 @@
 package fork_graph
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 /*

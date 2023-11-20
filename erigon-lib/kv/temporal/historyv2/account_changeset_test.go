@@ -25,8 +25,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 func TestEncodingAccount(t *testing.T) {

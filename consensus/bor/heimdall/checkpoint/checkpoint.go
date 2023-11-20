@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // Checkpoint defines a response object type of bor checkpoint

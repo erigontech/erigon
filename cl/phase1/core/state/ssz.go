@@ -1,8 +1,8 @@
 package state
 
 import (
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/types/clonable"
 )
 
 func (b *CachingBeaconState) EncodeSSZ(buf []byte) ([]byte, error) {

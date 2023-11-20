@@ -30,11 +30,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/patricia"
-	"github.com/ledgerwatch/erigon-lib/sais"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/erigon-lib/patricia"
+	"github.com/ledgerwatch/erigon/erigon-lib/sais"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )

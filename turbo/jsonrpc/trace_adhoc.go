@@ -5,17 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"math"
 	"strings"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/types"
 
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"

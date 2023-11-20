@@ -2,16 +2,16 @@ package app
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"os"
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/urfave/cli/v2"

@@ -19,7 +19,7 @@ package params
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 )

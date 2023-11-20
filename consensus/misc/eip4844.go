@@ -21,8 +21,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )

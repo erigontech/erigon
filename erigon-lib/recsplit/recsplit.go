@@ -32,11 +32,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/erigon-lib/recsplit/eliasfano16"
+	"github.com/ledgerwatch/erigon/erigon-lib/recsplit/eliasfano32"
 )
 
 var ErrCollision = fmt.Errorf("duplicate key")

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/ring"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/ring"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

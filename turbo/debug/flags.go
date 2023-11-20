@@ -19,7 +19,7 @@ package debug
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
 	"os"

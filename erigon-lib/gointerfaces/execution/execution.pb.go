@@ -7,7 +7,7 @@
 package execution
 
 import (
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"

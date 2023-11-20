@@ -21,10 +21,10 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/direct"
+	proto_sentry "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
+	rlp2 "github.com/ledgerwatch/erigon/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"

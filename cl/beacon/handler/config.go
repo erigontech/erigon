@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 func (a *ApiHandler) getSpec(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {

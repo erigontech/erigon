@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 )
 

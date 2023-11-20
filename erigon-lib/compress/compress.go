@@ -32,10 +32,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/cmp"
+	dir2 "github.com/ledgerwatch/erigon/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon/erigon-lib/etl"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )

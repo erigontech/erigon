@@ -18,7 +18,7 @@ package rpc
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 	"reflect"
 	"strings"
 )

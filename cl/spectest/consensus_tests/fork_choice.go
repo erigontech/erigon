@@ -15,8 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/spf13/afero"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

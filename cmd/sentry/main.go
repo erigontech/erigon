@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/datadir"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"

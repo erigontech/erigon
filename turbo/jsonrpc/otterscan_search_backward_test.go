@@ -2,12 +2,12 @@ package jsonrpc
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"testing"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
 

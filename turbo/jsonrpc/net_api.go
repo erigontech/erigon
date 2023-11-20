@@ -3,7 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"strconv"
 
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"

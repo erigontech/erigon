@@ -8,12 +8,12 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"

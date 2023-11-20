@@ -18,7 +18,7 @@ package state
 
 import (
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // journalEntry is a modification entry in the state change journal that can be

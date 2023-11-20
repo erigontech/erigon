@@ -13,8 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
@@ -24,6 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"

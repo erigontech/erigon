@@ -1,6 +1,6 @@
 package membatchwithdb
 
-import "github.com/ledgerwatch/erigon-lib/kv"
+import "github.com/ledgerwatch/erigon/erigon-lib/kv"
 
 type entry struct {
 	k []byte

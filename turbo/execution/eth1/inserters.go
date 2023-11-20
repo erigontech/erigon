@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 

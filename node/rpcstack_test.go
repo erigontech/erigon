@@ -19,7 +19,7 @@ package node
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"io"
 	"net/http"
 	"net/url"

@@ -3,9 +3,9 @@ package initial_state_test
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 )
 

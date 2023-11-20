@@ -19,7 +19,7 @@ package core
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -27,9 +27,9 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"

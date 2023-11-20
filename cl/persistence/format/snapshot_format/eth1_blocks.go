@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/chunk_encoding"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
 )
 
 // WriteEth1BlockForSnapshot writes an execution block to the given writer in the format expected by the snapshot.

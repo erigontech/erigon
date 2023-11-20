@@ -9,8 +9,6 @@ import (
 	"time"
 
 	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -21,6 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 

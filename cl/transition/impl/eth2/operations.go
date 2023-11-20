@@ -7,15 +7,15 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/log/v3"

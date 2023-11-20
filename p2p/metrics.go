@@ -19,7 +19,7 @@
 package p2p
 
 import (
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 	"net"
 )
 

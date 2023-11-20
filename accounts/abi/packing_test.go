@@ -19,7 +19,7 @@ package abi
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 type packUnpackTest struct {

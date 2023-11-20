@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"

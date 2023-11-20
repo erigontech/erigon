@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"

@@ -29,8 +29,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 var (

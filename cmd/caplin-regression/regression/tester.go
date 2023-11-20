@@ -12,9 +12,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 )

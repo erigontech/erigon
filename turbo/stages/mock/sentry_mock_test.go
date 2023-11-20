@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 

@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/length"
 )
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {

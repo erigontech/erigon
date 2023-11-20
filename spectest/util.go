@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/ledgerwatch/erigon/erigon-lib/types/ssz"
 )
 
 func ReadMeta(root fs.FS, name string, obj any) error {

@@ -24,9 +24,9 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"

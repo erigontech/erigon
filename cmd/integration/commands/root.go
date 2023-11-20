@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/kvcfg"
+	kv2 "github.com/ledgerwatch/erigon/erigon-lib/kv/mdbx"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/state/temporal"

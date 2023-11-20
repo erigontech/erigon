@@ -1,10 +1,10 @@
 package cache
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 var attestationIndiciesCache *lru.Cache[common.Hash, []uint64]

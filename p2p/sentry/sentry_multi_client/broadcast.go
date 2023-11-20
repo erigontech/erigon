@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 

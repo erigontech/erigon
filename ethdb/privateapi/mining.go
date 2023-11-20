@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	proto_txpool "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/txpool"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 

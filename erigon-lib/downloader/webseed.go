@@ -22,8 +22,8 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 )

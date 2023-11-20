@@ -18,7 +18,7 @@ package tracetest
 
 import (
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -26,9 +26,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -36,6 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"

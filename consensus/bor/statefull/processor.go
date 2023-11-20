@@ -3,11 +3,11 @@ package statefull
 import (
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 type ChainContext struct {

@@ -1,7 +1,7 @@
 package cltypes_test
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"

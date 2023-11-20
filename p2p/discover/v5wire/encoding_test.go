@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/hexutil"
 	"net"
 	"os"
 	"path/filepath"

@@ -26,8 +26,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/erigon-lib/mmap"
 	"github.com/ledgerwatch/log/v3"
 )
 

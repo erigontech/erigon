@@ -8,7 +8,7 @@ package txpool
 
 import (
 	context "context"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

@@ -6,10 +6,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 )

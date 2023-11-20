@@ -5,7 +5,7 @@ import (
 	"context"
 	"math"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 )
 

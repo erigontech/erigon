@@ -32,9 +32,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/common/fixedgas"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"

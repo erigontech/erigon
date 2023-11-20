@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // Encode64 takes x, the uint to encode, and buf, the buffer to write to.

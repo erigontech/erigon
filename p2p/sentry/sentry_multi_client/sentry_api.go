@@ -5,9 +5,9 @@ import (
 	"math/rand"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/sentry"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"

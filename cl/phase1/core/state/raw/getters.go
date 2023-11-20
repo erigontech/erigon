@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 var (

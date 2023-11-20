@@ -4,12 +4,12 @@ go 1.20
 
 require (
 	github.com/erigontech/mdbx-go v0.27.21
-	github.com/ledgerwatch/erigon-lib v1.0.0
+	github.com/ledgerwatch/erigon/erigon-lib v1.0.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
-replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
+replace github.com/ledgerwatch/erigon/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c

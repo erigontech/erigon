@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"

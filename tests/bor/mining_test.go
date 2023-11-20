@@ -12,22 +12,22 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/bor/helper"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/txpool"
+	txpool_proto "github.com/ledgerwatch/erigon/erigon-lib/gointerfaces/txpool"
 )
 
 const (

@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon/erigon-lib/metrics"
 )
 
 //Variables Naming:

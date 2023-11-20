@@ -22,9 +22,9 @@ import (
 	"math/big"
 	"reflect"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	common2 "github.com/ledgerwatch/erigon/erigon-lib/common"
 )
 
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation

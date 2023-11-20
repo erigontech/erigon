@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"

@@ -4,8 +4,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	libcommon "github.com/ledgerwatch/erigon/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"

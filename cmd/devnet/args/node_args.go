@@ -14,9 +14,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/erigon-lib/chain/networkname"
 )
 
 type NodeArgs struct {

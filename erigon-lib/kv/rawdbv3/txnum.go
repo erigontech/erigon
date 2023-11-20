@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/erigon-lib/kv"
 )
 
 type txNums struct{}

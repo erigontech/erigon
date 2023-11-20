@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon/erigon-lib/common"
+	diaglib "github.com/ledgerwatch/erigon/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
