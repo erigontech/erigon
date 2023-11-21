@@ -159,7 +159,7 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 }
 
 func (be *BranchEncoder) initCollector() {
-	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/16), log.Root().New("branch-encoder"))
+	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("branch-encoder"))
 }
 
 // reads previous comitted value and merges current with it if needed.
