@@ -167,5 +167,5 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 
-	&utils.DisableTxPoolGossipFlag,
+	&utils.TxPoolGossipDisableFlag,
 }

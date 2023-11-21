@@ -837,9 +837,10 @@ var (
 		Value: "",
 	}
 
-	DisableTxPoolGossipFlag = cli.BoolFlag{
-		Name:  "disable.txpool.gossip",
-		Usage: "Disable transaction pool gossip.",
+	TxPoolGossipDisableFlag = cli.BoolFlag{
+		Name:  "txpool.gossip.disable",
+		Usage: "Disable transaction pool gossip (p2p)",
+		Value: txpoolcfg.DefaultConfig.NoTxGossip,
 	}
 )
 
@@ -1656,8 +1657,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
 	}
 
-	if ctx.IsSet(DisableTxPoolGossipFlag.Name) {
-		cfg.DisableTxPoolGossip = ctx.Bool(DisableTxPoolGossipFlag.Name)
+	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
+		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
 }
 
