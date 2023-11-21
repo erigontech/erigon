@@ -150,13 +150,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
 		}
+		tx.(*temporal.Tx).ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 		if cfg.dbEventNotifier != nil {
 			cfg.dbEventNotifier.OnNewSnapshot()
 		}
 
 		{
 			log.Info(fmt.Sprintf("[%s] ViewID: %d", s.LogPrefix(), tx.ViewID()))
-			tx.(*temporal.Tx).ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 			tx.(state.HasAggCtx).AggCtx().LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress
