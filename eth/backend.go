@@ -589,7 +589,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	config.TxPool.NoTxGossip = config.DisableTxPoolGossip
+	config.TxPool.NoGossip = config.DisableTxPoolGossip
 	var miningRPC txpool_proto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {

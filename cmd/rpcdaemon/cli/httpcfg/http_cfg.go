@@ -79,6 +79,4 @@ type HttpCfg struct {
 	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
 	// Ots API
 	OtsMaxPageSize uint64
-
-	DisableTxPoolGossip bool
 }

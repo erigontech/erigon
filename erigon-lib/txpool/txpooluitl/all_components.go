@@ -149,7 +149,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		return nil, nil, nil, nil, nil, err
 	}
 	pool = txpool.Pool(txPool)
-	if cfg.NoTxGossip {
+	if cfg.NoGossip {
 		pool = txpool.Pool(txpool.NewTxPoolDropRemote(txPool))
 	}
 

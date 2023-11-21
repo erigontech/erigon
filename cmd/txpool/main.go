@@ -149,7 +149,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.BlobSlots = blobSlots
 	cfg.PriceBump = priceBump
 	cfg.BlobPriceBump = blobPriceBump
-	cfg.NoTxGossip = noTxGossip
+	cfg.NoGossip = noTxGossip
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"

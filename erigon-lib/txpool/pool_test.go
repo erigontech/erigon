@@ -947,7 +947,7 @@ func TestDropRemote(t *testing.T) {
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
-	cfg.NoTxGossip = true
+	cfg.NoGossip = true
 
 	logger := log.New()
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -955,7 +955,6 @@ func TestDropRemote(t *testing.T) {
 	txPool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, fixedgas.DefaultMaxBlobsPerBlock, logger)
 	assert.NoError(err)
 	require.True(txPool != nil)
-	txPoolDropRemote := NewTxPoolDropRemote(txPool)
 
 	ctx := context.Background()
 	var stateVersionID uint64 = 0
@@ -982,7 +981,7 @@ func TestDropRemote(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = txPoolDropRemote.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = txPool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 	// 1. Try Local Tx
 	{
@@ -996,7 +995,7 @@ func TestDropRemote(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := txPoolDropRemote.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := txPool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -1024,14 +1023,14 @@ func TestDropRemote(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		txPoolDropRemote.AddRemoteTxs(ctx, txSlots)
+		txPool.AddRemoteTxs(ctx, txSlots)
 	}
 
 	// empty because AddRemoteTxs logic is intentionally empty
-	assert.Equal(0, len(txPoolDropRemote.unprocessedRemoteByHash))
-	assert.Equal(0, len(txPoolDropRemote.unprocessedRemoteTxs.Txs))
+	assert.Equal(0, len(txPool.unprocessedRemoteByHash))
+	assert.Equal(0, len(txPool.unprocessedRemoteTxs.Txs))
 
-	assert.NoError(txPoolDropRemote.processRemoteTxs(ctx))
+	assert.NoError(txPool.processRemoteTxs(ctx))
 
 	checkAnnouncementEmpty := func() bool {
 		select {
