@@ -411,9 +411,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					allSnapshots.LogStat()
 				}
 
-				_ = reply.HistoryFiles
-
-				if err = agg.OpenFolder(true); err != nil {
+				if err = agg.OpenList(reply.HistoryFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					db.View(context.Background(), func(tx kv.Tx) error {
