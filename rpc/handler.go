@@ -449,7 +449,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter
 		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc()
 		}
-		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).UpdateDuration(start)
+		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).ObserveDuration(start)
 	}
 	return answer
 }

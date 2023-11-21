@@ -442,7 +442,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		start := time.Now()
 		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
 		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
+		mxCollateTook.ObserveDuration(start)
 
 		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 		mxCollationSizeHist.SetInt(collation.historyComp.Count())
@@ -481,8 +481,8 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		mxPruningProgress.Dec()
 		mxPruningProgress.Dec()
 
-		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
+		mxPruneTook.Observe(d.stats.LastPruneTook.Seconds())
+		mxPruneHistTook.Observe(d.stats.LastPruneHistTook.Seconds())
 	}
 
 	// when domain files are build and db is pruned, we can merge them
@@ -503,7 +503,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		start := time.Now()
 		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
 		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
+		mxCollateTook.ObserveDuration(start)
 
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
@@ -523,7 +523,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			}
 
 			mxRunningMerges.Dec()
-			mxBuildTook.UpdateDuration(start)
+			mxBuildTook.ObserveDuration(start)
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 
@@ -547,7 +547,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		if err := d.prune(ctx, txFrom, txTo, math.MaxUint64, logEvery); err != nil {
 			return err
 		}
-		mxPruneTook.UpdateDuration(startPrune)
+		mxPruneTook.ObserveDuration(startPrune)
 		mxPruningProgress.Dec()
 	}
 
@@ -565,7 +565,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		"range", fmt.Sprintf("%.2fM-%.2fM", float64(txFrom)/10e5, float64(txTo)/10e5),
 		"took", time.Since(stepStartedAt))
 
-	mxStepTook.UpdateDuration(stepStartedAt)
+	mxStepTook.ObserveDuration(stepStartedAt)
 
 	return nil
 }
@@ -601,7 +601,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 	closeAll = false
 
 	for _, s := range []DomainStats{a.accounts.stats, a.code.stats, a.storage.stats} {
-		mxBuildTook.Update(s.LastFileBuildingTook.Seconds())
+		mxBuildTook.Observe(s.LastFileBuildingTook.Seconds())
 	}
 
 	a.logger.Info("[stat] finished merge step",
@@ -855,9 +855,9 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 	}
 
 	mxCommitmentKeys.AddUint64(a.commitment.comKeys)
-	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
+	mxCommitmentTook.Observe(a.commitment.comTook.Seconds())
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
