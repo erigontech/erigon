@@ -17,15 +17,60 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type BeaconResponse struct {
-	Finalized           *bool  `json:"finalized,omitempty"`
-	Version             string `json:"version,omitempty"`
-	ExecutionOptimistic *bool  `json:"execution_optimistic,omitempty"`
-	Data                any    `json:"data,omitempty"`
+type apiError struct {
+	code int
+	err  error
+}
+
+type beaconResponse struct {
+	Data                any                    `json:"data,omitempty"`
+	Finalized           *bool                  `json:"finalized,omitempty"`
+	Version             *clparams.StateVersion `json:"version,omitempty"`
+	ExecutionOptimistic *bool                  `json:"execution_optimistic,omitempty"`
+	apiError            *apiError
+	internalError       error
+}
+
+func newBeaconResponse(data any) *beaconResponse {
+	return &beaconResponse{
+		Data: data,
+	}
+}
+
+func (r *beaconResponse) withFinalized(finalized bool) (out *beaconResponse) {
+	out = new(beaconResponse)
+	*out = *r
+	out.Finalized = new(bool)
+	out.ExecutionOptimistic = new(bool)
+	out.Finalized = &finalized
+	return r
+}
+
+func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beaconResponse) {
+	out = new(beaconResponse)
+	*out = *r
+	out.Version = new(clparams.StateVersion)
+	out.Version = &version
+	return r
+}
+
+func newCriticalErrorResponse(err error) *beaconResponse {
+	return &beaconResponse{
+		internalError: err,
+	}
+}
+
+func newApiErrorResponse(code int, msg string) *beaconResponse {
+	return &beaconResponse{
+		apiError: &apiError{
+			code: code,
+			err:  fmt.Errorf(msg),
+		},
+	}
 }
 
 // In case of it being a json we need to also expose finalization, version, etc...
-type beaconHandlerFn func(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error)
+type beaconHandlerFn func(r *http.Request) *beaconResponse
 
 func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -36,15 +81,23 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
 		}()
 
-		data, finalized, version, httpStatus, err := fn(r)
-		if err != nil {
-			w.WriteHeader(httpStatus)
-			io.WriteString(w, err.Error())
-			log.Debug("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
+		resp := fn(r)
+		if resp.internalError != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, resp.internalError.Error())
+			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.internalError.Error(), "ssz", isSSZ)
+			return
+		}
+
+		if resp.apiError != nil {
+			w.WriteHeader(resp.apiError.code)
+			io.WriteString(w, resp.apiError.err.Error())
+			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.apiError.err.Error(), "ssz", isSSZ)
 			return
 		}
 
 		if isSSZ && supportSSZ {
+			data := resp.Data
 			// SSZ encoding
 			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
 			if err != nil {
@@ -54,22 +107,12 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 				return
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.WriteHeader(httpStatus)
+			w.WriteHeader(http.StatusOK)
 			w.Write(encoded)
-			log.Debug("[Beacon API] genesis handler failed", err)
 			return
 		}
-		resp := &BeaconResponse{Data: data}
-		if version != nil {
-			resp.Version = clparams.ClVersionToString(*version)
-		}
-		if finalized != nil {
-			resp.ExecutionOptimistic = new(bool)
-			resp.Finalized = new(bool)
-			*resp.Finalized = *finalized
-		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(httpStatus)
+		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
 		}

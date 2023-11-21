@@ -5,64 +5,52 @@ import (
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
-func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
+func (a *ApiHandler) getHeaders(r *http.Request) *beaconResponse {
 	ctx := r.Context()
-
-	finalized = new(bool)
-	*finalized = true
 
 	querySlot, err := uint64FromQueryParams(r, "slot")
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
 	queryParentHash, err := hashFromQueryParams(r, "parent_root")
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 	var candidates []libcommon.Hash
 	var slot *uint64
 	var potentialRoot libcommon.Hash
-	// First lets find some good candidates for the query.
+	// First lets find some good candidates for the query. TODO(Giulio2002): this does not give all the headers.
 	switch {
 	case queryParentHash != nil && querySlot != nil:
 		// get all blocks with this parent
 		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, *queryParentHash)
 		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			return
+			return newCriticalErrorResponse(err)
 		}
 		if slot == nil {
-			httpStatus = http.StatusNotFound
-			err = fmt.Errorf("could not find block: %x", queryParentHash)
-			return
+			break
 		}
 		if *slot+1 != *querySlot {
 			break
 		}
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot+1)
 		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			return
+			return newCriticalErrorResponse(err)
 		}
 		candidates = append(candidates, potentialRoot)
 	case queryParentHash == nil && querySlot != nil:
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *querySlot)
 		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			return
+			return newCriticalErrorResponse(err)
 		}
 		candidates = append(candidates, potentialRoot)
 	case queryParentHash == nil && querySlot == nil:
@@ -72,29 +60,24 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 		}
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, headSlot)
 		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			return
+			return newCriticalErrorResponse(err)
 		}
 		candidates = append(candidates, potentialRoot)
 	}
 	// Now we assemble the response
 	headers := make([]*headerResponse, 0, len(candidates))
 	for _, root := range candidates {
-		signedHeader, err2 := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
-		if err2 != nil {
-			httpStatus = http.StatusInternalServerError
-			err = err2
-			return
+		signedHeader, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
+		if err != nil {
+			return newCriticalErrorResponse(err)
 		}
 		if signedHeader == nil || (queryParentHash != nil && signedHeader.Header.ParentRoot != *queryParentHash) || (querySlot != nil && signedHeader.Header.Slot != *querySlot) {
 			continue
 		}
 
-		var canonicalRoot libcommon.Hash
-		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
 		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			return
+			return newCriticalErrorResponse(err)
 		}
 		headers = append(headers, &headerResponse{
 			Root:      root,
@@ -102,57 +85,44 @@ func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, ver
 			Header:    signedHeader,
 		})
 	}
-	data = headers
-	httpStatus = http.StatusAccepted
-	return
+	return newBeaconResponse(headers)
 }
 
-func (a *ApiHandler) getHeader(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
+func (a *ApiHandler) getHeader(r *http.Request) *beaconResponse {
 	ctx := r.Context()
-	tx, err2 := a.indiciesDB.BeginRo(ctx)
-	if err2 != nil {
-		httpStatus = http.StatusInternalServerError
-		err = err2
-		return
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
-	blockId, err2 := blockIdFromRequest(r)
-	if err2 != nil {
-		httpStatus = http.StatusBadRequest
-		err = err2
-		return
+	blockId, err := blockIdFromRequest(r)
+	if err != nil {
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus2, err2 := a.rootFromBlockId(ctx, tx, blockId)
-	if err2 != nil {
-		httpStatus = httpStatus2
-		err = err2
-		return
+	root, httpStatus, err := a.rootFromBlockId(ctx, tx, blockId)
+	if err != nil {
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
-	signedHeader, err2 := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
-	if err2 != nil {
-		httpStatus = http.StatusInternalServerError
-		err = err2
-		return
+	signedHeader, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
+	if err != nil {
+		return newCriticalErrorResponse(err)
 	}
+
 	if signedHeader == nil {
-		httpStatus = http.StatusNotFound
-		err = fmt.Errorf("could not read block header: %x", root)
-		return
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
 	}
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
-	data = &headerResponse{
+
+	version := a.beaconChainCfg.GetCurrentStateVersion(signedHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
+
+	return newBeaconResponse(&headerResponse{
 		Root:      root,
 		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
-	}
-	finalized = new(bool)
-	*finalized = canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()
-	httpStatus = http.StatusAccepted
-	return
+	}).withFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version)
 }

@@ -7,7 +7,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
@@ -59,159 +58,112 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *seg
 	return
 }
 
-func (a *ApiHandler) getBlock(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx      kv.Tx
-		blockId *segmentID
-		root    libcommon.Hash
-	)
+func (a *ApiHandler) getBlock(r *http.Request) *beaconResponse {
 
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = blockIdFromRequest(r)
+	blockId, err := blockIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newCriticalErrorResponse(err)
+
 	}
-	root, httpStatus, err = a.rootFromBlockId(ctx, tx, blockId)
+	root, httpStatus, err := a.rootFromBlockId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
-		return
+		return newCriticalErrorResponse(err)
 	}
 	if blk == nil {
-		httpStatus = http.StatusNotFound
-		err = fmt.Errorf("block not found %x", root)
-		return
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
 	}
 	// Check if the block is canonical
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
-	// Pack the response
-	version = new(clparams.StateVersion)
-	*version = blk.Version()
-	data = blk
-	finalized = new(bool)
-	httpStatus = http.StatusAccepted
-	*finalized = root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()
-	return
+	return newBeaconResponse(blk).
+		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		withVersion(blk.Version())
 }
 
-func (a *ApiHandler) getBlockAttestations(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx      kv.Tx
-		blockId *segmentID
-		root    libcommon.Hash
-	)
-
+func (a *ApiHandler) getBlockAttestations(r *http.Request) *beaconResponse {
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = blockIdFromRequest(r)
+	blockId, err := blockIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err = a.rootFromBlockId(ctx, tx, blockId)
+
+	root, httpStatus, err := a.rootFromBlockId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
 	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
 	if err != nil {
-		return
+		return newCriticalErrorResponse(err)
 	}
 	if blk == nil {
-		httpStatus = http.StatusNotFound
-		err = fmt.Errorf("block not found %x", root)
-		return
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
 	}
 	// Check if the block is canonical
-	var canonicalRoot libcommon.Hash
-	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
-	// Pack the response
-	version = new(clparams.StateVersion)
-	*version = blk.Version()
-	data = blk.Block.Body.Attestations
-	finalized = new(bool)
-	httpStatus = http.StatusAccepted
-	*finalized = root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()
-	return
+
+	return newBeaconResponse(blk.Block.Body.Attestations).withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		withVersion(blk.Version())
 }
 
-func (a *ApiHandler) getBlockRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx      kv.Tx
-		blockId *segmentID
-		root    libcommon.Hash
-	)
-
+func (a *ApiHandler) getBlockRoot(r *http.Request) *beaconResponse {
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = blockIdFromRequest(r)
+	blockId, err := blockIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err = a.rootFromBlockId(ctx, tx, blockId)
+	root, httpStatus, err := a.rootFromBlockId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	if slot == nil {
-		httpStatus = http.StatusNotFound
-		err = fmt.Errorf("could not find block: %x", root)
-		return
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
 	}
 	// Check if the block is canonical
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 
-	// Pack the response
-	finalized = new(bool)
-	*finalized = canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()
-	data = struct{ Root libcommon.Hash }{Root: root}
-	httpStatus = http.StatusAccepted
-	return
+	return newBeaconResponse(struct{ Root libcommon.Hash }{Root: root}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot())
 }
