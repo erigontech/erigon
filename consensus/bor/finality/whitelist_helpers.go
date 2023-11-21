@@ -74,7 +74,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.IHeimd
 		return num, hash, errMilestone
 	}
 
-	config.logger.Debug("[heimdall] Got new milestone", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
+	config.logger.Debug("[heimdall] Got new milestone", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64())
 
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
