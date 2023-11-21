@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -195,7 +196,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
-	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
+	syncCommitteePubKeys := make([]libcommon.Bytes48, 0, cltypes.SyncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
@@ -235,7 +236,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	if err != nil {
 		return nil, err
 	}
-	var aggregate [48]byte
+	var aggregate libcommon.Bytes48
 	copy(aggregate[:], aggregatePublicKeyBytes)
 
 	return solid.NewSyncCommitteeFromParameters(syncCommitteePubKeys, aggregate), nil

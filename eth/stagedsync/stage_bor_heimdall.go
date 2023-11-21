@@ -262,6 +262,9 @@ func BorHeimdallForward(
 			if err != nil {
 				return err
 			}
+			if header == nil {
+				return fmt.Errorf("["+s.LogPrefix()+"] header not found: %d", blockNum)
+			}
 
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
@@ -272,7 +275,7 @@ func BorHeimdallForward(
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
-					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
 		}
@@ -605,9 +608,15 @@ func PersistValidatorSets(
 					// to speedup: recover signer in background goroutines and save in `sigcache`
 					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 					g.Go(func() error {
+						if header == nil {
+							return nil
+						}
 						_, _ = bor.Ecrecover(header, signatures, config)
 						return nil
 					})
+				}
+				if header == nil {
+					log.Debug("[bor] PersistValidatorSets nil header", "blockNum", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
