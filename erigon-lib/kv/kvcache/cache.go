@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
@@ -35,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 type CacheValidationResult struct {
@@ -100,19 +100,19 @@ type CacheView interface {
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
 	hasher               hash.Hash
-	codeEvictLen         *metrics.Counter
-	codeKeys             *metrics.Counter
-	keys                 *metrics.Counter
-	evict                *metrics.Counter
+	codeEvictLen         metrics.Counter
+	codeKeys             metrics.Counter
+	keys                 metrics.Counter
+	evict                metrics.Counter
 	latestStateView      *CoherentRoot
-	codeMiss             *metrics.Counter
-	timeout              *metrics.Counter
-	hits                 *metrics.Counter
-	codeHits             *metrics.Counter
+	codeMiss             metrics.Counter
+	timeout              metrics.Counter
+	hits                 metrics.Counter
+	codeHits             metrics.Counter
 	roots                map[uint64]*CoherentRoot
 	stateEvict           *ThreadSafeEvictionList
 	codeEvict            *ThreadSafeEvictionList
-	miss                 *metrics.Counter
+	miss                 metrics.Counter
 	cfg                  CoherentConfig
 	latestStateVersionID uint64
 	lock                 sync.Mutex

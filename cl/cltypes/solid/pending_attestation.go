@@ -2,7 +2,10 @@ package solid
 
 import (
 	"encoding/binary"
+	"encoding/json"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -106,4 +109,36 @@ func (a *PendingAttestation) HashSSZ() (o [32]byte, err error) {
 
 func (*PendingAttestation) Clone() clonable.Clonable {
 	return &PendingAttestation{}
+}
+
+func (a *PendingAttestation) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
+		AttestationData AttestationData  `json:"attestation_data"`
+		InclusionDelay  uint64           `json:"inclusion_delay"`
+		ProposerIndex   uint64           `json:"proposer_index"`
+	}{
+		AggregationBits: a.AggregationBits(),
+		AttestationData: a.AttestantionData(),
+		InclusionDelay:  a.InclusionDelay(),
+		ProposerIndex:   a.ProposerIndex(),
+	})
+}
+
+func (a *PendingAttestation) UnmarshalJSON(input []byte) error {
+	var err error
+	var tmp struct {
+		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
+		AttestationData AttestationData  `json:"attestation_data"`
+		InclusionDelay  uint64           `json:"inclusion_delay"`
+		ProposerIndex   uint64           `json:"proposer_index"`
+	}
+	if err = json.Unmarshal(input, &tmp); err != nil {
+		return err
+	}
+	a.SetAggregationBits(tmp.AggregationBits)
+	a.SetAttestationData(tmp.AttestationData)
+	a.SetInclusionDelay(tmp.InclusionDelay)
+	a.SetProposerIndex(tmp.ProposerIndex)
+	return nil
 }

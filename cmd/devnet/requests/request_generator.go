@@ -56,9 +56,9 @@ type RequestGenerator interface {
 	PingErigonRpc() PingResult
 	GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
-	GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
+	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error)
-	GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error)
+	GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error)
 	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
 	GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	BlockNumber() (uint64, error)
@@ -74,7 +74,7 @@ type RequestGenerator interface {
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 
-	GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error)
+	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error)
 }
 
 type requestGenerator struct {
@@ -173,8 +173,7 @@ func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response
 	}
 }
 
-func (req *requestGenerator) rpcCall(result interface{}, method RPCMethod, args ...interface{}) error {
-	ctx := context.Background()
+func (req *requestGenerator) rpcCall(ctx context.Context, result interface{}, method RPCMethod, args ...interface{}) error {
 	client, err := req.rpcClient(ctx)
 	if err != nil {
 		return err
