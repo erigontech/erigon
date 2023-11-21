@@ -112,12 +112,12 @@ func (m *milestone) LockMutex(endBlockNum uint64) bool {
 	m.finality.Lock()
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
-		log.Debug("endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
+		log.Debug("[bor] endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
 		return false
 	}
 
 	if m.Locked && endBlockNum < m.LockedMilestoneNumber {
-		log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
+		log.Debug("[bor] endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
 		return false
 	}
 
@@ -159,7 +159,7 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
 
 	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
+		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
 	}
 }
 
@@ -177,7 +177,7 @@ func (m *milestone) RemoveMilestoneID(milestoneId string) {
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
 
 	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
+		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
 	}
 
 }

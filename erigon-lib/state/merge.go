@@ -283,7 +283,7 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 			return nil
 		}
 		defer func() {
-			if ic.ii.filenameBase == AggTraceFileLife {
+			if ic.ii.filenameBase == traceFileLife {
 				ic.ii.logger.Warn(fmt.Sprintf("[agg] BuildColdLocality done: %s.%d-%d", ic.ii.filenameBase, from, to))
 			}
 		}()
@@ -1251,7 +1251,7 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 		}
 		ii.files.Delete(out)
 
-		if ii.filenameBase == AggTraceFileLife {
+		if ii.filenameBase == traceFileLife {
 			ii.logger.Warn(fmt.Sprintf("[agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
 		}
 		out.canDelete.Store(true)
@@ -1356,13 +1356,13 @@ func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem
 		d.files.Delete(out)
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
-			if d.filenameBase == AggTraceFileLife && out.decompressor != nil {
+			if d.filenameBase == traceFileLife && out.decompressor != nil {
 				d.logger.Info(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
 		} else {
-			if d.filenameBase == AggTraceFileLife && out.decompressor != nil {
+			if d.filenameBase == traceFileLife && out.decompressor != nil {
 				d.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
 			}
 		}

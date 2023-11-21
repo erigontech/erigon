@@ -38,6 +38,7 @@ import (
 )
 
 func TestSnapshotRandom(t *testing.T) {
+	t.Parallel()
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
@@ -326,6 +327,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 }
 
 func TestTransientStorage(t *testing.T) {
+	t.Parallel()
 	state := New(nil)
 
 	key := libcommon.Hash{0x01}

@@ -127,8 +127,8 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string) error {
-	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
+func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
+	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
 		return err
 	}
 	return h.openList(histNames)
@@ -138,17 +138,17 @@ func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
 	h.garbageFiles = h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", h.filenameBase, err)
+		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
 	}
 	return nil
 }
 
-func (h *History) OpenFolder() error {
+func (h *History) OpenFolder(readonly bool) error {
 	idxFiles, histFiles, _, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles)
+	return h.OpenList(idxFiles, histFiles, readonly)
 }
 
 // scanStateFiles
@@ -434,15 +434,11 @@ func (hc *HistoryContext) AddPrevValue(key1, key2, original []byte) (err error) 
 
 func (hc *HistoryContext) DiscardHistory() {
 	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false, true)
-}
-func (hc *HistoryContext) StartUnbufferedWrites() {
-	hc.ic.StartUnbufferedWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false, false)
+	hc.wal = hc.newWriter(hc.h.dirs.Tmp, true)
 }
 func (hc *HistoryContext) StartWrites() {
 	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, true, false)
+	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false)
 }
 func (hc *HistoryContext) FinishWrites() {
 	hc.ic.FinishWrites()
@@ -458,13 +454,11 @@ func (hc *HistoryContext) Rotate() historyFlusher {
 
 	if hc.wal != nil {
 		w := hc.wal
-		if w.buffered {
-			if err := w.historyVals.Flush(); err != nil {
-				panic(err)
-			}
+		if err := w.historyVals.Flush(); err != nil {
+			panic(err)
 		}
 		hf.h = w
-		hc.wal = hc.newWriter(hc.wal.tmpdir, hc.wal.buffered, hc.wal.discard)
+		hc.wal = hc.newWriter(hc.wal.tmpdir, hc.wal.discard)
 	}
 	return hf
 }
@@ -500,7 +494,6 @@ type historyWAL struct {
 	tmpdir           string
 	autoIncrementBuf []byte
 	historyKey       []byte
-	buffered         bool
 	discard          bool
 
 	// not large:
@@ -521,25 +514,22 @@ func (h *historyWAL) close() {
 	}
 }
 
-func (hc *HistoryContext) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
+func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyWAL {
 	w := &historyWAL{hc: hc,
-		tmpdir:   tmpdir,
-		buffered: buffered,
-		discard:  discard,
+		tmpdir:  tmpdir,
+		discard: discard,
 
 		autoIncrementBuf: make([]byte, 8),
 		historyKey:       make([]byte, 128),
 		largeValues:      hc.h.historyLargeValues,
+		historyVals:      etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger),
 	}
-	if buffered {
-		w.historyVals = etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger)
-		w.historyVals.LogLvl(log.LvlTrace)
-	}
+	w.historyVals.LogLvl(log.LvlTrace)
 	return w
 }
 
 func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	if h.discard || !h.buffered {
+	if h.discard {
 		return nil
 	}
 	if err := h.historyVals.Load(tx, h.hc.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

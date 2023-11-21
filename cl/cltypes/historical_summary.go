@@ -9,8 +9,8 @@ import (
 )
 
 type HistoricalSummary struct {
-	BlockSummaryRoot libcommon.Hash
-	StateSummaryRoot libcommon.Hash
+	BlockSummaryRoot libcommon.Hash `json:"block_summary_root"`
+	StateSummaryRoot libcommon.Hash `json:"state_summary_root"`
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {

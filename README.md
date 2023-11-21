@@ -560,6 +560,14 @@ node.
 
 If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
 
+#### `beaconAPI` ports
+
+| Component | Port | Protocol | Purpose          | Should Expose |
+|-----------|------|----------|------------------|---------------|
+| REST  | 5555 | TCP      | REST          | Public        |
+
+If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart above
+
 #### `shared` ports
 
 | Component | Port | Protocol | Purpose | Should Expose |

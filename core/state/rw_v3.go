@@ -6,22 +6,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
 	domains      *libstate.SharedDomains
@@ -89,7 +88,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 }
 
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
-	ExecTxsDone.Inc()
+	execTxsDone.Inc()
 
 	// this is done by sharedomains.SetTxNum.
 	// if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
@@ -343,7 +342,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
+func (rs *StateV3) DoneCount() uint64 { return execTxsDone.Get() }
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	if rs.domains != nil {

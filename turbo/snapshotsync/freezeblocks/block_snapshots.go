@@ -346,12 +346,12 @@ func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Lo
 func (s *RoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+func (s *RoSnapshots) blocksAvailable() uint64       { return s.idxMax.Load() }
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info("[snapshots] Blocks Stat",
-		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
+		"blocks", fmt.Sprintf("%dk", (s.blocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
@@ -374,8 +374,8 @@ func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) 
 	return existingFilesMap, res, nil
 }
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
+	if s.blocksAvailable() < cfg.ExpectBlocks {
+		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.blocksAvailable())
 	}
 	return nil
 }
@@ -496,7 +496,7 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	max := s.BlocksAvailable()
+	max := s.blocksAvailable()
 	for _, seg := range s.Bodies.segments {
 		if seg.seg == nil {
 			continue
@@ -1285,7 +1285,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 		notifier.OnNewSnapshot()
 	}
 	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.blocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}

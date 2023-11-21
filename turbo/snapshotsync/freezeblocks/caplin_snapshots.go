@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -19,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -437,4 +439,44 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	}
 
 	return s.ReopenFolder()
+}
+
+func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+	view := s.View()
+	defer view.Close()
+
+	var buf []byte
+
+	seg, ok := view.BeaconBlocksSegment(slot)
+	if !ok {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	if seg.idxSlot == nil {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+
+	gg := seg.seg.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	// Decompress this thing
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+
+	buffer.Reset()
+	buffer.Write(buf)
+	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
+	defer lz4ReaderPool.Put(lzReader)
+	lzReader.Reset(buffer)
+
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(lzReader)
 }

@@ -13,36 +13,30 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-
-	"github.com/ledgerwatch/erigon/core/rawdb"
-
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/erigontech/mdbx-go/mdbx"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -51,11 +45,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
-var ExecRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
-var ExecTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
+var execStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
+var execRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
+var execTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -74,7 +69,7 @@ type Progress struct {
 }
 
 func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
-	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
+	execStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -216,6 +211,14 @@ func ExecV3(ctx context.Context,
 	var inputTxNum = doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
+	nothingToExec := func(applyTx kv.Tx) (bool, error) {
+		_, lastTxNum, err := rawdbv3.TxNums.Last(applyTx)
+		if err != nil {
+			return false, err
+		}
+		return lastTxNum == inputTxNum, nil
+	}
+
 	// Cases:
 	//  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
@@ -238,7 +241,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d\n", inputTxNum)
+			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
 		}
 		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 		if err != nil {
@@ -262,14 +265,30 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 	if applyTx != nil {
+		if _nothing, err := nothingToExec(applyTx); err != nil {
+			return err
+		} else if _nothing {
+			return nil
+		}
+
 		if err := restoreTxNum(applyTx); err != nil {
 			return err
 		}
 	} else {
-		if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		var _nothing bool
+		if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
+			if _nothing, err = nothingToExec(applyTx); err != nil {
+				return err
+			} else if _nothing {
+				return nil
+			}
+
 			return restoreTxNum(applyTx)
 		}); err != nil {
 			return err
+		}
+		if _nothing {
+			return nil
 		}
 	}
 
@@ -343,8 +362,8 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			ExecRepeats.Add(conflicts)
-			ExecTriggers.Add(triggers)
+			execRepeats.Add(conflicts)
+			execTriggers.Add(triggers)
 			if processedBlockNum > lastBlockNum {
 				outputBlockNum.Set(processedBlockNum)
 				lastBlockNum = processedBlockNum
@@ -403,7 +422,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
+					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), execRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
@@ -444,8 +463,8 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 
-							ExecRepeats.Add(conflicts)
-							ExecTriggers.Add(triggers)
+							execRepeats.Add(conflicts)
+							execTriggers.Add(triggers)
 							if processedBlockNum > 0 {
 								outputBlockNum.Set(processedBlockNum)
 							}
@@ -780,7 +799,7 @@ Loop:
 					return err
 				}
 
-				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
+				execTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 			}
 			stageProgress = blockNum
@@ -801,7 +820,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
+				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), execRepeats.Get(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -896,7 +915,7 @@ Loop:
 		}
 	}
 
-	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
+	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.Get())
 
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
