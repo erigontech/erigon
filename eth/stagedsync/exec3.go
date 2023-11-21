@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -193,6 +194,15 @@ func ExecV3(ctx context.Context,
 					}
 				}
 			}
+		}
+	}
+	if initialCycle {
+		if casted, ok := applyTx.(*temporal.Tx); ok {
+			log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", execStage.LogPrefix(), casted.ViewID(), casted.AggCtx().ViewID()))
+			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
+				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
+				return histBlockNumProgress
+			})
 		}
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -25,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -597,7 +599,13 @@ func PersistValidatorSets(
 			for i := uint64(1); i <= blockNum; i++ {
 				header := chain.GetHeaderByNumber(i) // can return only canonical headers, but not all headers in db may be marked as canoical yet.
 				if header == nil {
-					log.Info(fmt.Sprintf("[%s] ViewID: %d", logPrefix, tx.ViewID()))
+					if casted, ok := tx.(*temporal.Tx); ok {
+						log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d, nil header %d", logPrefix, tx.ViewID(), casted.AggCtx().ViewID(), i))
+						casted.AggCtx().LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress
+						})
+					}
 					break
 				}
 
