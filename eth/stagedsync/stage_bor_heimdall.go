@@ -595,21 +595,19 @@ func PersistValidatorSets(
 			initialHeaders := make([]*types.Header, 0, batchSize)
 			parentHeader := zeroHeader
 			for i := uint64(1); i <= blockNum; i++ {
-				header := chain.GetHeaderByNumber(i)
+				header := chain.GetHeaderByNumber(i) // can return only canonical headers, but not all headers in db may be marked as canoical yet.
+				if header == nil {
+					break
+				}
+
 				{
 					// `snap.apply` bottleneck - is recover of signer.
 					// to speedup: recover signer in background goroutines and save in `sigcache`
 					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 					g.Go(func() error {
-						if header == nil {
-							return nil
-						}
 						_, _ = bor.Ecrecover(header, signatures, config)
 						return nil
 					})
-				}
-				if header == nil {
-					log.Debug(fmt.Sprintf("[%s] PersistValidatorSets nil header", logPrefix), "blockNum", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
