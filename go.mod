@@ -17,7 +17,6 @@ require (
 	github.com/Giulio2002/bls v0.0.0-20230906201036-c2330c97dc7d
 	github.com/RoaringBitmap/roaring v1.6.0
 	github.com/VictoriaMetrics/fastcache v1.12.1
-	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/alecthomas/kong v0.8.0
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
 	github.com/anacrolix/sync v0.5.1
@@ -104,7 +103,7 @@ require (
 )
 
 require (
-	github.com/FastFilter/xorfilter v0.1.4 // indirect
+	github.com/VictoriaMetrics/metrics v1.23.1 // indirect
 	github.com/agnivade/levenshtein v1.1.1 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect

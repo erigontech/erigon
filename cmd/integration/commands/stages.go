@@ -1508,7 +1508,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.OpenFolder(false)
+		err = _aggSingleton.OpenFolder(false) //TODO: open in read-only if erigon running?
 		if err != nil {
 			panic(err)
 		}

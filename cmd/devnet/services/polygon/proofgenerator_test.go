@@ -16,6 +16,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -53,22 +54,18 @@ type requestGenerator struct {
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
 	db := memdb.New("")
-
-	tx, err := db.BeginRw(context.Background())
-
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	if err = rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
-		return nil, err
-	}
-
-	if err = rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
-		return nil, err
-	}
-
-	tx.Commit()
 
 	reader := blockReader{
 		chain: chain,
@@ -146,14 +143,17 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 
 	tx, err := rg.sentry.DB.BeginRo(context.Background())
-
 	if err != nil {
 		return nil, err
 	}
-
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false)
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, historyV3)
 
 	if err != nil {
 		return nil, err
