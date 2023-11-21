@@ -33,6 +33,7 @@ import (
 // Forks before Shanghai are triggered by the block number,
 // while Shanghai and later forks are triggered by the block time.
 func TestCreation(t *testing.T) {
+	t.Parallel()
 	type testcase struct {
 		head uint64
 		time uint64
@@ -141,6 +142,30 @@ func TestCreation(t *testing.T) {
 				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 0}},          // First Shanghai block
 			},
 		},
+		// Mumbai test cases
+		{
+			params.MumbaiChainConfig,
+			params.MumbaiGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0xf6ef3fdf), Next: 2722000}},
+				{2722000, 0, ID{Hash: checksumToBytes(0x8647df30), Next: 13996000}},  // First Istanbul block
+				{13996000, 0, ID{Hash: checksumToBytes(0x06cc1179), Next: 22640000}}, // First Berlin block
+				{22640000, 0, ID{Hash: checksumToBytes(0x9adf950e), Next: 41874000}}, // First London block
+				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 0}},        // First Agra block
+			},
+		},
+		// Bor mainnet test cases
+		{
+			params.BorMainnetChainConfig,
+			params.BorMainnetGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0x0e07e722), Next: 3395000}},
+				{3395000, 0, ID{Hash: checksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
+				{14750000, 0, ID{Hash: checksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
+				{23850000, 0, ID{Hash: checksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
+				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 0}},        // First Agra block
+			},
+		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
@@ -155,6 +180,7 @@ func TestCreation(t *testing.T) {
 // TestValidation tests that a local peer correctly validates and accepts a remote
 // fork ID.
 func TestValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		head uint64
 		id   ID
@@ -234,6 +260,7 @@ func TestValidation(t *testing.T) {
 // Tests that IDs are properly RLP encoded (specifically important because we
 // use uint32 to store the hash, but we need to encode it as [4]byte).
 func TestEncoding(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		id   ID
 		want []byte

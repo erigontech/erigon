@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -19,10 +20,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pierrec/lz4"
 )
 
 type BeaconBlockSegment struct {
@@ -97,27 +100,25 @@ func (s *beaconBlockSegments) View(f func(segments []*BeaconBlockSegment) error)
 	return f(s.segments)
 }
 
-func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BeaconBlocksIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
-
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(path.Join(snapDir, segmentFilePath))
+	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-
 	_, fname := filepath.Split(segmentFilePath)
 	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
 
 	if err := Idx(ctx, d, sn.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		if i%100_000 == 0 {
-			logger.Log(lvl, "Compressing beacon blocks", "progress", i)
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Generating idx for beacon blocks", "progress", i)
 		}
 		p.Processed.Add(1)
 		num := make([]byte, 8)
@@ -157,6 +158,17 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
 func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
+
+func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
+	var res []string
+	for _, seg := range s.BeaconBlocks.segments {
+		if seg.ranges.from >= from && seg.ranges.to <= to {
+			res = append(res, seg.seg.FilePath())
+		}
+	}
+	return res
+}
+
 func (s *CaplinSnapshots) BlocksAvailable() uint64 {
 	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
 }
@@ -338,6 +350,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		return err
 	}
 	defer tx.Rollback()
+	var w bytes.Buffer
+	lzWriter := lz4.NewWriter(&w)
+	defer lzWriter.Close()
+	// Just make a reusable buffer
+	buf := make([]byte, 2048)
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		obj, err := b.GetBlock(ctx, tx, i)
@@ -354,16 +371,20 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			}
 			continue
 		}
-		var buf bytes.Buffer
-		if err := snapshot_format.WriteBlockForSnapshot(obj.Data, &buf); err != nil {
+		lzWriter.Reset(&w)
+		lzWriter.CompressionLevel = 1
+		if buf, err = snapshot_format.WriteBlockForSnapshot(lzWriter, obj.Data, buf); err != nil {
 			return err
 		}
-		word := buf.Bytes()
+		if err := lzWriter.Flush(); err != nil {
+			return err
+		}
+		word := w.Bytes()
 
 		if err := sn.AddWord(word); err != nil {
 			return err
 		}
-
+		w.Reset()
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
@@ -371,7 +392,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return BeaconBlocksIdx(ctx, f, segName, fromSlot, toSlot, snapDir, tmpDir, p, lvl, logger)
+	return BeaconBlocksIdx(ctx, f, path.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -390,4 +411,72 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 		}
 	}
 	return nil
+}
+
+func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger, lvl log.Lvl) error {
+	// if !s.segmentsReady.Load() {
+	// 	return fmt.Errorf("not all snapshot segments are available")
+	// }
+
+	// wait for Downloader service to download all expected snapshots
+	segments, _, err := SegmentsCaplin(s.dir)
+	if err != nil {
+		return err
+	}
+	for index := range segments {
+		segment := segments[index]
+		if segment.T != snaptype.BeaconBlocks {
+			continue
+		}
+		if hasIdxFile(segment, logger) {
+			continue
+		}
+		p := &background.Progress{}
+
+		if err := BeaconBlocksIdx(ctx, segment, segment.Path, segment.From, segment.To, s.dir, p, log.LvlDebug, logger); err != nil {
+			return err
+		}
+	}
+
+	return s.ReopenFolder()
+}
+
+func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+	view := s.View()
+	defer view.Close()
+
+	var buf []byte
+
+	seg, ok := view.BeaconBlocksSegment(slot)
+	if !ok {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	if seg.idxSlot == nil {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+
+	gg := seg.seg.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, 0, libcommon.Hash{}, nil
+	}
+	// Decompress this thing
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+
+	buffer.Reset()
+	buffer.Write(buf)
+	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
+	defer lz4ReaderPool.Put(lzReader)
+	lzReader.Reset(buffer)
+
+	// Use pooled buffers and readers to avoid allocations.
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(lzReader)
 }

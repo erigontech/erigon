@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -15,8 +16,21 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pierrec/lz4"
 	"github.com/spf13/afero"
 )
+
+var lz4PoolWriterPool = sync.Pool{
+	New: func() interface{} {
+		return lz4.NewWriter(nil)
+	},
+}
+
+var lz4PoolReaderPool = sync.Pool{
+	New: func() interface{} {
+		return lz4.NewReader(nil)
+	},
+}
 
 var ErrStateNotFound = errors.New("state not found")
 
@@ -59,6 +73,10 @@ type forkGraphDisk struct {
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
+}
+
+func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
+	return fmt.Sprintf("%x.cache", blockRoot)
 }
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *state.CachingBeaconState, err error) {
@@ -104,6 +122,22 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	}
 	bs = state.New(f.beaconCfg)
 	err = bs.DecodeSSZ(sszBuffer, int(v[0]))
+	// decode the cache file
+	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
+	if err != nil {
+		return
+	}
+	defer cacheFile.Close()
+
+	lz4Reader := lz4PoolReaderPool.Get().(*lz4.Reader)
+	defer lz4PoolReaderPool.Put(lz4Reader)
+
+	lz4Reader.Reset(cacheFile)
+
+	if err := bs.DecodeCaches(lz4Reader); err != nil {
+		return nil, err
+	}
+
 	return
 }
 
@@ -130,6 +164,7 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	if err != nil {
 		return
 	}
+	defer dumpedFile.Close()
 	// First write the hard fork version
 	_, err = dumpedFile.Write([]byte{byte(bs.Version())})
 	if err != nil {
@@ -149,6 +184,30 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	}
 
 	err = dumpedFile.Sync()
+	if err != nil {
+		return
+	}
+
+	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		return
+	}
+	defer cacheFile.Close()
+
+	lz4Writer := lz4PoolWriterPool.Get().(*lz4.Writer)
+	defer lz4PoolWriterPool.Put(lz4Writer)
+
+	lz4Writer.CompressionLevel = 5
+	lz4Writer.Reset(cacheFile)
+
+	if err := bs.EncodeCaches(lz4Writer); err != nil {
+		return err
+	}
+	if err = lz4Writer.Flush(); err != nil {
+		return
+	}
+	err = cacheFile.Sync()
+
 	return
 }
 
@@ -362,6 +421,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.finalizedCheckpoints, root)
 		delete(f.headers, root)
 		f.fs.Remove(getBeaconStateFilename(root))
+		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

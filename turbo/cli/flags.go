@@ -2,8 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
@@ -356,8 +357,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
-		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
-		Dirs:    cfg.Dirs,
+		Enabled:           ctx.Bool(utils.HTTPEnabledFlag.Name),
+		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
+		Dirs:              cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,
@@ -386,17 +388,18 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		},
 		EvmCallTimeout: ctx.Duration(EvmCallTimeoutFlag.Name),
 
-		WebsocketEnabled:     ctx.IsSet(utils.WSEnabledFlag.Name),
-		RpcBatchConcurrency:  ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
-		RpcStreamingDisable:  ctx.Bool(utils.RpcStreamingDisableFlag.Name),
-		DBReadConcurrency:    ctx.Int(utils.DBReadConcurrencyFlag.Name),
-		RpcAllowListFilePath: ctx.String(utils.RpcAccessListFlag.Name),
-		Gascap:               ctx.Uint64(utils.RpcGasCapFlag.Name),
-		MaxTraces:            ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:   ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:  ctx.Bool(utils.AllowUnprotectedTxs.Name),
+		WebsocketEnabled:            ctx.IsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:         ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:         ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:           ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcAllowListFilePath:        ctx.String(utils.RpcAccessListFlag.Name),
+		Gascap:                      ctx.Uint64(utils.RpcGasCapFlag.Name),
+		MaxTraces:                   ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:          ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:                  ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:             ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs:         ctx.Bool(utils.AllowUnprotectedTxs.Name),
+		MaxGetProofRewindBlockCount: ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 

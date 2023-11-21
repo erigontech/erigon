@@ -10,11 +10,17 @@ import (
 )
 
 type PeerNetworkInfo struct {
-	LocalAddress  string `json:"localAddress"`  // Local endpoint of the TCP data connection
-	RemoteAddress string `json:"remoteAddress"` // Remote endpoint of the TCP data connection
-	Inbound       bool   `json:"inbound"`
-	Trusted       bool   `json:"trusted"`
-	Static        bool   `json:"static"`
+	LocalAddress  string            `json:"localAddress"`  // Local endpoint of the TCP data connection
+	RemoteAddress string            `json:"remoteAddress"` // Remote endpoint of the TCP data connection
+	Inbound       bool              `json:"inbound"`
+	Trusted       bool              `json:"trusted"`
+	Static        bool              `json:"static"`
+	BytesIn       uint64            `json:"bytesIn"`
+	BytesOut      uint64            `json:"bytesOut"`
+	CapBytesIn    map[string]uint64 `json:"capBytesIn"`
+	CapBytesOut   map[string]uint64 `json:"capBytesOut"`
+	TypeBytesIn   map[string]uint64 `json:"typeBytesIn"`
+	TypeBytesOut  map[string]uint64 `json:"typeBytesOut"`
 }
 
 type PeerResponse struct {
@@ -28,15 +34,13 @@ type PeerResponse struct {
 	Caps          []string               `json:"caps"`          // Protocols advertised by this peer
 	Network       PeerNetworkInfo        `json:"network"`
 	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
-	BytesIn       int                    `json:"bytesIn"`   // Number of bytes received from the peer
-	BytesOut      int                    `json:"bytesOut"`  // Number of bytes sent to the peer
 }
 
-func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
+func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writePeers(w, ctx, node)
+		writePeers(w, ctxclient, node)
 	})
 }
 
@@ -66,20 +70,24 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
 		for key, value := range statisticsArray {
 			peer := PeerResponse{
-				ENR:      "", //TODO: find a way how to get missing data
-				Enode:    "",
-				ID:       key,
-				Name:     "",
-				BytesIn:  int(value.BytesIn),
-				BytesOut: int(value.BytesOut),
-				Type:     "Sentinel",
-				Caps:     []string{},
+				ENR:   "", //TODO: find a way how to get missing data
+				Enode: "",
+				ID:    key,
+				Name:  "",
+				Type:  "Sentinel",
+				Caps:  []string{},
 				Network: PeerNetworkInfo{
 					LocalAddress:  "",
 					RemoteAddress: "",
 					Inbound:       false,
 					Trusted:       false,
 					Static:        false,
+					BytesIn:       value.BytesIn,
+					BytesOut:      value.BytesOut,
+					CapBytesIn:    value.CapBytesIn,
+					CapBytesOut:   value.CapBytesOut,
+					TypeBytesIn:   value.TypeBytesIn,
+					TypeBytesOut:  value.TypeBytesOut,
 				},
 				Protocols: nil,
 			}
@@ -95,35 +103,30 @@ func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
 func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 
-	reply := node.Backend().DiagnosticsPeersData()
+	statisticsArray := node.Backend().DiagnosticsPeersData()
 
-	peers := make([]*PeerResponse, 0, len(reply))
+	peers := make([]*PeerResponse, 0, len(statisticsArray))
 
-	for _, rpcPeer := range reply {
-		var bin = 0
-		var bout = 0
-
-		if rpcPeer.Network.Inbound {
-			bin = rpcPeer.BytesTransfered
-		} else {
-			bout = rpcPeer.BytesTransfered
-		}
-
+	for key, value := range statisticsArray {
 		peer := PeerResponse{
-			ENR:      rpcPeer.ENR,
-			Enode:    rpcPeer.Enode,
-			ID:       rpcPeer.ID,
-			Name:     rpcPeer.Name,
-			BytesIn:  bin,
-			BytesOut: bout,
-			Type:     "Sentry",
-			Caps:     rpcPeer.Caps,
+			ENR:   "", //TODO: find a way how to get missing data
+			Enode: "",
+			ID:    key,
+			Name:  "",
+			Type:  "Sentry",
+			Caps:  []string{},
 			Network: PeerNetworkInfo{
-				LocalAddress:  rpcPeer.Network.LocalAddress,
-				RemoteAddress: rpcPeer.Network.RemoteAddress,
-				Inbound:       rpcPeer.Network.Inbound,
-				Trusted:       rpcPeer.Network.Trusted,
-				Static:        rpcPeer.Network.Static,
+				LocalAddress:  "",
+				RemoteAddress: "",
+				Inbound:       false,
+				Trusted:       false,
+				Static:        false,
+				BytesIn:       value.BytesIn,
+				BytesOut:      value.BytesOut,
+				CapBytesIn:    value.CapBytesIn,
+				CapBytesOut:   value.CapBytesOut,
+				TypeBytesIn:   value.TypeBytesIn,
+				TypeBytesOut:  value.TypeBytesOut,
 			},
 			Protocols: nil,
 		}
@@ -131,5 +134,17 @@ func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
 		peers = append(peers, &peer)
 	}
 
-	return peers, nil
+	return filterPeersWithoutBytesIn(peers), nil
+}
+
+func filterPeersWithoutBytesIn(peers []*PeerResponse) []*PeerResponse {
+	filteredPeers := make([]*PeerResponse, 0, len(peers))
+
+	for _, peer := range peers {
+		if peer.Network.BytesIn > 0 {
+			filteredPeers = append(filteredPeers, peer)
+		}
+	}
+
+	return filteredPeers
 }

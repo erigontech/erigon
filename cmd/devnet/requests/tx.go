@@ -18,14 +18,14 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	)
 
 	method, body := reqGen.txpoolContent()
-	if res := reqGen.call(method, body, &b); res.Err != nil {
+	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
 	resp, ok := b.Result.(map[string]interface{})
 
 	if !ok {
-		return 0, 0, 0, fmt.Errorf("Unexpected result type: %T", b.Result)
+		return 0, 0, 0, fmt.Errorf("unexpected result type: %T", b.Result)
 	}
 
 	pendingLen := 0

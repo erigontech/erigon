@@ -161,6 +161,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var stat os.FileInfo
 	if stat, err = d.f.Stat(); err != nil {
 		return nil, err

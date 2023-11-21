@@ -271,6 +271,9 @@ func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHas
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
+func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return back.blockReader.Span(ctx, tx, spanId)
+}
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
 	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})

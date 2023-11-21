@@ -2,6 +2,7 @@ package span
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -37,7 +38,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 	data, err := c.validatorSet.Pack(method)
 	if err != nil {
-		c.logger.Error("Unable to pack tx for getCurrentSpan", "error", err)
+		c.logger.Error("[bor] Unable to pack tx for getCurrentSpan", "error", err)
 		return nil, err
 	}
 
@@ -67,28 +68,30 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 	return &span, nil
 }
 
-func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
-	span, err := getSpanForBlock(blockNumber)
-	if err != nil {
+	spanBytes := chain.BorSpan(spanId)
+	var span HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
 
 	return span.ValidatorSet.Validators, nil
 }
 
-func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
 
-	span, err := getSpanForBlock(blockNumber)
-	if err != nil {
+	spanBytes := chain.BorSpan(spanId)
+	var span HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +128,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		return err
 	}
 
-	c.logger.Debug("✅ Committing new span",
+	c.logger.Debug("[bor] ✅ Committing new span",
 		"id", heimdallSpan.ID,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,
@@ -142,7 +145,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		producerBytes,
 	)
 	if err != nil {
-		c.logger.Error("Unable to pack tx for commitSpan", "error", err)
+		c.logger.Error("[bor] Unable to pack tx for commitSpan", "error", err)
 		return err
 	}
 

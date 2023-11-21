@@ -24,8 +24,7 @@ CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'd
 #CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes
-#CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
 BUILD_TAGS = nosqlite,noboltdb
@@ -122,6 +121,8 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += caplin-regression
+COMMANDS += tooling
+
 
 
 # build each command using %.cmd rule
@@ -141,22 +142,24 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-## test:                              run unit tests with a 100s timeout
-test:
+test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
+
+test-erigon-ext:
+	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
+
+## test:                              run unit tests with a 100s timeout
+test: test-erigon-lib
 	$(GOTEST) --timeout 10m
 
-test3:
-	@cd erigon-lib && $(MAKE) test
+test3: test-erigon-lib
 	$(GOTEST) --timeout 10m -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
-test-integration:
-	@cd erigon-lib && $(MAKE) test
+test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
-test3-integration:
-	@cd erigon-lib && $(MAKE) test
+test3-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
 
 ## lint-deps:                         install lint dependencies

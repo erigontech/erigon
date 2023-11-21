@@ -1,19 +1,20 @@
 package regression
 
 import (
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+
 	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"io/fs"
-	"io/ioutil"
-	"path"
-	"path/filepath"
-	"sort"
 )
 
 func (r *RegressionTester) readStartingState() (*state.CachingBeaconState, error) {
-	stateFile, err := ioutil.ReadFile(path.Join(r.testDirectory, regressionPath, startingStatePath))
+	stateFile, err := os.ReadFile(path.Join(r.testDirectory, regressionPath, startingStatePath))
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +34,7 @@ func (r *RegressionTester) initBlocks() error {
 		if info == nil || info.IsDir() || info.Name() != "data.bin" {
 			return nil
 		}
-		f, err := ioutil.ReadFile(path)
+		f, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}

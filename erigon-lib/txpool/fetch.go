@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -279,19 +281,39 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return err
 		}
-		_ = requestID
+
+		// limit to max 256 transactions in a reply
+		const hashSize = 32
+		hashes = hashes[:cmp.Min(len(hashes), 256*hashSize)]
+
 		var txs [][]byte
-		for i := 0; i < len(hashes); i += 32 {
-			txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
+		responseSize := 0
+		processed := len(hashes)
+
+		for i := 0; i < len(hashes); i += hashSize {
+			if responseSize >= p2pTxPacketLimit {
+				processed = i
+				log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply truncated to fit p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+				break
+			}
+
+			txnHash := hashes[i:cmp.Min(i+hashSize, len(hashes))]
+			txn, err := f.pool.GetRlp(tx, txnHash)
 			if err != nil {
 				return err
 			}
 			if txn == nil {
 				continue
 			}
+
 			txs = append(txs, txn)
+			responseSize += len(txn)
 		}
+
 		encodedRequest = types2.EncodePooledTransactions66(txs, requestID, nil)
+		if len(encodedRequest) > p2pTxPacketLimit {
+			log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
+		}
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
 			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
@@ -436,11 +458,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -448,59 +465,69 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if req == nil {
 			return nil
 		}
-
-		var unwindTxs, minedTxs types2.TxSlots
-		for _, change := range req.ChangeBatch {
-			if change.Direction == remote.Direction_FORWARD {
-				minedTxs.Resize(uint(len(change.Txs)))
-				for i := range change.Txs {
-					minedTxs.Txs[i] = &types2.TxSlot{}
-					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-						return err
-					}); err != nil && !errors.Is(err, context.Canceled) {
-						f.logger.Warn("stream.Recv", "err", err)
-						continue
-					}
-				}
-			}
-			if change.Direction == remote.Direction_UNWIND {
-				for i := range change.Txs {
-					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
-						utx := &types2.TxSlot{}
-						sender := make([]byte, 20)
-						_, err2 := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-						if err2 != nil {
-							return err2
-						}
-						if utx.Type == types2.BlobTxType {
-							knownBlobTxn, err2 := f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
-							if err2 != nil {
-								return err2
-							}
-							// Get the blob tx from cache; ignore altogether if it isn't there
-							if knownBlobTxn != nil {
-								unwindTxs.Append(knownBlobTxn.Tx, sender, false)
-							}
-						} else {
-							unwindTxs.Append(utx, sender, false)
-						}
-						return err
-					}); err != nil && !errors.Is(err, context.Canceled) {
-						f.logger.Warn("stream.Recv", "err", err)
-						continue
-					}
-				}
-			}
+		if err := f.handleStateChangesRequest(ctx, req); err != nil {
+			f.logger.Warn("[fetch] onNewBlock", "err", err)
 		}
 
-		if err := f.db.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
-		}); err != nil && !errors.Is(err, context.Canceled) {
-			f.logger.Warn("onNewBlock", "err", err)
-		}
-		if f.wg != nil {
+		if f.wg != nil { // to help tests
 			f.wg.Done()
 		}
 	}
+}
+
+func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
+	var unwindTxs, minedTxs types2.TxSlots
+	for _, change := range req.ChangeBatch {
+		if change.Direction == remote.Direction_FORWARD {
+			minedTxs.Resize(uint(len(change.Txs)))
+			for i := range change.Txs {
+				minedTxs.Txs[i] = &types2.TxSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					return err
+				}); err != nil && !errors.Is(err, context.Canceled) {
+					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					continue // 1 tx handling error must not stop batch processing
+				}
+			}
+		} else if change.Direction == remote.Direction_UNWIND {
+			for i := range change.Txs {
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
+					utx := &types2.TxSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
+						return err
+					}
+					if utx.Type == types2.BlobTxType {
+						var knownBlobTxn *metaTx
+						//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
+						if err := f.db.View(ctx, func(tx kv.Tx) error {
+							knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
+							return err
+						}); err != nil {
+							return err
+						}
+						// Get the blob tx from cache; ignore altogether if it isn't there
+						if knownBlobTxn != nil {
+							unwindTxs.Append(knownBlobTxn.Tx, sender, false)
+						}
+					} else {
+						unwindTxs.Append(utx, sender, false)
+					}
+					return nil
+				}); err != nil && !errors.Is(err, context.Canceled) {
+					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					continue // 1 tx handling error must not stop batch processing
+				}
+			}
+		}
+	}
+
+	if err := f.db.View(ctx, func(tx kv.Tx) error {
+		return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
+	}); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }

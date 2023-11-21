@@ -33,7 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
@@ -57,6 +56,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
@@ -1627,6 +1627,11 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 	}
 }
 
+// txMaxBroadcastSize is the max size of a transaction that will be broadcasted.
+// All transactions with a higher size will be announced and need to be fetched
+// by the peer.
+const txMaxBroadcastSize = 4 * 1024
+
 // MainLoop - does:
 // send pending byHash to p2p:
 //   - new byHash
@@ -1733,7 +1738,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							localTxSizes = append(localTxSizes, size)
 							localTxHashes = append(localTxHashes, hash...)
 
-							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							if t != types.BlobTxType {
 								localTxRlps = append(localTxRlps, slotRlp)
 								broadCastedHashes = append(broadCastedHashes, hash...)
 							}
@@ -1741,7 +1747,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							remoteTxTypes = append(remoteTxTypes, t)
 							remoteTxSizes = append(remoteTxSizes, size)
 							remoteTxHashes = append(remoteTxHashes, hash...)
-							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+
+							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+							if t != types.BlobTxType && len(slotRlp) < txMaxBroadcastSize {
 								remoteTxRlps = append(remoteTxRlps, slotRlp)
 							}
 						}
@@ -1756,18 +1764,22 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
-				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
-				txSentTo := send.BroadcastPooledTxs(localTxRlps)
+				// broadcast local transactions
+				const localTxsBroadcastMaxPeers uint64 = 10
+				txSentTo := send.BroadcastPooledTxs(localTxRlps, localTxsBroadcastMaxPeers)
 				for i, peer := range txSentTo {
 					p.logger.Info("Local tx broadcasted", "txHash", hex.EncodeToString(broadCastedHashes.At(i)), "to peer", peer)
 				}
-				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes)
+				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes, localTxsBroadcastMaxPeers*2)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
 					p.logger.Info("local tx announced", "tx_hash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
-				send.BroadcastPooledTxs(remoteTxRlps)
-				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes)
+
+				// broadcast remote transactions
+				const remoteTxsBroadcastMaxPeers uint64 = 3
+				send.BroadcastPooledTxs(remoteTxRlps, remoteTxsBroadcastMaxPeers)
+				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes, remoteTxsBroadcastMaxPeers*2)
 			}()
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()

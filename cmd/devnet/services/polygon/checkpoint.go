@@ -126,7 +126,11 @@ func (h *Heimdall) startChildHeaderSubscription(ctx context.Context) {
 
 	for childHeader := range childHeaderChan {
 		if err := h.handleChildHeader(ctx, childHeader); err != nil {
-			h.logger.Error("L2 header processing failed", "header", childHeader.Number, "err", err)
+			if errors.Is(err, notEnoughChildChainTxConfirmationsError) {
+				h.logger.Info("L2 header processing skipped", "header", childHeader.Number, "err", err)
+			} else {
+				h.logger.Error("L2 header processing failed", "header", childHeader.Number, "err", err)
+			}
 		}
 	}
 }
@@ -149,6 +153,8 @@ func (h *Heimdall) startRootHeaderBlockSubscription() {
 	}
 }
 
+var notEnoughChildChainTxConfirmationsError = errors.New("the chain doesn't have enough blocks for ChildChainTxConfirmations")
+
 func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) error {
 
 	h.logger.Debug("no of checkpoint confirmations required", "childChainTxConfirmations", h.checkpointConfig.ChildChainTxConfirmations)
@@ -156,9 +162,7 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 	latestConfirmedChildBlock := header.Number.Int64() - int64(h.checkpointConfig.ChildChainTxConfirmations)
 
 	if latestConfirmedChildBlock <= 0 {
-		h.logger.Error("no of blocks on childchain is less than confirmations required",
-			"childChainBlocks", header.Number.Uint64(), "confirmationsRequired", h.checkpointConfig.ChildChainTxConfirmations)
-		return errors.New("no of blocks on childchain is less than confirmations required")
+		return notEnoughChildChainTxConfirmationsError
 	}
 
 	timeStamp := uint64(time.Now().Unix())
@@ -371,7 +375,7 @@ func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (l
 		return libcommon.Hash{}, errors.New("number of headers requested exceeds")
 	}
 
-	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)).GetRootHash(start, end)
+	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)).GetRootHash(ctx, start, end)
 }
 
 func (h *Heimdall) shouldSendCheckpoint(start uint64, end uint64) (bool, error) {

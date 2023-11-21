@@ -1,9 +1,11 @@
 package requests
 
 import (
+	"context"
 	"encoding/json"
-	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
+
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -40,33 +42,63 @@ var BlockNumbers = struct {
 	Pending:  "pending",
 }
 
-type Block struct {
+type BlockWithTxHashes struct {
 	*types.Header
-	Hash         libcommon.Hash            `json:"hash"`
-	Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+	Hash              libcommon.Hash `json:"hash"`
+	TransactionHashes []libcommon.Hash
 }
 
-func (b *Block) UnmarshalJSON(input []byte) error {
-	type body struct {
-		Hash         libcommon.Hash            `json:"hash"`
-		Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
+	var header types.Header
+	if err := json.Unmarshal(input, &header); err != nil {
+		return err
 	}
 
-	bd := body{}
-
+	var bd struct {
+		Hash              libcommon.Hash   `json:"hash"`
+		TransactionHashes []libcommon.Hash `json:"transactions"`
+	}
 	if err := json.Unmarshal(input, &bd); err != nil {
 		return err
 	}
 
-	header := types.Header{}
+	b.Header = &header
+	b.Hash = bd.Hash
+	b.TransactionHashes = bd.TransactionHashes
 
+	return nil
+}
+
+type Block struct {
+	BlockWithTxHashes
+	Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+}
+
+func (b *Block) UnmarshalJSON(input []byte) error {
+	var header types.Header
 	if err := json.Unmarshal(input, &header); err != nil {
+		return err
+	}
+
+	var bd struct {
+		Hash         libcommon.Hash            `json:"hash"`
+		Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(input, &bd); err != nil {
 		return err
 	}
 
 	b.Header = &header
 	b.Hash = bd.Hash
 	b.Transactions = bd.Transactions
+
+	if bd.Transactions != nil {
+		b.TransactionHashes = make([]libcommon.Hash, len(b.Transactions))
+		for _, t := range bd.Transactions {
+			b.TransactionHashes = append(b.TransactionHashes, t.Hash)
+		}
+	}
+
 	return nil
 }
 
@@ -78,27 +110,34 @@ type EthGetTransactionCount struct {
 func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
 	var result hexutil2.Uint64
 
-	if err := reqGen.callCli(&result, Methods.ETHBlockNumber); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHBlockNumber); err != nil {
 		return 0, err
 	}
 
 	return uint64(result), nil
 }
 
-func (reqGen *requestGenerator) GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error) {
+func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error) {
 	var result Block
+	var err error
 
-	if err := reqGen.callCli(&result, Methods.ETHGetBlockByNumber, blockNum, withTxs); err != nil {
+	if withTxs {
+		err = reqGen.rpcCall(ctx, &result, Methods.ETHGetBlockByNumber, blockNum, withTxs)
+	} else {
+		err = reqGen.rpcCall(ctx, &result.BlockWithTxHashes, Methods.ETHGetBlockByNumber, blockNum, withTxs)
+	}
+
+	if err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	var result string
 
-	if err := req.callCli(&result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
+	if err := req.rpcCall(ctx, &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
 		return libcommon.Hash{}, err
 	}
 

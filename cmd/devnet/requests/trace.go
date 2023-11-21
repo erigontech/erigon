@@ -1,8 +1,10 @@
 package requests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -113,7 +115,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	method, body := reqGen.traceCall(blockRef, string(argsVal), string(optsVal))
-	res := reqGen.call(method, body, &b)
+	res := reqGen.rpcCallJSON(method, body, &b)
 
 	if res.Err != nil {
 		return nil, fmt.Errorf("TraceCall rpc failed: %w", res.Err)
@@ -134,7 +136,7 @@ func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs str
 func (reqGen *requestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {
 	var result []TransactionTrace
 
-	if err := reqGen.callCli(&result, Methods.TraceTransaction, hash); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.TraceTransaction, hash); err != nil {
 		return nil, err
 	}
 

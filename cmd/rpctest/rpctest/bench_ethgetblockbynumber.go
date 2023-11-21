@@ -98,7 +98,8 @@ func BenchEthGetBlockByNumber2(erigonURL, gethURL string, needCompare, latest bo
 		request = reqGen.getBlockByNumber(bn, true)
 		errCtx := fmt.Sprintf(" bn=%d ", bn)
 
-		if err := requestAndCompare(request, "eth_getBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
+		if err := requestAndCompare(request, "eth_getBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+			/* insertOnlyIfSuccess */ false); err != nil {
 			return err
 		}
 
