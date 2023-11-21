@@ -165,7 +165,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 
 	useExternalTx := applyTx != nil
-	if initialCycle || !useExternalTx {
+	if !useExternalTx {
 		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
@@ -173,24 +173,24 @@ func ExecV3(ctx context.Context,
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
-	}
-	if !useExternalTx && !parallel {
-		var err error
-		applyTx, err = chainDb.BeginRw(ctx) //nolint
-		if err != nil {
-			return err
-		}
-		defer func() { // need callback - because tx may be committed
-			applyTx.Rollback()
-		}()
-
-		if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-			if err := casted.WarmupDB(false); err != nil {
+		if !parallel {
+			var err error
+			applyTx, err = chainDb.BeginRw(ctx) //nolint
+			if err != nil {
 				return err
 			}
-			if dbg.MdbxLockInRam() {
-				if err := casted.LockDBInRam(); err != nil {
+			defer func() { // need callback - because tx may be committed
+				applyTx.Rollback()
+			}()
+
+			if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+				if err := casted.WarmupDB(false); err != nil {
 					return err
+				}
+				if dbg.MdbxLockInRam() {
+					if err := casted.LockDBInRam(); err != nil {
+						return err
+					}
 				}
 			}
 		}
