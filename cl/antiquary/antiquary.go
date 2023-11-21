@@ -238,9 +238,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
 		return err
 	}
-	if err := beacon_indicies.PruneSignedHeaders(tx, to-1); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 

@@ -71,10 +71,10 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 
 func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	var (
-		tx        kv.Tx
-		blockId   *segmentID
-		root      libcommon.Hash
-		blkHeader *cltypes.SignedBeaconBlockHeader
+		tx      kv.Tx
+		blockId *segmentID
+		root    libcommon.Hash
+		slot    *uint64
 	)
 
 	ctx := r.Context()
@@ -96,19 +96,17 @@ func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, v
 		return
 	}
 
-	blkHeader, _, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
+	slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
 	}
-	if blkHeader == nil {
+	if slot == nil {
 		err = fmt.Errorf("could not read block header: %x", root)
 		httpStatus = http.StatusNotFound
 		return
 	}
-	slot := blkHeader.Header.Slot
-
-	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 	currentVersion := a.beaconChainCfg.GetForkVersionByVersion(stateVersion)
 	previousVersion := a.beaconChainCfg.GetForkVersionByVersion(previousVersion(stateVersion))
@@ -127,7 +125,6 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, v
 		tx        kv.Tx
 		blockId   *segmentID
 		root      libcommon.Hash
-		blkHeader *cltypes.SignedBeaconBlockHeader
 		canonical bool
 	)
 
@@ -150,22 +147,32 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, v
 		return
 	}
 
-	blkHeader, canonical, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
+	var stateRoot libcommon.Hash
+	stateRoot, err = beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, root)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
 	}
-	if blkHeader == nil {
+	if stateRoot == (libcommon.Hash{}) {
+		err = fmt.Errorf("could not read block header: %x", root)
+		httpStatus = http.StatusNotFound
+		return
+	}
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+	if err != nil {
+		httpStatus = http.StatusInternalServerError
+		return
+	}
+	if slot == nil {
 		err = fmt.Errorf("could not read block header: %x", root)
 		httpStatus = http.StatusNotFound
 		return
 	}
 
-	data = rootResponse{Root: blkHeader.Header.Root}
-	slot := blkHeader.Header.Slot
+	data = rootResponse{Root: stateRoot}
 
 	finalized = new(bool)
-	*finalized = canonical && slot <= a.forkchoiceStore.FinalizedSlot()
+	*finalized = canonical && *slot <= a.forkchoiceStore.FinalizedSlot()
 	httpStatus = http.StatusAccepted
 	return
 }

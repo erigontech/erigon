@@ -1,86 +1,109 @@
 package handler
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
 func (a *ApiHandler) getHeaders(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
 	ctx := r.Context()
-	req := &getHeadersRequest{}
 
 	finalized = new(bool)
 	*finalized = true
-	// Try to decode the request body into the struct. If there is an error,
-	// respond to the client with the error message and a 400 status code.
-	err = json.NewDecoder(r.Body).Decode(&req)
-	if errors.Is(err, io.EOF) {
-		req = nil
-	} else if err != nil {
-		err = fmt.Errorf("error while decoding json: %s", err)
+
+	querySlot, err := uint64FromQueryParams(r, "slot")
+	if err != nil {
 		httpStatus = http.StatusBadRequest
 		return
 	}
-	var tx kv.Tx
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	queryParentHash, err := hashFromQueryParams(r, "parent_root")
+	if err != nil {
+		httpStatus = http.StatusBadRequest
+		return
+	}
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		httpStatus = http.StatusInternalServerError
 		return
 	}
 	defer tx.Rollback()
-
-	var headersList []*cltypes.SignedBeaconBlockHeader
-	var canonicals []bool
-
-	// 4 Cases empty request, only slot, only parent_root, both.
-	if req == nil || (req.ParentRoot == nil && req.Slot == nil) { // case 1 empty request
-		var headSlot uint64
-		_, headSlot, err = a.forkchoiceStore.GetHead()
+	var candidates []libcommon.Hash
+	var slot *uint64
+	var potentialRoot libcommon.Hash
+	// First lets find some good candidates for the query.
+	switch {
+	case queryParentHash != nil && querySlot != nil:
+		// get all blocks with this parent
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, *queryParentHash)
 		if err != nil {
 			httpStatus = http.StatusInternalServerError
 			return
 		}
-		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersBySlot(ctx, tx, headSlot)
-	} else if req.Slot != nil {
-		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersBySlot(ctx, tx, *req.Slot)
-	} else if req.ParentRoot != nil {
-		headersList, canonicals, err = beacon_indicies.ReadSignedHeadersByParentRoot(ctx, tx, *req.ParentRoot)
-	}
-	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
-	}
-	if len(headersList) == 0 {
-		*finalized = false
-	}
-	resp := []*headerResponse{}
-	for idx, header := range headersList {
-		var headerRoot libcommon.Hash
-		headerRoot, err = header.HashSSZ()
+		if slot == nil {
+			httpStatus = http.StatusNotFound
+			err = fmt.Errorf("could not find block: %x", queryParentHash)
+			return
+		}
+		if *slot+1 != *querySlot {
+			break
+		}
+		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot+1)
 		if err != nil {
 			httpStatus = http.StatusInternalServerError
 			return
 		}
-		if !canonicals[idx] || header.Header.Slot > a.forkchoiceStore.FinalizedSlot() {
-			*finalized = false
+		candidates = append(candidates, potentialRoot)
+	case queryParentHash == nil && querySlot != nil:
+		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *querySlot)
+		if err != nil {
+			httpStatus = http.StatusInternalServerError
+			return
 		}
-		resp = append(resp, &headerResponse{
-			Root:      headerRoot,
-			Canonical: canonicals[idx],
-			Header:    header,
+		candidates = append(candidates, potentialRoot)
+	case queryParentHash == nil && querySlot == nil:
+		headSlot := a.syncedData.HeadSlot()
+		if headSlot == 0 {
+			break
+		}
+		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, headSlot)
+		if err != nil {
+			httpStatus = http.StatusInternalServerError
+			return
+		}
+		candidates = append(candidates, potentialRoot)
+	}
+	// Now we assemble the response
+	headers := make([]*headerResponse, 0, len(candidates))
+	for _, root := range candidates {
+		signedHeader, err2 := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
+		if err2 != nil {
+			httpStatus = http.StatusInternalServerError
+			err = err2
+			return
+		}
+		if signedHeader == nil || (queryParentHash != nil && signedHeader.Header.ParentRoot != *queryParentHash) || (querySlot != nil && signedHeader.Header.Slot != *querySlot) {
+			continue
+		}
+
+		var canonicalRoot libcommon.Hash
+		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
+		if err != nil {
+			httpStatus = http.StatusInternalServerError
+			return
+		}
+		headers = append(headers, &headerResponse{
+			Root:      root,
+			Canonical: canonicalRoot == root,
+			Header:    signedHeader,
 		})
 	}
+	data = headers
 	httpStatus = http.StatusAccepted
-	data = resp
 	return
 }
 
@@ -106,7 +129,7 @@ func (a *ApiHandler) getHeader(r *http.Request) (data any, finalized *bool, vers
 		return
 	}
 
-	signedHeader, isCanonical, err2 := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+	signedHeader, err2 := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
 	if err2 != nil {
 		httpStatus = http.StatusInternalServerError
 		err = err2
@@ -117,13 +140,19 @@ func (a *ApiHandler) getHeader(r *http.Request) (data any, finalized *bool, vers
 		err = fmt.Errorf("could not read block header: %x", root)
 		return
 	}
+	var canonicalRoot libcommon.Hash
+	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
+	if err != nil {
+		httpStatus = http.StatusInternalServerError
+		return
+	}
 	data = &headerResponse{
 		Root:      root,
-		Canonical: isCanonical,
+		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
 	}
 	finalized = new(bool)
-	*finalized = isCanonical && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()
+	*finalized = canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()
 	httpStatus = http.StatusAccepted
 	return
 }

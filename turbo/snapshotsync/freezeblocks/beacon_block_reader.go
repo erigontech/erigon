@@ -107,28 +107,33 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	view := r.sn.View()
 	defer view.Close()
 
-	signedHeader, canonical, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
 	}
-	// root non-canonical? BAD
-	if !canonical {
+	if slot == nil {
 		return nil, nil
 	}
-	if signedHeader == nil {
-		return nil, nil
-	}
-	slot := signedHeader.Header.Slot
+
 	var buf []byte
-	if slot > r.sn.BlocksAvailable() {
-		data, err := r.beaconDB.GetBlock(ctx, tx, slot)
+	if *slot > r.sn.BlocksAvailable() {
+		data, err := r.beaconDB.GetBlock(ctx, tx, *slot)
 		return data.Data, err
 	}
 	if r.eth1Getter == nil {
 		return nil, nil
 	}
+	// Find canonical block
+	canonicalBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
+	// root non-canonical? BAD
+	if canonicalBlockRoot != root {
+		return nil, nil
+	}
 
-	seg, ok := view.BeaconBlocksSegment(slot)
+	seg, ok := view.BeaconBlocksSegment(*slot)
 	if !ok {
 		return nil, nil
 	}
@@ -136,10 +141,10 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	if seg.idxSlot == nil {
 		return nil, nil
 	}
-	if slot < seg.idxSlot.BaseDataID() {
+	if *slot < seg.idxSlot.BaseDataID() {
 		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, seg.idxSlot.BaseDataID())
 	}
-	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+	blockOffset := seg.idxSlot.OrdinalLookup(*slot - seg.idxSlot.BaseDataID())
 
 	gg := seg.seg.MakeGetter()
 	gg.Reset(blockOffset)
@@ -170,24 +175,29 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 	view := r.sn.View()
 	defer view.Close()
 
-	signedHeader, canonical, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+	if err != nil {
+		return nil, err
+	}
+	if slot == nil {
+		return nil, nil
+	}
+
+	if *slot > r.sn.BlocksAvailable() {
+		h, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+		return h, err
+	}
+	// Find canonical block
+	canonicalBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
 		return nil, err
 	}
 	// root non-canonical? BAD
-	if !canonical {
+	if canonicalBlockRoot != root {
 		return nil, nil
-	}
-	if signedHeader == nil {
-		return nil, nil
-	}
-	slot := signedHeader.Header.Slot
-	if slot > r.sn.BlocksAvailable() {
-		h, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
-		return h, err
 	}
 
-	h, _, _, err := r.sn.ReadHeader(slot)
+	h, _, _, err := r.sn.ReadHeader(*slot)
 	// Use pooled buffers and readers to avoid allocations.
 	return h, err
 }
