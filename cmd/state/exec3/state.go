@@ -161,7 +161,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		sr := state.NewStateReaderV3(rw.rs)
 		rw.SetReader(sr)
 	}
-	if txTask.BlockNum == 37307587 {
+	if txTask.BlockNum == 37279540 {
 		fmt.Printf("RunTxTaskNoLock history block=%d, txIndex=%d, txNum=%d, t=%T\n", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, rw.stateReader)
 	}
 	/*
@@ -255,7 +255,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.UsedGas = applyRes.UsedGas
-			if txTask.BlockNum == 37307587 {
+			if txTask.BlockNum == 37279540 {
 				fmt.Printf("Used gas = %d\n", txTask.UsedGas)
 			}
 			// Update the state with pending changes

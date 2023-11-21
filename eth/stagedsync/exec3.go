@@ -1060,7 +1060,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 	//doms.SetTxNum(context.Background(), doms.TxNum()-1) //
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
+	rh, err := doms.ComputeCommitment(ctx, true, true, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
