@@ -842,7 +842,7 @@ func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := d.values.Load(tx, d.dc.d.valsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := d.values.Load(tx, d.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
