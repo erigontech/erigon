@@ -54,21 +54,17 @@ type requestGenerator struct {
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
 	db := memdb.New("")
 
-	tx, err := db.BeginRw(context.Background())
-
-	if err != nil {
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-
-	if err = rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
-		return nil, err
-	}
-
-	if err = rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Header().Hash()); err != nil {
-		return nil, err
-	}
-
-	tx.Commit()
 
 	reader := blockReader{
 		chain: chain,
