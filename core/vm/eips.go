@@ -423,6 +423,23 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		memorySize:  memoryDataCopy,
 	}
+	jt[CREATE3] = &operation{
+		execute:     opCreate3,
+		constantGas: params.Create3Gas,
+		// dynamicGas:  gasCreate2,
+		numPop:     4,
+		numPush:    1,
+		memorySize: memoryCreate2,
+	}
+	jt[CREATE4] = &operation{
+		execute:     opCreate4,
+		constantGas: params.Create4Gas,
+		// dynamicGas:  gasCreate2,
+		numPop:     4,
+		numPush:    1,
+		memorySize: memoryCreate2,
+	}
+	jt[RETURNCONTRACT] = &operation{}
 }
 
 // opRjump implements the rjump opcode.
@@ -585,5 +602,59 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		scope.Memory.Copy(dst, src, size)
 	}
 
+	return nil, nil
+}
+
+func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	var (
+		code             = scope.Contract.CodeAt(scope.CodeSection)
+		initContainerIdx = int(code[*pc+1])
+		endowment        = scope.Stack.Pop()
+		salt             = scope.Stack.Pop()
+		offset, size     = scope.Stack.Pop(), scope.Stack.Pop()
+		inputOffset      = offset.Uint64()
+		inputSize        = size.Uint64()
+		gas              = scope.Contract.Gas
+		input            = []byte{}
+		initContainer    = scope.Contract.Container.SubContainer[initContainerIdx]
+	)
+
+	if inputSize > 0 {
+		input = scope.Memory.GetCopy(int64(inputOffset), int64(inputSize))
+	}
+	// Apply EIP150
+	gas -= gas / 64
+	scope.Contract.UseGas(gas)
+
+	stackValue := size
+
+	res, addr, returnGas, suberr := interpreter.evm.Create3(scope.Contract, input, initContainer, gas, &endowment, &salt)
+
+	// Push item on the stack based on the returned error.
+	if suberr != nil {
+		stackValue.Clear()
+	} else {
+		stackValue.SetBytes(addr.Bytes())
+	}
+
+	scope.Stack.Push(&stackValue)
+	scope.Contract.Gas += returnGas
+
+	if suberr == ErrExecutionReverted {
+		interpreter.returnData = res // set REVERT data to return data buffer
+		return res, nil
+	}
+	interpreter.returnData = nil // clear dirty return data buffer
+	return nil, nil
+}
+
+func opCreate4(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, nil
+}
+
+func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	return nil, nil
 }

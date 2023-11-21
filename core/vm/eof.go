@@ -79,9 +79,10 @@ func isEOFVersion1(code []byte) bool {
 
 // Container is an EOF container object.
 type Container struct {
-	Types []*FunctionMetadata
-	Code  [][]byte
-	Data  []byte
+	Types        []*FunctionMetadata
+	Code         [][]byte
+	SubContainer [][]byte
+	Data         []byte
 }
 
 // FunctionMetadata is an EOF function signature.

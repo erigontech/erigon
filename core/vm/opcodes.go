@@ -207,21 +207,21 @@ const (
 
 // 0xe0 range - eof ops.
 const (
-	RJUMP     OpCode = 0xe0
-	RJUMPI    OpCode = 0xe1
-	RJUMPV    OpCode = 0xe2
-	CALLF     OpCode = 0xe3
-	RETF      OpCode = 0xe4
-	JUMPF     OpCode = 0xe5
-	DUPN      OpCode = 0xe6
-	SWAPN     OpCode = 0xe7
-	DATALOAD  OpCode = 0xe8
-	DATALOADN OpCode = 0xe9
-	DATASIZE  OpCode = 0xea
-	DATACOPY  OpCode = 0xeb
-	// CREATE3        OpCode = 0xec
-	// CREATE4        OpCode = 0xed
-	// RETURNCONTRACT OpCode = 0xee
+	RJUMP          OpCode = 0xe0
+	RJUMPI         OpCode = 0xe1
+	RJUMPV         OpCode = 0xe2
+	CALLF          OpCode = 0xe3
+	RETF           OpCode = 0xe4
+	JUMPF          OpCode = 0xe5
+	DUPN           OpCode = 0xe6
+	SWAPN          OpCode = 0xe7
+	DATALOAD       OpCode = 0xe8
+	DATALOADN      OpCode = 0xe9
+	DATASIZE       OpCode = 0xea
+	DATACOPY       OpCode = 0xeb
+	CREATE3        OpCode = 0xec
+	CREATE4        OpCode = 0xed
+	RETURNCONTRACT OpCode = 0xee
 )
 
 // 0xf0 range - closures.
@@ -398,21 +398,21 @@ var opCodeToString = map[OpCode]string{
 	LOG4:   "LOG4",
 
 	// 0xe0 range.
-	RJUMP:     "RJUMP",
-	RJUMPI:    "RJUMPI",
-	RJUMPV:    "RJUMPV",
-	CALLF:     "CALLF",
-	RETF:      "RETF",
-	JUMPF:     "JUMPF",
-	DUPN:      "DUPN",
-	SWAPN:     "SWAPN",
-	DATALOAD:  "DATALOAD",
-	DATALOADN: "DATALOADN",
-	DATASIZE:  "DATASIZE",
-	DATACOPY:  "DATACOPY",
-	// CREATE3:        "CREATE3",
-	// CREATE4:        "CREATE4",
-	// RETURNCONTRACT: "RETURNCONTRACT",
+	RJUMP:          "RJUMP",
+	RJUMPI:         "RJUMPI",
+	RJUMPV:         "RJUMPV",
+	CALLF:          "CALLF",
+	RETF:           "RETF",
+	JUMPF:          "JUMPF",
+	DUPN:           "DUPN",
+	SWAPN:          "SWAPN",
+	DATALOAD:       "DATALOAD",
+	DATALOADN:      "DATALOADN",
+	DATASIZE:       "DATASIZE",
+	DATACOPY:       "DATACOPY",
+	CREATE3:        "CREATE3",
+	CREATE4:        "CREATE4",
+	RETURNCONTRACT: "RETURNCONTRACT",
 
 	// 0xf0 range.
 	CREATE:       "CREATE",
@@ -590,17 +590,17 @@ var stringToOp = map[string]OpCode{
 	"DATALOADN":      DATALOADN,
 	"DATASIZE":       DATASIZE,
 	"DATACOPY":       DATACOPY,
-	// "CREATE3":        CREATE3,
-	// "CREATE4":        CREATE4,
-	// "RETURNCONTRACT": RETURNCONTRACT,
-	"CREATE":       CREATE,
-	"CREATE2":      CREATE2,
-	"CALL":         CALL,
-	"RETURN":       RETURN,
-	"CALLCODE":     CALLCODE,
-	"REVERT":       REVERT,
-	"INVALID":      INVALID,
-	"SELFDESTRUCT": SELFDESTRUCT,
+	"CREATE3":        CREATE3,
+	"CREATE4":        CREATE4,
+	"RETURNCONTRACT": RETURNCONTRACT,
+	"CREATE":         CREATE,
+	"CREATE2":        CREATE2,
+	"CALL":           CALL,
+	"RETURN":         RETURN,
+	"CALLCODE":       CALLCODE,
+	"REVERT":         REVERT,
+	"INVALID":        INVALID,
+	"SELFDESTRUCT":   SELFDESTRUCT,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.
