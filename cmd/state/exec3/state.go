@@ -99,8 +99,10 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	return w
 }
 
-func (rw *Worker) ResetState(state *state.StateV3) {
-	rw.rs = state
+func (rw *Worker) ResetState(rs *state.StateV3) {
+	rw.rs = rs
+	rw.SetReader(state.NewStateReaderV3(rs))
+	rw.stateWriter = state.NewStateWriterBufferedV3(rs)
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
