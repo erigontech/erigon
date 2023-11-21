@@ -597,6 +597,7 @@ func PersistValidatorSets(
 			for i := uint64(1); i <= blockNum; i++ {
 				header := chain.GetHeaderByNumber(i) // can return only canonical headers, but not all headers in db may be marked as canoical yet.
 				if header == nil {
+					log.Info(fmt.Sprintf("[%s] ViewID: %d", logPrefix, tx.ViewID()))
 					break
 				}
 
