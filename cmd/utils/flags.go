@@ -839,7 +839,7 @@ var (
 
 	TxPoolGossipDisableFlag = cli.BoolFlag{
 		Name:  "txpool.gossip.disable",
-		Usage: "Disable transaction pool gossip (p2p)",
+		Usage: "Disable transaction pool gossip (p2p). Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
 		Value: txpoolcfg.DefaultConfig.NoTxGossip,
 	}
 )
