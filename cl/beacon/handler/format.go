@@ -186,3 +186,40 @@ func stateIdFromRequest(r *http.Request) (*segmentID, error) {
 		root: &root,
 	}, nil
 }
+
+func hashFromQueryParams(r *http.Request, name string) (*libcommon.Hash, error) {
+	hashStr := r.URL.Query().Get(name)
+	if hashStr == "" {
+		return nil, nil
+	}
+	// check if hashstr is an hex string
+	if len(hashStr) != 2+2*32 {
+		return nil, fmt.Errorf("invalid hash length")
+	}
+	if hashStr[:2] != "0x" {
+		return nil, fmt.Errorf("invalid hash prefix")
+	}
+	notHex, err := regexp.MatchString("[^0-9A-Fa-f]", hashStr[2:])
+	if err != nil {
+		return nil, err
+	}
+	if notHex {
+		return nil, fmt.Errorf("invalid hash characters")
+	}
+
+	hash := libcommon.HexToHash(hashStr)
+	return &hash, nil
+}
+
+// uint64FromQueryParams retrieves a number from the query params, in base 10.
+func uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
+	str := r.URL.Query().Get(name)
+	if str == "" {
+		return nil, nil
+	}
+	num, err := strconv.ParseUint(str, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &num, nil
+}

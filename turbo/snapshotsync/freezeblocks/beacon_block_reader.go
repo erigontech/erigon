@@ -31,6 +31,7 @@ type BeaconSnapshotReader interface {
 	// If the block is not present, it returns nil.
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error)
+	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error)
 
 	FrozenSlots() uint64
 }
@@ -163,4 +164,30 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 
 	// Use pooled buffers and readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(lzReader, r.eth1Getter, r.cfg)
+}
+
+func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, root libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
+	view := r.sn.View()
+	defer view.Close()
+
+	signedHeader, canonical, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+	if err != nil {
+		return nil, err
+	}
+	// root non-canonical? BAD
+	if !canonical {
+		return nil, nil
+	}
+	if signedHeader == nil {
+		return nil, nil
+	}
+	slot := signedHeader.Header.Slot
+	if slot > r.sn.BlocksAvailable() {
+		h, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+		return h, err
+	}
+
+	h, _, _, err := r.sn.ReadHeader(slot)
+	// Use pooled buffers and readers to avoid allocations.
+	return h, err
 }
