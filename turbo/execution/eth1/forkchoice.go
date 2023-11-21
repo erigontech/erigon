@@ -277,6 +277,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
+
 		}
 
 		// Set Progress for headers and bodies accordingly.
