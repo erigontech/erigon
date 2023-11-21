@@ -22,7 +22,7 @@ func NewHistTimer(name string) *HistTimer {
 }
 
 func (h *HistTimer) PutSince() {
-	h.Histogram.ObserveDuration(h.start)
+	h.Histogram.UpdateDuration(h.start)
 }
 
 func (h *HistTimer) Tag(pairs ...string) *HistTimer {

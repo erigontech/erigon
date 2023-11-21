@@ -2,7 +2,24 @@ package metrics
 
 import (
 	"fmt"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+type Histogram interface {
+	// UpdateDuration updates request duration based on the given startTime.
+	UpdateDuration(time.Time)
+
+	// Update updates h with v.
+	//
+	// Negative values and NaNs are ignored.
+	Update(float64)
+}
+
+type Summary interface {
+	Histogram
+}
 
 // NewCounter registers and returns new counter with the given name.
 //
@@ -88,6 +105,18 @@ func GetOrCreateGauge(name string) Gauge {
 	return &gauge{g}
 }
 
+type summary struct {
+	prometheus.Summary
+}
+
+func (sm summary) UpdateDuration(startTime time.Time) {
+	sm.Observe(time.Since(startTime).Seconds())
+}
+
+func (sm summary) Update(v float64) {
+	sm.Observe(v)
+}
+
 // NewSummary creates and returns new summary with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
@@ -104,7 +133,7 @@ func NewSummary(name string) Summary {
 		panic(fmt.Errorf("could not create new summary: %w", err))
 	}
 
-	return &summary{s}
+	return summary{s}
 }
 
 // GetOrCreateSummary returns registered summary with the given name
@@ -127,7 +156,19 @@ func GetOrCreateSummary(name string) Summary {
 		panic(fmt.Errorf("could not get or create new summary: %w", err))
 	}
 
-	return &summary{s}
+	return summary{s}
+}
+
+type histogram struct {
+	prometheus.Histogram
+}
+
+func (h histogram) UpdateDuration(startTime time.Time) {
+	h.Observe(time.Since(startTime).Seconds())
+}
+
+func (h histogram) Update(v float64) {
+	h.Observe(v)
 }
 
 // NewHistogram creates and returns new histogram with the given name.
@@ -146,7 +187,7 @@ func NewHistogram(name string) Histogram {
 		panic(fmt.Errorf("could not create new histogram: %w", err))
 	}
 
-	return &histogram{h}
+	return histogram{h}
 }
 
 // GetOrCreateHistogram returns registered histogram with the given name
@@ -169,5 +210,5 @@ func GetOrCreateHistogram(name string) Histogram {
 		panic(fmt.Errorf("could not get or create new histogram: %w", err))
 	}
 
-	return &histogram{h}
+	return histogram{h}
 }
