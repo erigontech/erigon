@@ -83,5 +83,5 @@ func sendMetrics(ctx context.Context, start time.Time, isSuccessful bool) {
 	}
 
 	meters.request[isSuccessful].Set(1)
-	meters.timer.ObserveDuration(start)
+	meters.timer.UpdateDuration(start)
 }

@@ -303,7 +303,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	defer newBlockTimer.ObserveDuration(time.Now())
+	defer newBlockTimer.UpdateDuration(time.Now())
 	//t := time.Now()
 
 	coreDB, cache := p.coreDBWithCache()
@@ -414,7 +414,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		return fmt.Errorf("txpool not started yet")
 	}
 
-	defer processBatchTxsTimer.ObserveDuration(time.Now())
+	defer processBatchTxsTimer.UpdateDuration(time.Now())
 	coreDB, cache := p.coreDBWithCache()
 	coreTx, err := coreDB.BeginRo(ctx)
 	if err != nil {
@@ -711,7 +711,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
-	defer addRemoteTxsTimer.ObserveDuration(time.Now())
+	defer addRemoteTxsTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i, txn := range newTxs.Txs {
@@ -1695,7 +1695,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				if announcements.Len() == 0 {
 					return
 				}
-				defer propagateNewTxsTimer.ObserveDuration(time.Now())
+				defer propagateNewTxsTimer.UpdateDuration(time.Now())
 
 				announcements = announcements.DedupCopy()
 
@@ -1780,7 +1780,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			var sizes []uint32
 			types, sizes, hashes = p.AppendAllAnnouncements(types, sizes, hashes[:0])
 			go send.PropagatePooledTxsToPeersList(newPeers, types, sizes, hashes)
-			propagateToNewPeerTimer.ObserveDuration(t)
+			propagateToNewPeerTimer.UpdateDuration(t)
 		}
 	}
 }
@@ -1806,7 +1806,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context, db kv.RwDB) (written uint64, 
 }
 
 func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
-	defer writeToDBTimer.ObserveDuration(time.Now())
+	defer writeToDBTimer.UpdateDuration(time.Now())
 	// 1. get global lock on txpool and flush it to db, without fsync (to release lock asap)
 	// 2. then fsync db without txpool lock
 	written, err = p.flushNoFsync(ctx, db)
