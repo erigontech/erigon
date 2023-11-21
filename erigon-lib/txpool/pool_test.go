@@ -941,7 +941,7 @@ func makeBlobTx() types.TxSlot {
 	return blobTx
 }
 
-func TestDropRemote(t *testing.T) {
+func TestDropRemoteAtNoGossip(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
