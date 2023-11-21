@@ -26,7 +26,6 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	_ "github.com/FastFilter/xorfilter"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
