@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -83,15 +82,13 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 
 		resp := fn(r)
 		if resp.internalError != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			io.WriteString(w, resp.internalError.Error())
+			http.Error(w, resp.internalError.Error(), http.StatusInternalServerError)
 			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.internalError.Error(), "ssz", isSSZ)
 			return
 		}
 
 		if resp.apiError != nil {
-			w.WriteHeader(resp.apiError.code)
-			io.WriteString(w, resp.apiError.err.Error())
+			http.Error(w, resp.apiError.err.Error(), resp.apiError.code)
 			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.apiError.err.Error(), "ssz", isSSZ)
 			return
 		}
@@ -101,18 +98,15 @@ func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.Respo
 			// SSZ encoding
 			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				io.WriteString(w, err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 				log.Debug("[Beacon API] failed", "method", r.Method, "err", err, "accepted", accept)
 				return
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.WriteHeader(http.StatusOK)
 			w.Write(encoded)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
 		}

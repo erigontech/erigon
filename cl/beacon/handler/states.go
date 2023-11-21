@@ -97,7 +97,6 @@ func (a *ApiHandler) getStateFork(r *http.Request) *beaconResponse {
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 	currentVersion := a.beaconChainCfg.GetForkVersionByVersion(stateVersion)
 	previousVersion := a.beaconChainCfg.GetForkVersionByVersion(previousVersion(stateVersion))
-	httpStatus = http.StatusAccepted
 
 	return newBeaconResponse(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
