@@ -86,8 +86,12 @@ var (
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
-const asserts = false
-const trace = false
+var (
+	asserts        = dbg.EnvBool("AGG_ASSERTS", false)
+	traceFileLife  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetLatest = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
+	traceGetAsOf   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+)
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
@@ -1209,7 +1213,7 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if d.filenameBase == AggTraceFileLife {
+	if d.filenameBase == traceFileLife {
 		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
@@ -1614,17 +1618,17 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//}
 			if dc.files[i].src.existence != nil {
 				if !dc.files[i].src.existence.ContainsHash(hi) {
-					if trace && dc.d.filenameBase == "accounts" {
+					if traceGetLatest == dc.d.filenameBase {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
 					}
 					continue
 				} else {
-					if trace && dc.d.filenameBase == "accounts" {
+					if traceGetLatest == dc.d.filenameBase {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
 					}
 				}
 			} else {
-				if trace && dc.d.filenameBase == "accounts" {
+				if traceGetLatest == dc.d.filenameBase {
 					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 				}
 			}
@@ -1639,13 +1643,13 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
-	if trace && dc.d.filenameBase == "accounts" {
+	if traceGetLatest == dc.d.filenameBase {
 		fmt.Printf("GetLatest(%s, %x) -> not found in files\n", dc.d.filenameBase, filekey)
 	}
 
@@ -1802,12 +1806,12 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		// if history returned marker of key creation
 		// domain must return nil
 		if len(v) == 0 {
-			if trace && dc.d.filenameBase == "accounts" {
+			if traceGetAsOf == dc.d.filenameBase {
 				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
 			}
 			return nil, nil
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetAsOf == dc.d.filenameBase {
 			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
 		}
 		return v, nil
@@ -1931,13 +1935,13 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
 		}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	} else {
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
 			//if err != nil {
 			//	panic(err)
