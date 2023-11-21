@@ -27,19 +27,22 @@ import (
 )
 
 var (
-	doMemstat         = EnvBool("NO_MEMSTAT", true)
-	writeMap          = EnvBool("WRITE_MAP", false)
-	noSync            = EnvBool("NO_SYNC", false)
-	mdbxReadahead     = EnvBool("MDBX_READAHEAD", false)
-	discardHistory    = EnvBool("DISCARD_HISTORY", false)
-	noPrune           = EnvBool("NO_PRUNE", false)
-	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
-	mdbxLockInRam     = EnvBool("MDBX_LOCK_IN_RAM", false)
+	doMemstat     = EnvBool("NO_MEMSTAT", true)
+	writeMap      = EnvBool("WRITE_MAP", false)
+	noSync        = EnvBool("NO_SYNC", false)
+	mdbxReadahead = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam = EnvBool("MDBX_LOCK_IN_RAM", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
+
+	//state v3
+	noPrune           = EnvBool("NO_PRUNE", false)
+	noMerge           = EnvBool("NO_MERGE", false)
+	discardHistory    = EnvBool("DISCARD_HISTORY", false)
+	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -48,13 +51,15 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 }
 
-func WriteMap() bool          { return writeMap }
-func NoSync() bool            { return noSync }
-func MdbxReadAhead() bool     { return mdbxReadahead }
+func WriteMap() bool      { return writeMap }
+func NoSync() bool        { return noSync }
+func MdbxReadAhead() bool { return mdbxReadahead }
+func MdbxLockInRam() bool { return mdbxLockInRam }
+
 func DiscardHistory() bool    { return discardHistory }
 func DiscardCommitment() bool { return discardCommitment }
 func NoPrune() bool           { return noPrune }
-func MdbxLockInRam() bool     { return mdbxLockInRam }
+func NoMerge() bool           { return noMerge }
 
 var (
 	dirtySace     uint64
