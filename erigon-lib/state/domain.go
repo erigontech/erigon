@@ -1640,6 +1640,9 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			return nil, false, err
 		}
 		if !found {
+			if traceGetLatest == dc.d.filenameBase {
+				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+			}
 			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
@@ -1650,7 +1653,7 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 		return v, true, nil
 	}
 	if traceGetLatest == dc.d.filenameBase {
-		fmt.Printf("GetLatest(%s, %x) -> not found in files\n", dc.d.filenameBase, filekey)
+		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dc.d.filenameBase, filekey, len(dc.files))
 	}
 
 	return nil, false, nil
