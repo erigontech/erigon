@@ -344,8 +344,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
-	if config.SilkwormPath != "" {
-		backend.silkworm, err = silkworm.New(config.SilkwormPath, config.Dirs.DataDir)
+	if config.SilkwormLibraryPath != "" {
+		backend.silkworm, err = silkworm.New(config.SilkwormLibraryPath, config.Dirs.DataDir)
 		if err != nil {
 			return nil, err
 		}
