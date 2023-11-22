@@ -220,7 +220,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
 				}
-
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
