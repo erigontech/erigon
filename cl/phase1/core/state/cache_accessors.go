@@ -185,7 +185,7 @@ func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]u
 
 func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
 	beaconConfig := b.BeaconConfig()
-	optimizedHashFunc := utils.OptimizedKeccak256NotThreadSafe()
+	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
@@ -215,7 +215,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		buf := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buf, i/32)
 		input := append(seed[:], buf...)
-		randomByte := uint64(utils.Keccak256(input)[i%32])
+		randomByte := uint64(utils.Sha256(input)[i%32])
 		// retrieve validator.
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
