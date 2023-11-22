@@ -180,7 +180,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
+	cfg.ClientConfig.PieceHashersPerTorrent = 16 * runtime.NumCPU()
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
