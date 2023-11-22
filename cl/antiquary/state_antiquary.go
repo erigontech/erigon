@@ -1,6 +1,7 @@
 package antiquary
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -22,6 +24,28 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 )
+
+func excludeDuplicatesIdentity() etl.LoadFunc {
+	var prevKey, prevValue []byte
+	prevValue = []byte{}
+	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(prevKey) == 0 {
+			prevKey = common.Copy(k)
+			prevValue = common.Copy(v)
+			return nil
+		}
+		if bytes.Equal(k, prevKey) {
+			prevValue = common.Copy(v)
+			return nil
+		}
+		if err := next(prevKey, prevKey, prevValue); err != nil {
+			return err
+		}
+		prevKey = common.Copy(k)
+		prevValue = common.Copy(v)
+		return nil
+	}
+}
 
 func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
@@ -103,25 +127,25 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// ValidatorBalance,
 	// RandaoMixes,
 	// Proposers,
-	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
-	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer slashed.Close()
-	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEligibilityEpoch.Close()
-	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEpoch.Close()
-	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer exitEpoch.Close()
-	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawableEpoch.Close()
-	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawalCredentials.Close()
-	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer balances.Close()
-	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
-	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
