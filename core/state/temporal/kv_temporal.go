@@ -191,6 +191,11 @@ type Tx struct {
 	resourcesToClose []kv.Closer
 }
 
+func (tx *Tx) ForceReopenAggCtx() {
+	tx.aggCtx.Close()
+	tx.aggCtx = tx.Agg().MakeContext()
+}
+
 func (tx *Tx) WarmupDB(force bool) error          { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error                 { return tx.MdbxTx.LockDBInRam() }
 func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
@@ -312,7 +317,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 		if err != nil {
 			panic(err)
 		}
-		if err := agg.OpenFolder(); err != nil {
+		if err := agg.OpenFolder(false); err != nil {
 			panic(err)
 		}
 

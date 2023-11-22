@@ -345,8 +345,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
-	if config.SilkwormPath != "" {
-		backend.silkworm, err = silkworm.New(config.SilkwormPath, config.Dirs.DataDir)
+	if config.SilkwormLibraryPath != "" {
+		backend.silkworm, err = silkworm.New(config.SilkwormLibraryPath, config.Dirs.DataDir)
 		if err != nil {
 			return nil, err
 		}
@@ -1241,7 +1241,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(false); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	return blockReader, blockWriter, allSnapshots, agg, nil

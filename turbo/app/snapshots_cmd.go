@@ -329,7 +329,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(false); err != nil {
 		return err
 	}
 	chainDB.View(ctx, func(tx kv.Tx) error {
@@ -484,7 +484,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(false)
 	if err != nil {
 		return err
 	}

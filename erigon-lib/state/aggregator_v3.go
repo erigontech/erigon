@@ -93,6 +93,8 @@ type AggregatorV3 struct {
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
 	logger       log.Logger
+
+	ctxAutoIncrement atomic.Uint64
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -219,33 +221,20 @@ func (a *AggregatorV3) DisableFsync() {
 	a.tracesTo.DisableFsync()
 }
 
-func (a *AggregatorV3) OpenFolder() error {
+func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
-	var err error
-	if err = a.accounts.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.storage.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.code.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.commitment.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.logAddrs.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.logTopics.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.tracesFrom.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	if err = a.tracesTo.OpenFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+	eg := &errgroup.Group{}
+	eg.Go(func() error { return a.accounts.OpenFolder(readonly) })
+	eg.Go(func() error { return a.storage.OpenFolder(readonly) })
+	eg.Go(func() error { return a.code.OpenFolder(readonly) })
+	eg.Go(func() error { return a.commitment.OpenFolder(readonly) })
+	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
+	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
+	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
+	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	a.recalcMaxTxNum()
 	mx := a.minimaxTxNumInFiles.Load()
@@ -253,7 +242,32 @@ func (a *AggregatorV3) OpenFolder() error {
 		mx--
 	}
 	a.aggregatedStep.Store(mx / a.aggregationStep)
+	return nil
+}
 
+func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
+	log.Warn("[dbg] OpenList", "l", files)
+
+	a.filesMutationLock.Lock()
+	defer a.filesMutationLock.Unlock()
+	eg := &errgroup.Group{}
+	eg.Go(func() error { return a.accounts.OpenFolder(readonly) })
+	eg.Go(func() error { return a.storage.OpenFolder(readonly) })
+	eg.Go(func() error { return a.code.OpenFolder(readonly) })
+	eg.Go(func() error { return a.commitment.OpenFolder(readonly) })
+	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
+	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
+	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
+	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+	a.recalcMaxTxNum()
+	mx := a.minimaxTxNumInFiles.Load()
+	if mx > 0 {
+		mx--
+	}
+	a.aggregatedStep.Store(mx / a.aggregationStep)
 	return nil
 }
 
@@ -335,7 +349,6 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 		}
 		return err
 	}
-	a.OpenFolder()
 	return nil
 }
 
@@ -391,7 +404,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(); err != nil {
+		if err := a.OpenFolder(false); err != nil {
 			return err
 		}
 	}
@@ -1273,6 +1286,9 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		}
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
+		if dbg.NoMerge() {
+			return
+		}
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
 			close(fin)
 			return
@@ -1376,7 +1392,8 @@ type AggregatorV3Context struct {
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
 
-	id uint64 // set only if TRACE_AGG=true
+	id      uint64 // auto-increment id of ctx for logs
+	_leakID uint64 // set only if TRACE_AGG=true
 }
 
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
@@ -1391,11 +1408,13 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 		tracesFrom: a.tracesFrom.MakeContext(),
 		tracesTo:   a.tracesTo.MakeContext(),
 
-		id: a.leakDetector.Add(),
+		id:      a.ctxAutoIncrement.Add(1),
+		_leakID: a.leakDetector.Add(),
 	}
 
 	return ac
 }
+func (ac *AggregatorV3Context) ViewID() uint64 { return ac.id }
 
 // --- Domain part START ---
 
@@ -1467,7 +1486,7 @@ func (ac *AggregatorV3Context) Close() {
 	if ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	ac.a.leakDetector.Del(ac.id)
+	ac.a.leakDetector.Del(ac._leakID)
 	ac.a = nil
 
 	ac.account.Close()

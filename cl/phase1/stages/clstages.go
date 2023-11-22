@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -44,6 +45,7 @@ type Cfg struct {
 	dbConfig        db_config.DatabaseConfiguration
 	sn              *freezeblocks.CaplinSnapshots
 	antiquary       *antiquary.Antiquary
+	syncedData      *synced_data.SyncedDataManager
 
 	hasDownloaded, backfilling bool
 }
@@ -72,6 +74,7 @@ func ClStagesCfg(
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 	backfilling bool,
+	syncedData *synced_data.SyncedDataManager,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -88,6 +91,7 @@ func ClStagesCfg(
 		dbConfig:        dbConfig,
 		sn:              sn,
 		backfilling:     backfilling,
+		syncedData:      syncedData,
 	}
 }
 
@@ -465,6 +469,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
 						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
@@ -485,10 +490,13 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
-					// Increment validator set
 
+					// Increment validator set
 					headState, err := cfg.forkChoice.GetFullState(headRoot, false)
 					if err != nil {
+						return err
+					}
+					if err := cfg.syncedData.OnHeadState(headState); err != nil {
 						return err
 					}
 					start := time.Now()

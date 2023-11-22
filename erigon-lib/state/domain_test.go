@@ -709,7 +709,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	defer dc.Close()
 	txNum := dc.hc.ic.txNum
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.OpenFolder())
+	require.NoError(t, d.OpenFolder(false))
 
 	dc.SetTxNum(txNum)
 	// Check the history

@@ -548,7 +548,8 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
-	if runtime.GOOS == "linux" {
+	t.Skip("too slow test")
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()

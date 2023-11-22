@@ -56,7 +56,7 @@ func dbAggregatorOnDatadir(t *testing.T, ddir string) (kv.RwDB, *state.Aggregato
 	agg, err := state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(false)
 	agg.DisableFsync()
 	require.NoError(t, err)
 	return db, agg

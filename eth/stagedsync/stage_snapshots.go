@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -131,16 +132,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	{
-		ac := cfg.agg.MakeContext()
-		defer ac.Close()
-		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress
-		})
-		ac.Close()
-	}
-
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.dbEventNotifier, &cfg.chainConfig); err != nil {
 		return err
 	}
@@ -162,6 +153,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if cfg.dbEventNotifier != nil {
 			cfg.dbEventNotifier.OnNewSnapshot()
 		}
+
+		if casted, ok := tx.(*temporal.Tx); ok {
+			casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+			log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", s.LogPrefix(), tx.ViewID(), tx.(*temporal.Tx).AggCtx().ViewID()))
+		}
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -175,6 +171,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
+	tx.(state.HasAggCtx).AggCtx().LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress
+	})
+
 	return nil
 }
 

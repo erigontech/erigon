@@ -188,7 +188,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string) error {
+func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 	{
 		if ii.withLocalityIndex {
 			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
@@ -207,17 +207,18 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("InvertedIndex.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
 	}
+	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder() error {
+func (ii *InvertedIndex) OpenFolder(readonly bool) error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles)
+	return ii.OpenList(idxFiles, readonly)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -637,7 +638,6 @@ func (ii *invertedIndexWAL) close() {
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
-var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexWAL {
 	w := &invertedIndexWAL{ic: ic,
@@ -693,7 +693,7 @@ func (ic *InvertedIndexContext) Close() {
 		refCnt := files[i].src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if ic.ii.filenameBase == AggTraceFileLife {
+			if ic.ii.filenameBase == traceFileLife {
 				ic.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
 			}
 			files[i].src.closeFilesAndRemove()
@@ -1637,7 +1637,7 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
 	fromStep, toStep := ic.minWarmStep(), step+1
 	defer func() {
-		if ic.ii.filenameBase == AggTraceFileLife {
+		if ic.ii.filenameBase == traceFileLife {
 			ii.logger.Warn(fmt.Sprintf("[agg] BuildWarmLocality done: %s.%d-%d", ii.filenameBase, fromStep, toStep))
 		}
 	}()

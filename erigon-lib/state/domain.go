@@ -33,6 +33,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -85,8 +86,12 @@ var (
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
-const asserts = false
-const trace = false
+var (
+	asserts        = dbg.EnvBool("AGG_ASSERTS", false)
+	traceFileLife  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetLatest = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
+	traceGetAsOf   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+)
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
@@ -437,23 +442,23 @@ func (dc *DomainContext) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
-	if err := d.History.OpenList(idxFiles, histFiles); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bool) error {
+	if err := d.History.OpenList(idxFiles, histFiles, readonly); err != nil {
 		return err
 	}
-	if err := d.openList(domainFiles); err != nil {
-		return err
+	if err := d.openList(domainFiles, readonly); err != nil {
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
 	return nil
 }
 
-func (d *Domain) openList(names []string) error {
+func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.garbageFiles = d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
-	d.protectFromHistoryFilesAheadOfDomainFiles()
+	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcRoFiles()
 	return nil
 }
@@ -461,16 +466,16 @@ func (d *Domain) openList(names []string) error {
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
-func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
-	d.removeFilesAfterStep(d.endTxNumMinimax() / d.aggregationStep)
+func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
+	d.removeFilesAfterStep(d.endTxNumMinimax()/d.aggregationStep, readonly)
 }
 
-func (d *Domain) OpenFolder() error {
+func (d *Domain) OpenFolder(readonly bool) error {
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
-		return err
+		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
 	}
-	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+	if err := d.OpenList(idx, histFiles, domainFiles, readonly); err != nil {
 		return err
 	}
 	return nil
@@ -484,7 +489,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
+func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 	var toDelete []*filesItem
 	d.files.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
@@ -493,9 +498,11 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 		return true
 	})
 	for _, item := range toDelete {
-		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
 		d.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 
 	toDelete = toDelete[:0]
@@ -508,7 +515,9 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 	for _, item := range toDelete {
 		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 
 	toDelete = toDelete[:0]
@@ -521,7 +530,9 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64) {
 	for _, item := range toDelete {
 		log.Debug(fmt.Sprintf("[snapshots] delete %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
 		d.History.InvertedIndex.files.Delete(item)
-		item.closeFilesAndRemove()
+		if !readonly {
+			item.closeFilesAndRemove()
+		}
 	}
 }
 
@@ -831,7 +842,7 @@ func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := d.values.Load(tx, d.dc.d.valsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := d.values.Load(tx, d.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
@@ -1202,7 +1213,7 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if d.filenameBase == AggTraceFileLife {
+	if d.filenameBase == traceFileLife {
 		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
@@ -1607,17 +1618,17 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			//}
 			if dc.files[i].src.existence != nil {
 				if !dc.files[i].src.existence.ContainsHash(hi) {
-					if trace && dc.d.filenameBase == "accounts" {
+					if traceGetLatest == dc.d.filenameBase {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
 					}
 					continue
 				} else {
-					if trace && dc.d.filenameBase == "accounts" {
+					if traceGetLatest == dc.d.filenameBase {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
 					}
 				}
 			} else {
-				if trace && dc.d.filenameBase == "accounts" {
+				if traceGetLatest == dc.d.filenameBase {
 					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 				}
 			}
@@ -1629,17 +1640,20 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			return nil, false, err
 		}
 		if !found {
+			if traceGetLatest == dc.d.filenameBase {
+				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
+			}
 			//	LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
-	if trace && dc.d.filenameBase == "accounts" {
-		fmt.Printf("GetLatest(%s, %x) -> not found in files\n", dc.d.filenameBase, filekey)
+	if traceGetLatest == dc.d.filenameBase {
+		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dc.d.filenameBase, filekey, len(dc.files))
 	}
 
 	return nil, false, nil
@@ -1795,12 +1809,12 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		// if history returned marker of key creation
 		// domain must return nil
 		if len(v) == 0 {
-			if trace && dc.d.filenameBase == "accounts" {
+			if traceGetAsOf == dc.d.filenameBase {
 				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dc.d.filenameBase, key, txNum)
 			}
 			return nil, nil
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetAsOf == dc.d.filenameBase {
 			fmt.Printf("GetAsOf(%s, %x, %d) -> found in history\n", dc.d.filenameBase, key, txNum)
 		}
 		return v, nil
@@ -1924,13 +1938,13 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
 		}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	} else {
-		if trace && dc.d.filenameBase == "accounts" {
+		if traceGetLatest == dc.d.filenameBase {
 			//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
 			//if err != nil {
 			//	panic(err)

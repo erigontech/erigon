@@ -10,7 +10,6 @@ require (
 )
 
 require (
-	github.com/FastFilter/xorfilter v0.1.4
 	github.com/RoaringBitmap/roaring v1.6.0
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/dht/v2 v2.20.0
@@ -33,7 +32,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231108094649-548d27768f8e
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231120041510-4025fe91a2f7
 	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.1.0
@@ -89,7 +88,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.7.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
-	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cilium/ebpf v0.9.1 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
