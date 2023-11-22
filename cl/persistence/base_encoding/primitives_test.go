@@ -11,4 +11,7 @@ func Test64(t *testing.T) {
 
 	out := Encode64ToBytes4(number)
 	require.Equal(t, Decode64FromBytes4(out), number)
+
+	out = EncodeCompactUint64(number)
+	require.Equal(t, DecodeCompactUint64(out), number)
 }

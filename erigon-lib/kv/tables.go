@@ -460,8 +460,20 @@ const (
 	// Period (one every 27 hours) => LightClientUpdate
 	LightClientUpdates = "LightClientUpdates"
 	// Beacon historical data
-	// ValidatorIndex => [Public Key]
-	ValidatorPublicKeys = "ValidatorPublickeys"
+	// ValidatorIndex => [Field]
+	ValidatorPublicKeys                 = "ValidatorPublickeys"
+	ValidatorEffectiveBalance           = "ValidatorEffectiveBalance"
+	ValidatorSlashed                    = "ValidatorSlashed"
+	ValidatorActivationEligibilityEpoch = "ValidatorActivationEligibilityEpoch"
+	ValidatorActivationEpoch            = "ValidatorActivationEpoch"
+	ValidatorExitEpoch                  = "ValidatorExitEpoch"
+	ValidatorWithdrawableEpoch          = "ValidatorWithdrawableEpoch"
+	ValidatorWithdrawalCredentials      = "ValidatorWithdrawalCredentials"
+	ValidatorBalance                    = "ValidatorBalance"
+
+	// External data
+	RandaoMixes = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
+	Proposers   = "BlockProposers" // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 )
@@ -625,7 +637,19 @@ var ChaindataTables = []string{
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	// State Reconstitution
 	ValidatorPublicKeys,
+	ValidatorEffectiveBalance,
+	ValidatorSlashed,
+	ValidatorActivationEligibilityEpoch,
+	ValidatorActivationEpoch,
+	ValidatorExitEpoch,
+	ValidatorWithdrawableEpoch,
+	ValidatorWithdrawalCredentials,
+	ValidatorBalance,
+	// Other stuff (related to state reconstitution)
+	RandaoMixes,
+	Proposers,
 	StatesProcessingProgress,
 }
 

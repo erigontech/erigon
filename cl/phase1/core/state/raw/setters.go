@@ -13,6 +13,10 @@ func (b *BeaconState) SetVersion(version clparams.StateVersion) {
 
 func (b *BeaconState) SetSlot(slot uint64) {
 	b.slot = slot
+	if b.events.OnEpochBoundary != nil && b.slot%b.beaconConfig.SlotsPerEpoch == 0 {
+		b.events.OnEpochBoundary(b.slot / b.beaconConfig.SlotsPerEpoch)
+	}
+
 	b.markLeaf(SlotLeafIndex)
 }
 

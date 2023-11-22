@@ -2,14 +2,23 @@ package antiquary
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -83,6 +92,104 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 	}
+	// Setup ETL collectors for:
+	// ValidatorEffectiveBalance,
+	// ValidatorSlashed,
+	// ValidatorActivationEligibilityEpoch,
+	// ValidatorActivationEpoch,
+	// ValidatorExitEpoch,
+	// ValidatorWithdrawableEpoch,
+	// ValidatorWithdrawalCredentials,
+	// ValidatorBalance,
+	// RandaoMixes,
+	// Proposers,
+	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer effectiveBalance.Close()
+	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer slashed.Close()
+	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer activationEligibilityEpoch.Close()
+	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer activationEpoch.Close()
+	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer exitEpoch.Close()
+	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer withdrawableEpoch.Close()
+	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer withdrawalCredentials.Close()
+	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer balances.Close()
+	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer randaoMixes.Close()
+	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer proposers.Close()
+
+	// Setup state events handlers
+	s.currentState.SetEvents(raw.Events{
+		OnRandaoMixChange: func(index int, mix [32]byte) error {
+			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), mix[:])
+		},
+		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
+			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
+				return err
+			}
+			slashedVal := []byte{0}
+			if v.Slashed() {
+				slashedVal = []byte{1}
+			}
+			if err := slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), slashedVal); err != nil {
+				return err
+			}
+			if err := activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
+				return err
+			}
+			if err := activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
+				return err
+			}
+			if err := exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
+				return err
+			}
+			if err := withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
+				return err
+			}
+			w := v.WithdrawalCredentials()
+			if err := withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), w[:]); err != nil {
+				return err
+			}
+			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+		},
+		OnNewValidatorBalance: func(index int, balance uint64) error {
+			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+		},
+		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
+			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+		},
+		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
+			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+		},
+		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
+			return exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+		},
+		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
+			return withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+		},
+		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
+			slashedVal := []byte{0}
+			if newSlashed {
+				slashedVal = []byte{1}
+			}
+			return slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), slashedVal)
+		},
+		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
+			return activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+		},
+		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
+			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), wc)
+		},
+		OnEpochBoundary: func(epoch uint64) error {
+			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
+		},
+	})
 	log.Info("Starting state processing", "from", s.currentState.Slot(), "to", to)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
@@ -118,9 +225,85 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer rwTx.Rollback()
+	// Now load.
+	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := slashed.Load(rwTx, kv.ValidatorSlashed, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := activationEligibilityEpoch.Load(rwTx, kv.ValidatorActivationEligibilityEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := activationEpoch.Load(rwTx, kv.ValidatorActivationEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := exitEpoch.Load(rwTx, kv.ValidatorExitEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := withdrawableEpoch.Load(rwTx, kv.ValidatorWithdrawableEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := withdrawalCredentials.Load(rwTx, kv.ValidatorWithdrawalCredentials, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := balances.Load(rwTx, kv.ValidatorBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := proposers.Load(rwTx, kv.Proposers, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
 	log.Info("Restarting Caplin")
 	return rwTx.Commit()
+}
+
+func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
+	epoch := state.Epoch(s)
+	var wg sync.WaitGroup
+	list := make([]byte, s.BeaconConfig().SlotsPerEpoch*4)
+	for slot := s.Slot(); slot < s.Slot()+s.BeaconConfig().SlotsPerEpoch; slot++ {
+		var proposerIndex uint64
+		// Lets do proposer index computation
+		mixPosition := (epoch + s.BeaconConfig().EpochsPerHistoricalVector - s.BeaconConfig().MinSeedLookahead - 1) %
+			s.BeaconConfig().EpochsPerHistoricalVector
+		// Input for the seed hash.
+		mix := s.GetRandaoMix(int(mixPosition))
+		input := shuffling.GetSeed(s.BeaconConfig(), mix, epoch, s.BeaconConfig().DomainBeaconProposer)
+		slotByteArray := make([]byte, 8)
+		binary.LittleEndian.PutUint64(slotByteArray, slot)
+
+		// Add slot to the end of the input.
+		inputWithSlot := append(input[:], slotByteArray...)
+		hash := sha256.New()
+
+		// Calculate the hash.
+		hash.Write(inputWithSlot)
+		seed := hash.Sum(nil)
+
+		indices := s.GetActiveValidatorsIndices(epoch)
+
+		// Write the seed to an array.
+		seedArray := [32]byte{}
+		copy(seedArray[:], seed)
+		wg.Add(1)
+
+		// Do it in parallel
+		go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
+			defer wg.Done()
+			var err error
+			proposerIndex, err = shuffling.ComputeProposerIndex(s.BeaconState, indices, seedArray)
+			if err != nil {
+				panic(err)
+			}
+			binary.BigEndian.PutUint32(list[i*4:(i+1)*4], uint32(proposerIndex))
+		}(slot-s.Slot(), slot, indices, seedArray)
+	}
+	wg.Wait()
+	return list
 }

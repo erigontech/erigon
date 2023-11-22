@@ -5,7 +5,7 @@ import (
 )
 
 type Events struct {
-	OnRandaoMixChange                        func(index int, mix [32]byte)
+	OnRandaoMixChange                        func(index int, mix [32]byte) error
 	OnNewValidator                           func(index int, v solid.Validator, balance uint64) error
 	OnNewValidatorBalance                    func(index int, balance uint64) error
 	OnNewValidatorEffectiveBalance           func(index int, balance uint64) error
@@ -15,4 +15,5 @@ type Events struct {
 	OnNewValidatorSlashed                    func(index int, slashed bool) error
 	OnNewValidatorActivationEligibilityEpoch func(index int, epoch uint64) error
 	OnNewValidatorWithdrawalCredentials      func(index int, wc []byte) error
+	OnEpochBoundary                          func(epoch uint64) error
 }
