@@ -846,8 +846,8 @@ var (
 		Usage: "Comma separated list of support session ids to connect to",
 	}
 
-	SilkwormPathFlag = cli.StringFlag{
-		Name:  "silkworm.path",
+	SilkwormLibraryPathFlag = cli.StringFlag{
+		Name:  "silkworm.libpath",
 		Usage: "Path to the Silkworm library",
 		Value: "",
 	}
@@ -907,6 +907,16 @@ var (
 		Name:  "rpc.slow.log.threshold",
 		Usage: "Threshold to log slow RPC requests",
 		Value: 100,
+	}
+	CaplinBackfillingFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling",
+		Usage: "sets whether backfilling is enabled for caplin",
+		Value: true,
+	}
+	CaplinArchiveFlag = cli.BoolFlag{
+		Name:  "caplin.archive",
+		Usage: "enables archival node in caplin",
+		Value: false,
 	}
 )
 
@@ -1537,8 +1547,13 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
 }
 
+func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name)
+	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+}
+
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
+	cfg.SilkwormLibraryPath = ctx.String(SilkwormLibraryPathFlag.Name)
 	if ctx.IsSet(SilkwormExecutionFlag.Name) {
 		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	}
@@ -1655,6 +1670,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
 	setBeaconAPI(ctx, cfg)
+	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)

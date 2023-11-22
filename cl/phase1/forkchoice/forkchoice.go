@@ -47,8 +47,9 @@ type ForkChoiceStore struct {
 	latestMessages   map[uint64]*LatestMessage
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
-	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	mu        sync.Mutex
+	eth2Roots             *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
+	preverifiedValidators *lru.Cache[libcommon.Hash, uint64]
+	mu                    sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 	// freezer
@@ -92,6 +93,11 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
+	preverifiedValidators, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+	preverifiedValidators.Add(anchorRoot, uint64(anchorState.ValidatorLength()))
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -112,6 +118,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		genesisTime:                   anchorState.GenesisTime(),
 		beaconCfg:                     anchorState.BeaconConfig(),
 		childrens:                     make(map[libcommon.Hash]childrens),
+		preverifiedValidators:         preverifiedValidators,
 	}, nil
 }
 
@@ -209,8 +216,16 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 	return f.forkGraph.AnchorSlot()
 }
 
-func (f *ForkChoiceStore) GetFullState(blockRoot libcommon.Hash) (*state2.CachingBeaconState, error) {
+func (f *ForkChoiceStore) GetFullState(blockRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.forkGraph.GetState(blockRoot, true)
+	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+}
+
+// Highest seen returns highest seen slot
+func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedValidators.Get(blockRoot); ok {
+		return ret
+	}
+	return 0
 }

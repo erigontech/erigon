@@ -259,6 +259,9 @@ func BorHeimdallForward(
 			if err != nil {
 				return err
 			}
+			if header == nil {
+				return fmt.Errorf("["+s.LogPrefix()+"] header not found: %d", blockNum)
+			}
 
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
@@ -269,7 +272,7 @@ func BorHeimdallForward(
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
-					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
 		}
@@ -285,7 +288,7 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger); err != nil {
+		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 			return fmt.Errorf("persistValidatorSets: %w", err)
 		}
 		if !mine && header != nil {
@@ -494,7 +497,8 @@ func PersistValidatorSets(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
-	logger log.Logger) error {
+	logger log.Logger,
+	logPrefix string) error {
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -556,7 +560,7 @@ func PersistValidatorSets(
 
 		select {
 		case <-logEvery.C:
-			logger.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", blockNum)
+			logger.Info(fmt.Sprintf("[%s] Gathering headers for validator proposer prorities (backwards)", logPrefix), "blockNum", blockNum)
 		default:
 		}
 	}
@@ -582,7 +586,7 @@ func PersistValidatorSets(
 			if err := snap.Store(snapDb); err != nil {
 				return fmt.Errorf("snap.Store (0): %w", err)
 			}
-			logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
+			logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
 			g := errgroup.Group{}
 			g.SetLimit(estimate.AlmostAllCPUs())
 			defer g.Wait()
@@ -597,9 +601,15 @@ func PersistValidatorSets(
 					// to speedup: recover signer in background goroutines and save in `sigcache`
 					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 					g.Go(func() error {
+						if header == nil {
+							return nil
+						}
 						_, _ = bor.Ecrecover(header, signatures, config)
 						return nil
 					})
+				}
+				if header == nil {
+					log.Debug(fmt.Sprintf("[%s] PersistValidatorSets nil header", logPrefix), "blockNum", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
@@ -611,7 +621,7 @@ func PersistValidatorSets(
 				}
 				select {
 				case <-logEvery.C:
-					logger.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+					logger.Info(fmt.Sprintf("[%s] Computing validator proposer prorities (forward)", logPrefix), "blockNum", i)
 				default:
 				}
 			}
@@ -657,7 +667,7 @@ func PersistValidatorSets(
 			return fmt.Errorf("snap.Store: %w", err)
 		}
 
-		logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return nil
