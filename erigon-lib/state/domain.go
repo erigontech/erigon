@@ -218,6 +218,7 @@ func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer ff.Close()
 		stat, err := ff.Stat()
 		if err != nil {
 			return nil, err
