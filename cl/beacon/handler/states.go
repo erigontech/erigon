@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -69,193 +68,112 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (a *ApiHandler) getStateFork(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx        kv.Tx
-		blockId   *segmentID
-		root      libcommon.Hash
-		blkHeader *cltypes.SignedBeaconBlockHeader
-	)
-
+func (a *ApiHandler) getStateFork(r *http.Request) *beaconResponse {
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = stateIdFromRequest(r)
+	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err = a.rootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
-	blkHeader, _, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
-	if blkHeader == nil {
-		err = fmt.Errorf("could not read block header: %x", root)
-		httpStatus = http.StatusNotFound
-		return
+	if slot == nil {
+		return newApiErrorResponse(http.StatusNotFound, err.Error())
 	}
-	slot := blkHeader.Header.Slot
-
-	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 	currentVersion := a.beaconChainCfg.GetForkVersionByVersion(stateVersion)
 	previousVersion := a.beaconChainCfg.GetForkVersionByVersion(previousVersion(stateVersion))
 
-	data = &cltypes.Fork{
+	return newBeaconResponse(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           epoch,
-	}
-	httpStatus = http.StatusAccepted
-	return
+	})
 }
 
-func (a *ApiHandler) getStateRoot(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx        kv.Tx
-		blockId   *segmentID
-		root      libcommon.Hash
-		blkHeader *cltypes.SignedBeaconBlockHeader
-		canonical bool
-	)
-
+func (a *ApiHandler) getStateRoot(r *http.Request) *beaconResponse {
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = stateIdFromRequest(r)
+	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err = a.rootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
-	blkHeader, canonical, err = beacon_indicies.ReadSignedHeaderByStateRoot(ctx, tx, root)
+	stateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, root)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
-	if blkHeader == nil {
-		err = fmt.Errorf("could not read block header: %x", root)
-		httpStatus = http.StatusNotFound
-		return
+	if stateRoot == (libcommon.Hash{}) {
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
 	}
 
-	data = rootResponse{Root: blkHeader.Header.Root}
-	slot := blkHeader.Header.Slot
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+	if err != nil {
+		return newCriticalErrorResponse(err)
+	}
+	if slot == nil {
+		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
+	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return newCriticalErrorResponse(err)
+	}
 
-	finalized = new(bool)
-	*finalized = canonical && slot <= a.forkchoiceStore.FinalizedSlot()
-	httpStatus = http.StatusAccepted
-	return
+	return newBeaconResponse(&rootResponse{Root: stateRoot}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
-func (a *ApiHandler) getFullState(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx      kv.Tx
-		blockId *segmentID
-		root    libcommon.Hash
-	)
-
+func (a *ApiHandler) getFullState(r *http.Request) *beaconResponse {
 	ctx := r.Context()
 
-	tx, err = a.indiciesDB.BeginRo(ctx)
+	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 	defer tx.Rollback()
 
-	blockId, err = stateIdFromRequest(r)
+	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err = a.rootFromStateId(ctx, tx, blockId)
+
+	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return
+		return newApiErrorResponse(httpStatus, err.Error())
 	}
 
 	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
 	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
+		return newCriticalErrorResponse(err)
 	}
 
-	data, err = a.forkchoiceStore.GetFullState(blockRoot, true)
+	state, err := a.forkchoiceStore.GetFullState(blockRoot, true)
 	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
+		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}
 
-	finalized = new(bool)
-	*finalized = false
-	httpStatus = http.StatusAccepted
-	return
-}
-
-func (a *ApiHandler) getValidators(r *http.Request) (data any, finalized *bool, version *clparams.StateVersion, httpStatus int, err error) {
-	var (
-		tx      kv.Tx
-		blockId *segmentID
-		root    libcommon.Hash
-	)
-
-	ctx := r.Context()
-
-	tx, err = a.indiciesDB.BeginRo(ctx)
-	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
-	}
-	defer tx.Rollback()
-
-	blockId, err = stateIdFromRequest(r)
-	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
-	}
-	root, httpStatus, err = a.rootFromStateId(ctx, tx, blockId)
-	if err != nil {
-		return
-	}
-
-	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
-	if err != nil {
-		httpStatus = http.StatusInternalServerError
-		return
-	}
-
-	var state *state.CachingBeaconState
-	state, err = a.forkchoiceStore.GetFullState(blockRoot, true)
-	if err != nil {
-		httpStatus = http.StatusBadRequest
-		return
-	}
-
-	data = state.Validators()
-	finalized = new(bool)
-	*finalized = false
-	httpStatus = http.StatusAccepted
-	return
+	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version())
 }

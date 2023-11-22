@@ -103,7 +103,7 @@ var Defaults = Config{
 		Produce:    true,
 	},
 
-	// applies if SilkwormPath is set
+	// applies if SilkwormLibraryPath is set
 	SilkwormExecution: true,
 }
 
@@ -254,10 +254,10 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormPath      string
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormLibraryPath string
+	SilkwormExecution   bool
+	SilkwormRpcDaemon   bool
+	SilkwormSentry      bool
 
 	DisableTxPoolGossip bool
 }
