@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
@@ -32,6 +33,9 @@ type Antiquary struct {
 	backfilled *atomic.Bool
 	cfg        *clparams.BeaconChainConfig
 	states     bool
+
+	// set to nil
+	currentState *state.CachingBeaconState
 }
 
 func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool) *Antiquary {
@@ -98,15 +102,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
-	if a.states {
-		statesAntiquary := stateAntiquary{
-			db:              a.mainDB,
-			log:             a.logger,
-			cfg:             a.cfg,
-			snapshotsReader: a.snReader,
-		}
-		go statesAntiquary.loop(a.ctx)
-	}
+
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
@@ -152,6 +148,10 @@ func (a *Antiquary) Loop() error {
 		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
 			return err
 		}
+	}
+
+	if a.states {
+		go a.loopStates(a.ctx)
 	}
 
 	// write the indicies

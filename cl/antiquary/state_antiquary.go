@@ -10,26 +10,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 )
 
-type stateAntiquary struct {
-	db              kv.RwDB
-	log             log.Logger
-	currentState    *state.CachingBeaconState // this starts at nil and is updated by the state processor.
-	cfg             *clparams.BeaconChainConfig
-	snapshotsReader freezeblocks.BeaconSnapshotReader
-}
-
-func (s *stateAntiquary) loop(ctx context.Context) {
+func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(3 * time.Second)
 	defer reqRetryTimer.Stop()
 	if !initial_state.IsGenesisStateSupported(clparams.NetworkType(s.cfg.DepositNetworkID)) {
-		s.log.Warn("Genesis state is not supported for this network, no historical states data will be available")
+		s.logger.Warn("Genesis state is not supported for this network, no historical states data will be available")
 		return
 	}
 
@@ -37,17 +27,20 @@ func (s *stateAntiquary) loop(ctx context.Context) {
 		select {
 		// Check if we are behind finalized
 		case <-reqRetryTimer.C:
+			if !s.backfilled.Load() {
+				continue
+			}
 			// Check if we are behind finalized
 			progress, finalized, err := s.readHistoricalProcessingProgress(ctx)
 			if err != nil {
-				s.log.Error("Failed to read historical processing progress", "err", err)
+				s.logger.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
 			if progress >= finalized {
 				continue
 			}
 			if err := s.incrementBeaconState(ctx, finalized); err != nil {
-				s.log.Error("Failed to increment beacon state", "err", err)
+				s.logger.Error("Failed to increment beacon state", "err", err)
 				return
 			}
 
@@ -57,9 +50,9 @@ func (s *stateAntiquary) loop(ctx context.Context) {
 	}
 }
 
-func (s *stateAntiquary) readHistoricalProcessingProgress(ctx context.Context) (progress, finalized uint64, err error) {
+func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progress, finalized uint64, err error) {
 	var tx kv.Tx
-	tx, err = s.db.BeginRo(ctx)
+	tx, err = s.mainDB.BeginRo(ctx)
 	if err != nil {
 		return
 	}
@@ -76,9 +69,9 @@ func (s *stateAntiquary) readHistoricalProcessingProgress(ctx context.Context) (
 	return
 }
 
-func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) error {
+func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
-	tx, err := s.db.BeginRo(ctx)
+	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -97,7 +90,7 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 	prevSlot := s.currentState.Slot()
 
 	for slot := s.currentState.Slot() + 1; slot < to; slot++ {
-		block, err := s.snapshotsReader.ReadBlockBySlot(ctx, tx, slot)
+		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
 			return err
 		}
@@ -111,7 +104,7 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 		}
 		select {
 		case <-progressTimer.C:
-			log.Info("State processing progress", "slot", slot, "blk/sec", fmt.Sprint("%.2f", float64(slot-prevSlot)/60))
+			log.Info("State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
 			prevSlot = slot
 		default:
 		}
@@ -120,7 +113,7 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 	tx.Rollback()
 	log.Info("Stopping Caplin to load states")
 
-	rwTx, err := s.db.BeginRw(ctx)
+	rwTx, err := s.mainDB.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
