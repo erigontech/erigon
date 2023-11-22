@@ -54,3 +54,18 @@ func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	copy(ret[:], pks)
 	return ret, err
 }
+
+func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
+	progressByytes, err := tx.GetOne(kv.StatesProcessingProgress, kv.StatesProcessingKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(progressByytes) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64FromBytes4(progressByytes), nil
+}
+
+func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
+	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
+}

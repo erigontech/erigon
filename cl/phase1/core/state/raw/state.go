@@ -60,6 +60,7 @@ type BeaconState struct {
 	// cl version
 	version      clparams.StateVersion // State version
 	beaconConfig *clparams.BeaconChainConfig
+	events       Events
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
@@ -150,4 +151,8 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 // Get validators field
 func (b *BeaconState) Validators() *solid.ValidatorSet {
 	return b.validators
+}
+
+func (b *BeaconState) SetEvents(events Events) {
+	b.events = events
 }

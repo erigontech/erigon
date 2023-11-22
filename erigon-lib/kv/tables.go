@@ -462,6 +462,8 @@ const (
 	// Beacon historical data
 	// ValidatorIndex => [Public Key]
 	ValidatorPublicKeys = "ValidatorPublickeys"
+
+	StatesProcessingProgress = "StatesProcessingProgress"
 )
 
 // Keys
@@ -494,6 +496,8 @@ var (
 	LightClientStore            = []byte("LightClientStore")
 	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
+
+	StatesProcessingKey = []byte("StatesProcessing")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -622,6 +626,7 @@ var ChaindataTables = []string{
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
 	ValidatorPublicKeys,
+	StatesProcessingProgress,
 }
 
 const (
