@@ -998,11 +998,13 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		if c.blockReader != nil {
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				c.logger.Error("[bor] Error while committing span", "err", err)
+				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
+				c.logger.Error("[bor] committing span", "err", err)
 				return nil, types.Receipts{}, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
+				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
@@ -1062,12 +1064,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		if c.blockReader != nil {
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				c.logger.Error("[bor] Error while committing span", "err", err)
+				err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
+				c.logger.Error("[bor] committing span", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
-				c.logger.Error("[bor] Error while committing states", "err", err)
+				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
+				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
