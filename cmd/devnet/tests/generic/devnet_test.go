@@ -19,6 +19,10 @@ import (
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
+
 	t.Run("InitSubscriptions", func(t *testing.T) {
 		services.InitSubscriptions(ctx, []requests.SubMethod{requests.Methods.ETHNewHeads})
 	})
@@ -40,9 +44,6 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 }
 
 func TestDynamicTxNode0(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
 	runCtx, err := tests.ContextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0).WithCurrentNode(0))
