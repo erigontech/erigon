@@ -70,11 +70,21 @@ type handler struct {
 	serverSubs          map[ID]*Subscription
 	maxBatchConcurrency uint
 	traceRequests       bool
+
+	// metrics
+	diagMessages        map[string]diagMsg
+	rpcSlowLogThreshold uint
+	rpcSlowLog          bool
 }
 
 type callProc struct {
 	ctx       context.Context
 	notifiers []*Notifier
+}
+
+type diagMsg struct {
+	Method string
+	Time   time.Time
 }
 
 func HandleError(err error, stream *jsoniter.Stream) error {
@@ -109,9 +119,10 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 	return nil
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLog bool, rpcSlowLogThreshold uint) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
+
 	h := &handler{
 		reg:            reg,
 		idgen:          idgen,
@@ -128,13 +139,47 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
+
+		diagMessages:        make(map[string]diagMsg),
+		rpcSlowLog:          rpcSlowLog,
+		rpcSlowLogThreshold: rpcSlowLogThreshold,
 	}
 
 	if conn.remoteAddr() != "" {
 		h.logger = h.logger.New("conn", conn.remoteAddr())
 	}
 	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe", h.logger)
+	if rpcSlowLog {
+		h.lookForSlowRpc()
+	}
 	return h
+}
+
+func (h *handler) lookForSlowRpc() {
+	updateThreshold := 100 * time.Millisecond
+	slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
+	if slowThreshold < updateThreshold {
+		updateThreshold = slowThreshold
+	}
+
+	quit := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(updateThreshold)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				for k, v := range h.diagMessages {
+					if time.Since(v.Time) > slowThreshold {
+						h.logger.Warn("Slow RPC call", "method", v.Method, "reqid", idForLog{json.RawMessage(k)})
+					}
+				}
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -388,6 +433,9 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 		return nil
 	case msg.isCall():
+		if h.rpcSlowLog {
+			h.diagMessages[string(msg.ID)] = diagMsg{Method: msg.Method, Time: start}
+		}
 		resp := h.handleCall(ctx, msg, stream)
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
@@ -402,6 +450,10 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 		} else {
 			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		}
+
+		if h.rpcSlowLog {
+			delete(h.diagMessages, string(resp.ID))
 		}
 		return resp
 	case msg.hasValidID():

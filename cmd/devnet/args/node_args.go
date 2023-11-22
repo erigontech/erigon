@@ -56,6 +56,9 @@ type NodeArgs struct {
 
 	NodeKey    *ecdsa.PrivateKey `arg:"-"`
 	NodeKeyHex string            `arg:"--nodekeyhex" json:"nodekeyhex,omitempty"`
+
+	RPCSlowLog          int `arg:"--rpc.slow.log" default:"false" json:"rpc.slow.log"`
+	RPCSlowLogThreshold int `arg:"--rpc.slow.log.threshold" default:"100" json:"rpc.slow.log.threshold"`
 }
 
 func (node *NodeArgs) Configure(base NodeArgs, nodeNumber int) error {
