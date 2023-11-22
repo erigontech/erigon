@@ -489,6 +489,8 @@ func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
 		return NewOldestEntryBuffer(size)
 	case SortableMergeBuffer:
 		return NewLatestMergedEntryMergedBuffer(size, prevBuf.(*oldestMergedEntrySortableBuffer).merge)
+	case NewestEntryBuffer:
+		return NewNewestEntryBuffer(size)
 	default:
 		panic("unknown buffer type " + strconv.Itoa(tp))
 	}
