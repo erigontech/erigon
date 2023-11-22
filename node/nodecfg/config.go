@@ -165,7 +165,7 @@ type Config struct {
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 
-	Http *httpcfg.HttpCfg
+	Http httpcfg.HttpCfg
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
