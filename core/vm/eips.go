@@ -668,9 +668,13 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		auxData            = scope.Memory.GetPtr(int64(auxDataOffset.Uint64()), int64(auxDataSize.Uint64()))
 	)
 	var c Container
+	// NOTE(racytech): UnmarshalBinary checks for correct EOF format
+	// but it decodes entire container, which is a bit expensive. Do we need that?
+	// Can we do better?
 	if err := c.UnmarshalBinary(deployContainer); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 	}
-	c.Data = append(c.Data, auxData...)
+	// TODO(racytech): make sure this one refers to the same underlying slice as Container.SubContainer[deployContainerIdx]
+	deployContainer = append(deployContainer, auxData...)
 	return nil, nil
 }
