@@ -60,3 +60,15 @@ func (s *SyncedDataManager) Syncing() bool {
 	surplusMargin := s.cfg.SlotsPerEpoch * 2
 	return s.headState.Slot()+surplusMargin < headEpoch
 }
+
+func (s *SyncedDataManager) HeadSlot() uint64 {
+	if !s.enabled {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.headState == nil {
+		return 0
+	}
+	return s.headState.Slot()
+}
