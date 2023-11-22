@@ -143,16 +143,16 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		cancunTime = cfg.OverrideCancunTime
 	}
 
-	pool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, maxBlobsPerBlock, logger)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, maxBlobsPerBlock, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	fetch := txpool.NewFetch(ctx, sentryClients, pool, stateChangesClient, chainDB, txPoolDB, *chainID, logger)
+	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, *chainID, logger)
 	//fetch.ConnectCore()
 	//fetch.ConnectSentries()
 
-	send := txpool.NewSend(ctx, sentryClients, pool, logger)
-	txpoolGrpcServer := txpool.NewGrpcServer(ctx, pool, txPoolDB, *chainID, logger)
-	return txPoolDB, pool, fetch, send, txpoolGrpcServer, nil
+	send := txpool.NewSend(ctx, sentryClients, txPool, logger)
+	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, *chainID, logger)
+	return txPoolDB, txPool, fetch, send, txpoolGrpcServer, nil
 }
