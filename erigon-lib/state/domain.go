@@ -693,6 +693,10 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 			item.bindex.Close()
 			item.bindex = nil
 		}
+		if item.existence != nil {
+			item.existence.Close()
+			item.existence = nil
+		}
 		d.files.Delete(item)
 	}
 }
