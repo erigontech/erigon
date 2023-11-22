@@ -43,8 +43,7 @@ func (s *stateAntiquary) loop(ctx context.Context) {
 				s.log.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
-			if finalized >= progress {
-				s.log.Debug("State processing is behind finalized", "progress", progress, "finalized", finalized)
+			if progress >= finalized {
 				continue
 			}
 			if err := s.incrementBeaconState(ctx, finalized); err != nil {
@@ -102,6 +101,10 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 		if err != nil {
 			return err
 		}
+		// If we have a missed block, we just skip it.
+		if block == nil {
+			continue
+		}
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
@@ -115,7 +118,7 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 	}
 	log.Info("State processing finished", "slot", s.currentState.Slot())
 	tx.Rollback()
-	log.Info("Stopping caplin to load states")
+	log.Info("Stopping Caplin to load states")
 
 	rwTx, err := s.db.BeginRw(ctx)
 	if err != nil {
@@ -125,6 +128,6 @@ func (s *stateAntiquary) incrementBeaconState(ctx context.Context, to uint64) er
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
-	log.Info("Restarting caplin to load states")
+	log.Info("Restarting Caplin")
 	return rwTx.Commit()
 }

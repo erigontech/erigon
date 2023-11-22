@@ -26,13 +26,15 @@ type Antiquary struct {
 	downloader proto_downloader.DownloaderClient
 	logger     log.Logger
 	sn         *freezeblocks.CaplinSnapshots
+	snReader   freezeblocks.BeaconSnapshotReader
 	ctx        context.Context
 	beaconDB   persistence.BlockSource
 	backfilled *atomic.Bool
 	cfg        *clparams.BeaconChainConfig
+	states     bool
 }
 
-func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) *Antiquary {
+func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -45,6 +47,8 @@ func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs dat
 		ctx:        ctx,
 		backfilled: backfilled,
 		cfg:        cfg,
+		states:     states,
+		snReader:   reader,
 	}
 }
 
@@ -94,6 +98,15 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
+	if a.states {
+		statesAntiquary := stateAntiquary{
+			db:              a.mainDB,
+			log:             a.logger,
+			cfg:             a.cfg,
+			snapshotsReader: a.snReader,
+		}
+		go statesAntiquary.loop(a.ctx)
+	}
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot

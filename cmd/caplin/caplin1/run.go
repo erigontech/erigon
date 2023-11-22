@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
@@ -84,7 +85,7 @@ func OpenCaplinDatabase(ctx context.Context,
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, backfilling bool) error {
+	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool) error {
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine, false)
 	if err != nil {
@@ -106,7 +107,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger)
+	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states)
 	// Create the antiquary
 	if snDownloader != nil {
 		go func() {
@@ -195,6 +196,9 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	}
 
 	if err := state_accessors.InitializePublicKeyTable(tx, state); err != nil {
+		return err
+	}
+	if err := beacon_indicies.WriteHighestFinalized(tx, 0); err != nil {
 		return err
 	}
 
