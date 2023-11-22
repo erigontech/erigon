@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -190,6 +191,7 @@ type Config struct {
 	Snapshot     BlocksFreezing
 	Downloader   *downloadercfg.Cfg
 	BeaconRouter beacon_router_configuration.RouterConfiguration
+	CaplinConfig clparams.CaplinConfig
 
 	Dirs datadir.Dirs
 
