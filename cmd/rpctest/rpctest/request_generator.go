@@ -258,6 +258,11 @@ func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.A
 	return sb.String()
 }
 
+func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {
+	const template = `{"id":1,"jsonrpc":"2.0","method":"ots_getBlockTransactions","params":[%d, %d, %d]}`
+	return fmt.Sprintf(template, block_number, page_number, page_size)
+}
+
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(g.client, routes[target], body, response)
