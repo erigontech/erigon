@@ -621,6 +621,7 @@ func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		input            = []byte{}
 		initContainer    = scope.Contract.Container.SubContainer[initContainerIdx]
 	)
+	*pc += 2
 
 	if inputSize > 0 {
 		input = scope.Memory.GetCopy(int64(inputOffset), int64(inputSize))
@@ -652,9 +653,24 @@ func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 }
 
 func opCreate4(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	// TODO(racytech): Add new TxType
+	// CREATE4 expects new transaction type = 4 which will carry initcodes
 	return nil, nil
 }
 
 func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		code               = scope.Contract.CodeAt(scope.CodeSection)
+		deployContainerIdx = int(code[*pc+1])
+		auxDataOffset      = scope.Stack.Pop()
+		auxDataSize        = scope.Stack.Pop()
+		deployContainer    = scope.Contract.Container.SubContainer[deployContainerIdx]
+		auxData            = scope.Memory.GetPtr(int64(auxDataOffset.Uint64()), int64(auxDataSize.Uint64()))
+	)
+	var c Container
+	if err := c.UnmarshalBinary(deployContainer); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+	}
+	c.Data = append(c.Data, auxData...)
 	return nil, nil
 }
