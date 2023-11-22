@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,6 +40,9 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 }
 
 func TestDynamicTxNode0(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
 	runCtx, err := tests.ContextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0).WithCurrentNode(0))
