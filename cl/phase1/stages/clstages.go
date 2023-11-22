@@ -583,10 +583,15 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					// TODO(Giulio2002): schedule snapshots retirement if needed.
-					// err = cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-cfg.dbConfig.PruneDepth)
-					// if err != nil {
-					// 	return err
-					// }
+					if !cfg.backfilling {
+						if err := cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-100_000); err != nil {
+							return err
+						}
+						if err := beacon_indicies.PruneBlockRoots(ctx, tx, 0, cfg.forkChoice.HighestSeen()-100_000); err != nil {
+							return err
+						}
+					}
+
 					return tx.Commit()
 				},
 			},

@@ -163,7 +163,7 @@ func forkList(schedule map[libcommon.Bytes4]uint64) (f []fork) {
 func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
 	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
-	dataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
+	dataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
@@ -227,7 +227,7 @@ func ComputeDomain(
 ) ([]byte, error) {
 	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
-	forkDataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
+	forkDataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
 }
 
@@ -239,7 +239,7 @@ func ComputeSigningRoot(
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return utils.Keccak256(objRoot[:], domain), nil
+	return utils.Sha256(objRoot[:], domain), nil
 }
 
 func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot libcommon.Hash) ([]byte, error) {
