@@ -535,6 +535,10 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 			item.index.Close()
 			item.index = nil
 		}
+		if item.existence != nil {
+			item.existence.Close()
+			item.existence = nil
+		}
 		ii.files.Delete(item)
 	}
 }
