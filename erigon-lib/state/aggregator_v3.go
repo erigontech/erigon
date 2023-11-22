@@ -93,6 +93,8 @@ type AggregatorV3 struct {
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
 	logger       log.Logger
+
+	ctxAutoIncrement atomic.Uint64
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -1390,7 +1392,8 @@ type AggregatorV3Context struct {
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
 
-	id uint64 // set only if TRACE_AGG=true
+	id      uint64 // auto-increment id of ctx for logs
+	_leakID uint64 // set only if TRACE_AGG=true
 }
 
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
@@ -1405,11 +1408,13 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 		tracesFrom: a.tracesFrom.MakeContext(),
 		tracesTo:   a.tracesTo.MakeContext(),
 
-		id: a.leakDetector.Add(),
+		id:      a.ctxAutoIncrement.Add(1),
+		_leakID: a.leakDetector.Add(),
 	}
 
 	return ac
 }
+func (ac *AggregatorV3Context) ViewID() uint64 { return ac.id }
 
 // --- Domain part START ---
 
@@ -1481,7 +1486,7 @@ func (ac *AggregatorV3Context) Close() {
 	if ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	ac.a.leakDetector.Del(ac.id)
+	ac.a.leakDetector.Del(ac._leakID)
 	ac.a = nil
 
 	ac.account.Close()

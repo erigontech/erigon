@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -165,7 +166,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 
 	useExternalTx := applyTx != nil
-	if initialCycle || !useExternalTx {
+	if !useExternalTx {
 		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
@@ -173,26 +174,35 @@ func ExecV3(ctx context.Context,
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
-	}
-	if !useExternalTx && !parallel {
-		var err error
-		applyTx, err = chainDb.BeginRw(ctx) //nolint
-		if err != nil {
-			return err
-		}
-		defer func() { // need callback - because tx may be committed
-			applyTx.Rollback()
-		}()
-
-		if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-			if err := casted.WarmupDB(false); err != nil {
+		if !parallel {
+			var err error
+			applyTx, err = chainDb.BeginRw(ctx) //nolint
+			if err != nil {
 				return err
 			}
-			if dbg.MdbxLockInRam() {
-				if err := casted.LockDBInRam(); err != nil {
+			defer func() { // need callback - because tx may be committed
+				applyTx.Rollback()
+			}()
+
+			if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+				if err := casted.WarmupDB(false); err != nil {
 					return err
 				}
+				if dbg.MdbxLockInRam() {
+					if err := casted.LockDBInRam(); err != nil {
+						return err
+					}
+				}
 			}
+		}
+	}
+	if initialCycle {
+		if casted, ok := applyTx.(*temporal.Tx); ok {
+			log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", execStage.LogPrefix(), casted.ViewID(), casted.AggCtx().ViewID()))
+			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
+				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
+				return histBlockNumProgress
+			})
 		}
 	}
 
