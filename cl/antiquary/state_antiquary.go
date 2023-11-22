@@ -123,80 +123,81 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer randaoMixes.Close()
 	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
-
+	// Use this as the event slot (it will be incremented by 1 each time we process a block)
+	slot := s.currentState.Slot() + 1
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
-			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), mix[:])
+			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), mix[:])
 		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
-			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
+			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
 				return err
 			}
 			slashedVal := []byte{0}
 			if v.Slashed() {
 				slashedVal = []byte{1}
 			}
-			if err := slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), slashedVal); err != nil {
+			if err := slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal); err != nil {
 				return err
 			}
-			if err := activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
+			if err := activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
 				return err
 			}
-			if err := activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
+			if err := activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
 				return err
 			}
-			if err := exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
+			if err := exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
 				return err
 			}
-			if err := withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
+			if err := withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
 				return err
 			}
 			w := v.WithdrawalCredentials()
-			if err := withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), w[:]); err != nil {
+			if err := withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:]); err != nil {
 				return err
 			}
-			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
 		},
 		OnNewValidatorBalance: func(index int, balance uint64) error {
-			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
 		},
 		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
-			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(balance))
+			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
-			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
-			return exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+			return exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
-			return withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+			return withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
 			slashedVal := []byte{0}
 			if newSlashed {
 				slashedVal = []byte{1}
 			}
-			return slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), slashedVal)
+			return slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
-			return activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), base_encoding.EncodeCompactUint64(epoch))
+			return activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
-			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), s.currentState.Slot()), wc)
+			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
 	})
-	log.Info("Starting state processing", "from", s.currentState.Slot(), "to", to)
+	log.Info("Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
-	prevSlot := s.currentState.Slot()
+	prevSlot := slot
 
-	for slot := s.currentState.Slot() + 1; slot < to; slot++ {
+	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
 			return err
