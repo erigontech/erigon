@@ -103,7 +103,7 @@ func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallC
 	}
 
 	if err != nil {
-		logger.Error("[bor.heimdall] Failed to fetch latest no-ack milestone", "err", err)
+		logger.Warn("[bor.heimdall] Failed to fetch latest no-ack milestone", "err", err)
 		return milestoneID, errMilestone
 	}
 
@@ -124,7 +124,7 @@ func fetchNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.IHeimd
 	}
 
 	if err != nil {
-		logger.Error("[bor.heimdall] Failed to fetch no-ack milestone by ID ", "milestoneID", milestoneID, "err", err)
+		logger.Warn("[bor.heimdall] Failed to fetch no-ack milestone by ID ", "milestoneID", milestoneID, "err", err)
 		return errMilestone
 	}
 
