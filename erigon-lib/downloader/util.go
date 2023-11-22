@@ -99,16 +99,15 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
 		subs := historyFileRegex.FindStringSubmatch(name)
-		fmt.Printf("[dbg] %d, %s", len(subs), name)
-		if len(subs) != 5 {
+		if len(subs) != 6 {
 			continue
 		}
 		// Check that it's seedable
-		from, err := strconv.ParseUint(subs[2], 10, 64)
+		from, err := strconv.ParseUint(subs[3], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
-		to, err := strconv.ParseUint(subs[3], 10, 64)
+		to, err := strconv.ParseUint(subs[4], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
