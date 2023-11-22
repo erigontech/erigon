@@ -847,8 +847,8 @@ var (
 		Usage: "Comma separated list of support session ids to connect to",
 	}
 
-	SilkwormPathFlag = cli.StringFlag{
-		Name:  "silkworm.path",
+	SilkwormLibraryPathFlag = cli.StringFlag{
+		Name:  "silkworm.libpath",
 		Usage: "Path to the Silkworm library",
 		Value: "",
 	}
@@ -1529,7 +1529,7 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
+	cfg.SilkwormLibraryPath = ctx.String(SilkwormLibraryPathFlag.Name)
 	if ctx.IsSet(SilkwormExecutionFlag.Name) {
 		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	}

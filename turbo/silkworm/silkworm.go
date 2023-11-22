@@ -54,7 +54,7 @@ var ErrInterrupted = errors.New("interrupted")
 
 type Silkworm struct {
 	dllHandle      unsafe.Pointer
-	instance       *C.SilkwormHandle
+	handle         C.SilkwormHandle
 	initFunc       unsafe.Pointer
 	finiFunc       unsafe.Pointer
 	addSnapshot    unsafe.Pointer
@@ -65,10 +65,10 @@ type Silkworm struct {
 	executeBlocks  unsafe.Pointer
 }
 
-func New(dllPath string, dataDirPath string) (*Silkworm, error) {
-	dllHandle, err := OpenLibrary(dllPath)
+func New(libraryPath string, dataDirPath string) (*Silkworm, error) {
+	dllHandle, err := OpenLibrary(libraryPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load silkworm library from path %s: %w", dllPath, err)
+		return nil, fmt.Errorf("failed to load silkworm library from path %s: %w", libraryPath, err)
 	}
 
 	initFunc, err := LoadFunction(dllHandle, "silkworm_init")
@@ -106,7 +106,7 @@ func New(dllPath string, dataDirPath string) (*Silkworm, error) {
 
 	silkworm := &Silkworm{
 		dllHandle:      dllHandle,
-		instance:       nil,
+		handle:         nil,
 		initFunc:       initFunc,
 		finiFunc:       finiFunc,
 		addSnapshot:    addSnapshot,
@@ -123,7 +123,7 @@ func New(dllPath string, dataDirPath string) (*Silkworm, error) {
 		return nil, errors.New("silkworm.New failed to copy dataDirPath")
 	}
 
-	status := C.call_silkworm_init_func(silkworm.initFunc, &silkworm.instance, settings) //nolint:gocritic
+	status := C.call_silkworm_init_func(silkworm.initFunc, &silkworm.handle, settings) //nolint:gocritic
 	if status == SILKWORM_OK {
 		return silkworm, nil
 	}
@@ -131,8 +131,8 @@ func New(dllPath string, dataDirPath string) (*Silkworm, error) {
 }
 
 func (s *Silkworm) Close() {
-	C.call_silkworm_fini_func(s.finiFunc, s.instance)
-	s.instance = nil
+	C.call_silkworm_fini_func(s.finiFunc, s.handle)
+	s.handle = nil
 }
 
 func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
@@ -200,7 +200,7 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 		transactions: cTxsSnapshot,
 	}
 
-	status := C.call_silkworm_add_snapshot_func(s.addSnapshot, s.instance, &cChainSnapshot) //nolint:gocritic
+	status := C.call_silkworm_add_snapshot_func(s.addSnapshot, s.handle, &cChainSnapshot) //nolint:gocritic
 	if status == SILKWORM_OK {
 		return nil
 	}
@@ -209,7 +209,7 @@ func (s *Silkworm) AddSnapshot(snapshot *MappedChainSnapshot) error {
 
 func (s *Silkworm) StartRpcDaemon(db kv.RoDB) error {
 	cEnv := (*C.MDBX_env)(db.CHandle())
-	status := C.call_silkworm_start_rpcdaemon_func(s.startRpcDaemon, s.instance, cEnv)
+	status := C.call_silkworm_start_rpcdaemon_func(s.startRpcDaemon, s.handle, cEnv)
 	// Handle successful execution
 	if status == SILKWORM_OK {
 		return nil
@@ -218,7 +218,7 @@ func (s *Silkworm) StartRpcDaemon(db kv.RoDB) error {
 }
 
 func (s *Silkworm) StopRpcDaemon() error {
-	status := C.call_silkworm_stop_rpcdaemon_func(s.stopRpcDaemon, s.instance)
+	status := C.call_silkworm_stop_rpcdaemon_func(s.stopRpcDaemon, s.handle)
 	// Handle successful execution
 	if status == SILKWORM_OK {
 		return nil
@@ -309,7 +309,7 @@ func (s *Silkworm) SentryStart(settings SentrySettings) error {
 	if err != nil {
 		return err
 	}
-	status := C.call_silkworm_sentry_start_func(s.sentryStart, s.instance, cSettings)
+	status := C.call_silkworm_sentry_start_func(s.sentryStart, s.handle, cSettings)
 	if status == SILKWORM_OK {
 		return nil
 	}
@@ -317,7 +317,7 @@ func (s *Silkworm) SentryStart(settings SentrySettings) error {
 }
 
 func (s *Silkworm) SentryStop() error {
-	status := C.call_silkworm_stop_rpcdaemon_func(s.sentryStop, s.instance)
+	status := C.call_silkworm_stop_rpcdaemon_func(s.sentryStop, s.handle)
 	if status == SILKWORM_OK {
 		return nil
 	}
@@ -359,7 +359,7 @@ func (s *Silkworm) ExecuteBlocks(txn kv.Tx, chainID *big.Int, startBlock uint64,
 	cWriteCallTraces := C._Bool(writeCallTraces)
 	cLastExecutedBlock := C.uint64_t(startBlock - 1)
 	cMdbxErrorCode := C.int(0)
-	status := C.call_silkworm_execute_blocks_func(s.executeBlocks, s.instance, cTxn, cChainId, cStartBlock,
+	status := C.call_silkworm_execute_blocks_func(s.executeBlocks, s.handle, cTxn, cChainId, cStartBlock,
 		cMaxBlock, cBatchSize, cWriteChangeSets, cWriteReceipts, cWriteCallTraces, &cLastExecutedBlock, &cMdbxErrorCode)
 	lastExecutedBlock = uint64(cLastExecutedBlock)
 	// Handle successful execution
