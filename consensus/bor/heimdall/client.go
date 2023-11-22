@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
@@ -95,7 +96,7 @@ func (h *HeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to 
 			return nil, err
 		}
 
-		h.logger.Debug("Fetching state sync events", "queryParams", url.RawQuery)
+		h.logger.Debug("[heimdall] Fetching state sync events", "queryParams", url.RawQuery)
 
 		ctx = withRequestType(ctx, stateSyncRequest)
 
@@ -307,7 +308,7 @@ retryLoop:
 
 		select {
 		case <-ctx.Done():
-			logger.Debug("Shutdown detected, terminating request by context.Done")
+			logger.Debug("Shutdown detected, terminating request", "err", ctx.Err())
 
 			return nil, ctx.Err()
 		case <-closeCh:

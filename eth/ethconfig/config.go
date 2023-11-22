@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -102,7 +103,7 @@ var Defaults = Config{
 		Produce:    true,
 	},
 
-	// applies if SilkwormPath is set
+	// applies if SilkwormLibraryPath is set
 	SilkwormExecution: true,
 }
 
@@ -186,8 +187,9 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot   BlocksFreezing
-	Downloader *downloadercfg.Cfg
+	Snapshot     BlocksFreezing
+	Downloader   *downloadercfg.Cfg
+	BeaconRouter beacon_router_configuration.RouterConfiguration
 
 	Dirs datadir.Dirs
 
@@ -252,10 +254,10 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormPath      string
-	SilkwormExecution bool
-	SilkwormRpcDaemon bool
-	SilkwormSentry    bool
+	SilkwormLibraryPath string
+	SilkwormExecution   bool
+	SilkwormRpcDaemon   bool
+	SilkwormSentry      bool
 }
 
 type Sync struct {

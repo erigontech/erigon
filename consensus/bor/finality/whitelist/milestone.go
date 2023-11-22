@@ -112,12 +112,12 @@ func (m *milestone) LockMutex(endBlockNum uint64) bool {
 	m.finality.Lock()
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
-		log.Debug("endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
+		log.Debug("[bor] endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
 		return false
 	}
 
 	if m.Locked && endBlockNum < m.LockedMilestoneNumber {
-		log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
+		log.Debug("[bor] endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
 		return false
 	}
 
@@ -159,7 +159,7 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
 
 	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
+		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
 	}
 }
 
@@ -177,7 +177,7 @@ func (m *milestone) RemoveMilestoneID(milestoneId string) {
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
 
 	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
+		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
 	}
 
 }
@@ -255,25 +255,25 @@ func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
 
 	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
+		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
 	}
 }
 
 // EnqueueFutureMilestone add the future milestone to the list
 func (m *milestone) enqueueFutureMilestone(key uint64, hash common.Hash) {
 	if _, ok := m.FutureMilestoneList[key]; ok {
-		log.Debug("Future milestone already exist", "endBlockNumber", key, "futureMilestoneHash", hash)
+		log.Debug("[bor] Future milestone already exist", "endBlockNumber", key, "futureMilestoneHash", hash)
 		return
 	}
 
-	log.Debug("Enqueing new future milestone", "endBlockNumber", key, "futureMilestoneHash", hash)
+	log.Debug("[bor] Enqueing new future milestone", "endBlockNumber", key, "futureMilestoneHash", hash)
 
 	m.FutureMilestoneList[key] = hash
 	m.FutureMilestoneOrder = append(m.FutureMilestoneOrder, key)
 
 	err := rawdb.WriteFutureMilestoneList(m.db, m.FutureMilestoneOrder, m.FutureMilestoneList)
 	if err != nil {
-		log.Error("Error in writing future milestone data to db", "err", err)
+		log.Error("[bor] Error in writing future milestone data to db", "err", err)
 	}
 
 	FutureMilestoneMeter.Set(key)
@@ -286,6 +286,6 @@ func (m *milestone) dequeueFutureMilestone() {
 
 	err := rawdb.WriteFutureMilestoneList(m.db, m.FutureMilestoneOrder, m.FutureMilestoneList)
 	if err != nil {
-		log.Error("Error in writing future milestone data to db", "err", err)
+		log.Error("[bor] Error in writing future milestone data to db", "err", err)
 	}
 }

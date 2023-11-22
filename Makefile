@@ -121,6 +121,8 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += caplin-regression
+COMMANDS += tooling
+
 
 
 # build each command using %.cmd rule

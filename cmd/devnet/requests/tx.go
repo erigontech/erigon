@@ -25,7 +25,7 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	resp, ok := b.Result.(map[string]interface{})
 
 	if !ok {
-		return 0, 0, 0, fmt.Errorf("Unexpected result type: %T", b.Result)
+		return 0, 0, 0, fmt.Errorf("unexpected result type: %T", b.Result)
 	}
 
 	pendingLen := 0

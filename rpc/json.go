@@ -220,7 +220,7 @@ func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err err
 	return messages, batch, nil
 }
 
-func (c *jsonCodec) writeJSON(ctx context.Context, v interface{}) error {
+func (c *jsonCodec) WriteJSON(ctx context.Context, v interface{}) error {
 	c.encMu.Lock()
 	defer c.encMu.Unlock()
 

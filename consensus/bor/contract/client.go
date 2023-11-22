@@ -65,7 +65,7 @@ func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall) (*bi
 
 	data, err := gc.stateReceiverABI.Pack(method)
 	if err != nil {
-		gc.logger.Error("Unable to pack tx for LastStateId", "err", err)
+		gc.logger.Error("[bor] Unable to pack tx for LastStateId", "err", err)
 		return nil, err
 	}
 
