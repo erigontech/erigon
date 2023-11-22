@@ -175,7 +175,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 8)
 	var i atomic.Int32
 
 	for _, file := range files {
