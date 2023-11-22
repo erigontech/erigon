@@ -403,9 +403,11 @@ func (b *newestEntrySortableBuffer) Put(k, v []byte) {
 	prevV, ok := b.entries[string(k)]
 	if ok {
 		b.size -= len(prevV)
+	} else {
+		b.size += len(k)
 	}
 
-	b.size += len(k)*2 + len(v)
+	b.size += len(v)
 	b.entries[string(k)] = common.Copy(v)
 }
 
