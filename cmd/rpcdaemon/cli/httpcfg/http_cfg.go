@@ -80,6 +80,5 @@ type HttpCfg struct {
 	// Ots API
 	OtsMaxPageSize uint64
 
-	RPCSlowLog          bool
 	RPCSlowLogThreshold uint
 }

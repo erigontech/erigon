@@ -179,7 +179,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiIdleTimeoutFlag,
 
 	&utils.TrustedSetupFile,
-	&utils.RPCSlowLogFlag,
 	&utils.RPCSlowLogThresholdFlag,
 
 	&utils.TxPoolGossipDisableFlag,

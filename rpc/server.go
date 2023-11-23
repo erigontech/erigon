@@ -55,14 +55,13 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
 	logger              log.Logger
-	rpcSlowLog          bool
 	rpcSlowLogThreshold uint
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLog bool, rpcSlowLogThreshold uint) *Server {
+func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold uint) *Server {
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
-		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger, rpcSlowLog: rpcSlowLog, rpcSlowLogThreshold: rpcSlowLogThreshold}
+		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -119,7 +118,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLog, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 

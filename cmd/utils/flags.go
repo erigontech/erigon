@@ -903,15 +903,10 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-	RPCSlowLogFlag = cli.BoolFlag{
-		Name:  "rpc.slow.log",
-		Usage: "Log slow RPC requests",
-		Value: false,
-	}
 	RPCSlowLogThresholdFlag = cli.UintFlag{
 		Name:  "rpc.slow.log.threshold",
-		Usage: "Threshold to log slow RPC requests",
-		Value: 100,
+		Usage: "Threshold to log slow RPC requests in miliseconds",
+		Value: 0,
 	}
 	CaplinBackfillingFlag = cli.BoolFlag{
 		Name:  "caplin.backfilling",
