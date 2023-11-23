@@ -93,7 +93,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
 				continue
 			}
-			if !d.isWhitelistedName(name) {
+			if !nameWhitelisted(name, d.torrentsWhitelist) {
 				continue
 			}
 			uri, err := url.ParseRequestURI(wUrl)
@@ -109,15 +109,6 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 	defer d.lock.Unlock()
 	d.byFileName = webSeedUrls
 	d.torrentUrls = torrentUrls
-}
-
-func (d *WebSeeds) isWhitelistedName(fileName string) bool {
-	for i := 0; i < len(d.torrentsWhitelist); i++ {
-		if d.torrentsWhitelist[i].Name == fileName {
-			return true
-		}
-	}
-	return false
 }
 
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
@@ -299,17 +290,29 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 		return err
 	}
 	torrentHash := mi.HashInfoBytes()
-	torrentHashString := torrentHash.String()
-	var whitelisted bool
-	for i := 0; i < len(whitelist); i++ {
-		// files with different names can have same hash. means need check AND name AND hash.
-		if whitelist[i].Name == fileName && whitelist[i].Hash == torrentHashString {
-			whitelisted = true
-			break
-		}
-	}
-	if !whitelisted {
+	// files with different names can have same hash. means need check AND name AND hash.
+	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
 		return fmt.Errorf(".torrent file is not whitelisted")
 	}
 	return nil
+}
+
+func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName {
+			return true
+		}
+	}
+	return false
+}
+
+func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
+			return true
+		}
+	}
+	return false
 }
