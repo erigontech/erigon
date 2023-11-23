@@ -59,13 +59,13 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	// check if we have the given blocks
 	currentBlock := rawdb.ReadCurrentBlockNumber(roTx)
 	if currentBlock == nil {
-		log.Debug("[bor] Failed to fetch current block from blockchain while verifying incoming", "str", str)
+		log.Debug("[bor] no current block marker yet: syncing...", "incoming", str)
 		return hash, errMissingBlocks
 	}
 
 	head := *currentBlock
 	if head < end {
-		log.Debug("[bor] Current head block behind incoming", "block", str, "head", head, "end block", end)
+		log.Debug("[bor] current head block behind incoming", "block", str, "head", head, "end block", end)
 		return hash, errMissingBlocks
 	}
 
