@@ -148,6 +148,11 @@ var (
 		Name:  "txpool.disable",
 		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
 	}
+	TxPoolGossipDisableFlag = cli.BoolFlag{
+		Name:  "txpool.gossip.disable",
+		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped.K Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
+		Value: txpoolcfg.DefaultConfig.NoGossip,
+	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
 		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
@@ -898,10 +903,6 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-	TxPoolGossipDisableFlag = cli.BoolFlag{
-		Name:  "txpool.gossip.disable",
-		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped.K Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
-		Value: txpoolcfg.DefaultConfig.NoGossip,
 	CaplinBackfillingFlag = cli.BoolFlag{
 		Name:  "caplin.backfilling",
 		Usage: "sets whether backfilling is enabled for caplin",
