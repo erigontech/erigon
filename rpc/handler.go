@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -72,7 +73,7 @@ type handler struct {
 	traceRequests       bool
 
 	// metrics
-	diagMessages        map[string]diagMsg
+	diagMessages        sync.Map
 	rpcSlowLogThreshold uint
 	rpcSlowLog          bool
 }
@@ -83,8 +84,10 @@ type callProc struct {
 }
 
 type diagMsg struct {
-	Method string
-	Time   time.Time
+	Method           string
+	Time             time.Time
+	LastLogTime      time.Time
+	RequestTotalTime time.Duration
 }
 
 func HandleError(err error, stream *jsoniter.Stream) error {
@@ -140,7 +143,6 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
 
-		diagMessages:        make(map[string]diagMsg),
 		rpcSlowLog:          rpcSlowLog,
 		rpcSlowLogThreshold: rpcSlowLogThreshold,
 	}
@@ -156,26 +158,34 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) lookForSlowRpc() {
+	logInterval := 20 * time.Second
 	updateThreshold := 100 * time.Millisecond
 	slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
 	if slowThreshold < updateThreshold {
 		updateThreshold = slowThreshold
 	}
 
-	quit := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(updateThreshold)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ticker.C:
-				for k, v := range h.diagMessages {
-					if time.Since(v.Time) > slowThreshold {
-						h.logger.Warn("Slow RPC call", "method", v.Method, "reqid", idForLog{json.RawMessage(k)})
+				h.diagMessages.Range(func(key, value interface{}) bool {
+					requestDuration := time.Since(value.(diagMsg).Time)
+					if requestDuration > slowThreshold && time.Since(value.(diagMsg).LastLogTime) > logInterval {
+						h.logger.Warn("Slow RPC call", "method", value.(diagMsg).Method, "reqid", idForLog{json.RawMessage(fmt.Sprint(key))}, "Request duration", requestDuration)
+
+						newValue := value.(diagMsg)
+						newValue.LastLogTime = time.Now()
+						newValue.RequestTotalTime = requestDuration
+						h.diagMessages.Delete(key)
+						h.diagMessages.Store(key, newValue)
 					}
-				}
-			case <-quit:
-				ticker.Stop()
+					return true
+				})
+			case <-h.rootCtx.Done():
 				return
 			}
 		}
@@ -434,8 +444,9 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		return nil
 	case msg.isCall():
 		if h.rpcSlowLog {
-			h.diagMessages[string(msg.ID)] = diagMsg{Method: msg.Method, Time: start}
+			h.diagMessages.Store(string(msg.ID), diagMsg{Method: msg.Method, Time: start, LastLogTime: time.Unix(0, 0), RequestTotalTime: 0})
 		}
+
 		resp := h.handleCall(ctx, msg, stream)
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
@@ -453,7 +464,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 
 		if h.rpcSlowLog {
-			delete(h.diagMessages, string(resp.ID))
+			h.diagMessages.Delete(string(resp.ID))
 		}
 		return resp
 	case msg.hasValidID():
