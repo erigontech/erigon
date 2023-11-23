@@ -40,14 +40,14 @@ func ComputeCompressedSerializedUint64ListDiff(old, new []uint64, out []byte) ([
 	for i := 0; i < len(new); i++ {
 		if i >= len(old) {
 			binary.BigEndian.PutUint64(bytes8, new[i])
-			if _, err := buffer.Write(bytes8); err != nil {
+			if _, err := compressor.Write(bytes8); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		//binary.BigEndian.PutUint64(dst[i*8:], new[i]-old[i])
 		binary.BigEndian.PutUint64(bytes8, new[i]-old[i])
-		if _, err := buffer.Write(bytes8); err != nil {
+		if _, err := compressor.Write(bytes8); err != nil {
 			return nil, err
 		}
 	}
