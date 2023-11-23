@@ -99,6 +99,12 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	return w
 }
 
+func (rw *Worker) ResetState(rs *state.StateV3) {
+	rw.rs = rs
+	rw.SetReader(state.NewStateReaderV3(rs))
+	rw.stateWriter = state.NewStateWriterBufferedV3(rs)
+}
+
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
 func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
@@ -244,6 +250,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.UsedGas = applyRes.UsedGas
+			//fmt.Printf("txn %d usedGas=%d\n", txTask.TxNum, txTask.UsedGas)
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
