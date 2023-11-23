@@ -230,6 +230,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			// Dump balances on disk
 			b2.Grow(8 * s.currentState.ValidatorLength())
 			buf := b2.Bytes()
+			buf = buf[:8*s.currentState.ValidatorLength()]
 
 			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
 				binary.LittleEndian.PutUint64(buf[index*8:index*8+8], v)
@@ -241,6 +242,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 			b.Grow(lz4.CompressBlockBound(len(buf)))
 			out := b.Bytes()
+			out = out[:lz4.CompressBlockBound(len(buf))]
 			if _, err := lz4.CompressBlock(buf, out, lz4HashTable); err != nil {
 				return err
 			}
