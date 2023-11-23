@@ -220,7 +220,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			balancesFile, err := s.fs.OpenFile(epochToPaths(slot, s.cfg, "balances"), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+			folderPath, filePath := epochToPaths(slot, s.cfg, "balances")
+			_ = s.fs.MkdirAll(folderPath, 0o755)
+
+			balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				return err
 			}
@@ -372,7 +375,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 
 const subDivisionFolderSize = 10_000
 
-func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) string {
+func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
 	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
 }
