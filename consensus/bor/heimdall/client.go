@@ -355,7 +355,7 @@ func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 		return nil, err
 	}
 
-	if body == nil {
+	if len(body) == 0 {
 		return nil, ErrNoResponse
 	}
 
