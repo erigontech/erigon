@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const dumpFullEpochs = 10 // Dump full balances
+const slotsPerDumps = 2048 // Dump full balances
 
 func excludeDuplicatesIdentity() etl.LoadFunc {
 	var prevKey, prevValue []byte
@@ -107,6 +107,19 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
+func uint64BalancesList(s *state.CachingBeaconState, out []uint64) []uint64 {
+	if len(out) < s.ValidatorLength() {
+		out = make([]uint64, s.ValidatorLength())
+	}
+	out = out[:s.ValidatorLength()]
+
+	s.ForEachBalance(func(v uint64, index int, total int) bool {
+		out[index] = v
+		return true
+	})
+	return out
+}
+
 func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
 	tx, err := s.mainDB.BeginRo(ctx)
@@ -158,11 +171,13 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 	// buffers
-	compressedWriter, err := zlib.NewWriterLevel(nil, 7)
+	compressedWriter, err := zlib.NewWriterLevel(nil, zlib.BestCompression)
 	if err != nil {
 		return err
 	}
 	defer compressedWriter.Close()
+	var prevBalances, nextBalances []uint64
+	var diff []byte
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -220,33 +235,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			folderPath, filePath := epochToPaths(slot, s.cfg, "balances")
-			_ = s.fs.MkdirAll(folderPath, 0o755)
-
-			balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return err
-			}
-			defer balancesFile.Close()
-			compressedWriter.Reset(balancesFile)
-			// Dump balances on disk
-			bytes8 := make([]byte, 8)
-			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
-				binary.LittleEndian.PutUint64(bytes8, v)
-				if _, err := compressedWriter.Write(bytes8); err != nil {
-					return false
-				}
-				return true
-			})
-			if err != nil {
-				return err
-			}
-			if err := compressedWriter.Flush(); err != nil {
-				return err
-			}
-			if err := balancesFile.Sync(); err != nil {
-				return err
-			}
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
@@ -262,14 +250,32 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err != nil {
 			return err
 		}
+		if slot%slotsPerDumps == 0 {
+			if err := s.antiquateBalances(ctx, slot, s.currentState); err != nil {
+				return err
+			}
+		}
+
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			continue
 		}
+		prevBalances = uint64BalancesList(s.currentState, prevBalances)
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
 		}
+		nextBalances = uint64BalancesList(s.currentState, nextBalances)
+		// We now compute the difference between the two balances.
+		diff, err = base_encoding.ComputeCompressedSerializedUint64ListDiff(prevBalances, nextBalances, diff)
+		if err != nil {
+			return err
+		}
+		// antiquate the balances
+		if err := s.antiquateBalancesDiff(ctx, slot, diff); err != nil {
+			return err
+		}
+		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
 			log.Info("State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
@@ -319,6 +325,57 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	log.Info("Restarting Caplin")
 	return rwTx.Commit()
+}
+
+func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *state.CachingBeaconState) error {
+	folderPath, filePath := epochToPaths(slot, s.cfg, "balances")
+	_ = s.fs.MkdirAll(folderPath, 0o755)
+
+	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer balancesFile.Close()
+
+	compressedWriter, err := zlib.NewWriterLevel(balancesFile, zlib.BestCompression)
+	if err != nil {
+		return err
+	}
+	defer compressedWriter.Close()
+
+	balances := make([]byte, state.ValidatorLength()*8)
+	state.ForEachBalance(func(v uint64, index int, total int) bool {
+		binary.BigEndian.PutUint64(balances[index*8:], v)
+		return true
+	})
+
+	if _, err := compressedWriter.Write(balances); err != nil {
+		return err
+	}
+
+	if err := compressedWriter.Flush(); err != nil {
+		return err
+	}
+	return balancesFile.Sync()
+}
+
+func (s *Antiquary) antiquateBalancesDiff(ctx context.Context, slot uint64, diff []byte) error {
+	folderPath, filePath := epochToPaths(slot, s.cfg, "balances_diff")
+	_ = s.fs.MkdirAll(folderPath, 0o755)
+
+	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer balancesFile.Close()
+
+	if err != nil {
+		return err
+	}
+	if _, err := balancesFile.Write(diff); err != nil {
+		return err
+	}
+	return balancesFile.Sync()
 }
 
 func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
