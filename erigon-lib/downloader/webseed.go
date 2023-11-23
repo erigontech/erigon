@@ -293,20 +293,17 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	return res, nil
 }
 
-func validateTorrentBytes(fileName string, b []byte, torrentWhitelist snapcfg.Preverified) error {
+func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverified) error {
 	var mi metainfo.MetaInfo
-	if len(torrentWhitelist) == 0 {
-		return nil
-	}
 	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
 		return err
 	}
 	torrentHash := mi.HashInfoBytes()
 	torrentHashString := torrentHash.String()
 	var whitelisted bool
-	for _, it := range torrentWhitelist {
+	for i := 0; i < len(whitelist); i++ {
 		// files with different names can have same hash. means need check AND name AND hash.
-		if it.Name == fileName && it.Hash == torrentHashString {
+		if whitelist[i].Name == fileName && whitelist[i].Hash == torrentHashString {
 			whitelisted = true
 			break
 		}
