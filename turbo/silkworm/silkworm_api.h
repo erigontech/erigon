@@ -61,7 +61,9 @@ extern "C" {
 
 typedef struct MDBX_env MDBX_env;
 typedef struct MDBX_txn MDBX_txn;
-typedef struct SilkwormHandle SilkwormHandle;
+
+struct SilkwormInstance;
+typedef struct SilkwormInstance* SilkwormHandle;
 
 struct SilkwormMemoryMappedFile {
     const char* file_path;
@@ -105,7 +107,7 @@ struct SilkwormSettings {
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure.
  */
 SILKWORM_EXPORT int silkworm_init(
-    SilkwormHandle** handle,
+    SilkwormHandle* handle,
     const struct SilkwormSettings* settings) SILKWORM_NOEXCEPT;
 
 /**
@@ -117,7 +119,7 @@ SILKWORM_EXPORT int silkworm_init(
  * \param[in] len The number of snapshots and paths.
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure on some or all indexes.
  */
-SILKWORM_EXPORT int silkworm_build_recsplit_indexes(SilkwormHandle* handle, struct SilkwormMemoryMappedFile* snapshots[], int len) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_build_recsplit_indexes(SilkwormHandle handle, struct SilkwormMemoryMappedFile* snapshots[], int len) SILKWORM_NOEXCEPT;
 
 /**
  * \brief Notify Silkworm about a new snapshot to use.
@@ -125,7 +127,7 @@ SILKWORM_EXPORT int silkworm_build_recsplit_indexes(SilkwormHandle* handle, stru
  * \param[in] snapshot A snapshot to use.
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure.
  */
-SILKWORM_EXPORT int silkworm_add_snapshot(SilkwormHandle* handle, struct SilkwormChainSnapshot* snapshot) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_add_snapshot(SilkwormHandle handle, struct SilkwormChainSnapshot* snapshot) SILKWORM_NOEXCEPT;
 
 /**
  * \brief Start Silkworm RPC daemon.
@@ -133,7 +135,7 @@ SILKWORM_EXPORT int silkworm_add_snapshot(SilkwormHandle* handle, struct Silkwor
  * \param[in] env An valid MDBX environment. Must not be zero.
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure.
  */
-SILKWORM_EXPORT int silkworm_start_rpcdaemon(SilkwormHandle* handle, MDBX_env* env) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_start_rpcdaemon(SilkwormHandle handle, MDBX_env* env) SILKWORM_NOEXCEPT;
 
 /**
  * \brief Stop Silkworm RPC daemon and wait for its termination.
@@ -141,7 +143,7 @@ SILKWORM_EXPORT int silkworm_start_rpcdaemon(SilkwormHandle* handle, MDBX_env* e
  * \param[in] snapshot A snapshot to use.
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure.
  */
-SILKWORM_EXPORT int silkworm_stop_rpcdaemon(SilkwormHandle* handle) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_stop_rpcdaemon(SilkwormHandle handle) SILKWORM_NOEXCEPT;
 
 #define SILKWORM_SENTRY_SETTINGS_CLIENT_ID_SIZE 128
 #define SILKWORM_SENTRY_SETTINGS_NAT_SIZE 50
@@ -162,8 +164,8 @@ struct SilkwormSentrySettings {
     size_t max_peers;
 };
 
-SILKWORM_EXPORT int silkworm_sentry_start(SilkwormHandle* handle, const struct SilkwormSentrySettings* settings) SILKWORM_NOEXCEPT;
-SILKWORM_EXPORT int silkworm_sentry_stop(SilkwormHandle* handle) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_sentry_start(SilkwormHandle handle, const struct SilkwormSentrySettings* settings) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_sentry_stop(SilkwormHandle handle) SILKWORM_NOEXCEPT;
 
 /**
  * \brief Execute a batch of blocks and write resulting changes into the database.
@@ -188,7 +190,7 @@ SILKWORM_EXPORT int silkworm_sentry_stop(SilkwormHandle* handle) SILKWORM_NOEXCE
  * (blocks up to and incl. last_executed_block were still executed).
  */
 SILKWORM_EXPORT int silkworm_execute_blocks(
-    SilkwormHandle* handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block, uint64_t max_block,
+    SilkwormHandle handle, MDBX_txn* txn, uint64_t chain_id, uint64_t start_block, uint64_t max_block,
     uint64_t batch_size, bool write_change_sets, bool write_receipts, bool write_call_traces,
     uint64_t* last_executed_block, int* mdbx_error_code) SILKWORM_NOEXCEPT;
 
@@ -197,7 +199,7 @@ SILKWORM_EXPORT int silkworm_execute_blocks(
  * \param[in] handle A valid Silkworm instance handle got with silkworm_init.
  * \return SILKWORM_OK (=0) on success, a non-zero error value on failure.
  */
-SILKWORM_EXPORT int silkworm_fini(SilkwormHandle* handle) SILKWORM_NOEXCEPT;
+SILKWORM_EXPORT int silkworm_fini(SilkwormHandle handle) SILKWORM_NOEXCEPT;
 
 #if __cplusplus
 }

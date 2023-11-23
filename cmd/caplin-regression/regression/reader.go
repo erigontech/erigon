@@ -1,15 +1,16 @@
 package regression
 
 import (
-	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
+
+	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 func (r *RegressionTester) readStartingState() (*state.CachingBeaconState, error) {

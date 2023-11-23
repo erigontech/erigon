@@ -33,7 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
@@ -57,6 +56,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
@@ -711,6 +711,13 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
+	if p.cfg.NoGossip {
+		// if no gossip, then
+		// disable adding remote transactions
+		// consume remote tx from fetch
+		return
+	}
+
 	defer addRemoteTxsTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -1701,6 +1708,14 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 
 				notifyMiningAboutNewSlots()
 
+				if p.cfg.NoGossip {
+					// drain newTxs for emptying newTx channel
+					// newTx channel will be filled only with local transactions
+					// early return to avoid outbound transaction propagation
+					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					return
+				}
+
 				var localTxTypes []byte
 				var localTxSizes []uint32
 				var localTxHashes types.Hashes
@@ -1756,22 +1771,31 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
-				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
-				txSentTo := send.BroadcastPooledTxs(localTxRlps)
+				// broadcast local transactions
+				const localTxsBroadcastMaxPeers uint64 = 10
+				txSentTo := send.BroadcastPooledTxs(localTxRlps, localTxsBroadcastMaxPeers)
 				for i, peer := range txSentTo {
 					p.logger.Info("Local tx broadcasted", "txHash", hex.EncodeToString(broadCastedHashes.At(i)), "to peer", peer)
 				}
-				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes)
+				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes, localTxsBroadcastMaxPeers*2)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
 					p.logger.Info("local tx announced", "tx_hash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
-				send.BroadcastPooledTxs(remoteTxRlps)
-				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes)
+
+				// broadcast remote transactions
+				const remoteTxsBroadcastMaxPeers uint64 = 3
+				send.BroadcastPooledTxs(remoteTxRlps, remoteTxsBroadcastMaxPeers)
+				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes, remoteTxsBroadcastMaxPeers*2)
 			}()
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
 			if len(newPeers) == 0 {
+				continue
+			}
+			if p.cfg.NoGossip {
+				// avoid transaction gossiping for new peers
+				log.Debug("[txpool] tx gossip disabled", "state", "sync new peers")
 				continue
 			}
 			t := time.Now()
