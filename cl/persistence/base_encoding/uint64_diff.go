@@ -56,7 +56,7 @@ func ComputeCompressedSerializedUint64ListDiff(old, new []uint64, out []byte) ([
 		return nil, err
 	}
 	bufLen := buffer.Len()
-	if len(buffer.Bytes()) > len(out) {
+	if bufLen > cap(out) {
 		out = make([]byte, bufLen)
 	}
 	out = out[:bufLen]
