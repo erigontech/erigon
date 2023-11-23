@@ -93,7 +93,7 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
 				continue
 			}
-			if !d.isWhitelistedName(name) {
+			if !nameWhitelisted(name, d.torrentsWhitelist) {
 				continue
 			}
 			uri, err := url.ParseRequestURI(wUrl)
@@ -109,15 +109,6 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 	defer d.lock.Unlock()
 	d.byFileName = webSeedUrls
 	d.torrentUrls = torrentUrls
-}
-
-func (d *WebSeeds) isWhitelistedName(fileName string) bool {
-	for i := 0; i < len(d.torrentsWhitelist); i++ {
-		if d.torrentsWhitelist[i].Name == fileName {
-			return true
-		}
-	}
-	return false
 }
 
 func (d *WebSeeds) TorrentUrls() snaptype.TorrentUrls {
@@ -306,26 +297,35 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	return res, nil
 }
 
-func validateTorrentBytes(fileName string, b []byte, torrentWhitelist snapcfg.Preverified) error {
+func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverified) error {
 	var mi metainfo.MetaInfo
-	if len(torrentWhitelist) == 0 {
-		return nil
-	}
 	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
 		return err
 	}
 	torrentHash := mi.HashInfoBytes()
-	torrentHashString := torrentHash.String()
-	var whitelisted bool
-	for _, it := range torrentWhitelist {
-		// files with different names can have same hash. means need check AND name AND hash.
-		if it.Name == fileName && it.Hash == torrentHashString {
-			whitelisted = true
-			break
-		}
-	}
-	if !whitelisted {
+	// files with different names can have same hash. means need check AND name AND hash.
+	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
 		return fmt.Errorf(".torrent file is not whitelisted")
 	}
 	return nil
+}
+
+func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName {
+			return true
+		}
+	}
+	return false
+}
+
+func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
+			return true
+		}
+	}
+	return false
 }
