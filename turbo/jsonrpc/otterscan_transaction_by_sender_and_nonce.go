@@ -173,6 +173,12 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	maxBlPrevChunk := uint64(0)
 
 	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if k == nil || !bytes.HasPrefix(k, addr.Bytes()) {
 			// Check plain state
 			data, err := tx.GetOne(kv.PlainState, addr.Bytes())
