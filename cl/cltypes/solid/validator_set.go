@@ -164,7 +164,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 
 	if v.l == 0 {
-		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
+		return utils.Sha256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
 	}
 
 	emptyHashBytes := make([]byte, length.Hash)
@@ -211,7 +211,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 
-	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
+	return utils.Sha256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
 func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
