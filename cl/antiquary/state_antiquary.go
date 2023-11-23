@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pierrec/lz4"
+	"golang.org/x/exp/maps"
 )
 
 const dumpFullEpochs = 10 // Dump full balances
@@ -261,6 +262,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err != nil {
 				return err
 			}
+			maps.Clear(changedIndiciesBalances)
 			if err := lz4Writer.Flush(); err != nil {
 				return err
 			}
