@@ -171,6 +171,10 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, s.config) {
 			return snap, &BlockTooSoonError{number, succession}
 		}
+		difficulty := snap.Difficulty(signer)
+		if header.Difficulty.Uint64() != difficulty {
+			return snap, &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
+		}
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
