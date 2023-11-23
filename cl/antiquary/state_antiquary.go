@@ -158,8 +158,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 	// buffers
-	lz4Writer := lz4.NewWriter(nil)
-	defer lz4Writer.Close()
+	lz4HashTable := make([]int, 1<<16)
+
+	var b, b2 bytes.Buffer
+
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -190,9 +192,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			w := v.WithdrawalCredentials()
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
-		},
-		OnNewValidatorBalance: func(index int, balance uint64) error {
-			return nil
 		},
 		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
 			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
@@ -228,29 +227,27 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			defer balancesFile.Close()
-			lz4Writer.CompressionLevel = 7
-			lz4Writer.Reset(balancesFile)
 			// Dump balances on disk
-			bytes8 := make([]byte, 8)
-			bytes4 := make([]byte, 4)
+			b2.Grow(8 * s.currentState.ValidatorLength())
+			buf := b2.Bytes()
 
 			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
-				binary.LittleEndian.PutUint32(bytes4, uint32(index))
-				if _, err = lz4Writer.Write(bytes4); err != nil {
-					return false
-				}
-				binary.LittleEndian.PutUint64(bytes8, v)
-				if _, err = lz4Writer.Write(bytes8); err != nil {
-					return false
-				}
+				binary.LittleEndian.PutUint64(buf[index*8:index*8+8], v)
 				return true
 			})
 			if err != nil {
 				return err
 			}
-			if err := lz4Writer.Flush(); err != nil {
+
+			b.Grow(lz4.CompressBlockBound(len(buf)))
+			out := b.Bytes()
+			if _, err := lz4.CompressBlock(buf, out, lz4HashTable); err != nil {
 				return err
 			}
+			if _, err := balancesFile.Write(out); err != nil {
+				return err
+			}
+			fmt.Println("Uncompressed balances size", len(buf), "compressed", len(out), "ratio", float64(len(out))/float64(len(buf)))
 			if err := balancesFile.Sync(); err != nil {
 				return err
 			}
