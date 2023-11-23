@@ -363,7 +363,7 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 }
 
 func (s *Antiquary) antiquateBalancesDiff(ctx context.Context, slot uint64, diff []byte) error {
-	folderPath, filePath := epochToPaths(slot, s.cfg, "balances_diff")
+	folderPath, filePath := slotToPaths(slot, s.cfg, "balances_diff")
 	_ = s.fs.MkdirAll(folderPath, 0o755)
 
 	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
@@ -431,4 +431,9 @@ const subDivisionFolderSize = 10_000
 func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
 	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
+}
+
+func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
