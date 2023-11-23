@@ -291,7 +291,12 @@ func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL
 	// attempt counter
 	attempt := 1
 
-	logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "attempt", attempt, "error", err)
+	logger.Warn("[bor.heimdall] an error while fetching",
+		"query", url.Query().Encode(),
+		"path", url.Path,
+		"attempt", attempt,
+		"error", err,
+	)
 
 	// create a new ticker for retrying the request
 	ticker := time.NewTicker(retryCall)
