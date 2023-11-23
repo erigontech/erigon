@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-
-	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // make a sync.pool of compressors (zlib)
@@ -24,7 +22,7 @@ var bufferPool = sync.Pool{
 }
 
 // ComputeSerializedUint64ListDiff computes the difference between two uint64 lists, it assumes the new list to be always greater in length than the old one.
-func ComputeCompressedSerializedUint64ListDiff(old, new []uint64) ([]byte, error) {
+func ComputeCompressedSerializedUint64ListDiff(old, new []uint64, out []byte) ([]byte, error) {
 	if len(old) > len(new) {
 		return nil, fmt.Errorf("old list is longer than new list")
 	}
@@ -57,5 +55,11 @@ func ComputeCompressedSerializedUint64ListDiff(old, new []uint64) ([]byte, error
 	if err := compressor.Flush(); err != nil {
 		return nil, err
 	}
-	return common.Copy(buffer.Bytes()), nil
+	bufLen := buffer.Len()
+	if len(buffer.Bytes()) > len(out) {
+		out = make([]byte, bufLen)
+	}
+	out = out[:bufLen]
+	copy(out, buffer.Bytes())
+	return out, nil
 }
