@@ -181,4 +181,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowLogFlag,
 	&utils.RPCSlowLogThresholdFlag,
+
+	&utils.TxPoolGossipDisableFlag,
 }
