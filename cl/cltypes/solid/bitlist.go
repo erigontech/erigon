@@ -116,7 +116,7 @@ func (u *BitList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (arr *BitList) getBaseHash(xs []byte, depth uint8) error {

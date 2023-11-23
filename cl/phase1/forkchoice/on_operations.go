@@ -188,7 +188,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	// Perform full validation if requested.
 	if !test {
 		// Check the validator's withdrawal credentials against the provided message.
-		hashedFrom := utils.Keccak256(change.From[:])
+		hashedFrom := utils.Sha256(change.From[:])
 		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 			return fmt.Errorf("invalid withdrawal credentials")
 		}
