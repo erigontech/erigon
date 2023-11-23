@@ -230,9 +230,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			defer balancesFile.Close()
 			compressedWriter.Reset(balancesFile)
 			// Dump balances on disk
-			buf := make([]byte, 8*s.currentState.ValidatorLength())
+			bytes8 := make([]byte, 8)
 			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
-				binary.LittleEndian.PutUint64(buf[index*8:index*8+8], v)
+				binary.LittleEndian.PutUint64(bytes8, v)
+				if _, err := compressedWriter.Write(bytes8); err != nil {
+					return false
+				}
 				return true
 			})
 			if err != nil {
