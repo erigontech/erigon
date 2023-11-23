@@ -464,7 +464,17 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 
 		if h.rpcSlowLog {
-			h.diagMessages.Delete(string(resp.ID))
+			value, ok := h.diagMessages.Load(string(resp.ID))
+			if ok {
+				requestDuration := time.Since(value.(diagMsg).Time)
+				slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
+				if requestDuration > slowThreshold {
+					h.logger.Warn("Slow RPC call finished running", "method", value.(diagMsg).Method, "reqid", string(resp.ID), "Request duration", requestDuration)
+				}
+
+				h.diagMessages.Delete(string(resp.ID))
+			}
+
 		}
 		return resp
 	case msg.hasValidID():
