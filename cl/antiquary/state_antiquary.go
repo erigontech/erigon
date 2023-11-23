@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pierrec/lz4"
-	"golang.org/x/exp/maps"
 )
 
 const dumpFullEpochs = 10 // Dump full balances
@@ -116,7 +115,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer tx.Rollback()
 
-	changedIndiciesBalances := make(map[uint64]uint64)
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
 		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
@@ -194,7 +192,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
 		},
 		OnNewValidatorBalance: func(index int, balance uint64) error {
-			changedIndiciesBalances[uint64(index)] = balance
 			return nil
 		},
 		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
@@ -233,22 +230,21 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			// Dump balances on disk
 			bytes8 := make([]byte, 8)
 			bytes4 := make([]byte, 4)
-			i := 0
-			for index, balance := range changedIndiciesBalances {
+
+			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
 				binary.LittleEndian.PutUint32(bytes4, uint32(index))
 				if _, err = lz4Writer.Write(bytes4); err != nil {
-					return err
+					return false
 				}
-				binary.LittleEndian.PutUint64(bytes8, balance)
+				binary.LittleEndian.PutUint64(bytes8, v)
 				if _, err = lz4Writer.Write(bytes8); err != nil {
-					return err
+					return false
 				}
-				i++
-			}
+				return true
+			})
 			if err != nil {
 				return err
 			}
-			maps.Clear(changedIndiciesBalances)
 			if err := lz4Writer.Flush(); err != nil {
 				return err
 			}
