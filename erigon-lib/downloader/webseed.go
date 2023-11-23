@@ -312,7 +312,7 @@ func validateTorrentBytes(fileName string, b []byte, torrentWhitelist snapcfg.Pr
 		}
 	}
 	if !whitelisted {
-		return fmt.Errorf("skipping torrent file, hash not found: %s", torrentHash.String())
+		return fmt.Errorf(".torrent file is not whitelisted")
 	}
 	return nil
 }
