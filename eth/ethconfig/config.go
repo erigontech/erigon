@@ -261,6 +261,8 @@ type Config struct {
 	SilkwormExecution   bool
 	SilkwormRpcDaemon   bool
 	SilkwormSentry      bool
+
+	DisableTxPoolGossip bool
 }
 
 type Sync struct {
