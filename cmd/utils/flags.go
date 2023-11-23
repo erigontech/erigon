@@ -899,6 +899,16 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
+	CaplinBackfillingFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling",
+		Usage: "sets whether backfilling is enabled for caplin",
+		Value: true,
+	}
+	CaplinArchiveFlag = cli.BoolFlag{
+		Name:  "caplin.archive",
+		Usage: "enables archival node in caplin",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1528,6 +1538,11 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
 }
 
+func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name)
+	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+}
+
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormLibraryPath = ctx.String(SilkwormLibraryPathFlag.Name)
 	if ctx.IsSet(SilkwormExecutionFlag.Name) {
@@ -1646,6 +1661,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
 	setBeaconAPI(ctx, cfg)
+	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)

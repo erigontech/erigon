@@ -13,8 +13,6 @@ type DatabaseConfiguration struct{ PruneDepth uint64 }
 
 var DefaultDatabaseConfiguration = DatabaseConfiguration{PruneDepth: math.MaxUint64}
 
-// should be 1_000_000
-
 func WriteConfigurationIfNotExist(ctx context.Context, tx kv.RwTx, cfg DatabaseConfiguration) error {
 	var b bytes.Buffer
 	if err := cbor.Encoder(&b).Encode(cfg); err != nil {
