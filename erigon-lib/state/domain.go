@@ -218,6 +218,7 @@ func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer ff.Close()
 		stat, err := ff.Stat()
 		if err != nil {
 			return nil, err
@@ -692,6 +693,10 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 		if item.bindex != nil {
 			item.bindex.Close()
 			item.bindex = nil
+		}
+		if item.existence != nil {
+			item.existence.Close()
+			item.existence = nil
 		}
 		d.files.Delete(item)
 	}
