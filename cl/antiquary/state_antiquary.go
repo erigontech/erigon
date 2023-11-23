@@ -250,7 +250,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err != nil {
 			return err
 		}
-		if slot%slotsPerDumps == 0 {
+		if (slot-1)%slotsPerDumps == 0 {
 			if err := s.antiquateBalances(ctx, slot, s.currentState); err != nil {
 				return err
 			}
@@ -264,6 +264,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
+		}
+		if slot%slotsPerDumps == 0 {
+			continue
 		}
 		nextBalances = uint64BalancesList(s.currentState, nextBalances)
 		// We now compute the difference between the two balances.
