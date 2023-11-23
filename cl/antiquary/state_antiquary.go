@@ -2,6 +2,7 @@ package antiquary
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -25,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pierrec/lz4"
 )
 
 const dumpFullEpochs = 10 // Dump full balances
@@ -158,10 +158,11 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 	// buffers
-	lz4HashTable := make([]int, 1<<16)
-
-	var b, b2 bytes.Buffer
-
+	compressedWriter, err := zlib.NewWriterLevel(nil, 7)
+	if err != nil {
+		return err
+	}
+	defer compressedWriter.Close()
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -227,11 +228,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			defer balancesFile.Close()
+			compressedWriter.Reset(balancesFile)
 			// Dump balances on disk
-			b2.Grow(8 * s.currentState.ValidatorLength())
-			buf := b2.Bytes()
-			buf = buf[:8*s.currentState.ValidatorLength()]
-
+			buf := make([]byte, 8*s.currentState.ValidatorLength())
 			s.currentState.ForEachBalance(func(v uint64, index int, total int) bool {
 				binary.LittleEndian.PutUint64(buf[index*8:index*8+8], v)
 				return true
@@ -239,17 +238,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err != nil {
 				return err
 			}
-
-			b.Grow(lz4.CompressBlockBound(len(buf)))
-			out := b.Bytes()
-			out = out[:lz4.CompressBlockBound(len(buf))]
-			if _, err := lz4.CompressBlock(buf, out, lz4HashTable); err != nil {
+			if err := compressedWriter.Flush(); err != nil {
 				return err
 			}
-			if _, err := balancesFile.Write(out); err != nil {
-				return err
-			}
-			fmt.Println("Uncompressed balances size", len(buf), "compressed", len(out), "ratio", float64(len(out))/float64(len(buf)))
 			if err := balancesFile.Sync(); err != nil {
 				return err
 			}
