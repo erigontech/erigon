@@ -23,7 +23,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pierrec/lz4"
 )
+
+const dumpFullEpochs = 10 // Dump full balances
 
 func excludeDuplicatesIdentity() etl.LoadFunc {
 	var prevKey, prevValue []byte
@@ -109,7 +112,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	// TODO(Giulio2002): start from last progress
+
+	changedIndiciesBalances := make(map[uint64]uint64)
+	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
 		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
 		if err != nil {
@@ -152,12 +157,16 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer proposers.Close()
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
+	// buffers
+	var buf bytes.Buffer
+	lz4Writer := lz4.NewWriter(&buf)
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
 			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), mix[:])
 		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
+			changedIndiciesBalances[uint64(index)] = balance
 			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
 				return err
 			}
@@ -187,7 +196,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
 		},
 		OnNewValidatorBalance: func(index int, balance uint64) error {
-			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
+			changedIndiciesBalances[uint64(index)] = balance
+			return nil
 		},
 		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
 			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
@@ -215,6 +225,48 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
+			buf.Reset()
+			lz4Writer.Reset(&buf)
+
+			bytes8 := make([]byte, 8)
+			bytes4 := make([]byte, 4)
+			var err error
+			if epoch%dumpFullEpochs == 0 {
+				// val = make([]byte, s.currentState.ValidatorLength()*8)
+				// s.currentState.ForEachBalance(func(v uint64, index, total int) bool {
+				// 	binary.LittleEndian.PutUint64(val[index*8:(index+1)*8], v)
+				// 	return true
+				// })
+				s.currentState.ForEachBalance(func(v uint64, index, total int) bool {
+					binary.LittleEndian.PutUint64(bytes8, v)
+					if _, err = lz4Writer.Write(bytes8); err != nil {
+						return false
+					}
+					return true
+				})
+			} else {
+				i := 0
+				for index, balance := range changedIndiciesBalances {
+					binary.LittleEndian.PutUint32(bytes4, uint32(index))
+					if _, err = lz4Writer.Write(bytes4); err != nil {
+						return err
+					}
+					binary.LittleEndian.PutUint64(bytes8, balance)
+					if _, err = lz4Writer.Write(bytes8); err != nil {
+						return err
+					}
+					i++
+				}
+			}
+			if err != nil {
+				return err
+			}
+			if err := lz4Writer.Flush(); err != nil {
+				return err
+			}
+			if err := balances.Collect(base_encoding.Encode64ToBytes4(epoch), buf.Bytes()); err != nil {
+				return err
+			}
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
 	})
