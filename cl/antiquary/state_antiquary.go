@@ -116,6 +116,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 	}
+	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return next(k, k, v)
+	}
 	// Setup ETL collectors for:
 	// ValidatorEffectiveBalance,
 	// ValidatorSlashed,
@@ -127,25 +130,25 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// ValidatorBalance,
 	// RandaoMixes,
 	// Proposers,
-	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
-	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer slashed.Close()
-	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEligibilityEpoch.Close()
-	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEpoch.Close()
-	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer exitEpoch.Close()
-	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawableEpoch.Close()
-	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawalCredentials.Close()
-	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer balances.Close()
-	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
-	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
@@ -251,34 +254,34 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer rwTx.Rollback()
 	// Now load.
-	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := slashed.Load(rwTx, kv.ValidatorSlashed, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := slashed.Load(rwTx, kv.ValidatorSlashed, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := activationEligibilityEpoch.Load(rwTx, kv.ValidatorActivationEligibilityEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := activationEligibilityEpoch.Load(rwTx, kv.ValidatorActivationEligibilityEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := activationEpoch.Load(rwTx, kv.ValidatorActivationEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := activationEpoch.Load(rwTx, kv.ValidatorActivationEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := exitEpoch.Load(rwTx, kv.ValidatorExitEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := exitEpoch.Load(rwTx, kv.ValidatorExitEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := withdrawableEpoch.Load(rwTx, kv.ValidatorWithdrawableEpoch, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := withdrawableEpoch.Load(rwTx, kv.ValidatorWithdrawableEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := withdrawalCredentials.Load(rwTx, kv.ValidatorWithdrawalCredentials, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := withdrawalCredentials.Load(rwTx, kv.ValidatorWithdrawalCredentials, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := balances.Load(rwTx, kv.ValidatorBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := balances.Load(rwTx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := proposers.Load(rwTx, kv.Proposers, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := proposers.Load(rwTx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {

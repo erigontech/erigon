@@ -37,7 +37,6 @@ const (
 	// if first v1 was added under key K, then v2; only v1 will stay
 	SortableOldestAppearedBuffer
 	SortableMergeBuffer
-	NewestEntryBuffer
 
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
@@ -384,103 +383,6 @@ func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func NewNewestEntryBuffer(bufferOptimalSize datasize.ByteSize) *newestEntrySortableBuffer {
-	return &newestEntrySortableBuffer{
-		entries:     make(map[string][]byte),
-		size:        0,
-		optimalSize: int(bufferOptimalSize.Bytes()),
-	}
-}
-
-type newestEntrySortableBuffer struct {
-	entries     map[string][]byte
-	sortedBuf   []sortableBufferEntry
-	size        int
-	optimalSize int
-}
-
-func (b *newestEntrySortableBuffer) Put(k, v []byte) {
-	prevV, ok := b.entries[string(k)]
-	if ok {
-		b.size -= len(prevV)
-	} else {
-		b.size += len(k)
-	}
-
-	b.size += len(v)
-	b.entries[string(k)] = common.Copy(v)
-}
-
-func (b *newestEntrySortableBuffer) Size() int      { return b.size }
-func (b *newestEntrySortableBuffer) SizeLimit() int { return b.optimalSize }
-
-func (b *newestEntrySortableBuffer) Len() int {
-	return len(b.entries)
-}
-
-func (b *newestEntrySortableBuffer) Sort() {
-	for k, v := range b.entries {
-		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
-	}
-	sort.Stable(b)
-}
-
-func (b *newestEntrySortableBuffer) Less(i, j int) bool {
-	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
-}
-
-func (b *newestEntrySortableBuffer) Swap(i, j int) {
-	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
-}
-
-func (b *newestEntrySortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
-}
-func (b *newestEntrySortableBuffer) Reset() {
-	b.sortedBuf = nil
-	b.entries = make(map[string][]byte)
-	b.size = 0
-}
-func (b *newestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
-}
-
-func (b *newestEntrySortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func (b *newestEntrySortableBuffer) CheckFlushSize() bool {
-	return b.size >= b.optimalSize
-}
-
 func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
@@ -491,8 +393,6 @@ func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
 		return NewOldestEntryBuffer(size)
 	case SortableMergeBuffer:
 		return NewLatestMergedEntryMergedBuffer(size, prevBuf.(*oldestMergedEntrySortableBuffer).merge)
-	case NewestEntryBuffer:
-		return NewNewestEntryBuffer(size)
 	default:
 		panic("unknown buffer type " + strconv.Itoa(tp))
 	}
@@ -508,8 +408,6 @@ func getTypeByBuffer(b Buffer) int {
 		return SortableOldestAppearedBuffer
 	case *oldestMergedEntrySortableBuffer:
 		return SortableMergeBuffer
-	case *newestEntrySortableBuffer:
-		return NewestEntryBuffer
 	default:
 		panic(fmt.Sprintf("unknown buffer type: %T ", b))
 	}
