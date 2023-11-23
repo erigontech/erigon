@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -150,8 +152,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer withdrawableEpoch.Close()
 	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawalCredentials.Close()
-	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
-	defer balances.Close()
+
 	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
 	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
@@ -159,15 +160,14 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 	// buffers
-	var buf bytes.Buffer
-	lz4Writer := lz4.NewWriter(&buf)
+	lz4Writer := lz4.NewWriter(nil)
+	defer lz4Writer.Close()
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
 			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), mix[:])
 		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
-			changedIndiciesBalances[uint64(index)] = balance
 			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
 				return err
 			}
@@ -191,10 +191,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			w := v.WithdrawalCredentials()
-			if err := withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:]); err != nil {
-				return err
-			}
-			return balances.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
+			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
 		},
 		OnNewValidatorBalance: func(index int, balance uint64) error {
 			changedIndiciesBalances[uint64(index)] = balance
@@ -226,38 +223,27 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			buf.Reset()
-			lz4Writer.Reset(&buf)
-
+			balancesFile, err := s.fs.OpenFile(epochToPaths(slot, s.cfg, "balances"), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return err
+			}
+			defer balancesFile.Close()
+			lz4Writer.CompressionLevel = 7
+			lz4Writer.Reset(balancesFile)
+			// Dump balances on disk
 			bytes8 := make([]byte, 8)
 			bytes4 := make([]byte, 4)
-			var err error
-			if epoch%dumpFullEpochs == 0 {
-				// val = make([]byte, s.currentState.ValidatorLength()*8)
-				// s.currentState.ForEachBalance(func(v uint64, index, total int) bool {
-				// 	binary.LittleEndian.PutUint64(val[index*8:(index+1)*8], v)
-				// 	return true
-				// })
-				s.currentState.ForEachBalance(func(v uint64, index, total int) bool {
-					binary.LittleEndian.PutUint64(bytes8, v)
-					if _, err = lz4Writer.Write(bytes8); err != nil {
-						return false
-					}
-					return true
-				})
-			} else {
-				i := 0
-				for index, balance := range changedIndiciesBalances {
-					binary.LittleEndian.PutUint32(bytes4, uint32(index))
-					if _, err = lz4Writer.Write(bytes4); err != nil {
-						return err
-					}
-					binary.LittleEndian.PutUint64(bytes8, balance)
-					if _, err = lz4Writer.Write(bytes8); err != nil {
-						return err
-					}
-					i++
+			i := 0
+			for index, balance := range changedIndiciesBalances {
+				binary.LittleEndian.PutUint32(bytes4, uint32(index))
+				if _, err = lz4Writer.Write(bytes4); err != nil {
+					return err
 				}
+				binary.LittleEndian.PutUint64(bytes8, balance)
+				if _, err = lz4Writer.Write(bytes8); err != nil {
+					return err
+				}
+				i++
 			}
 			if err != nil {
 				return err
@@ -266,9 +252,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := lz4Writer.Flush(); err != nil {
 				return err
 			}
-			if err := balances.Collect(base_encoding.Encode64ToBytes4(epoch), buf.Bytes()); err != nil {
+			if err := balancesFile.Sync(); err != nil {
 				return err
 			}
+			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
 	})
@@ -329,9 +316,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := withdrawalCredentials.Load(rwTx, kv.ValidatorWithdrawalCredentials, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := balances.Load(rwTx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
 	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -388,4 +372,11 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	}
 	wg.Wait()
 	return list
+}
+
+const subDivisionFolderSize = 10_000
+
+func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) string {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
+	return path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
 }

@@ -22,9 +22,9 @@ func NewAferoRawBlockSaver(fs afero.Fs, cfg *clparams.BeaconChainConfig) RawBeac
 	}
 }
 
-func AferoRawBeaconBlockChainFromOsPath(cfg *clparams.BeaconChainConfig, path string) RawBeaconBlockChain {
+func AferoRawBeaconBlockChainFromOsPath(cfg *clparams.BeaconChainConfig, path string) (RawBeaconBlockChain, afero.Fs) {
 	dataDirFs := afero.NewBasePathFs(afero.NewOsFs(), path)
-	return NewAferoRawBlockSaver(dataDirFs, cfg)
+	return NewAferoRawBlockSaver(dataDirFs, cfg), dataDirFs
 }
 
 func (a aferoRawBeaconBlockChain) BlockWriter(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (io.WriteCloser, error) {

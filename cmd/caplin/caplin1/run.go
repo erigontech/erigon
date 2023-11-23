@@ -86,7 +86,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool) error {
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, af := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconConfig, rawDB, dirs.CaplinIndexing, engine, false)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states)
+	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states, af)
 	// Create the antiquary
 	if snDownloader != nil {
 		go func() {
