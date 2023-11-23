@@ -241,7 +241,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		addedNew++
 		if !strings.HasSuffix(name, ".seg.torrent") {
 			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
+			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
 		name := name
@@ -250,10 +250,10 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name, "err", err)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
+				d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
 					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
