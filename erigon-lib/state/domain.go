@@ -1899,13 +1899,7 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return dc.keysC, nil
 }
 
-var addr1 common.Address = common.HexToAddress("0000000000000000000000000000000000001010")
-
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	trace := bytes.Equal(addr1[:], key1) && key2 == nil && dc.d.keysTable == "CodeKeys"
-	if trace {
-		fmt.Printf("DomainContext trace %s\n", dc.d.keysTable)
-	}
 	//t := time.Now()
 	key := key1
 	if len(key2) > 0 {
@@ -1937,13 +1931,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		if trace && dc.d.filenameBase == "accounts" {
-			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		}
 		//LatestStateReadDB.UpdateDuration(t)
-		if trace {
-			fmt.Printf("Returning from the DB, len=%d\n", len(v))
-		}
 		return v, true, nil
 	} else {
 		if trace && dc.d.filenameBase == "accounts" {
@@ -1961,7 +1949,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 			//fmt.Printf("K: %d\n", l2)
 			//panic(1)
 			//
-			fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+			//fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
 		}
 	}
 	//LatestStateReadDBNotFound.UpdateDuration(t)
@@ -1969,9 +1957,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
 		return nil, false, err
-	}
-	if trace {
-		fmt.Printf("Returning from files, len=%d\n", len(v))
 	}
 	return v, found, nil
 }

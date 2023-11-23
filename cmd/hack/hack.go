@@ -348,7 +348,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	tx, err1 := db.BeginRw(context.Background())
+	tx, err1 := db.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -1160,7 +1160,7 @@ func findPrefix(chaindata string) error {
 	defer c.Close()
 	var k []byte
 	var e error
-	prefix := common.FromHex("0x0901050b0c03")
+	prefix := common.FromHex("0x0201070b040207")
 	count := 0
 	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
 		if len(k) != 20 {
@@ -1374,7 +1374,7 @@ func main() {
 		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
 
 	case "searchChangeSet":
-		err = searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))
+		err = searchChangeSet(*chaindata, common.FromHex(*account), uint64(*block))
 
 	case "searchStorageChangeSet":
 		err = searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))

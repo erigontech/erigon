@@ -822,92 +822,92 @@ Loop:
 
 			outputBlockNum.Set(blockNum)
 
-			//select {
-			//case <-logEvery.C:
-			stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-			progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
-			if rs.SizeEstimate() < commitThreshold {
-				break
-			}
-
-			if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-				if err := casted.WarmupDB(false); err != nil {
-					return err
-				}
-			}
-
-			var t1, t3, t4, t5, t6 time.Duration
-			commtitStart := time.Now()
-			tt := time.Now()
-			if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
-				return err
-			} else if !ok {
-				break Loop
-			}
-			t1 = time.Since(tt)
-
-			if err := func() error {
-				tt = time.Now()
-				doms.FinishWrites()
-				doms.ClearRam(false)
-				t3 = time.Since(tt)
-
-				if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
-					return err
+			select {
+			case <-logEvery.C:
+				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
+				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
+				if rs.SizeEstimate() < commitThreshold {
+					break
 				}
 
-				tt = time.Now()
-				applyTx.CollectMetrics()
-				if !useExternalTx {
-					tt = time.Now()
-					if err = applyTx.Commit(); err != nil {
+				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+					if err := casted.WarmupDB(false); err != nil {
 						return err
 					}
-					doms.SetContext(nil)
-					doms.SetTx(nil)
+				}
 
-					t4 = time.Since(tt)
+				var t1, t3, t4, t5, t6 time.Duration
+				commtitStart := time.Now()
+				tt := time.Now()
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
+					return err
+				} else if !ok {
+					break Loop
+				}
+				t1 = time.Since(tt)
+
+				if err := func() error {
 					tt = time.Now()
-					if blocksFreezeCfg.Produce {
-						tt = time.Now()
-						agg.BuildFilesInBackground(outputTxNum.Load())
+					doms.FinishWrites()
+					doms.ClearRam(false)
+					t3 = time.Since(tt)
+
+					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
+						return err
 					}
-					t5 = time.Since(tt)
+
 					tt = time.Now()
-					if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-						if casted, ok := tx.(kv.CanWarmupDB); ok {
-							if err := casted.WarmupDB(false); err != nil {
-								return err
-							}
-						}
-						if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+					applyTx.CollectMetrics()
+					if !useExternalTx {
+						tt = time.Now()
+						if err = applyTx.Commit(); err != nil {
 							return err
 						}
-						return nil
-					}); err != nil {
-						return err
-					}
-					t6 = time.Since(tt)
+						doms.SetContext(nil)
+						doms.SetTx(nil)
 
-					applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
-					if err != nil {
-						return err
+						t4 = time.Since(tt)
+						tt = time.Now()
+						if blocksFreezeCfg.Produce {
+							tt = time.Now()
+							agg.BuildFilesInBackground(outputTxNum.Load())
+						}
+						t5 = time.Since(tt)
+						tt = time.Now()
+						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							if casted, ok := tx.(kv.CanWarmupDB); ok {
+								if err := casted.WarmupDB(false); err != nil {
+									return err
+								}
+							}
+							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+								return err
+							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						t6 = time.Since(tt)
+
+						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
+						if err != nil {
+							return err
+						}
 					}
+					applyWorker.ResetTx(applyTx)
+					nc := applyTx.(state2.HasAggCtx).AggCtx()
+					doms.SetTx(applyTx)
+					doms.SetContext(nc)
+					doms.StartWrites()
+
+					return nil
+				}(); err != nil {
+					return err
 				}
-				applyWorker.ResetTx(applyTx)
-				nc := applyTx.(state2.HasAggCtx).AggCtx()
-				doms.SetTx(applyTx)
-				doms.SetContext(nc)
-				doms.StartWrites()
-
-				return nil
-			}(); err != nil {
-				return err
+				logger.Info("Committed", "time", time.Since(commtitStart),
+					"commitment", t1, "flush", t3, "tx.commit", t4, "aggregate", t5, "prune", t6)
+			default:
 			}
-			logger.Info("Committed", "time", time.Since(commtitStart),
-				"commitment", t1, "flush", t3, "tx.commit", t4, "aggregate", t5, "prune", t6)
-			//default:
-			//}
 		}
 
 		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
@@ -1060,7 +1060,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 	//doms.SetTxNum(context.Background(), doms.TxNum()-1) //
-	rh, err := doms.ComputeCommitment(ctx, true, true, header.Number.Uint64())
+	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}

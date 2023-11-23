@@ -155,20 +155,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
-		sr := state.NewHistoryReaderV3()
-		rw.SetReader(sr)
+		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
-		sr := state.NewStateReaderV3(rw.rs)
-		rw.SetReader(sr)
+		rw.SetReader(state.NewStateReaderV3(rw.rs))
 	}
-	if txTask.BlockNum == 37279540 {
-		fmt.Printf("RunTxTaskNoLock history block=%d, txIndex=%d, txNum=%d, t=%T\n", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, rw.stateReader)
+	if txTask.BlockNum == 2231226 {
+		fmt.Printf("RunTxTaskNoLock history block=%d, txIndex=%d, txNum=%d, t=%T\n", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, rw.stateWriter)
 	}
-	/*
-		if sr, ok := rw.stateReader.(*state.StateReaderV3); ok {
-			sr.SetTrace(txTask.BlockNum == 37307587)
-		}
-	*/
+
+	if sr, ok := rw.stateReader.(*state.StateReaderV3); ok {
+		sr.SetTrace(txTask.BlockNum == 2231226)
+	}
 
 	if rw.background && rw.chainTx == nil {
 		var err error
