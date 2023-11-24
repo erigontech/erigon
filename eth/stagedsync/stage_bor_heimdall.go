@@ -340,7 +340,7 @@ func checkHeaderExtraData(
 
 	sort.Sort(valset.ValidatorsByAddress(producerSet))
 
-	headerVals, err := valset.ParseValidators(header.GetValidatorBytes(config))
+	headerVals, err := valset.ParseValidators(bor.GetValidatorBytes(header, config))
 	if err != nil {
 		return err
 	}
