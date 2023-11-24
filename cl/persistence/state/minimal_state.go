@@ -1,21 +1,37 @@
 package state_accessors
 
 import (
-	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
-// pool of zlib compressor objects
-var zlibCompressorPool = sync.Pool{
+// pool of zstd compressor objects
+var compressorPool = sync.Pool{
 	New: func() interface{} {
-		return zlib.NewWriter(nil)
+		c, err := zstd.NewWriter(nil)
+		if err != nil {
+			panic(err)
+		}
+		return c
+	},
+}
+
+// pool of zstd compressor objects
+var decompressorPool = sync.Pool{
+	New: func() interface{} {
+		d, err := zstd.NewReader(nil)
+		if err != nil {
+			panic(err)
+		}
+		return d
 	},
 }
 
@@ -62,9 +78,9 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 
 }
 
-// Serialize serializes the state into a byte slice with zlib compression.
+// Serialize serializes the state into a byte slice with zstd compression.
 func (m *MinimalBeaconState) Serialize(w io.Writer) error {
-	compressor := zlibCompressorPool.Get().(*zlib.Writer)
+	compressor := compressorPool.Get().(*zstd.Encoder)
 	compressor.Reset(w)
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
@@ -85,16 +101,15 @@ func (m *MinimalBeaconState) Serialize(w io.Writer) error {
 	return compressor.Flush()
 }
 
-// Deserialize deserializes the state from a byte slice with zlib compression.
+// Deserialize deserializes the state from a byte slice with zstd compression.
 func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.JustificationBits = &cltypes.JustificationBits{}
+	var err error
+	decompressor := decompressorPool.Get().(*zstd.Decoder)
+	defer decompressorPool.Put(decompressor)
+	decompressor.Reset(r)
 
-	decompressor, err := zlib.NewReader(r)
-	if err != nil {
-		return err
-	}
-	defer decompressor.Close()
 	versionByte := make([]byte, 1)
 	if _, err = decompressor.Read(versionByte); err != nil {
 		return err
@@ -110,9 +125,14 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 	}
 
 	buf := make([]byte, binary.BigEndian.Uint64(lenB))
+	var n int
 
-	if _, err = decompressor.Read(buf); err != nil {
+	n, err = decompressor.Read(buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return err
+	}
+	if n != len(buf) {
+		return io.ErrUnexpectedEOF
 	}
 	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }

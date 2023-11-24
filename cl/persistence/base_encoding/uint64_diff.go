@@ -2,17 +2,23 @@ package base_encoding
 
 import (
 	"bytes"
-	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// make a sync.pool of compressors (zlib)
+// make a sync.pool of compressors (zstd)
 var compressorPool = sync.Pool{
 	New: func() interface{} {
-		return zlib.NewWriter(nil)
+		compressor, err := zstd.NewWriter(nil)
+		if err != nil {
+			panic(err)
+		}
+		return compressor
 	},
 }
 
@@ -30,7 +36,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []uint64) e
 
 	bytes8 := make([]byte, 8)
 
-	compressor := compressorPool.Get().(*zlib.Writer)
+	compressor := compressorPool.Get().(*zstd.Encoder)
 	defer compressorPool.Put(compressor)
 	compressor.Reset(w)
 
@@ -77,22 +83,25 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []uint64, diff []byte) ([]
 		return nil, err
 	}
 
-	decompressor, err := zlib.NewReader(buffer)
+	decompressor, err := zstd.NewReader(buffer)
 	if err != nil {
 		return nil, err
 	}
-	defer decompressor.Close()
 
 	bytes8 := make([]byte, 8)
 	for i := 0; i < int(length); i++ {
-		if _, err := decompressor.Read(bytes8); err != nil {
+		fmt.Println(out)
+		n, err := decompressor.Read(bytes8)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, err
+		}
+		if n != 8 {
+			return nil, io.EOF
 		}
 		if i >= len(old) {
 			out = append(out, binary.BigEndian.Uint64(bytes8))
 			continue
 		}
-		fmt.Println("a")
 		out = append(out, old[i]+binary.BigEndian.Uint64(bytes8))
 	}
 

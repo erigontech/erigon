@@ -2,7 +2,6 @@ package antiquary
 
 import (
 	"bytes"
-	"compress/zlib"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -12,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -178,8 +178,13 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	minimalBeaconStates := etl.NewCollector(kv.MinimalBeaconState, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer minimalBeaconStates.Close()
 
+	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
-
+	compressedWriter, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	if err != nil {
+		return err
+	}
+	defer compressedWriter.Close()
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
 		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
@@ -187,19 +192,14 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(s.currentState, effectiveBalance, slashed, activationEligibilityEpoch, activationEpoch, exitEpoch, withdrawableEpoch, withdrawalCredentials, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots); err != nil {
+		if err := s.collectGenesisState(compressedWriter, s.currentState, effectiveBalance, slashed, activationEligibilityEpoch, activationEpoch, exitEpoch, withdrawableEpoch, withdrawalCredentials, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots); err != nil {
 			return err
 		}
 	}
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
-	// buffers
-	compressedWriter, err := zlib.NewWriterLevel(nil, zlib.BestCompression)
-	if err != nil {
-		return err
-	}
-	defer compressedWriter.Close()
+
 	var prevBalances, nextBalances []uint64
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
@@ -283,7 +283,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		if (slot-1)%slotsPerDumps == 0 {
-			if err := s.antiquateBalances(ctx, slot, s.currentState); err != nil {
+			if err := s.antiquateBalances(ctx, slot, s.currentState, compressedWriter); err != nil {
 				return err
 			}
 		}
@@ -298,15 +298,17 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
 		}
+
+		if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
+			return err
+		}
 		if slot%slotsPerDumps == 0 {
 			continue
 		}
 		nextBalances = uint64BalancesList(s.currentState, nextBalances)
+
 		// antiquate the balances
 		if err := s.antiquateUint64ListDiff(ctx, "balances", base_encoding.Encode64ToBytes4(slot), prevBalances, nextBalances, balances); err != nil {
-			return err
-		}
-		if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
 
@@ -377,7 +379,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	return rwTx.Commit()
 }
 
-func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *state.CachingBeaconState) error {
+func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *state.CachingBeaconState, compressor *zstd.Encoder) error {
 	folderPath, filePath := epochToPaths(slot, s.cfg, "balances")
 	_ = s.fs.MkdirAll(folderPath, 0o755)
 
@@ -386,12 +388,7 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 		return err
 	}
 	defer balancesFile.Close()
-
-	compressedWriter, err := zlib.NewWriterLevel(balancesFile, zlib.BestCompression)
-	if err != nil {
-		return err
-	}
-	defer compressedWriter.Close()
+	compressor.Reset(balancesFile)
 
 	balances := make([]byte, state.ValidatorLength()*8)
 	state.ForEachBalance(func(v uint64, index int, total int) bool {
@@ -399,11 +396,11 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 		return true
 	})
 
-	if _, err := compressedWriter.Write(balances); err != nil {
+	if _, err := compressor.Write(balances); err != nil {
 		return err
 	}
 
-	if err := compressedWriter.Flush(); err != nil {
+	if err := compressor.Flush(); err != nil {
 		return err
 	}
 	return balancesFile.Sync()
@@ -480,7 +477,7 @@ func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string)
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
-func (s *Antiquary) collectGenesisState(state *state.CachingBeaconState, effectiveBalanceCollector, slashedCollector, activationEligibilityEpochCollector, activationEpochCollector, exitEpochCollector, withdrawableEpochCollector, withdrawalCredentialsCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector) error {
+func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, effectiveBalanceCollector, slashedCollector, activationEligibilityEpochCollector, activationEpochCollector, exitEpochCollector, withdrawableEpochCollector, withdrawalCredentialsCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -521,7 +518,7 @@ func (s *Antiquary) collectGenesisState(state *state.CachingBeaconState, effecti
 	if err != nil {
 		return err
 	}
-	if err := s.antiquateBalances(context.Background(), slot, state); err != nil {
+	if err := s.antiquateBalances(context.Background(), slot, state, compressor); err != nil {
 		return err
 	}
 
