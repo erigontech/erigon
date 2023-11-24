@@ -15,6 +15,6 @@ type histogram struct {
 	prometheus.Summary
 }
 
-func (h histogram) ObserveDuration(start time.Time) {
+func (h *histogram) ObserveDuration(start time.Time) {
 	h.Observe(secondsSince(start))
 }

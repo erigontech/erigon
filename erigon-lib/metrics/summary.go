@@ -15,6 +15,6 @@ type summary struct {
 	prometheus.Summary
 }
 
-func (s summary) ObserveDuration(start time.Time) {
+func (s *summary) ObserveDuration(start time.Time) {
 	s.Observe(secondsSince(start))
 }
