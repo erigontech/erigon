@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -73,8 +72,10 @@ type handler struct {
 	traceRequests       bool
 
 	// metrics
-	diagMessages        sync.Map
+	diagMessage         diagMsg
+	diagLock            sync.Mutex
 	rpcSlowLogThreshold uint
+	rpcMethodsWhitelist []string
 }
 
 type callProc struct {
@@ -83,10 +84,10 @@ type callProc struct {
 }
 
 type diagMsg struct {
-	Method           string
-	Time             time.Time
-	LastLogTime      time.Time
-	RequestTotalTime time.Duration
+	Method      string
+	Time        time.Time
+	LastLogTime time.Time
+	Finished    bool
 }
 
 func HandleError(err error, stream *jsoniter.Stream) error {
@@ -143,6 +144,8 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		traceRequests:       traceRequests,
 
 		rpcSlowLogThreshold: rpcSlowLogThreshold,
+		diagMessage:         diagMsg{Method: "", Time: time.Unix(0, 0), LastLogTime: time.Unix(0, 0), Finished: true},
+		rpcMethodsWhitelist: []string{"eth_call", "eth_getBlock"},
 	}
 
 	if conn.remoteAddr() != "" {
@@ -156,7 +159,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) lookForSlowRpc() {
-	logInterval := 20 * time.Second
+	logInterval := 30 * time.Second
 	updateThreshold := 100 * time.Millisecond
 	slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
 	if slowThreshold < updateThreshold {
@@ -170,24 +173,31 @@ func (h *handler) lookForSlowRpc() {
 		for {
 			select {
 			case <-ticker.C:
-				h.diagMessages.Range(func(key, value interface{}) bool {
-					requestDuration := time.Since(value.(diagMsg).Time)
-					if requestDuration > slowThreshold && time.Since(value.(diagMsg).LastLogTime) > logInterval {
-						h.logger.Warn("[Slow RPC] - request still processing", "method", value.(diagMsg).Method, "reqid", idForLog{json.RawMessage(fmt.Sprint(key))}, "Request duration", requestDuration)
-
-						newValue := value.(diagMsg)
-						newValue.LastLogTime = time.Now()
-						newValue.RequestTotalTime = requestDuration
-						h.diagMessages.Delete(key)
-						h.diagMessages.Store(key, newValue)
+				h.diagLock.Lock()
+				if h.isRpcMethodNeedsCheck(h.diagMessage.Method) {
+					if !h.diagMessage.Finished {
+						requestDuration := time.Since(h.diagMessage.Time)
+						if requestDuration > slowThreshold && time.Since(h.diagMessage.LastLogTime) > logInterval {
+							h.logger.Warn("[Slow RPC] - request still processing", "method", h.diagMessage.Method, "Request duration", requestDuration)
+							h.diagMessage.LastLogTime = time.Now()
+						}
 					}
-					return true
-				})
+				}
+				h.diagLock.Unlock()
 			case <-h.rootCtx.Done():
 				return
 			}
 		}
 	}()
+}
+
+func (h *handler) isRpcMethodNeedsCheck(method string) bool {
+	for _, m := range h.rpcMethodsWhitelist {
+		if m == method {
+			return false
+		}
+	}
+	return true
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -441,23 +451,18 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 		return nil
 	case msg.isCall():
-		if h.rpcSlowLogThreshold > 0 {
-			h.diagMessages.Store(string(msg.ID), diagMsg{Method: msg.Method, Time: start, LastLogTime: time.Unix(0, 0), RequestTotalTime: 0})
-		}
+		h.diagMessage = diagMsg{Method: msg.Method, Time: start, LastLogTime: time.Unix(0, 0), Finished: false}
 
 		resp := h.handleCall(ctx, msg, stream)
 
 		if h.rpcSlowLogThreshold > 0 {
-			value, ok := h.diagMessages.Load(string(resp.ID))
-			if ok {
-				requestDuration := time.Since(value.(diagMsg).Time)
-				slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
-				if requestDuration > slowThreshold {
-					h.logger.Warn("[Slow RPC] - request finished", "method", value.(diagMsg).Method, "reqid", string(resp.ID), "Request duration", requestDuration)
-				}
-
-				h.diagMessages.Delete(string(resp.ID))
+			requestDuration := time.Since(h.diagMessage.Time)
+			slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
+			if requestDuration > slowThreshold {
+				h.logger.Warn("[Slow RPC] - request finished", "method", h.diagMessage.Method, "Request duration", requestDuration)
 			}
+
+			h.diagMessage.Finished = true
 		}
 
 		if resp != nil && resp.Error != nil {
