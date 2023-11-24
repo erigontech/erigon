@@ -47,14 +47,14 @@ Flag `--snapshots` is compatible with `--prune` flag
 # It will dump blocks from Database to .seg files:
 erigon snapshots retire --datadir=<your_datadir> 
 
-# Create .torrent files (Downloader will seed automatically all .torrent files)
+# Create .torrent files (you can think about them as "checksum")
+downloader torrent_create --datadir=<your_datadir>
+
 # output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader torrent_hashes --rebuild --datadir=<your_datadir>
+downloader torrent_hashes --datadir=<your_datadir>
 
-# Start downloader (seeds automatically)
+# Start downloader (read all .torrent files, and download/seed data)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
-
-# Erigon is not required for snapshots seeding. But Erigon with --snapshots also does seeding. 
 ```
 
 Additional info:
