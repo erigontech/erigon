@@ -805,11 +805,12 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
-	if ac.a.minimaxTxNumInFiles.Load() == 0 {
+	maxTxNum := ac.maxTxNumInDomainFiles(false)
+	if maxTxNum == 0 {
 		return
 	}
 
-	histBlockNumProgress := tx2block(ac.maxTxNumInDomainFiles(false))
+	domainBlockNumProgress := tx2block(maxTxNum)
 	str := make([]string, 0, len(ac.account.files))
 	for _, item := range ac.account.files {
 		bn := tx2block(item.endTxNum)
@@ -832,7 +833,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
-		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
+		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
