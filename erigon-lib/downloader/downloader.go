@@ -373,7 +373,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Progress = 0
 	} else {
 		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
-		if stats.Progress == 100 && !stats.Completed {
+		if int(stats.Progress) == 100 && !stats.Completed {
 			stats.Progress = 99.99
 		}
 	}
