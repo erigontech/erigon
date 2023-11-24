@@ -100,9 +100,12 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 	dirPath := cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
 	if dirPath == "" {
-		datadir := cmd.Flags().Lookup("datadir").Value.String()
-		if datadir != "" {
-			dirPath = filepath.Join(datadir, "logs")
+		datadirFlag := cmd.Flags().Lookup("datadir")
+		if datadirFlag != nil {
+			datadir := datadirFlag.Value.String()
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
 		}
 	}
 

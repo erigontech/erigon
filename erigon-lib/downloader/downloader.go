@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -372,7 +373,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Progress = 0
 	} else {
 		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
-		if stats.Progress == 100 && !stats.Completed {
+		if int(stats.Progress) == 100 && !stats.Completed {
 			stats.Progress = 99.99
 		}
 	}
@@ -382,7 +383,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
-func (d *Downloader) verifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -408,15 +409,21 @@ func (d *Downloader) verifyFile(ctx context.Context, t *torrent.Torrent, complet
 	return g.Wait()
 }
 
-func (d *Downloader) VerifyData(ctx context.Context) error {
+func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	total := 0
-	torrents := d.torrentClient.Torrents()
+	_torrents := d.torrentClient.Torrents()
+	torrents := make([]*torrent.Torrent, 0, len(_torrents))
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
+			fmt.Printf("alex: %s\n", t.Name())
+			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
+				continue
+			}
+			torrents = append(torrents, t)
 			total += t.NumPieces()
-		default:
-			continue
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
@@ -449,7 +456,7 @@ func (d *Downloader) VerifyData(ctx context.Context) error {
 	for _, t := range torrents {
 		t := t
 		g.Go(func() error {
-			return d.verifyFile(ctx, t, completedPieces)
+			return VerifyFile(ctx, t, completedPieces)
 		})
 	}
 

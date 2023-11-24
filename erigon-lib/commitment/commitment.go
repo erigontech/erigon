@@ -9,7 +9,7 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
