@@ -91,26 +91,19 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 
 	sd := &SharedDomains{
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
-		aggCtx:      ac,
-
-		Account:    ac.a.accounts,
-		account:    map[string][]byte{},
-		Code:       ac.a.code,
-		code:       map[string][]byte{},
-		Storage:    ac.a.storage,
-		storage:    btree2.NewMap[string, []byte](128),
-		Commitment: ac.a.commitment,
-		commitment: map[string][]byte{},
-
-		TracesTo:   ac.a.tracesTo,
-		TracesFrom: ac.a.tracesFrom,
-		LogAddrs:   ac.a.logAddrs,
-		LogTopics:  ac.a.logTopics,
-		roTx:       tx,
-		//trace:      true,
+		Account:     ac.a.accounts,
+		Code:        ac.a.code,
+		Storage:     ac.a.storage,
+		Commitment:  ac.a.commitment,
+		TracesTo:    ac.a.tracesTo,
+		TracesFrom:  ac.a.tracesFrom,
+		LogAddrs:    ac.a.logAddrs,
+		LogTopics:   ac.a.logTopics,
+		roTx:        tx,
+		//trace:       true,
 	}
 
-	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
+	sd.SetContext(ac)
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -658,16 +651,6 @@ func (sd *SharedDomains) StepSize() uint64 {
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(ctx context.Context, txNum uint64) {
-	//if txNum%sd.Account.aggregationStep == 0 && txNum > 0 { //
-	//	// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
-	//	// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-	//	//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/sd.Account.aggregationStep)
-	//	_, err := sd.ComputeCommitment(ctx, true, sd.trace, sd.blockNum.Load())
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//}
-
 	sd.txNum = txNum
 	sd.aggCtx.account.SetTxNum(txNum)
 	sd.aggCtx.code.SetTxNum(txNum)
@@ -849,7 +832,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 func (sd *SharedDomains) Close() {
 	sd.FinishWrites()
 	sd.SetBlockNum(0)
-	sd.SetTxNum(context.Background(), 0)
+	if sd.aggCtx != nil {
+		sd.SetTxNum(context.Background(), 0)
+	}
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil

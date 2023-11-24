@@ -182,7 +182,7 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.

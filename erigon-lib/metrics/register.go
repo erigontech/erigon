@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	vm "github.com/VictoriaMetrics/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
-
-const UsePrometheusClient = true
 
 type Histogram interface {
 	// UpdateDuration updates request duration based on the given startTime.
@@ -63,17 +60,13 @@ func (c intCounter) Get() uint64 {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned counter is safe to use from concurrent goroutines.
-func NewCounter(s string) Counter {
-	if UsePrometheusClient {
-		counter, err := defaultSet.NewGauge(s)
-		if err != nil {
-			panic(fmt.Errorf("could not create new counter: %w", err))
-		}
-
-		return intCounter{counter}
-	} else {
-		return vm.GetDefaultSet().NewCounter(s)
+func NewCounter(name string) Counter {
+	counter, err := defaultSet.NewGauge(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new counter: %w", err))
 	}
+
+	return intCounter{counter}
 }
 
 // GetOrCreateCounter returns registered counter with the given name
@@ -90,26 +83,13 @@ func NewCounter(s string) Counter {
 // The returned counter is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewCounter instead of GetOrCreateCounter.
-func GetOrCreateCounter(s string, isGauge ...bool) Counter {
-	if UsePrometheusClient {
-		counter, err := defaultSet.GetOrCreateGauge(s)
-		if err != nil {
-			panic(fmt.Errorf("could not get or create new counter: %w", err))
-		}
-
-		return intCounter{counter}
-	} else {
-		if counter := DefaultRegistry.Get(s); counter != nil {
-			if counter, ok := counter.(Counter); ok {
-				return counter
-			}
-		}
-
-		counter := vm.GetOrCreateCounter(s, isGauge...)
-		DefaultRegistry.Register(s, counter)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return counter
+func GetOrCreateCounter(name string, isGauge ...bool) Counter {
+	counter, err := defaultSet.GetOrCreateGauge(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new counter: %w", err))
 	}
+
+	return intCounter{counter}
 }
 
 // NewGaugeFunc registers and returns gauge with the given name, which calls f
@@ -125,8 +105,8 @@ func GetOrCreateCounter(s string, isGauge ...bool) Counter {
 // f must be safe for concurrent calls.
 //
 // The returned gauge is safe to use from concurrent goroutines.
-func NewGaugeFunc(s string, f func() float64) prometheus.GaugeFunc {
-	gf, err := defaultSet.NewGaugeFunc(s, f)
+func NewGaugeFunc(name string, f func() float64) prometheus.GaugeFunc {
+	gf, err := defaultSet.NewGaugeFunc(name, f)
 	if err != nil {
 		panic(fmt.Errorf("could not create new gauge func: %w", err))
 	}
@@ -148,8 +128,8 @@ func NewGaugeFunc(s string, f func() float64) prometheus.GaugeFunc {
 // The returned gauge is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func GetOrCreateGaugeFunc(s string, f func() float64) prometheus.GaugeFunc {
-	gf, err := defaultSet.GetOrCreateGaugeFunc(s, f)
+func GetOrCreateGaugeFunc(name string, f func() float64) prometheus.GaugeFunc {
+	gf, err := defaultSet.GetOrCreateGaugeFunc(name, f)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new gauge func: %w", err))
 	}
@@ -179,20 +159,13 @@ func (sm summary) Update(v float64) {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned summary is safe to use from concurrent goroutines.
-func NewSummary(s string) Summary {
-	if UsePrometheusClient {
-		s, err := defaultSet.NewSummary(s)
-		if err != nil {
-			panic(fmt.Errorf("could not create new summary: %w", err))
-		}
-
-		return summary{s}
-	} else {
-		summary := vm.NewSummary(s)
-		DefaultRegistry.Register(s, summary)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return summary
+func NewSummary(name string) Summary {
+	s, err := defaultSet.NewSummary(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new summary: %w", err))
 	}
+
+	return summary{s}
 }
 
 // GetOrCreateSummary returns registered summary with the given name
@@ -209,20 +182,13 @@ func NewSummary(s string) Summary {
 // The returned summary is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewSummary instead of GetOrCreateSummary.
-func GetOrCreateSummary(s string) Summary {
-	if UsePrometheusClient {
-		s, err := defaultSet.GetOrCreateSummary(s)
-		if err != nil {
-			panic(fmt.Errorf("could not get or create new summary: %w", err))
-		}
-
-		return summary{s}
-	} else {
-		summary := vm.GetOrCreateSummary(s)
-		DefaultRegistry.Register(s, summary)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return summary
+func GetOrCreateSummary(name string) Summary {
+	s, err := defaultSet.GetOrCreateSummary(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new summary: %w", err))
 	}
+
+	return summary{s}
 }
 
 type histogram struct {
@@ -247,17 +213,13 @@ func (h histogram) Update(v float64) {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned histogram is safe to use from concurrent goroutines.
-func NewHistogram(s string) Histogram {
-	if UsePrometheusClient {
-		h, err := defaultSet.NewHistogram(s)
-		if err != nil {
-			panic(fmt.Errorf("could not create new histogram: %w", err))
-		}
-
-		return histogram{h}
-	} else {
-		return vm.NewHistogram(s)
+func NewHistogram(name string) Histogram {
+	h, err := defaultSet.NewHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new histogram: %w", err))
 	}
+
+	return histogram{h}
 }
 
 // GetOrCreateHistogram returns registered histogram with the given name
@@ -274,18 +236,11 @@ func NewHistogram(s string) Histogram {
 // The returned histogram is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
-func GetOrCreateHistogram(s string) Histogram {
-	if UsePrometheusClient {
-		h, err := defaultSet.GetOrCreateHistogram(s)
-		if err != nil {
-			panic(fmt.Errorf("could not get or create new histogram: %w", err))
-		}
-
-		return histogram{h}
-	} else {
-		summary := vm.GetOrCreateHistogram(s)
-		DefaultRegistry.Register(s, summary)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return summary
+func GetOrCreateHistogram(name string) Histogram {
+	h, err := defaultSet.GetOrCreateHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new histogram: %w", err))
 	}
+
+	return histogram{h}
 }

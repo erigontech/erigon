@@ -29,6 +29,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+type CaplinConfig struct {
+	Backfilling bool
+	Archive     bool
+}
+
 type NetworkType int
 
 const (

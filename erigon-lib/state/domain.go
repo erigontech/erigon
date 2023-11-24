@@ -31,12 +31,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -87,10 +88,11 @@ var (
 const StepsInColdFile = 32
 
 var (
-	asserts        = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
-	traceGetLatest = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
-	traceGetAsOf   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
+	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetLatest   = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
+	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -715,6 +717,9 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
+	if tracePutWithPrev == dc.d.filenameBase {
+		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, val, preval)
+	}
 	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
@@ -1927,7 +1932,15 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	if err != nil {
 		return nil, false, err
 	}
-	_, foundInvStep, err := keysC.SeekExact(key) // reads first DupSort value
+
+	var foundInvStep []byte
+	if traceGetLatest == dc.d.filenameBase {
+		defer func() {
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
+		}()
+	}
+
+	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
@@ -1943,29 +1956,29 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		if traceGetLatest == dc.d.filenameBase {
-			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		}
+		//if traceGetLatest == dc.d.filenameBase {
+		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
+		//}
 		//LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
-	} else {
-		if traceGetLatest == dc.d.filenameBase {
-			//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//l := iter.ToArrU64Must(it)
-			//fmt.Printf("L: %d\n", l)
-			//it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//l2 := iter.ToArrU64Must(it2)
-			//fmt.Printf("K: %d\n", l2)
-			//panic(1)
-			//
-			fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
-		}
+		//} else {
+		//if traceGetLatest == dc.d.filenameBase {
+		//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//l := iter.ToArrU64Must(it)
+		//fmt.Printf("L: %d\n", l)
+		//it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//l2 := iter.ToArrU64Must(it2)
+		//fmt.Printf("K: %d\n", l2)
+		//panic(1)
+		//
+		//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+		//}
 	}
 	//LatestStateReadDBNotFound.UpdateDuration(t)
 
@@ -2152,7 +2165,7 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
 }
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.

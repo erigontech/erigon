@@ -30,7 +30,7 @@ func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err 
 	}
 
 	s := state.New(&clparams.MainnetBeaconConfig)
-	keccakOptimized := utils.OptimizedKeccak256NotThreadSafe()
+	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), meta.Seed)
 	for idx, v := range meta.Mapping {
 		shuffledIdx, err := shuffling.ComputeShuffledIndex(s.BeaconConfig(), uint64(idx), uint64(meta.Count), meta.Seed, preInputs, keccakOptimized)

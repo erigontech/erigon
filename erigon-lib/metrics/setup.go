@@ -1,5 +1,3 @@
-// Hook go-metrics into expvar
-// on any /debug/metrics request, load all vars from the registry into expvar, and execute regular expvar handler
 package metrics
 
 import (
@@ -7,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var EnabledExpensive = false
@@ -14,9 +14,10 @@ var EnabledExpensive = false
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
 func Setup(address string, logger log.Logger) *http.ServeMux {
-	prometheusMux := http.NewServeMux()
+	prometheus.DefaultRegisterer.MustRegister(defaultSet)
 
-	prometheusMux.Handle("/debug/metrics/prometheus", Handler(DefaultRegistry))
+	prometheusMux := http.NewServeMux()
+	prometheusMux.Handle("/debug/metrics/prometheus", promhttp.Handler())
 
 	promServer := &http.Server{
 		Addr:    address,
@@ -30,6 +31,5 @@ func Setup(address string, logger log.Logger) *http.ServeMux {
 	}()
 
 	logger.Info("Enabling metrics export to prometheus", "path", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
-
 	return prometheusMux
 }
