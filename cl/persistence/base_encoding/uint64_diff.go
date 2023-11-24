@@ -29,6 +29,77 @@ var bufferPool = sync.Pool{
 	},
 }
 
+func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) error {
+	if len(old) > len(new) {
+		return fmt.Errorf("old list is longer than new list")
+	}
+
+	compressor := compressorPool.Get().(*zstd.Encoder)
+	defer compressorPool.Put(compressor)
+	compressor.Reset(w)
+
+	if err := binary.Write(w, binary.BigEndian, uint32(len(new))); err != nil {
+		return err
+	}
+	temp := make([]byte, 8)
+	for i := 0; i < len(old); i += 8 {
+		binary.LittleEndian.PutUint64(temp, binary.LittleEndian.Uint64(new[i:i+8])-binary.LittleEndian.Uint64(old[i:i+8]))
+		if _, err := compressor.Write(temp); err != nil {
+			return err
+		}
+	}
+	// dump the remaining bytes
+	if _, err := compressor.Write(new[len(old):]); err != nil {
+		return err
+	}
+	return compressor.Flush()
+}
+
+func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]byte, error) {
+	out = out[:0]
+
+	buffer := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buffer)
+	buffer.Reset()
+
+	if _, err := buffer.Write(diff); err != nil {
+		return nil, err
+	}
+
+	var length uint32
+	if err := binary.Read(buffer, binary.BigEndian, &length); err != nil {
+		return nil, err
+	}
+
+	decompressor, err := zstd.NewReader(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	temp := make([]byte, 8)
+	for i := 0; i < len(old); i += 8 {
+		n, err := decompressor.Read(temp)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, err
+		}
+		if n != 8 {
+			return nil, io.EOF
+		}
+		binary.LittleEndian.PutUint64(temp, binary.LittleEndian.Uint64(old[i:i+8])+binary.LittleEndian.Uint64(temp))
+		out = append(out, temp...)
+	}
+
+	// Append the remaining new bytes that were not in the old slice
+	remainingBytes := make([]byte, int(length)-len(old))
+	_, err = decompressor.Read(remainingBytes)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	out = append(out, remainingBytes...)
+
+	return out, nil
+}
+
 func ComputeCompressedSerializedByteListDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
 		return fmt.Errorf("old list is longer than new list")

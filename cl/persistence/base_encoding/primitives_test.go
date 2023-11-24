@@ -19,8 +19,12 @@ func Test64(t *testing.T) {
 }
 
 func TestDiff64(t *testing.T) {
-	old := []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	new := []uint64{1, 2, 3, 4, 5, 61, 45, 8, 9, 10}
+	old := make([]byte, 8000)
+	new := make([]byte, 8000)
+	for i := 0; i < 8000; i++ {
+		old[i] = byte(i)
+		new[i] = byte(i + 1)
+	}
 
 	var b bytes.Buffer
 
@@ -28,7 +32,6 @@ func TestDiff64(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-
 	new2, err := ApplyCompressedSerializedUint64ListDiff(old, nil, out)
 	require.NoError(t, err)
 

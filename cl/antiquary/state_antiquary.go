@@ -183,6 +183,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer previousPartecipationC.Close()
 	currentPartecipationC := etl.NewCollector(kv.CurrentEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer currentPartecipationC.Close()
+	checkpoints := etl.NewCollector(kv.Checkpoints, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer checkpoints.Close()
 
 	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
@@ -282,12 +284,18 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
-
 	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
 			return err
 		}
+		if slot%s.cfg.SlotsPerEpoch == 0 {
+			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
+			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
+				return err
+			}
+		}
+
 		if (slot-1)%slotsPerDumps == 0 {
 			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
@@ -326,17 +334,17 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
-		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances); err != nil {
+		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, true); err != nil {
 			return err
 		}
 		if s.currentState.Version() >= clparams.AltairVersion {
-			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, true); err != nil {
 				return err
 			}
-			if err := s.antiquateBytesListDiff(ctx, key, previousPartecipation, s.currentState.RawPreviousEpochParticipation(), previousPartecipationC); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, previousPartecipation, s.currentState.RawPreviousEpochParticipation(), previousPartecipationC, false); err != nil {
 				return err
 			}
-			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, false); err != nil {
 				return err
 			}
 		}
@@ -401,6 +409,18 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := minimalBeaconStates.Load(rwTx, kv.MinimalBeaconState, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := inactivityScoresC.Load(rwTx, kv.InactivityScores, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := previousPartecipationC.Load(rwTx, kv.PreviousEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := currentPartecipationC.Load(rwTx, kv.CurrentEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := checkpoints.Load(rwTx, kv.Checkpoints, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
@@ -429,15 +449,21 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	return balancesFile.Sync()
 }
 
-func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector) error {
+func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, u64 bool) error {
 	// create a diff
 	diffBuffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(diffBuffer)
 	diffBuffer.Reset()
 
-	// We now compute the difference between the two balances.
-	if err := base_encoding.ComputeCompressedSerializedByteListDiff(diffBuffer, old, new); err != nil {
-		return err
+	if u64 {
+		if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(diffBuffer, old, new); err != nil {
+			return err
+		}
+	} else {
+		// We now compute the difference between the two balances.
+		if err := base_encoding.ComputeCompressedSerializedByteListDiff(diffBuffer, old, new); err != nil {
+			return err
+		}
 	}
 
 	return collector.Collect(key, common.Copy(diffBuffer.Bytes()))

@@ -480,6 +480,7 @@ const (
 	InactivityScores           = "InactivityScores"
 	PreviousEpochParticipation = "PreviousEpochParticipation"
 	CurrentEpochParticipation  = "CurrentEpochParticipation"
+	Checkpoints                = "Checkpoints"
 	RandaoMixes                = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
 	Proposers                  = "BlockProposers" // epoch => proposers indicies
 
@@ -666,6 +667,7 @@ var ChaindataTables = []string{
 	PreviousEpochParticipation,
 	CurrentEpochParticipation,
 	InactivityScores,
+	Checkpoints,
 }
 
 const (
