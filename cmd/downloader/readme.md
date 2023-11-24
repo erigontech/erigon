@@ -136,12 +136,10 @@ downloader --seedbox --datadir=<your> --chain=mainnet
 Seedbox can fallback to **Webseed** - HTTP url to centralized infrastructure. For example: private S3 bucket with
 signed_urls, or any HTTP server with files.
 
-Erigon has default webseed url's - and you can create own.
-
 ```
+# Erigon has default webseed url's - and you can create own
 downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
-
-# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file
 ```
 
 --------- 
