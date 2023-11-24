@@ -31,11 +31,17 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 }
 
 func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
+	if b.events.OnNewBlockRoot != nil {
+		b.events.OnNewBlockRoot(index, root)
+	}
 	b.markLeaf(BlockRootsLeafIndex)
 	b.blockRoots.Set(index, root)
 }
 
 func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
+	if b.events.OnNewStateRoot != nil {
+		b.events.OnNewStateRoot(index, root)
+	}
 	b.markLeaf(StateRootsLeafIndex)
 	b.stateRoots.Set(index, root)
 }
@@ -231,12 +237,11 @@ func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 }
 
 func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
+	if b.events.OnNewSlashingSegment != nil {
+		b.events.OnNewSlashingSegment(index, segment)
+	}
 	b.markLeaf(SlashingsLeafIndex)
 	b.slashings.Set(index, segment)
-}
-func (b *BeaconState) IncrementSlashingSegmentAt(index int, delta uint64) {
-	b.markLeaf(SlashingsLeafIndex)
-	b.slashings.Set(index, b.SlashingSegmentAt(index)+delta)
 }
 
 func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {

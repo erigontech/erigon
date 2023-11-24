@@ -461,8 +461,10 @@ const (
 	LightClientUpdates = "LightClientUpdates"
 	// Beacon historical data
 	// ValidatorIndex => [Field]
-	ValidatorPublicKeys                 = "ValidatorPublickeys"
+	ValidatorPublicKeys = "ValidatorPublickeys"
+	// ValidatorIndex + Slot => [Field]
 	ValidatorEffectiveBalance           = "ValidatorEffectiveBalance"
+	ValidatorSlashings                  = "ValidatorSlashings"
 	ValidatorSlashed                    = "ValidatorSlashed"
 	ValidatorActivationEligibilityEpoch = "ValidatorActivationEligibilityEpoch"
 	ValidatorActivationEpoch            = "ValidatorActivationEpoch"
@@ -472,8 +474,11 @@ const (
 	ValidatorBalance                    = "ValidatorBalance"
 
 	// External data
-	RandaoMixes = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
-	Proposers   = "BlockProposers" // epoch => proposers indicies
+	StateRoot          = "StateRoot"
+	BlockRoot          = "BlockRoot"
+	MinimalBeaconState = "MinimalBeaconState"
+	RandaoMixes        = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
+	Proposers          = "BlockProposers" // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 )
@@ -647,7 +652,11 @@ var ChaindataTables = []string{
 	ValidatorWithdrawableEpoch,
 	ValidatorWithdrawalCredentials,
 	ValidatorBalance,
+	ValidatorSlashings,
 	// Other stuff (related to state reconstitution)
+	BlockRoot,
+	StateRoot,
+	MinimalBeaconState,
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,

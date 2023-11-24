@@ -28,6 +28,13 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+// pool for buffers
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return &bytes.Buffer{}
+	},
+}
+
 const slotsPerDumps = 2048 // Dump full balances
 
 func excludeDuplicatesIdentity() etl.LoadFunc {
@@ -128,13 +135,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer tx.Rollback()
 
-	// TODO(Giulio2002): also store genesis information and resume from state.
-	if s.currentState == nil {
-		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
-		if err != nil {
-			return err
-		}
-	}
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
@@ -149,25 +149,49 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// ValidatorBalance,
 	// RandaoMixes,
 	// Proposers,
-	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
-	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer slashed.Close()
-	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEligibilityEpoch.Close()
-	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer activationEpoch.Close()
-	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer exitEpoch.Close()
-	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawableEpoch.Close()
-	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer withdrawalCredentials.Close()
-
-	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer balances.Close()
+	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
-	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewNewestEntryBuffer(etl.BufferOptimalSize), s.logger)
+	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
+	slashings := etl.NewCollector(kv.ValidatorSlashings, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer slashings.Close()
+	blockRoots := etl.NewCollector(kv.BlockRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer blockRoots.Close()
+	stateRoots := etl.NewCollector(kv.StateRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer stateRoots.Close()
+	minimalBeaconStates := etl.NewCollector(kv.MinimalBeaconState, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer minimalBeaconStates.Close()
+
+	var minimalBeaconStateBuf bytes.Buffer
+
+	// TODO(Giulio2002): also store genesis information and resume from state.
+	if s.currentState == nil {
+		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
+		if err != nil {
+			return err
+		}
+		// Collect genesis state if we are at genesis
+		if err := s.collectGenesisState(s.currentState, effectiveBalance, slashed, activationEligibilityEpoch, activationEpoch, exitEpoch, withdrawableEpoch, withdrawalCredentials, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots); err != nil {
+			return err
+		}
+	}
+
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 	// buffers
@@ -177,7 +201,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer compressedWriter.Close()
 	var prevBalances, nextBalances []uint64
-	var diff []byte
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -238,6 +261,15 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
+		OnNewSlashingSegment: func(index int, segment uint64) error {
+			return slashings.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(segment))
+		},
+		OnNewBlockRoot: func(index int, root common.Hash) error {
+			return blockRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
+		},
+		OnNewStateRoot: func(index int, root common.Hash) error {
+			return stateRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
+		},
 	})
 	log.Info("Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
@@ -260,6 +292,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if block == nil {
 			continue
 		}
+
 		prevBalances = uint64BalancesList(s.currentState, prevBalances)
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
@@ -269,15 +302,14 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			continue
 		}
 		nextBalances = uint64BalancesList(s.currentState, nextBalances)
-		// We now compute the difference between the two balances.
-		diff, err = base_encoding.ComputeCompressedSerializedUint64ListDiff(prevBalances, nextBalances, diff)
-		if err != nil {
-			return err
-		}
 		// antiquate the balances
-		if err := s.antiquateBalancesDiff(ctx, slot, diff); err != nil {
+		if err := s.antiquateUint64ListDiff(ctx, "balances", base_encoding.Encode64ToBytes4(slot), prevBalances, nextBalances, balances); err != nil {
 			return err
 		}
+		if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
+			return err
+		}
+
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
@@ -320,7 +352,22 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := balances.Load(rwTx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := proposers.Load(rwTx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := slashings.Load(rwTx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := blockRoots.Load(rwTx, kv.BlockRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := stateRoots.Load(rwTx, kv.StateRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := minimalBeaconStates.Load(rwTx, kv.MinimalBeaconState, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
@@ -362,23 +409,18 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 	return balancesFile.Sync()
 }
 
-func (s *Antiquary) antiquateBalancesDiff(ctx context.Context, slot uint64, diff []byte) error {
-	folderPath, filePath := slotToPaths(slot, s.cfg, "balances_diff")
-	_ = s.fs.MkdirAll(folderPath, 0o755)
+func (s *Antiquary) antiquateUint64ListDiff(ctx context.Context, name string, key []byte, old, new []uint64, collector *etl.Collector) error {
+	// create a diff
+	diffBuffer := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(diffBuffer)
+	diffBuffer.Reset()
 
-	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
+	// We now compute the difference between the two balances.
+	if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(diffBuffer, old, new); err != nil {
 		return err
 	}
-	defer balancesFile.Close()
 
-	if err != nil {
-		return err
-	}
-	if _, err := balancesFile.Write(diff); err != nil {
-		return err
-	}
-	return balancesFile.Sync()
+	return collector.Collect(key, common.Copy(diffBuffer.Bytes()))
 }
 
 func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
@@ -436,4 +478,96 @@ func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string
 func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
 	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
+}
+
+func (s *Antiquary) collectGenesisState(state *state.CachingBeaconState, effectiveBalanceCollector, slashedCollector, activationEligibilityEpochCollector, activationEpochCollector, exitEpochCollector, withdrawableEpochCollector, withdrawalCredentialsCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector) error {
+	var err error
+	slot := state.Slot()
+	epoch := slot / s.cfg.SlotsPerEpoch
+	// Setup state events handlers
+	if err := proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState)); err != nil {
+		return err
+	}
+
+	state.ForEachValidator(func(v solid.Validator, index, total int) bool {
+		if err = effectiveBalanceCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
+			return false
+		}
+		slashedVal := []byte{0}
+		if v.Slashed() {
+			slashedVal = []byte{1}
+		}
+		if err = slashedCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal); err != nil {
+			return false
+		}
+		if err = activationEligibilityEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
+			return false
+		}
+		if err = activationEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
+			return false
+		}
+		if err = exitEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
+			return false
+		}
+		if err = withdrawableEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
+			return false
+		}
+		w := v.WithdrawalCredentials()
+		if err = withdrawalCredentialsCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:]); err != nil {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.antiquateBalances(context.Background(), slot, state); err != nil {
+		return err
+	}
+
+	randaoMixes := state.RandaoMixes()
+	for i := 0; i < randaoMixes.Length(); i++ {
+		mix := randaoMixes.Get(i)
+		if err := randaoMixesCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(i), slot), mix[:]); err != nil {
+			return err
+		}
+	}
+	var b bytes.Buffer
+	if err := s.storeMinimalState(&b, state, minimalBeaconStateCollector); err != nil {
+		return err
+	}
+
+	for i := 0; i < raw.SlashingsLength; i++ {
+		if err := slashingsCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(i), slot), base_encoding.EncodeCompactUint64(state.SlashingSegmentAt(i))); err != nil {
+			return err
+		}
+	}
+
+	brs := state.BlockRoots()
+	for i := 0; i < brs.Length(); i++ {
+		br := brs.Get(i)
+		if err := blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(uint64(i)), br[:]); err != nil {
+			return err
+		}
+	}
+
+	srs := state.StateRoots()
+	for i := 0; i < srs.Length(); i++ {
+		sr := srs.Get(i)
+		if err := stateRootsCollector.Collect(base_encoding.Encode64ToBytes4(uint64(i)), sr[:]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {
+	buffer.Reset()
+	minimalBeaconState := state_accessors.MinimalBeaconStateFromBeaconState(st.BeaconState)
+
+	if err := minimalBeaconState.Serialize(buffer); err != nil {
+		return err
+	}
+	return collector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), buffer.Bytes())
 }

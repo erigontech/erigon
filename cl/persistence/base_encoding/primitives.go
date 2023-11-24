@@ -2,6 +2,8 @@ package base_encoding
 
 import (
 	"encoding/binary"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func Encode64ToBytes4(x uint64) (out []byte) {
@@ -43,4 +45,11 @@ func DecodeCompactUint64(buf []byte) (x uint64) {
 		}
 	}
 	return
+}
+
+func EncodePeriodAndRoot(period uint32, root libcommon.Hash) []byte {
+	out := make([]byte, 36)
+	binary.BigEndian.PutUint32(out[:4], period)
+	copy(out[4:], root[:])
+	return out
 }

@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	blockRootsLength = 8192
-	stateRootsLength = 8192
-	randoMixesLength = 65536
-	slashingsLength  = 8192
+	BlockRootsLength = 8192
+	StateRootsLength = 8192
+	RandoMixesLength = 65536
+	SlashingsLength  = 8192
 )
 
 type BeaconState struct {
@@ -79,7 +79,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		balances:                    solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:   solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
-		slashings:                   solid.NewUint64VectorSSZ(slashingsLength),
+		slashings:                   solid.NewUint64VectorSSZ(SlashingsLength),
 		currentEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:   solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 		historicalRoots:             solid.NewHashList(int(cfg.HistoricalRootsLimit)),
