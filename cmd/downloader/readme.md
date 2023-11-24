@@ -134,7 +134,8 @@ downloader --seedbox --datadir=<your> --chain=mainnet
 ```
 
 Seedbox can fallback to **Webseed** - HTTP url to centralized infrastructure. For example: private S3 bucket with
-signed_urls, or any HTTP server with files.
+signed_urls, or any HTTP server with files. Main idea: erigon decentralized infrastructure has higher prioriity than
+centralized (which used as **support/fallback**).
 
 ```
 # Erigon has default webseed url's - and you can create own
