@@ -2165,7 +2165,7 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
 }
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
