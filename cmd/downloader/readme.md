@@ -109,7 +109,7 @@ Technical details:
 - To prevent attack - .idx creation using random Seed - all nodes will have
   different .idx file (and same .seg files)
 - If you add/remove any .seg file manually, also need
-  remove `<your_datadir>/snapshots/db` folder
+  remove `<your_datadir>/downloader` folder
 
 ## How to verify that .seg files have the same checksum as current .torrent files
 
