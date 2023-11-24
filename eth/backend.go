@@ -32,6 +32,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
@@ -256,6 +257,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
 		if err != nil {
 			return err
+		}
+		if config.HistoryV3 {
+			agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainKv, logger)
+			if err != nil {
+				return err
+			}
+
+			chainKv, err = temporal.New(chainKv, agg, nil)
+			if err != nil {
+				return err
+			}
 		}
 
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)

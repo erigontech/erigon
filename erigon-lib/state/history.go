@@ -1666,6 +1666,7 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
+		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(k[len(k)-8:]), k[:len(k)-8])
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
 		return nil
@@ -1705,6 +1706,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		}
 		hi.nextKey = k
 		hi.nextVal = v[8:]
+		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(v[:8]), k)
 		return nil
 	}
 	hi.nextKey = nil
@@ -1994,14 +1996,14 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 					hi.nextKey = nil
 					return nil
 				}
-				//fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
+				fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
 				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
 					break
 				}
 			}
 		}
-		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
+		fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) /*|| int(binary.BigEndian.Uint64(k[len(k)-8:])) > hi.endTxNum */ {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
 				continue
@@ -2009,6 +2011,10 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
+		//if int(binary.BigEndian.Uint64(k[len(k)-8:])) >= hi.endTxNum {
+		//	break
+		//}
+		fmt.Printf("txnum %d %s %s\n", binary.BigEndian.Uint64(k[len(k)-8:]), string(k[:len(k)-8]), string(v))
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
 		return nil

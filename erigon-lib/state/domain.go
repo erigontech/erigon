@@ -37,9 +37,9 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -717,9 +717,9 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	if tracePutWithPrev == dc.d.filenameBase {
-		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, val, preval)
-	}
+	//if tracePutWithPrev == dc.d.filenameBase {
+	fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, val, preval)
+	//}
 	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
@@ -728,6 +728,9 @@ func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 
 func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
+	//if tracePutWithPrev == dc.d.filenameBase {
+	fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, prev)
+	//}
 	if err := dc.hc.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
@@ -1500,7 +1503,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 // context Flush should be managed by caller.
 func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64) error {
 	d := dc.d
-	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step, d.domainLargeValues)
+	fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
@@ -1515,7 +1518,26 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("[%s]unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
+		//
+		//ic, err := dc.hc.IdxRange(k, int(txNumUnindTo), int(txNumUnindTo+dc.d.aggregationStep), order.Asc, -1, rwTx)
+		//if err != nil {
+		//	return err
+		//}
+		//if ic.HasNext() {
+		//	nextTxn, err := ic.Next()
+		//	if err != nil {
+		//		return err
+		//	}
+		//	nextVal, ok, err := dc.hc.GetNoStateWithRecent(k, nextTxn, rwTx)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	if ok && len(nextVal) == 0 {
+		//		continue // value has been deleted
+		//		//v = nil
+		//	}
+		//}
+		fmt.Printf("[%s]unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
@@ -1576,7 +1598,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo-1, txNumUnindFrom, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
 	}
 	return restored.flush(ctx, rwTx)

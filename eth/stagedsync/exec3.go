@@ -15,9 +15,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -260,8 +261,8 @@ func ExecV3(ctx context.Context,
 		inputTxNum = _min
 		outputTxNum.Store(inputTxNum)
 
-		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
-		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
+		_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
+		fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
 		return nil
