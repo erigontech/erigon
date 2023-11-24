@@ -127,7 +127,8 @@ step - no peers yet have this files.
 **Seedbox** - machie which ony seeding archive files:
 
 - Doesn't need synced erigon
-- Can have cheap disks and cpu
+- Can work on very cheap disks, cpu, ram
+- It works exactly like Erigon node - downloading archive files and seed them
 
 ```
 downloader --seedbox --datadir=<your> --chain=mainnet
