@@ -474,11 +474,14 @@ const (
 	ValidatorBalance                    = "ValidatorBalance"
 
 	// External data
-	StateRoot          = "StateRoot"
-	BlockRoot          = "BlockRoot"
-	MinimalBeaconState = "MinimalBeaconState"
-	RandaoMixes        = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
-	Proposers          = "BlockProposers" // epoch => proposers indicies
+	StateRoot                  = "StateRoot"
+	BlockRoot                  = "BlockRoot"
+	MinimalBeaconState         = "MinimalBeaconState"
+	InactivityScores           = "InactivityScores"
+	PreviousEpochParticipation = "PreviousEpochParticipation"
+	CurrentEpochParticipation  = "CurrentEpochParticipation"
+	RandaoMixes                = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
+	Proposers                  = "BlockProposers" // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 )
@@ -660,6 +663,9 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	PreviousEpochParticipation,
+	CurrentEpochParticipation,
+	InactivityScores,
 }
 
 const (

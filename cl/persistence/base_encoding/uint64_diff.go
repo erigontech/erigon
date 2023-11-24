@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"unsafe"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -28,13 +29,10 @@ var bufferPool = sync.Pool{
 	},
 }
 
-// ComputeSerializedUint64ListDiff computes the difference between two uint64 lists, it assumes the new list to be always greater in length than the old one.
-func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []uint64) error {
+func ComputeCompressedSerializedByteListDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
 		return fmt.Errorf("old list is longer than new list")
 	}
-
-	bytes8 := make([]byte, 8)
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
 	defer compressorPool.Put(compressor)
@@ -44,19 +42,24 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []uint64) e
 		return err
 	}
 
-	for i := 0; i < len(new); i++ {
-		if i >= len(old) {
-			binary.BigEndian.PutUint64(bytes8, new[i])
-			if _, err := compressor.Write(bytes8); err != nil {
-				return err
-			}
-			continue
-		}
-		//binary.BigEndian.PutUint64(dst[i*8:], new[i]-old[i])
-		binary.BigEndian.PutUint64(bytes8, new[i]-old[i])
-		if _, err := compressor.Write(bytes8); err != nil {
+	bytesClock := 64
+	blockXorLen := len(old) / bytesClock
+	tmp := make([]byte, bytesClock)
+	for i := 0; i < blockXorLen; i++ {
+		blockXOR(tmp, old[i*bytesClock:(i+1)*bytesClock], new[i*bytesClock:(i+1)*bytesClock])
+		if _, err := compressor.Write(tmp); err != nil {
 			return err
 		}
+	}
+	// Take full advantage of the blockXOR
+	for i := blockXorLen * bytesClock; i < len(old); i++ {
+		if _, err := compressor.Write([]byte{new[i] - old[i]}); err != nil {
+			return err
+		}
+	}
+	// dump the remaining bytes
+	if _, err := compressor.Write(new[len(old):]); err != nil {
+		return err
 	}
 
 	if err := compressor.Flush(); err != nil {
@@ -66,10 +69,9 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []uint64) e
 	return nil
 }
 
-// ApplyCompressedSerializedUint64ListDiff applies the difference between two uint64 lists, it assumes the new list to be always greater in length than the old one.
-func ApplyCompressedSerializedUint64ListDiff(old, out []uint64, diff []byte) ([]uint64, error) {
+func ApplyCompressedSerializedByteListDiff(old, out []byte, diff []byte) ([]byte, error) {
 	out = out[:0]
-	// get a temporary buffer from the pool
+
 	buffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(buffer)
 	buffer.Reset()
@@ -88,22 +90,59 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []uint64, diff []byte) ([]
 		return nil, err
 	}
 
-	bytes8 := make([]byte, 8)
-	for i := 0; i < int(length); i++ {
-		fmt.Println(out)
-		n, err := decompressor.Read(bytes8)
+	bytesClock := 64
+
+	tmp := make([]byte, bytesClock)
+	blockXorLen := len(old) / bytesClock
+	block := make([]byte, bytesClock)
+	for i := 0; i < blockXorLen; i++ {
+		n, err := decompressor.Read(tmp)
 		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, err
 		}
-		if n != 8 {
+		if n != bytesClock {
 			return nil, io.EOF
 		}
-		if i >= len(old) {
-			out = append(out, binary.BigEndian.Uint64(bytes8))
-			continue
-		}
-		out = append(out, old[i]+binary.BigEndian.Uint64(bytes8))
+
+		blockXOR(block, old[i*bytesClock:(i+1)*bytesClock], tmp)
+		out = append(out, block...)
 	}
 
+	readByte := make([]byte, 1)
+	// Handle the remaining bytes with XOR
+	for i := blockXorLen * bytesClock; i < len(old); i++ {
+		n, err := decompressor.Read(readByte)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, err
+		}
+		if n != 1 {
+			return nil, io.EOF
+		}
+		out = append(out, old[i]+readByte[0])
+	}
+
+	// Append the remaining new bytes that were not in the old slice
+	remainingBytes := make([]byte, int(length)-len(old))
+	_, err = decompressor.Read(remainingBytes)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	out = append(out, remainingBytes...)
+
 	return out, nil
+}
+
+// Block stores (a xor b) in dst, where a, b, and dst all have length 16.
+func blockXOR(dst, a, b []byte) {
+	dw := (*[8]uintptr)(unsafe.Pointer(&dst[0]))
+	aw := (*[8]uintptr)(unsafe.Pointer(&a[0]))
+	bw := (*[8]uintptr)(unsafe.Pointer(&b[0]))
+	dw[0] = aw[0] ^ bw[0]
+	dw[1] = aw[1] ^ bw[1]
+	dw[2] = aw[2] ^ bw[2]
+	dw[3] = aw[3] ^ bw[3]
+	dw[4] = aw[4] ^ bw[4]
+	dw[5] = aw[5] ^ bw[5]
+	dw[6] = aw[6] ^ bw[6]
+	dw[7] = aw[7] ^ bw[7]
 }

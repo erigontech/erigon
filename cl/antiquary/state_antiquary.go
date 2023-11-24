@@ -177,6 +177,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer stateRoots.Close()
 	minimalBeaconStates := etl.NewCollector(kv.MinimalBeaconState, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer minimalBeaconStates.Close()
+	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer inactivityScoresC.Close()
+	previousPartecipationC := etl.NewCollector(kv.PreviousEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer previousPartecipationC.Close()
+	currentPartecipationC := etl.NewCollector(kv.CurrentEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer currentPartecipationC.Close()
 
 	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
@@ -200,7 +206,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, nextBalances []uint64
+	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation []byte
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -283,8 +289,13 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		if (slot-1)%slotsPerDumps == 0 {
-			if err := s.antiquateBalances(ctx, slot, s.currentState, compressedWriter); err != nil {
+			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
+			}
+			if s.currentState.Version() >= clparams.AltairVersion {
+				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -292,8 +303,15 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if block == nil {
 			continue
 		}
-
-		prevBalances = uint64BalancesList(s.currentState, prevBalances)
+		// We now compute the difference between the two balances.
+		prevBalances = prevBalances[:0]
+		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
+		inactivityScores = inactivityScores[:0]
+		inactivityScores = append(inactivityScores, s.currentState.RawInactivityScores()...)
+		previousPartecipation = previousPartecipation[:0]
+		previousPartecipation = append(previousPartecipation, s.currentState.RawPreviousEpochParticipation()...)
+		currentPartecipation = currentPartecipation[:0]
+		currentPartecipation = append(currentPartecipation, s.currentState.RawCurrentEpochParticipation()...)
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
@@ -305,11 +323,22 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if slot%slotsPerDumps == 0 {
 			continue
 		}
-		nextBalances = uint64BalancesList(s.currentState, nextBalances)
 
-		// antiquate the balances
-		if err := s.antiquateUint64ListDiff(ctx, "balances", base_encoding.Encode64ToBytes4(slot), prevBalances, nextBalances, balances); err != nil {
+		// antiquate fields
+		key := base_encoding.Encode64ToBytes4(slot)
+		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances); err != nil {
 			return err
+		}
+		if s.currentState.Version() >= clparams.AltairVersion {
+			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC); err != nil {
+				return err
+			}
+			if err := s.antiquateBytesListDiff(ctx, key, previousPartecipation, s.currentState.RawPreviousEpochParticipation(), previousPartecipationC); err != nil {
+				return err
+			}
+			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC); err != nil {
+				return err
+			}
 		}
 
 		// We now do some post-processing on the state.
@@ -379,8 +408,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	return rwTx.Commit()
 }
 
-func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *state.CachingBeaconState, compressor *zstd.Encoder) error {
-	folderPath, filePath := epochToPaths(slot, s.cfg, "balances")
+func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder, name string) error {
+	folderPath, filePath := epochToPaths(slot, s.cfg, name)
 	_ = s.fs.MkdirAll(folderPath, 0o755)
 
 	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
@@ -390,13 +419,7 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 	defer balancesFile.Close()
 	compressor.Reset(balancesFile)
 
-	balances := make([]byte, state.ValidatorLength()*8)
-	state.ForEachBalance(func(v uint64, index int, total int) bool {
-		binary.BigEndian.PutUint64(balances[index*8:], v)
-		return true
-	})
-
-	if _, err := compressor.Write(balances); err != nil {
+	if _, err := compressor.Write(uncompressed); err != nil {
 		return err
 	}
 
@@ -406,14 +429,14 @@ func (s *Antiquary) antiquateBalances(ctx context.Context, slot uint64, state *s
 	return balancesFile.Sync()
 }
 
-func (s *Antiquary) antiquateUint64ListDiff(ctx context.Context, name string, key []byte, old, new []uint64, collector *etl.Collector) error {
+func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector) error {
 	// create a diff
 	diffBuffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(diffBuffer)
 	diffBuffer.Reset()
 
 	// We now compute the difference between the two balances.
-	if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(diffBuffer, old, new); err != nil {
+	if err := base_encoding.ComputeCompressedSerializedByteListDiff(diffBuffer, old, new); err != nil {
 		return err
 	}
 
@@ -518,8 +541,19 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 	if err != nil {
 		return err
 	}
-	if err := s.antiquateBalances(context.Background(), slot, state, compressor); err != nil {
+	if err := s.antiquateField(context.Background(), slot, state.RawBalances(), compressor, "balances"); err != nil {
 		return err
+	}
+	if state.Version() >= clparams.AltairVersion {
+		if err := s.antiquateField(context.Background(), slot, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+			return err
+		}
+		if err := s.antiquateField(context.Background(), slot, state.RawPreviousEpochParticipation(), compressor, "previous_epoch_participation"); err != nil {
+			return err
+		}
+		if err := s.antiquateField(context.Background(), slot, state.RawCurrentEpochParticipation(), compressor, "current_epoch_participation"); err != nil {
+			return err
+		}
 	}
 
 	randaoMixes := state.RandaoMixes()

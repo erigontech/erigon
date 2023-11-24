@@ -164,3 +164,20 @@ func (b *BeaconState) HistoricalSummariesLength() uint64 {
 func (b *BeaconState) HistoricalRootsLength() uint64 {
 	return uint64(b.historicalRoots.Length())
 }
+
+// Dangerous
+func (b *BeaconState) RawInactivityScores() []byte {
+	return b.inactivityScores.Bytes()
+}
+
+func (b *BeaconState) RawBalances() []byte {
+	return b.balances.Bytes()
+}
+
+func (b *BeaconState) RawPreviousEpochParticipation() []byte {
+	return b.previousEpochParticipation.Bytes()
+}
+
+func (b *BeaconState) RawCurrentEpochParticipation() []byte {
+	return b.currentEpochParticipation.Bytes()
+}
