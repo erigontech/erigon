@@ -102,6 +102,7 @@ func init() {
 	rootCmd.AddCommand(createTorrent)
 
 	rootCmd.AddCommand(torrentCat)
+	rootCmd.AddCommand(torrentMagnet)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -269,6 +270,22 @@ var torrentCat = &cobra.Command{
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
 		fmt.Printf("%s\n", mi.HashInfoBytes())
+		return nil
+	},
+}
+var torrentMagnet = &cobra.Command{
+	Use:     "torrent_magnet",
+	Example: "go run ./cmd/downloader torrent_magnet <path_to_torrent_file>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("please pass .torrent file path by first argument")
+		}
+		fPath := args[0]
+		mi, err := metainfo.LoadFromFile(fPath)
+		if err != nil {
+			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
+		}
+		fmt.Printf("%s\n", mi.Magnet(nil, nil).String())
 		return nil
 	},
 }

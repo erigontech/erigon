@@ -146,6 +146,13 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 
 --------- 
 
+## Utilities
+
+```
+downloader torrent_cat /path/to.torrent
+downloader torrent_magnet /path/to.torrent
+```
+
 ## Faster rsync
 
 ```
@@ -162,3 +169,4 @@ crontab -e
 ```
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
+
