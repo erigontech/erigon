@@ -296,9 +296,6 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 	return nil
 }
 
-func (dc *DomainContext) maxColdStep() uint64 {
-	return dc.maxTxNumInDomainFiles(true) / dc.d.aggregationStep
-}
 func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }

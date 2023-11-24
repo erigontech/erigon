@@ -171,7 +171,8 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		require.Equal(0, int(dc.maxColdStep())) // domains have no cold files
+		maxColdStep := dc.maxTxNumInDomainFiles(true) / dc.d.aggregationStep
+		require.Equal(0, int(maxColdStep)) // domains have no cold files
 		var last []byte
 
 		it := dc.hc.ic.iterateKeysLocality(ctx, 0, uint64(coldSteps), nil)
