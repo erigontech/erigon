@@ -153,7 +153,7 @@ func (h *hashList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(h.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (h *hashList) Range(fn func(int, libcommon.Hash, int) bool) {
