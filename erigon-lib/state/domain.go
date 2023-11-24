@@ -710,7 +710,7 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 	start := time.Now()
 	collation, err := d.collateStream(ctx, step, txFrom, txTo, tx)
 	mxRunningCollations.Dec()
-	mxCollateTook.UpdateDuration(start)
+	mxCollateTook.ObserveDuration(start)
 
 	mxCollationSize.SetInt(collation.valuesComp.Count())
 	mxCollationSizeHist.SetInt(collation.historyComp.Count())
