@@ -125,7 +125,7 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 		peer:      peer,
 		rw:        rw,
 		removed:   make(chan struct{}),
-		tasks:     make(chan func(), 16),
+		tasks:     make(chan func(), 32),
 		ctx:       ctx,
 		ctxCancel: cancel,
 	}
