@@ -857,7 +857,7 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
-func (a *AggregatorV3) EndTxNumFrozenAndIndexed() uint64 {
+func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
 	return cmp.Min(
 		cmp.Min(
 			a.accounts.endIndexedTxNumMinimax(true),
@@ -1530,7 +1530,7 @@ type AggregatorStep struct {
 }
 
 func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
-	frozenAndIndexed := a.EndTxNumFrozenAndIndexed()
+	frozenAndIndexed := a.EndTxNumDomainsFrozen()
 	accountSteps := a.accounts.MakeSteps(frozenAndIndexed)
 	codeSteps := a.code.MakeSteps(frozenAndIndexed)
 	storageSteps := a.storage.MakeSteps(frozenAndIndexed)
