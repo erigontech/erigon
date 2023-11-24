@@ -21,6 +21,14 @@ var zlibCompressorPool = sync.Pool{
 
 type MinimalBeaconState struct {
 	Version clparams.StateVersion
+	// Lengths
+	validatorLength                 uint64
+	eth1DataLength                  uint64
+	previousEpochAttestationsLength uint64
+	currentEpochAttestationsLength  uint64
+	HistoricalSummariesLength       uint64
+	HistoricalRootsLength           uint64
+
 	// Phase0
 	Eth1Data          *cltypes.Eth1Data
 	Eth1DepositIndex  uint64
@@ -37,13 +45,19 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &MinimalBeaconState{
-		Version:                      s.Version(),
-		Eth1Data:                     s.Eth1Data(),
-		Eth1DepositIndex:             s.Eth1DepositIndex(),
-		JustificationBits:            justificationCopy,
-		NextWithdrawalIndex:          s.NextWithdrawalIndex(),
-		NextWithdrawalValidatorIndex: s.NextWithdrawalValidatorIndex(),
-		LatestExecutionPayloadHeader: s.LatestExecutionPayloadHeader(),
+		validatorLength:                 uint64(s.ValidatorLength()),
+		eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
+		previousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
+		currentEpochAttestationsLength:  uint64(s.CurrentEpochAttestations().Len()),
+		HistoricalSummariesLength:       s.HistoricalSummariesLength(),
+		HistoricalRootsLength:           s.HistoricalRootsLength(),
+		Version:                         s.Version(),
+		Eth1Data:                        s.Eth1Data(),
+		Eth1DepositIndex:                s.Eth1DepositIndex(),
+		JustificationBits:               justificationCopy,
+		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
+		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
+		LatestExecutionPayloadHeader:    s.LatestExecutionPayloadHeader(),
 	}
 
 }
@@ -104,7 +118,7 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 }
 
 func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits}
+	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 	if m.Version >= clparams.BellatrixVersion {
 		schema = append(schema, m.LatestExecutionPayloadHeader)
 	}

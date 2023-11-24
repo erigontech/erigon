@@ -156,3 +156,11 @@ func (b *BeaconState) Validators() *solid.ValidatorSet {
 func (b *BeaconState) SetEvents(events Events) {
 	b.events = events
 }
+
+func (b *BeaconState) HistoricalSummariesLength() uint64 {
+	return uint64(b.historicalSummaries.Len())
+}
+
+func (b *BeaconState) HistoricalRootsLength() uint64 {
+	return uint64(b.historicalRoots.Length())
+}
