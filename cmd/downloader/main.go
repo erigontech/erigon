@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -98,6 +99,9 @@ func init() {
 
 	withDataDir(createTorrent)
 	withFile(createTorrent)
+	rootCmd.AddCommand(createTorrent)
+
+	rootCmd.AddCommand(torrentCat)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -105,9 +109,8 @@ func init() {
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
 		panic(err)
 	}
-
-	rootCmd.AddCommand(createTorrent)
 	rootCmd.AddCommand(printTorrentHashes)
+
 }
 
 func withDataDir(cmd *cobra.Command) {
@@ -132,8 +135,10 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		logger = debug.SetupCobra(cmd, "downloader")
-		logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+		if cmd.Name() != "torrent_cat" {
+			logger = debug.SetupCobra(cmd, "downloader")
+			logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := Downloader(cmd.Context(), logger); err != nil {
@@ -247,6 +252,23 @@ var printTorrentHashes = &cobra.Command{
 		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
 		}
+		return nil
+	},
+}
+
+var torrentCat = &cobra.Command{
+	Use:     "torrent_cat",
+	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("please pass .torrent file path by first argument")
+		}
+		fPath := args[0]
+		mi, err := metainfo.LoadFromFile(fPath)
+		if err != nil {
+			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
+		}
+		fmt.Printf("%s\n", mi.HashInfoBytes())
 		return nil
 	},
 }
