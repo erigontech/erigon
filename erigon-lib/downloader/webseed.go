@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/exp/slices"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/anacrolix/torrent/bencode"
@@ -36,7 +36,7 @@ type WebSeeds struct {
 	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
 	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
 	downloadTorrentFile bool
-	torrentHashes       []string
+	torrentsWhitelist   snapcfg.Preverified
 
 	logger    log.Logger
 	verbosity log.Lvl
@@ -89,16 +89,19 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 	webSeedUrls, torrentUrls := snaptype.WebSeedUrls{}, snaptype.TorrentUrls{}
 	for _, urls := range list {
 		for name, wUrl := range urls {
-			if strings.HasSuffix(name, ".torrent") {
-				uri, err := url.ParseRequestURI(wUrl)
-				if err != nil {
-					d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
-					continue
-				}
-				torrentUrls[name] = append(torrentUrls[name], uri)
+			if !strings.HasSuffix(name, ".torrent") {
+				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
 				continue
 			}
-			webSeedUrls[name] = append(webSeedUrls[name], wUrl)
+			if !nameWhitelisted(name, d.torrentsWhitelist) {
+				continue
+			}
+			uri, err := url.ParseRequestURI(wUrl)
+			if err != nil {
+				d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
+				continue
+			}
+			torrentUrls[name] = append(torrentUrls[name], uri)
 		}
 	}
 
@@ -229,19 +232,19 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		addedNew++
 		if !strings.HasSuffix(name, ".seg.torrent") {
 			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this type not supported yet", "name", fName)
+			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
 		name := name
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
-				res, err := d.callTorrentHttpProvider(ctx, url)
+				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Debug("[snapshots] callTorrentHttpProvider", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name, "err", err)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] downloaded .torrent file from webseed", "name", name)
+				d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
 					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
@@ -256,7 +259,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	}
 }
 
-func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
+func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
 	request, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
@@ -275,23 +278,41 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([
 	if err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
-	if err = validateTorrentBytes(res, d.torrentHashes); err != nil {
+	if err = validateTorrentBytes(fileName, res, d.torrentsWhitelist); err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
 	return res, nil
 }
 
-func validateTorrentBytes(b []byte, torrentHashes []string) error {
+func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverified) error {
 	var mi metainfo.MetaInfo
-	if len(torrentHashes) == 0 {
-		return nil
-	}
 	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
 		return err
 	}
 	torrentHash := mi.HashInfoBytes()
-	if !slices.Contains(torrentHashes, torrentHash.String()) {
-		return fmt.Errorf("skipping torrent file, hash not found: %s", torrentHash.String())
+	// files with different names can have same hash. means need check AND name AND hash.
+	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
+		return fmt.Errorf(".torrent file is not whitelisted")
 	}
 	return nil
+}
+
+func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName {
+			return true
+		}
+	}
+	return false
+}
+
+func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
+	fileName = strings.TrimSuffix(fileName, ".torrent")
+	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
+			return true
+		}
+	}
+	return false
 }
