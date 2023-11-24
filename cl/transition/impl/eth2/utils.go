@@ -15,7 +15,7 @@ const VERSIONED_HASH_VERSION_KZG byte = byte(1)
 
 func kzgCommitmentToVersionedHash(kzgCommitment *cltypes.KZGCommitment) (libcommon.Hash, error) {
 	versionedHash := [32]byte{}
-	kzgCommitmentHash := utils.Keccak256(kzgCommitment[:])
+	kzgCommitmentHash := utils.Sha256(kzgCommitment[:])
 
 	buf := append([]byte{}, VERSIONED_HASH_VERSION_KZG)
 	buf = append(buf, kzgCommitmentHash[1:]...)
@@ -61,7 +61,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
-	return utils.Keccak256(b, domain), nil
+	return utils.Sha256(b, domain), nil
 }
 
 // transitionSlot is called each time there is a new slot to process

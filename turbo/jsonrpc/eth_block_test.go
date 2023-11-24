@@ -2,9 +2,10 @@ package jsonrpc
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
