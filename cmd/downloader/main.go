@@ -61,6 +61,7 @@ var (
 	filePath                       string
 	forceRebuild                   bool
 	forceVerify                    bool
+	forceVerifyFiles               []string
 	downloaderApiAddr              string
 	natSetting                     string
 	torrentVerbosity               int
@@ -95,7 +96,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "seedbox determines to either download .torrent from webseed or not")
-	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
+	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Verify files. All by default, or passed by --verify.files")
+	rootCmd.PersistentFlags().StringArrayVar(&forceVerifyFiles, "verify.files", nil, "Limit list of files to verify")
 
 	withDataDir(createTorrent)
 	withFile(createTorrent)
@@ -205,9 +207,11 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx); err != nil {
+		if err = d.VerifyData(ctx, forceVerifyFiles); err != nil {
 			return err
 		}
+		logger.Info("[snapshots] Verify done")
+		return nil
 	}
 
 	d.MainLoopInBackground(false)
@@ -257,6 +261,23 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
+var torrentVerify = &cobra.Command{
+	Use:     "torrent_verify",
+	Example: "go run ./cmd/downloader torrent_verify <path_to_torrent_file>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("please pass .torrent file path by first argument")
+		}
+		fPath := args[0]
+		mi, err := metainfo.LoadFromFile(fPath)
+		if err != nil {
+			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
+		}
+
+		fmt.Printf("%s\n", mi.HashInfoBytes())
+		return nil
+	},
+}
 var torrentCat = &cobra.Command{
 	Use:     "torrent_cat",
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
@@ -269,6 +290,7 @@ var torrentCat = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
+
 		fmt.Printf("%s\n", mi.HashInfoBytes())
 		return nil
 	},

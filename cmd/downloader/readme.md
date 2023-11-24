@@ -116,6 +116,7 @@ Technical details:
 ```
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader --verify --datadir=<your_datadir>
+downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadir>
 ```
 
 ## Create cheap seedbox
@@ -150,6 +151,7 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 
 ```
 downloader torrent_cat /path/to.torrent
+
 downloader torrent_magnet /path/to.torrent
 ```
 
