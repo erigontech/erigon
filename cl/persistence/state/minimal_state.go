@@ -4,36 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"sync"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
-
-// pool of zstd compressor objects
-var compressorPool = sync.Pool{
-	New: func() interface{} {
-		c, err := zstd.NewWriter(nil)
-		if err != nil {
-			panic(err)
-		}
-		return c
-	},
-}
-
-// pool of zstd compressor objects
-var decompressorPool = sync.Pool{
-	New: func() interface{} {
-		d, err := zstd.NewReader(nil)
-		if err != nil {
-			panic(err)
-		}
-		return d
-	},
-}
 
 type MinimalBeaconState struct {
 	Version clparams.StateVersion
@@ -46,12 +22,9 @@ type MinimalBeaconState struct {
 	HistoricalRootsLength           uint64
 
 	// Phase0
-	latestBlockHeader cltypes.BeaconBlockHeader
 	Eth1Data          *cltypes.Eth1Data
 	Eth1DepositIndex  uint64
 	JustificationBits *cltypes.JustificationBits
-	// Bellatrix
-	LatestExecutionPayloadHeader *cltypes.Eth1Header
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
@@ -62,7 +35,6 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &MinimalBeaconState{
-		latestBlockHeader:               s.LatestBlockHeader(),
 		validatorLength:                 uint64(s.ValidatorLength()),
 		eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
 		previousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
@@ -75,16 +47,12 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 		JustificationBits:               justificationCopy,
 		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
 		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
-		LatestExecutionPayloadHeader:    s.LatestExecutionPayloadHeader(),
 	}
 
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
 func (m *MinimalBeaconState) Serialize(w io.Writer) error {
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	compressor.Reset(w)
-	defer compressorPool.Put(compressor)
 
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
@@ -92,17 +60,17 @@ func (m *MinimalBeaconState) Serialize(w io.Writer) error {
 	}
 	lenB := make([]byte, 8)
 	binary.BigEndian.PutUint64(lenB, uint64(len(buf)))
-	if _, err = compressor.Write([]byte{byte(m.Version)}); err != nil {
+	if _, err = w.Write([]byte{byte(m.Version)}); err != nil {
 		return err
 	}
-	if _, err = compressor.Write(lenB); err != nil {
+	if _, err = w.Write(lenB); err != nil {
 		return err
 	}
-	_, err = compressor.Write(buf)
+	_, err = w.Write(buf)
 	if err != nil {
 		return err
 	}
-	return compressor.Close()
+	return nil
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
@@ -110,28 +78,22 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.JustificationBits = &cltypes.JustificationBits{}
 	var err error
-	decompressor := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(decompressor)
-	decompressor.Reset(r)
 
 	versionByte := make([]byte, 1)
-	if _, err = decompressor.Read(versionByte); err != nil {
+	if _, err = r.Read(versionByte); err != nil {
 		return err
 	}
 	m.Version = clparams.StateVersion(versionByte[0])
 
-	if m.Version >= clparams.BellatrixVersion {
-		m.LatestExecutionPayloadHeader = cltypes.NewEth1Header(m.Version)
-	}
 	lenB := make([]byte, 8)
-	if _, err = decompressor.Read(lenB); err != nil {
+	if _, err = r.Read(lenB); err != nil {
 		return err
 	}
 
 	buf := make([]byte, binary.BigEndian.Uint64(lenB))
 	var n int
 
-	n, err = decompressor.Read(buf)
+	n, err = r.Read(buf)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return err
 	}
@@ -142,10 +104,7 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 }
 
 func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength, &m.latestBlockHeader}
-	if m.Version >= clparams.BellatrixVersion {
-		schema = append(schema, m.LatestExecutionPayloadHeader)
-	}
+	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}
