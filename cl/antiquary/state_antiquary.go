@@ -251,9 +251,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			w := v.WithdrawalCredentials()
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
 		},
-		OnNewValidatorEffectiveBalance: func(index int, balance uint64) error {
-			return effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(balance))
-		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
 			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
@@ -383,7 +380,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || prevEpoch != state.Epoch(s.currentState) {
-			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), proposers, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), effectiveBalance, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {
