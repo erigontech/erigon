@@ -486,36 +486,41 @@ func (ii *InvertedIndex) openFiles() error {
 	var invalidFileItems []*filesItem
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.decompressor != nil {
-				continue
-			}
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			datPath := ii.efFilePath(fromStep, toStep)
-			if !dir.FileExist(datPath) {
-				invalidFileItems = append(invalidFileItems, item)
-				continue
-			}
+			if item.decompressor == nil {
+				fPath := ii.efFilePath(fromStep, toStep)
+				if !dir.FileExist(fPath) {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
+					invalidFileItems = append(invalidFileItems, item)
+					continue
+				}
 
-			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-				ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
-				continue
+				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
 			}
 
 			if item.index == nil {
-				idxPath := ii.efAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(idxPath) {
-					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-						return false
+				fPath := ii.efAccessorFilePath(fromStep, toStep)
+				if dir.FileExist(fPath) {
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
 					}
 				}
 			}
 			if item.existence == nil && ii.withExistenceIndex {
-				idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
-				if dir.FileExist(idxPath) {
-					if item.existence, err = OpenExistenceFilter(idxPath); err != nil {
-						ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-						return false
+				fPath := ii.efExistenceIdxFilePath(fromStep, toStep)
+				if dir.FileExist(fPath) {
+					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
 					}
 				}
 			}
