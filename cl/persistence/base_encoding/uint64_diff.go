@@ -74,7 +74,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	// Find the repeated pattern
 	prevVal := plainBuffer[0]
 	count := 1
-	for i := 0; i < len(plainBuffer); i++ {
+	for i := 1; i < len(plainBuffer); i++ {
 		if plainBuffer[i] == prevVal {
 			count++
 			continue
@@ -83,7 +83,9 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 		prevVal = plainBuffer[i]
 		count = 1
 	}
-	fmt.Println(len(repeatedPattern) * 16)
+	repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
+
+	fmt.Println(len(repeatedPattern)*16, len(new))
 
 	// Write the repeated pattern
 	for _, entry := range repeatedPattern {
