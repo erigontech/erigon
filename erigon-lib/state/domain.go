@@ -31,14 +31,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -63,22 +63,22 @@ var (
 	LatestStateReadDB            = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="yes"}`)    //nolint
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
-	mxRunningMerges        = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningFilesBuilding = metrics.GetOrCreateCounter("domain_running_files_building")
+	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
+	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
 	mxCollateTook          = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain      = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
 	mxPruneTookHistory     = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
 	mxPruneTookIndex       = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress      = metrics.GetOrCreateCounter("domain_pruning_progress")
-	mxCollationSize        = metrics.GetOrCreateCounter("domain_collation_size")
-	mxCollationSizeHist    = metrics.GetOrCreateCounter("domain_collation_hist_size")
+	mxPruneInProgress      = metrics.GetOrCreateGauge("domain_pruning_progress")
+	mxCollationSize        = metrics.GetOrCreateGauge("domain_collation_size")
+	mxCollationSizeHist    = metrics.GetOrCreateGauge("domain_collation_hist_size")
 	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
 	mxPruneSizeHistory     = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
 	mxPruneSizeIndex       = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
 	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook             = metrics.GetOrCreateHistogram("domain_step_took")
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
-	mxCommitmentRunning    = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
@@ -87,10 +87,11 @@ var (
 const StepsInColdFile = 32
 
 var (
-	asserts        = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife  = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
-	traceGetLatest = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
-	traceGetAsOf   = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
+	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	traceGetLatest   = dbg.EnvString("AGG_TRACE_GET_LATEST", "")
+	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -392,16 +393,16 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 	return d, nil
 }
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
 // LastStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -538,23 +539,23 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
+	re := regexp.MustCompile("^v([0-9]+)-" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
 
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
-		if len(subs) != 3 {
+		if len(subs) != 4 {
 			if len(subs) != 0 {
-				d.logger.Warn("File ignored by domain scan, more than 3 submatches", "name", name, "submatches", len(subs))
+				d.logger.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			d.logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
 			d.logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
@@ -715,6 +716,9 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
+	if tracePutWithPrev == dc.d.filenameBase {
+		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, val, preval)
+	}
 	if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
@@ -1119,7 +1123,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
-		mxCollateTook.UpdateDuration(started)
+		mxCollateTook.ObserveDuration(started)
 	}()
 
 	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
@@ -1186,7 +1190,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
-	mxCollationSize.Set(uint64(coll.valuesCount))
+	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
 }
 
@@ -1225,7 +1229,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	start := time.Now()
 	defer func() {
 		d.stats.LastFileBuildingTook = time.Since(start)
-		mxBuildTook.UpdateDuration(start)
+		mxBuildTook.ObserveDuration(start)
 	}()
 
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
@@ -1648,13 +1652,13 @@ func (dc *DomainContext) getLatestFromFilesWithExistenceIndex(filekey []byte) (v
 			if traceGetLatest == dc.d.filenameBase {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 			}
-			//	LatestStateReadGrindNotFound.UpdateDuration(t)
+			//	LatestStateReadGrindNotFound.ObserveDuration(t)
 			continue
 		}
 		if traceGetLatest == dc.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
-		//LatestStateReadGrind.UpdateDuration(t)
+		//LatestStateReadGrind.ObserveDuration(t)
 		return v, true, nil
 	}
 	if traceGetLatest == dc.d.filenameBase {
@@ -1707,13 +1711,13 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			return nil, false, err
 		}
 		if !found {
-			LatestStateReadWarmNotFound.UpdateDuration(t)
+			LatestStateReadWarmNotFound.ObserveDuration(t)
 			t = time.Now()
 			continue
 		}
 		// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
 
-		LatestStateReadWarm.UpdateDuration(t)
+		LatestStateReadWarm.ObserveDuration(t)
 		return v, found, nil
 	}
 	return nil, false, nil
@@ -1759,11 +1763,11 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			return nil, false, err
 		}
 		if !ok {
-			LatestStateReadGrindNotFound.UpdateDuration(t)
+			LatestStateReadGrindNotFound.ObserveDuration(t)
 			t = time.Now()
 			continue
 		}
-		LatestStateReadGrind.UpdateDuration(t)
+		LatestStateReadGrind.ObserveDuration(t)
 		return v, true, nil
 	}
 	return nil, false, nil
@@ -1793,11 +1797,11 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 			return nil, false, err
 		}
 		if !found {
-			LatestStateReadColdNotFound.UpdateDuration(t)
+			LatestStateReadColdNotFound.ObserveDuration(t)
 			t = time.Now()
 			continue
 		}
-		LatestStateReadCold.UpdateDuration(t)
+		LatestStateReadCold.ObserveDuration(t)
 		return v, true, nil
 	}
 	return nil, false, nil
@@ -1927,7 +1931,15 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	if err != nil {
 		return nil, false, err
 	}
-	_, foundInvStep, err := keysC.SeekExact(key) // reads first DupSort value
+
+	var foundInvStep []byte
+	if traceGetLatest == dc.d.filenameBase {
+		defer func() {
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
+		}()
+	}
+
+	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
@@ -1943,31 +1955,31 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		if traceGetLatest == dc.d.filenameBase {
-			fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		}
-		//LatestStateReadDB.UpdateDuration(t)
+		//if traceGetLatest == dc.d.filenameBase {
+		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
+		//}
+		//LatestStateReadDB.ObserveDuration(t)
 		return v, true, nil
-	} else {
-		if traceGetLatest == dc.d.filenameBase {
-			//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//l := iter.ToArrU64Must(it)
-			//fmt.Printf("L: %d\n", l)
-			//it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//l2 := iter.ToArrU64Must(it2)
-			//fmt.Printf("K: %d\n", l2)
-			//panic(1)
-			//
-			fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
-		}
+		//} else {
+		//if traceGetLatest == dc.d.filenameBase {
+		//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//l := iter.ToArrU64Must(it)
+		//fmt.Printf("L: %d\n", l)
+		//it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//l2 := iter.ToArrU64Must(it2)
+		//fmt.Printf("K: %d\n", l2)
+		//panic(1)
+		//
+		//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+		//}
 	}
-	//LatestStateReadDBNotFound.UpdateDuration(t)
+	//LatestStateReadDBNotFound.ObserveDuration(t)
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
@@ -2152,7 +2164,7 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
 }
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
@@ -2238,7 +2250,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
 
 	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
-	mxPruneTookDomain.UpdateDuration(st)
+	mxPruneTookDomain.ObserveDuration(st)
 
 	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)

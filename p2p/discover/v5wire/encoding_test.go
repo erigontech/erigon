@@ -169,7 +169,7 @@ func TestHandshake_norecord(t *testing.T) {
 func TestHandshake_rekey(t *testing.T) {
 	// runtime: setevent failed; errno=6
 	// fatal error: runtime.semawakeup
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 

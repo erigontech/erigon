@@ -86,7 +86,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var historyFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
@@ -99,15 +99,15 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
 		subs := historyFileRegex.FindStringSubmatch(name)
-		if len(subs) != 5 {
+		if len(subs) != 6 {
 			continue
 		}
 		// Check that it's seedable
-		from, err := strconv.ParseUint(subs[2], 10, 64)
+		from, err := strconv.ParseUint(subs[3], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
-		to, err := strconv.ParseUint(subs[3], 10, 64)
+		to, err := strconv.ParseUint(subs[4], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
@@ -175,7 +175,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 16)
 	var i atomic.Int32
 
 	for _, file := range files {

@@ -90,26 +90,19 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 
 	sd := &SharedDomains{
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
-		aggCtx:      ac,
-
-		Account:    ac.a.accounts,
-		account:    map[string][]byte{},
-		Code:       ac.a.code,
-		code:       map[string][]byte{},
-		Storage:    ac.a.storage,
-		storage:    btree2.NewMap[string, []byte](128),
-		Commitment: ac.a.commitment,
-		commitment: map[string][]byte{},
-
-		TracesTo:   ac.a.tracesTo,
-		TracesFrom: ac.a.tracesFrom,
-		LogAddrs:   ac.a.logAddrs,
-		LogTopics:  ac.a.logTopics,
-		roTx:       tx,
-		//trace:      true,
+		Account:     ac.a.accounts,
+		Code:        ac.a.code,
+		Storage:     ac.a.storage,
+		Commitment:  ac.a.commitment,
+		TracesTo:    ac.a.tracesTo,
+		TracesFrom:  ac.a.tracesFrom,
+		LogAddrs:    ac.a.logAddrs,
+		LogTopics:   ac.a.logTopics,
+		roTx:        tx,
+		//trace:       true,
 	}
 
-	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
+	sd.SetContext(ac)
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -868,7 +861,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 func (sd *SharedDomains) Close() {
 	sd.FinishWrites()
 	sd.SetBlockNum(0)
-	sd.SetTxNum(context.Background(), 0)
+	if sd.aggCtx != nil {
+		sd.SetTxNum(context.Background(), 0)
+	}
 	sd.account = nil
 	sd.code = nil
 	sd.storage = nil
@@ -964,7 +959,7 @@ func (sd *SharedDomains) rotate() []flusher {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.UpdateDuration(time.Now())
+	defer mxFlushTook.ObserveDuration(time.Now())
 	flushers := sd.rotate()
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {

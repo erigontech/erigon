@@ -296,9 +296,6 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 	return nil
 }
 
-func (dc *DomainContext) maxColdStep() uint64 {
-	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
-}
 func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }
@@ -309,23 +306,20 @@ func (ic *InvertedIndexContext) maxWarmStep() uint64 {
 	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep
 }
 
-func (dc *DomainContext) maxTxNumInFiles(cold bool) uint64 {
+func (dc *DomainContext) maxTxNumInDomainFiles(cold bool) uint64 {
 	if len(dc.files) == 0 {
 		return 0
 	}
-	var max uint64
-	if cold {
-		for i := len(dc.files) - 1; i >= 0; i-- {
-			if !dc.files[i].src.frozen {
-				continue
-			}
-			max = dc.files[i].endTxNum
-			break
-		}
-	} else {
-		max = dc.files[len(dc.files)-1].endTxNum
+	if !cold {
+		return dc.files[len(dc.files)-1].endTxNum
 	}
-	return cmp.Min(max, dc.hc.maxTxNumInFiles(cold))
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		if !dc.files[i].src.frozen {
+			continue
+		}
+		return dc.files[i].endTxNum
+	}
+	return 0
 }
 
 func (hc *HistoryContext) maxTxNumInFiles(cold bool) uint64 {
@@ -451,7 +445,7 @@ func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, histo
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", hc.h.filenameBase, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: v1-%s.%d-%d.efi", hc.h.filenameBase, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
 				return nil, nil, 0, walkErr
 			}
 		}

@@ -49,9 +49,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-var execStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
-var execRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
-var execTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
+var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
+var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
+var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -70,7 +70,7 @@ type Progress struct {
 }
 
 func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
-	execStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
+	execStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -238,15 +238,8 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if inputTxNum == 0 {
-			return nil
-		}
 
-		inputTxNum++ // start execution from next txn
-		//++ may change blockNum, re-read it
-
-		var ok bool
-		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(applyTx, inputTxNum)
+		ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
 		}
@@ -257,18 +250,17 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		_max, err := rawdbv3.TxNums.Max(applyTx, blockNum)
-		if err != nil {
-			return err
+
+		if doms.TxNum() > _min {
+			// if stopped in the middle of the block: start from beginning of block.
+			// first part will be executed in HistoryExecution mode
+			offsetFromBlockBeginning = doms.TxNum() - _min
 		}
 
-		offsetFromBlockBeginning = inputTxNum - _min
 		inputTxNum = _min
-
-		// if stopped in the middle of the block: start from beginning of block. first half will be executed on historicalStateReader
 		outputTxNum.Store(inputTxNum)
 
-		_ = _max
+		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
 		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(blockNum)
 		doms.SetTxNum(ctx, inputTxNum)
@@ -372,10 +364,10 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			execRepeats.Add(conflicts)
-			execTriggers.Add(triggers)
+			execRepeats.AddInt(conflicts)
+			execTriggers.AddInt(triggers)
 			if processedBlockNum > lastBlockNum {
-				outputBlockNum.Set(processedBlockNum)
+				outputBlockNum.SetUint64(processedBlockNum)
 				lastBlockNum = processedBlockNum
 			}
 			if processedTxNum > 0 {
@@ -432,16 +424,16 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), execRepeats.Get(), stepsInDB)
+					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						if doms.BlockNum() != outputBlockNum.Get() {
-							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.Get()))
+						if doms.BlockNum() != outputBlockNum.GetValueUint64() {
+							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.GetValueUint64()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.Get())
+						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64())
 						if err != nil {
 							return err
 						}
@@ -473,10 +465,10 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 
-							execRepeats.Add(conflicts)
-							execTriggers.Add(triggers)
+							execRepeats.AddInt(conflicts)
+							execTriggers.AddInt(triggers)
 							if processedBlockNum > 0 {
-								outputBlockNum.Set(processedBlockNum)
+								outputBlockNum.SetUint64(processedBlockNum)
 							}
 							if processedTxNum > 0 {
 								outputTxNum.Store(processedTxNum)
@@ -513,7 +505,7 @@ func ExecV3(ctx context.Context,
 						doms.ClearRam(true)
 						t3 = time.Since(tt)
 
-						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
+						if err = execStage.Update(tx, outputBlockNum.GetValueUint64()); err != nil {
 							return err
 						}
 						if _, err = rawdb.IncrementStateVersion(applyTx); err != nil {
@@ -551,7 +543,7 @@ func ExecV3(ctx context.Context,
 			if err = doms.Flush(ctx, tx); err != nil {
 				return err
 			}
-			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
+			if err = execStage.Update(tx, outputBlockNum.GetValueUint64()); err != nil {
 				return err
 			}
 			if err = tx.Commit(); err != nil {
@@ -621,11 +613,9 @@ func ExecV3(ctx context.Context,
 	}
 
 	blocksInSnapshots := cfg.blockReader.FrozenBlocks()
-	var b *types.Block
-	//var err error
-
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
+	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		if blockNum >= blocksInSnapshots {
@@ -726,7 +716,7 @@ Loop:
 				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && (txIndex+1) < int(offsetFromBlockBeginning),
+				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 			}
 			//if txTask.HistoryExecution { // nolint
 			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
@@ -809,41 +799,51 @@ Loop:
 					return err
 				}
 
-				execTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
+				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 			}
 			stageProgress = blockNum
 			inputTxNum++
 		}
-		offsetFromBlockBeginning = 0
+		if offsetFromBlockBeginning > 0 {
+			// after history execution no offset will be required
+			offsetFromBlockBeginning = 0
+		}
 
 		// MA commitTx
 		if !parallel {
-			//if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
-			//	return err
-			//} else if !ok {
-			//	break Loop
+			//if blockNum%1000 == 0 {
+			//	if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
+			//		return err
+			//	} else if !ok {
+			//		break Loop
+			//	}
 			//}
 
-			outputBlockNum.Set(blockNum)
+			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), execRepeats.Get(), stepsInDB)
+				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
+				var (
+					commitStart = time.Now()
+					tt          = time.Now()
+
+					t1, t2, t3, t4 time.Duration
+				)
 
 				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
 					if err := casted.WarmupDB(false); err != nil {
 						return err
 					}
+					t4 = time.Since(tt)
 				}
 
-				var t1, t3, t4, t5, t6 time.Duration
-				commtitStart := time.Now()
-				tt := time.Now()
+				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
 					return err
 				} else if !ok {
@@ -852,12 +852,8 @@ Loop:
 				t1 = time.Since(tt)
 
 				if err := func() error {
-					tt = time.Now()
-					doms.FinishWrites()
-					doms.ClearRam(false)
-					t3 = time.Since(tt)
-
-					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
+					doms.Close()
+					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
 						return err
 					}
 
@@ -868,16 +864,12 @@ Loop:
 						if err = applyTx.Commit(); err != nil {
 							return err
 						}
-						doms.SetContext(nil)
-						doms.SetTx(nil)
 
-						t4 = time.Since(tt)
-						tt = time.Now()
+						t2 = time.Since(tt)
 						if blocksFreezeCfg.Produce {
-							tt = time.Now()
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
-						t5 = time.Since(tt)
+
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
 							if casted, ok := tx.(kv.CanWarmupDB); ok {
@@ -892,25 +884,26 @@ Loop:
 						}); err != nil {
 							return err
 						}
-						t6 = time.Since(tt)
+						t3 = time.Since(tt)
 
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint
 						if err != nil {
 							return err
 						}
 					}
+					doms = state2.NewSharedDomains(applyTx)
+					rs = state.NewStateV3(doms, logger)
+
 					applyWorker.ResetTx(applyTx)
-					nc := applyTx.(state2.HasAggCtx).AggCtx()
-					doms.SetTx(applyTx)
-					doms.SetContext(nc)
-					doms.StartWrites()
+					applyWorker.ResetState(rs)
 
 					return nil
 				}(); err != nil {
 					return err
 				}
-				logger.Info("Committed", "time", time.Since(commtitStart),
-					"commitment", t1, "flush", t3, "tx.commit", t4, "aggregate", t5, "prune", t6)
+				logger.Info("Committed", "time", time.Since(commitStart),
+					"block", doms.BlockNum(), "txNum", doms.TxNum(),
+					"flush+commitment", t1, "tx.commit", t2, "prune", t3, "warmup", t4)
 			default:
 			}
 		}
@@ -925,7 +918,7 @@ Loop:
 		}
 	}
 
-	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.Get())
+	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
 
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
@@ -1064,7 +1057,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	//doms.SetTxNum(context.Background(), doms.TxNum()-1) //
 	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
@@ -1391,7 +1383,7 @@ func reconstituteStep(last bool,
 				logger.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].Get(),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].GetValueUint64(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -1502,7 +1494,7 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			syncMetrics[stages.Execution].Set(bn)
+			syncMetrics[stages.Execution].SetUint64(bn)
 		}
 		return err
 	}(); err != nil {
