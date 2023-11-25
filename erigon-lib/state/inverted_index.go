@@ -299,27 +299,42 @@ var (
 	withExistence idxList = 0b100
 )
 
-func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
+func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
 	roFiles := make([]ctxItem, 0, files.Len())
 	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.canDelete.Load() {
+				if trace {
+					log.Warn("[dbg] roFiles0", "f", item.decompressor.FileName())
+				}
 				continue
 			}
 
 			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
 			if item.decompressor == nil {
+				if trace {
+					log.Warn("[dbg] roFiles1", "from", item.startTxNum, "to", item.endTxNum)
+				}
 				continue
 			}
 			if (l&withBTree != 0) && item.bindex == nil {
+				if trace {
+					log.Warn("[dbg] roFiles2", "f", item.decompressor.FileName())
+				}
 				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withHashMap != 0) && item.index == nil {
+				if trace {
+					log.Warn("[dbg] roFiles3", "f", item.decompressor.FileName())
+				}
 				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withExistence != 0) && item.existence == nil {
+				if trace {
+					log.Warn("[dbg] roFiles4", "f", item.decompressor.FileName())
+				}
 				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 				continue
 			}
@@ -327,6 +342,9 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
 			for len(roFiles) > 0 && roFiles[len(roFiles)-1].src.isSubsetOf(item) {
+				if trace {
+					log.Warn("[dbg] roFiles5", "f", roFiles[len(roFiles)-1].src.decompressor.FileName())
+				}
 				roFiles[len(roFiles)-1].src = nil
 				roFiles = roFiles[:len(roFiles)-1]
 			}
@@ -346,7 +364,7 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList) (roItems []ctxItem) {
 }
 
 func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := ctxFiles(ii.files, ii.indexList)
+	roFiles := ctxFiles(ii.files, ii.indexList, false)
 	ii.roFiles.Store(&roFiles)
 }
 
