@@ -2079,19 +2079,6 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
 	return hi.k, hi.v, nil
 }
 
-func (h *History) DisableReadAhead() {
-	h.InvertedIndex.DisableReadAhead()
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.DisableReadAhead()
-			if item.index != nil {
-				item.index.DisableReadAhead()
-			}
-		}
-		return true
-	})
-}
-
 // HistoryStep used for incremental state reconsitution, it isolates only one snapshot interval
 type HistoryStep struct {
 	compressVals bool

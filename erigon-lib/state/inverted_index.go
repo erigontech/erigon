@@ -1666,18 +1666,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	ii.reCalcRoFiles()
 }
 
-func (ii *InvertedIndex) DisableReadAhead() {
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			item.decompressor.DisableReadAhead()
-			if item.index != nil {
-				item.index.DisableReadAhead()
-			}
-		}
-		return true
-	})
-}
-
 func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
 	if ii.files == nil {
 		return 0, 0, 0
