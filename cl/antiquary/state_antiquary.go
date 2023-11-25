@@ -398,13 +398,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
 				return err
 			}
-			// Let's try to compute next sync committee for next epoch in parallel, in order to speed up the process.
-			go func() {
-				defer shuffledLock.Unlock()
-				s.currentState.GetBeaconCommitee(
-					(slot+s.cfg.SlotsPerEpoch)/s.cfg.SlotsPerEpoch,
-					/*committee index is irrelevant, i just want to make sure we cache the shuffled index = */ 0)
-			}()
+
 		}
 		accumulatedMixes[slot%s.cfg.SlotsPerEpoch] = s.currentState.GetRandaoMixes(state.Epoch(s.currentState))
 
