@@ -12,6 +12,7 @@ import (
 )
 
 type MinimalBeaconState struct {
+	// Block Header and Execution Headers can be retrieved from block snapshots
 	Version clparams.StateVersion
 	// Lengths
 	validatorLength                 uint64
