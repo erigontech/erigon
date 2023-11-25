@@ -366,10 +366,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 
-		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
-		if isEpochCrossed {
-			shuffledLock.Lock()
-		}
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
@@ -387,6 +383,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
+		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if isEpochCrossed {
 			prevEpochKey := base_encoding.Encode64ToBytes4(prevEpoch)
