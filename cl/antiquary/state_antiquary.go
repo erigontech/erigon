@@ -377,9 +377,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
-		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
-			return err
-		}
+
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || prevEpoch != state.Epoch(s.currentState) {
 			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), proposers, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
 				return err
@@ -391,6 +389,13 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
+		if block == nil {
+			continue
+		}
+
+		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+			return err
+		}
 		if s.currentState.Version() >= clparams.AltairVersion {
 			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, base_encoding.ComputeCompressedSerializedByteListDiff); err != nil {
 				return err
