@@ -217,7 +217,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation, eth1DataBytes []byte
+	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation []byte
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -317,15 +317,14 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		if slot%s.cfg.SlotsPerEpoch == 0 && s.currentState.Version() == clparams.Phase0Version {
-			if s.currentState.Version() == clparams.Phase0Version {
-				encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
-				if err != nil {
-					return err
-				}
-				if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, &minimalBeaconStateBuf, compressedWriter); err != nil {
-					return err
-				}
+			encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
+			if err != nil {
+				return err
 			}
+			if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, &minimalBeaconStateBuf, compressedWriter); err != nil {
+				return err
+			}
+
 		}
 
 		if (slot-1)%slotsPerDumps == 0 {
