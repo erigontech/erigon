@@ -84,6 +84,8 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 func (m *MinimalBeaconState) Serialize(w io.Writer) error {
 	compressor := compressorPool.Get().(*zstd.Encoder)
 	compressor.Reset(w)
+	defer compressorPool.Put(compressor)
+
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
