@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	shuffledSetsCacheSize     = 3
-	activeValidatorsCacheSize = 3
+	shuffledSetsCacheSize     = 5
+	activeValidatorsCacheSize = 5
 )
 
 type HashFunc func([]byte) ([32]byte, error)

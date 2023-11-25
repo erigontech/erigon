@@ -14,6 +14,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -169,6 +170,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer balances.Close()
 	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
+	intraRandaoMixes := etl.NewCollector(kv.IntraRandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer intraRandaoMixes.Close()
 	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
 	slashings := etl.NewCollector(kv.ValidatorSlashings, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -194,6 +197,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer eth1DataVotes.Close()
 
+	accumulatedMixes := make([]libcommon.Hash, s.cfg.SlotsPerEpoch)
 	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
 	compressedWriter, err := zstd.NewWriter(&minimalBeaconStateBuf, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
@@ -222,9 +226,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
-		OnRandaoMixChange: func(index int, mix [32]byte) error {
-			return randaoMixes.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), mix[:])
-		},
+
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
 			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
 				return err
@@ -315,7 +317,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
-
+	var shuffledLock sync.Mutex
 	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
@@ -379,7 +381,33 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
-		if prevValidatorSetLength != s.currentState.ValidatorLength() || prevEpoch != state.Epoch(s.currentState) {
+		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
+
+		if isEpochCrossed {
+			prevEpochKey := base_encoding.Encode64ToBytes4(prevEpoch)
+			epochKey := base_encoding.Encode64ToBytes4(state.Epoch(s.currentState))
+			// Write flattened randao, with per-epoch randaos.
+			flattenedRandaoMixes := flattenRandaoMixes(accumulatedMixes)
+			if err := intraRandaoMixes.Collect(prevEpochKey, flattenedRandaoMixes); err != nil {
+				return err
+			}
+			mix := s.currentState.GetRandaoMixes(prevEpoch)
+			// the last randao is put here
+			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
+				return err
+			}
+			shuffledLock.Lock()
+			// Let's try to compute next sync committee for next epoch in parallel, in order to speed up the process.
+			go func() {
+				defer shuffledLock.Unlock()
+				s.currentState.GetBeaconCommitee(
+					(slot+s.cfg.SlotsPerEpoch)/s.cfg.SlotsPerEpoch,
+					/*committee index is irrelevant, i just want to make sure we cache the shuffled index = */ 0)
+			}()
+		}
+		accumulatedMixes[slot%s.cfg.SlotsPerEpoch] = s.currentState.GetRandaoMixes(state.Epoch(s.currentState))
+
+		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
 			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), effectiveBalance, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
 				return err
 			}
@@ -462,6 +490,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := currentPartecipationC.Load(rwTx, kv.CurrentEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := intraRandaoMixes.Load(rwTx, kv.IntraRandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := checkpoints.Load(rwTx, kv.Checkpoints, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -480,6 +511,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
+
 	log.Info("Restarting Caplin")
 	return rwTx.Commit()
 }
@@ -720,5 +752,12 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 		return err
 	}
 	return c.Collect(k, common.Copy(b.Bytes()))
+}
 
+func flattenRandaoMixes(hashes []libcommon.Hash) []byte {
+	out := make([]byte, len(hashes)*32)
+	for i, h := range hashes {
+		copy(out[i*32:(i+1)*32], h[:])
+	}
+	return out
 }

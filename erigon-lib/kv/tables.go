@@ -488,8 +488,9 @@ const (
 	EpochAttestations          = "EpochAttestations"
 	Eth1DataVotes              = "Eth1DataVotes"
 
-	RandaoMixes = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
-	Proposers   = "BlockProposers" // epoch => proposers indicies
+	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
+	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
+	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 )
@@ -681,6 +682,7 @@ var ChaindataTables = []string{
 	HistoricalSummaries,
 	EpochAttestations,
 	Eth1DataVotes,
+	IntraRandaoMixes,
 }
 
 const (
