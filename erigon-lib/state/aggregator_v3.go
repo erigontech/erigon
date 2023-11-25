@@ -520,7 +520,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.AddInt(-1)
+			mxRunningFilesBuilding.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -561,7 +561,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			}
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.AddInt(-1)
+			mxRunningFilesBuilding.Dec()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -628,7 +628,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	ac := a.MakeContext()
 	defer ac.Close()
 	mxRunningMerges.Inc()
-	defer mxRunningMerges.AddInt(-1)
+	defer mxRunningMerges.Dec()
 
 	closeAll := true
 	maxSpan := a.aggregationStep * StepsInColdFile

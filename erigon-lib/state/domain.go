@@ -63,13 +63,13 @@ var (
 	LatestStateReadDB            = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="yes"}`)    //nolint
 	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
 
-	mxRunningMerges        = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningFilesBuilding = metrics.GetOrCreateCounter("domain_running_files_building")
+	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
+	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
 	mxCollateTook          = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTookDomain      = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
 	mxPruneTookHistory     = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
 	mxPruneTookIndex       = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
-	mxPruneInProgress      = metrics.GetOrCreateCounter("domain_pruning_progress")
+	mxPruneInProgress      = metrics.GetOrCreateGauge("domain_pruning_progress")
 	mxCollationSize        = metrics.GetOrCreateGauge("domain_collation_size")
 	mxCollationSizeHist    = metrics.GetOrCreateGauge("domain_collation_hist_size")
 	mxPruneSizeDomain      = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
@@ -78,7 +78,7 @@ var (
 	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook             = metrics.GetOrCreateHistogram("domain_step_took")
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
-	mxCommitmentRunning    = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
@@ -2176,7 +2176,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	st := time.Now()
 	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.AddInt(-1)
+	defer mxPruneInProgress.Dec()
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {

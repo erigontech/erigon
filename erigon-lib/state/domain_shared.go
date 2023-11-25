@@ -673,7 +673,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
-	defer mxCommitmentRunning.AddInt(-1)
+	defer mxCommitmentRunning.Dec()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, err = sd.Commitment.ComputeCommitment(ctx, trace)

@@ -940,7 +940,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}
 	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.AddInt(-1)
+	defer mxPruneInProgress.Dec()
 
 	ii := ic.ii
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
