@@ -394,16 +394,16 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 	return d, nil
 }
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
 // LastStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -540,23 +540,23 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 }
 
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
+	re := regexp.MustCompile("^v([0-9]+)-" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
 
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
-		if len(subs) != 3 {
+		if len(subs) != 4 {
 			if len(subs) != 0 {
-				d.logger.Warn("File ignored by domain scan, more than 3 submatches", "name", name, "submatches", len(subs))
+				d.logger.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			d.logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
 			d.logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}

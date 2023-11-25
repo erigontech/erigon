@@ -522,12 +522,12 @@ func TestChangedKeysIterator(t *testing.T) {
 func TestScanStaticFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"test.0-1.ef",
-		"test.1-2.ef",
-		"test.0-4.ef",
-		"test.2-3.ef",
-		"test.3-4.ef",
-		"test.4-5.ef",
+		"v1-test.0-1.ef",
+		"v1-test.1-2.ef",
+		"v1-test.0-4.ef",
+		"v1-test.2-3.ef",
+		"v1-test.3-4.ef",
+		"v1-test.4-5.ef",
 	}
 	ii.scanStateFiles(files)
 	require.Equal(t, 6, ii.files.Len())
@@ -542,16 +542,16 @@ func TestScanStaticFiles(t *testing.T) {
 func TestCtxFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"test.0-1.ef", // overlap with same `endTxNum=4`
-		"test.1-2.ef",
-		"test.0-4.ef",
-		"test.2-3.ef",
-		"test.3-4.ef",
-		"test.4-5.ef",     // no overlap
-		"test.480-484.ef", // overlap with same `startTxNum=480`
-		"test.480-488.ef",
-		"test.480-496.ef",
-		"test.480-512.ef",
+		"v1-test.0-1.ef", // overlap with same `endTxNum=4`
+		"v1-test.1-2.ef",
+		"v1-test.0-4.ef",
+		"v1-test.2-3.ef",
+		"v1-test.3-4.ef",
+		"v1-test.4-5.ef",     // no overlap
+		"v1-test.480-484.ef", // overlap with same `startTxNum=480`
+		"v1-test.480-488.ef",
+		"v1-test.480-496.ef",
+		"v1-test.480-512.ef",
 	}
 	ii.scanStateFiles(files)
 	require.Equal(t, 10, ii.files.Len())

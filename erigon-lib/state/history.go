@@ -117,10 +117,10 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 }
 
 func (h *History) vFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
 // OpenList - main method to open list of files.
@@ -154,22 +154,22 @@ func (h *History) OpenFolder(readonly bool) error {
 // scanStateFiles
 // returns `uselessFiles` where file "is useless" means: it's subset of frozen file. such files can be safely deleted. subset of non-frozen file may be useful
 func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
+	re := regexp.MustCompile("^v([0-9]+)-" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
 	for _, name := range fNames {
 		subs := re.FindStringSubmatch(name)
-		if len(subs) != 3 {
+		if len(subs) != 4 {
 			if len(subs) != 0 {
 				h.logger.Warn("[snapshots] file ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			h.logger.Warn("[snapshots] file ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
 			h.logger.Warn("[snapshots] file ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}

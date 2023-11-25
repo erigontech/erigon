@@ -74,7 +74,7 @@ type MdbxOpts struct {
 }
 
 const DefaultMapSize = 2 * datasize.TB
-const DefaultGrowthStep = 2 * datasize.GB
+const DefaultGrowthStep = 1 * datasize.GB
 
 func NewMDBX(log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
