@@ -19,9 +19,9 @@ func Test64(t *testing.T) {
 }
 
 func TestDiff64(t *testing.T) {
-	old := make([]byte, 8000)
-	new := make([]byte, 8000)
-	for i := 0; i < 8000; i++ {
+	old := make([]byte, 80)
+	new := make([]byte, 88)
+	for i := 0; i < 80; i++ {
 		old[i] = byte(i)
 		new[i] = byte(i + 1)
 	}
