@@ -296,7 +296,7 @@ func BorHeimdallForward(
 		if !mine && header != nil {
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
 			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
-				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header); err != nil {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
 					return err
 				}
 			}
@@ -324,6 +324,7 @@ func checkHeaderExtraData(
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	header *types.Header,
+	config *chain.BorConfig,
 ) error {
 	var spanID uint64
 	if blockNum+1 > zerothSpanEnd {
@@ -341,7 +342,7 @@ func checkHeaderExtraData(
 
 	sort.Sort(valset.ValidatorsByAddress(producerSet))
 
-	headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
+	headerVals, err := valset.ParseValidators(bor.GetValidatorBytes(header, config))
 	if err != nil {
 		return err
 	}

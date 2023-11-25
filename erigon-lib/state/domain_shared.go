@@ -929,7 +929,7 @@ func (sd *SharedDomains) rotate() []flusher {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.UpdateDuration(time.Now())
+	defer mxFlushTook.ObserveDuration(time.Now())
 	flushers := sd.rotate()
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {

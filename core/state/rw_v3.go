@@ -334,7 +334,9 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return execTxsDone.Get() }
+func (rs *StateV3) DoneCount() uint64 {
+	return execTxsDone.GetValueUint64()
+}
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	if rs.domains != nil {

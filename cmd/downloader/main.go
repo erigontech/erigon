@@ -341,10 +341,10 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
-		if strings.HasPrefix(t.DisplayName, "history/commitment") {
+		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
 			continue
 		}
-		if strings.HasPrefix(t.DisplayName, "idx/commitment") {
+		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
 			continue
 		}
 		res[t.DisplayName] = t.InfoHash.String()

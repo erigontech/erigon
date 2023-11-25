@@ -587,7 +587,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	mxStepTook.UpdateDuration(stepStartedAt)
+	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
 	a.aggregatedStep.Store(step)
 
