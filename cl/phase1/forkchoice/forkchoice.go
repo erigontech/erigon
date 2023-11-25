@@ -47,9 +47,13 @@ type ForkChoiceStore struct {
 	latestMessages   map[uint64]*LatestMessage
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
-	eth2Roots             *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	preverifiedValidators *lru.Cache[libcommon.Hash, uint64]
-	mu                    sync.Mutex
+	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
+	// preverifid sizes
+	preverifiedValidators          *lru.Cache[libcommon.Hash, uint64]
+	preverifiedHistoricalRoots     *lru.Cache[libcommon.Hash, uint64]
+	preverifiedHistoricalSummaries *lru.Cache[libcommon.Hash, uint64]
+
+	mu sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 	// freezer
@@ -97,28 +101,40 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
+	preverifiedHistoricalRoots, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+	preverifiedHistoricalSummaries, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+	preverifiedHistoricalSummaries.Add(anchorRoot, uint64(anchorState.HistoricalSummariesLength()))
+	preverifiedHistoricalRoots.Add(anchorRoot, uint64(anchorState.HistoricalRootsLength()))
 	preverifiedValidators.Add(anchorRoot, uint64(anchorState.ValidatorLength()))
 	return &ForkChoiceStore{
-		ctx:                           ctx,
-		highestSeen:                   anchorState.Slot(),
-		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
-		justifiedCheckpoint:           anchorCheckpoint.Copy(),
-		finalizedCheckpoint:           anchorCheckpoint.Copy(),
-		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
-		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     forkGraph,
-		equivocatingIndicies:          map[uint64]struct{}{},
-		latestMessages:                map[uint64]*LatestMessage{},
-		checkpointStates:              make(map[checkpointComparable]*checkpointState),
-		eth2Roots:                     eth2Roots,
-		engine:                        engine,
-		recorder:                      recorder,
-		operationsPool:                operationsPool,
-		anchorPublicKeys:              anchorPublicKeys,
-		genesisTime:                   anchorState.GenesisTime(),
-		beaconCfg:                     anchorState.BeaconConfig(),
-		childrens:                     make(map[libcommon.Hash]childrens),
-		preverifiedValidators:         preverifiedValidators,
+		ctx:                            ctx,
+		highestSeen:                    anchorState.Slot(),
+		time:                           anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
+		justifiedCheckpoint:            anchorCheckpoint.Copy(),
+		finalizedCheckpoint:            anchorCheckpoint.Copy(),
+		unrealizedJustifiedCheckpoint:  anchorCheckpoint.Copy(),
+		unrealizedFinalizedCheckpoint:  anchorCheckpoint.Copy(),
+		forkGraph:                      forkGraph,
+		equivocatingIndicies:           map[uint64]struct{}{},
+		latestMessages:                 map[uint64]*LatestMessage{},
+		checkpointStates:               make(map[checkpointComparable]*checkpointState),
+		eth2Roots:                      eth2Roots,
+		engine:                         engine,
+		recorder:                       recorder,
+		operationsPool:                 operationsPool,
+		anchorPublicKeys:               anchorPublicKeys,
+		genesisTime:                    anchorState.GenesisTime(),
+		beaconCfg:                      anchorState.BeaconConfig(),
+		childrens:                      make(map[libcommon.Hash]childrens),
+		preverifiedValidators:          preverifiedValidators,
+		preverifiedHistoricalRoots:     preverifiedHistoricalRoots,
+		preverifiedHistoricalSummaries: preverifiedHistoricalSummaries,
 	}, nil
 }
 
@@ -222,9 +238,22 @@ func (f *ForkChoiceStore) GetFullState(blockRoot libcommon.Hash, alwaysCopy bool
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
-// Highest seen returns highest seen slot
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
 	if ret, ok := f.preverifiedValidators.Get(blockRoot); ok {
+		return ret
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalRoots(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedHistoricalRoots.Get(blockRoot); ok {
+		return ret
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedHistoricalSummaries.Get(blockRoot); ok {
 		return ret
 	}
 	return 0

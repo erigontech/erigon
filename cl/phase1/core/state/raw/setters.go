@@ -287,11 +287,17 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoin
 }
 
 func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) {
+	if b.events.OnNewCurrentSyncCommittee != nil {
+		b.events.OnNewCurrentSyncCommittee(currentSyncCommittee)
+	}
 	b.currentSyncCommittee = currentSyncCommittee
 	b.markLeaf(CurrentSyncCommitteeLeafIndex)
 }
 
 func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) {
+	if b.events.OnNewNextSyncCommittee != nil {
+		b.events.OnNewNextSyncCommittee(nextSyncCommittee)
+	}
 	b.nextSyncCommittee = nextSyncCommittee
 	b.markLeaf(NextSyncCommitteeLeafIndex)
 }

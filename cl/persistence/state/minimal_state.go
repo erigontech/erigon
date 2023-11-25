@@ -46,6 +46,7 @@ type MinimalBeaconState struct {
 	HistoricalRootsLength           uint64
 
 	// Phase0
+	latestBlockHeader cltypes.BeaconBlockHeader
 	Eth1Data          *cltypes.Eth1Data
 	Eth1DepositIndex  uint64
 	JustificationBits *cltypes.JustificationBits
@@ -61,6 +62,7 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &MinimalBeaconState{
+		latestBlockHeader:               s.LatestBlockHeader(),
 		validatorLength:                 uint64(s.ValidatorLength()),
 		eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
 		previousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
@@ -138,7 +140,7 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 }
 
 func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength, &m.latestBlockHeader}
 	if m.Version >= clparams.BellatrixVersion {
 		schema = append(schema, m.LatestExecutionPayloadHeader)
 	}

@@ -10,19 +10,47 @@ import (
 )
 
 // InitializeValidatorTable initializes the validator table in the database.
-func InitializePublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState) error {
+func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 	var err error
 	if err = tx.ClearBucket(kv.ValidatorPublicKeys); err != nil {
 		return err
 	}
+	if err = tx.ClearBucket(kv.HistoricalRoots); err != nil {
+		return err
+	}
+	if err = tx.ClearBucket(kv.HistoricalSummaries); err != nil {
+		return err
+	}
 	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		key := base_encoding.Encode64ToBytes4(uint64(idx))
-		if err2 := tx.Append(kv.ValidatorPublicKeys, key, v.PublicKeyBytes()); err2 != nil {
-			err = err2
+		if err = tx.Append(kv.ValidatorPublicKeys, key, v.PublicKeyBytes()); err != nil {
 			return false
 		}
 		return true
 	})
+	if err != nil {
+		return err
+	}
+	for i := 0; i < int(state.HistoricalRootsLength()); i++ {
+		key := base_encoding.Encode64ToBytes4(uint64(i))
+		root := state.HistoricalRoot(i)
+		if err = tx.Append(kv.HistoricalRoots, key, root[:]); err != nil {
+			return err
+		}
+	}
+	var temp []byte
+	for i := 0; i < int(state.HistoricalSummariesLength()); i++ {
+		temp = temp[:0]
+		key := base_encoding.Encode64ToBytes4(uint64(i))
+		summary := state.HistoricalSummary(i)
+		temp, err = summary.EncodeSSZ(temp)
+		if err != nil {
+			return err
+		}
+		if err = tx.Append(kv.HistoricalSummaries, key, temp); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
@@ -37,6 +65,35 @@ func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, prever
 		}
 		// We put as there could be reorgs and thus some of overwriting
 		if err := tx.Put(kv.ValidatorPublicKeys, key, pubKey[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func IncrementHistoricalRootsTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
+	for i := preverifiedIndicies; i < uint64(state.HistoricalRootsLength()); i++ {
+		key := base_encoding.Encode64ToBytes4(i)
+		root := state.HistoricalRoot(int(i))
+		if err := tx.Put(kv.HistoricalRoots, key, root[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
+	var temp []byte
+	var err error
+	for i := preverifiedIndicies; i < uint64(state.HistoricalSummariesLength()); i++ {
+		temp = temp[:0]
+		key := base_encoding.Encode64ToBytes4(i)
+		summary := state.HistoricalSummary(int(i))
+		temp, err = summary.EncodeSSZ(temp)
+		if err != nil {
+			return err
+		}
+		if err = tx.Put(kv.HistoricalSummaries, key, temp); err != nil {
 			return err
 		}
 	}

@@ -500,8 +500,17 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					start := time.Now()
+					// Incement some stuff here
 					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
+					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
+					preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().BlockRoot())
 					if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
+						return err
+					}
+					if err := state_accessors.IncrementHistoricalSummariesTable(tx, headState, preverifiedHistoricalSummary); err != nil {
+						return err
+					}
+					if err := state_accessors.IncrementHistoricalRootsTable(tx, headState, preverifiedHistoricalRoots); err != nil {
 						return err
 					}
 					log.Debug("Incremented state history", "elapsed", time.Since(start), "preverifiedValidators", preverifiedValidators)

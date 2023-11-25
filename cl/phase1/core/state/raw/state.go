@@ -181,3 +181,11 @@ func (b *BeaconState) RawPreviousEpochParticipation() []byte {
 func (b *BeaconState) RawCurrentEpochParticipation() []byte {
 	return b.currentEpochParticipation.Bytes()
 }
+
+func (b *BeaconState) HistoricalRoot(index int) common.Hash {
+	return b.historicalRoots.Get(index)
+}
+
+func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
+	return b.historicalSummaries.Get(index)
+}

@@ -195,7 +195,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		return err
 	}
 
-	if err := state_accessors.InitializePublicKeyTable(tx, state); err != nil {
+	if err := state_accessors.InitializeStaticTables(tx, state); err != nil {
 		return err
 	}
 	if err := beacon_indicies.WriteHighestFinalized(tx, 0); err != nil {

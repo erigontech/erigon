@@ -20,4 +20,6 @@ type Events struct {
 	OnNewValidatorWithdrawalCredentials      func(index int, wc []byte) error
 	OnNewSlashingSegment                     func(index int, segment uint64) error
 	OnEpochBoundary                          func(epoch uint64) error
+	OnNewNextSyncCommittee                   func(committee *solid.SyncCommittee) error
+	OnNewCurrentSyncCommittee                func(committee *solid.SyncCommittee) error
 }

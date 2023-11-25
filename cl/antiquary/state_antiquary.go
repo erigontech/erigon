@@ -185,6 +185,14 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer currentPartecipationC.Close()
 	checkpoints := etl.NewCollector(kv.Checkpoints, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer checkpoints.Close()
+	nextSyncCommittee := etl.NewCollector(kv.NextSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer nextSyncCommittee.Close()
+	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer currentSyncCommittee.Close()
+	epochAttestations := etl.NewCollector(kv.EpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer epochAttestations.Close()
+	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer eth1DataVotes.Close()
 
 	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
@@ -266,6 +274,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
+			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
+			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
+				return err
+			}
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
@@ -277,6 +289,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		},
 		OnNewStateRoot: func(index int, root common.Hash) error {
 			return stateRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
+		},
+		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
+			return nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
+		},
+		OnNewCurrentSyncCommittee: func(committee *solid.SyncCommittee) error {
+			return currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
 		},
 	})
 	log.Info("Starting state processing", "from", slot, "to", to)
@@ -290,8 +308,20 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		if slot%s.cfg.SlotsPerEpoch == 0 {
-			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
-			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
+			if s.currentState.Version() == clparams.Phase0Version {
+				encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, &minimalBeaconStateBuf, compressedWriter); err != nil {
+					return err
+				}
+			}
+			encodedEth1Data, err := s.currentState.Eth1DataVotes().EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
+			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(slot-1), encodedEth1Data, eth1DataVotes, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -419,6 +449,18 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	if err := checkpoints.Load(rwTx, kv.Checkpoints, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := nextSyncCommittee.Load(rwTx, kv.NextSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := currentSyncCommittee.Load(rwTx, kv.CurrentSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := epochAttestations.Load(rwTx, kv.EpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := eth1DataVotes.Load(rwTx, kv.Eth1DataVotes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
@@ -627,4 +669,21 @@ func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBea
 		return err
 	}
 	return collector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), buffer.Bytes())
+}
+
+func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.Buffer, compressor *zstd.Encoder) error {
+	if compressor == nil {
+		return c.Collect(k, v)
+	}
+	b.Reset()
+	compressor.Reset(b)
+
+	if _, err := compressor.Write(v); err != nil {
+		return err
+	}
+	if err := compressor.Flush(); err != nil {
+		return err
+	}
+	return c.Collect(k, common.Copy(b.Bytes()))
+
 }
