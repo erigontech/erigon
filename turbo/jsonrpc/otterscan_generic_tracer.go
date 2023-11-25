@@ -84,6 +84,12 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	for idx, tx := range block.Transactions() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		ibs.SetTxContext(tx.Hash(), block.Hash(), idx)
 
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)

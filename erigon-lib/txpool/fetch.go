@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
