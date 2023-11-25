@@ -222,6 +222,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	slot := s.currentState.Slot() + 1
 
 	var prevBalances, inactivityScores, currentPartecipation, prevValSet []byte
+	var shuffledLock sync.Mutex
+
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
@@ -286,6 +288,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				currentPartecipation[i] = 0
 			}
 			currentPartecipation = currentPartecipation[:0]
+			shuffledLock.Lock()
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
@@ -317,7 +320,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
-	var shuffledLock sync.Mutex
 	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
@@ -396,7 +398,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
 				return err
 			}
-			shuffledLock.Lock()
 			// Let's try to compute next sync committee for next epoch in parallel, in order to speed up the process.
 			go func() {
 				defer shuffledLock.Unlock()
