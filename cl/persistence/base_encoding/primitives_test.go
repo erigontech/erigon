@@ -19,11 +19,15 @@ func Test64(t *testing.T) {
 }
 
 func TestDiff64(t *testing.T) {
-	old := make([]byte, 80)
-	new := make([]byte, 88)
+	old := make([]byte, 800000)
+	new := make([]byte, 800008)
+	inc := 1
 	for i := 0; i < 80; i++ {
+		if i%9 == 0 {
+			inc++
+		}
 		old[i] = byte(i)
-		new[i] = byte(i + 1)
+		new[i] = byte(i + inc)
 	}
 
 	var b bytes.Buffer
@@ -59,8 +63,8 @@ func TestDiffBytes(t *testing.T) {
 }
 
 func BenchmarkComputeCompressedSerializedByteListDiff(b *testing.B) {
-	old := make([]byte, 800000)
-	new := make([]byte, 800000)
+	old := make([]byte, 8000000)
+	new := make([]byte, 8000000)
 	for i := 0; i < 800000; i++ {
 		old[i] = byte(i)
 		new[i] = byte(i + 1)

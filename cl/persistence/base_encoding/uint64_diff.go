@@ -31,13 +31,15 @@ var bufferPool = sync.Pool{
 
 var plainUint64BufferPool = sync.Pool{
 	New: func() interface{} {
-		return make([]uint64, 1028)
+		b := make([]uint64, 1028)
+		return &b
 	},
 }
 
 var repeatedPatternBufferPool = sync.Pool{
 	New: func() interface{} {
-		return make([]repeatedPatternEntry, 1028)
+		b := make([]repeatedPatternEntry, 1028)
+		return &b
 	},
 }
 
@@ -56,13 +58,15 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	compressor.Reset(w)
 
 	// Get one plain buffer from the pool
-	plainBuffer := plainUint64BufferPool.Get().([]uint64)
-	defer plainUint64BufferPool.Put(plainBuffer)
+	plainBufferPtr := plainUint64BufferPool.Get().(*[]uint64)
+	defer plainUint64BufferPool.Put(plainBufferPtr)
+	plainBuffer := *plainBufferPtr
 	plainBuffer = plainBuffer[:0]
 
 	// Get one repeated pattern buffer from the pool
-	repeatedPattern := repeatedPatternBufferPool.Get().([]repeatedPatternEntry)
-	defer repeatedPatternBufferPool.Put(repeatedPattern)
+	repeatedPatternPtr := repeatedPatternBufferPool.Get().(*[]repeatedPatternEntry)
+	defer repeatedPatternBufferPool.Put(repeatedPatternPtr)
+	repeatedPattern := *repeatedPatternPtr
 	repeatedPattern = repeatedPattern[:0]
 
 	for i := 0; i < len(new); i += 8 {
@@ -89,6 +93,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	if err := binary.Write(w, binary.BigEndian, uint32(len(repeatedPattern))); err != nil {
 		return err
 	}
+	fmt.Println("repeatedPattern", len(repeatedPattern))
 	temp := make([]byte, 8)
 
 	// Write the repeated pattern
