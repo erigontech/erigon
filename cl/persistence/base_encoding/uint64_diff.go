@@ -106,6 +106,8 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 			return err
 		}
 	}
+	*repeatedPatternPtr = repeatedPattern[:0]
+	*plainBufferPtr = plainBuffer[:0]
 
 	return compressor.Close()
 }
