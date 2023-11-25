@@ -15,7 +15,7 @@ import (
 // make a sync.pool of compressors (zstd)
 var compressorPool = sync.Pool{
 	New: func() interface{} {
-		compressor, err := zstd.NewWriter(nil)
+		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault), zstd.WithEncoderConcurrency(10))
 		if err != nil {
 			panic(err)
 		}
