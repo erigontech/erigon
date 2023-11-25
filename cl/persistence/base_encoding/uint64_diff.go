@@ -35,6 +35,12 @@ var plainUint64BufferPool = sync.Pool{
 	},
 }
 
+var repeatedPatternBufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]repeatedPatternEntry, 1028)
+	},
+}
+
 type repeatedPatternEntry struct {
 	val   uint64
 	count int
@@ -44,7 +50,6 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	if len(old) > len(new) {
 		return fmt.Errorf("old list is longer than new list")
 	}
-	repeatedPattern := []repeatedPatternEntry{}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
 	defer compressorPool.Put(compressor)
@@ -54,6 +59,11 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	plainBuffer := plainUint64BufferPool.Get().([]uint64)
 	defer plainUint64BufferPool.Put(plainBuffer)
 	plainBuffer = plainBuffer[:0]
+
+	// Get one repeated pattern buffer from the pool
+	repeatedPattern := repeatedPatternBufferPool.Get().([]repeatedPatternEntry)
+	defer repeatedPatternBufferPool.Put(repeatedPattern)
+	repeatedPattern = repeatedPattern[:0]
 
 	if err := binary.Write(w, binary.BigEndian, uint32(len(new))); err != nil {
 		return err
