@@ -301,6 +301,9 @@ var (
 
 func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
 	roFiles := make([]ctxItem, 0, files.Len())
+	if trace {
+		log.Warn("[dbg] roFiles01", "amount", files.Len())
+	}
 	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.canDelete.Load() {
