@@ -222,7 +222,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	slot := s.currentState.Slot() + 1
 
 	var prevBalances, inactivityScores, currentPartecipation, prevValSet []byte
-	var shuffledLock sync.Mutex
 
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
