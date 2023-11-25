@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sync"
@@ -180,8 +181,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer minimalBeaconStates.Close()
 	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer inactivityScoresC.Close()
-	previousPartecipationC := etl.NewCollector(kv.PreviousEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer previousPartecipationC.Close()
 	currentPartecipationC := etl.NewCollector(kv.CurrentEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer currentPartecipationC.Close()
 	checkpoints := etl.NewCollector(kv.Checkpoints, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -217,7 +216,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation []byte
+	var prevBalances, inactivityScores, currentPartecipation, prevValSet []byte
+	// var validatorStaticState
+	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -279,6 +280,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
 				return err
 			}
+			// Zero out this piece of shit.
+			currentPartecipation = currentPartecipation[:cap(currentPartecipation)]
+			for i := 0; i < len(currentPartecipation); i++ {
+				currentPartecipation[i] = 0
+			}
+			currentPartecipation = currentPartecipation[:0]
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
@@ -331,6 +338,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
 			}
+			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawBalances(), compressedWriter); err != nil {
+				return err
+			}
 			if s.currentState.Version() >= clparams.AltairVersion {
 				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
 					return err
@@ -347,10 +357,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
 		inactivityScores = inactivityScores[:0]
 		inactivityScores = append(inactivityScores, s.currentState.RawInactivityScores()...)
-		previousPartecipation = previousPartecipation[:0]
-		previousPartecipation = append(previousPartecipation, s.currentState.RawPreviousEpochParticipation()...)
 		currentPartecipation = currentPartecipation[:0]
 		currentPartecipation = append(currentPartecipation, s.currentState.RawCurrentEpochParticipation()...)
+		prevValSet = prevValSet[:0]
+		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
@@ -365,17 +375,18 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
-		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, true); err != nil {
+		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
+		if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), proposers, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
+			return err
+		}
+
 		if s.currentState.Version() >= clparams.AltairVersion {
-			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, true); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 				return err
 			}
-			if err := s.antiquateBytesListDiff(ctx, key, previousPartecipation, s.currentState.RawPreviousEpochParticipation(), previousPartecipationC, false); err != nil {
-				return err
-			}
-			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, false); err != nil {
+			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, base_encoding.ComputeCompressedSerializedByteListDiff); err != nil {
 				return err
 			}
 		}
@@ -443,9 +454,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := inactivityScoresC.Load(rwTx, kv.InactivityScores, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := previousPartecipationC.Load(rwTx, kv.PreviousEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
 	if err := currentPartecipationC.Load(rwTx, kv.CurrentEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -492,21 +500,39 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	return balancesFile.Sync()
 }
 
-func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, u64 bool) error {
+func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder) error {
+	folderPath, filePath := epochToPaths(slot, s.cfg, "effective_balances")
+	_ = s.fs.MkdirAll(folderPath, 0o755)
+
+	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer balancesFile.Close()
+	compressor.Reset(balancesFile)
+	validatorSetSize := 121
+
+	for i := 0; i < len(uncompressed)/validatorSetSize; i++ {
+		// 80:88
+		if _, err := compressor.Write(uncompressed[i*validatorSetSize+80 : i*validatorSetSize+88]); err != nil {
+			return err
+		}
+	}
+
+	if err := compressor.Flush(); err != nil {
+		return err
+	}
+	return balancesFile.Sync()
+}
+
+func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
 	// create a diff
 	diffBuffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(diffBuffer)
 	diffBuffer.Reset()
 
-	if u64 {
-		if err := base_encoding.ComputeCompressedSerializedUint64ListDiff(diffBuffer, old, new); err != nil {
-			return err
-		}
-	} else {
-		// We now compute the difference between the two balances.
-		if err := base_encoding.ComputeCompressedSerializedByteListDiff(diffBuffer, old, new); err != nil {
-			return err
-		}
+	if err := diffFn(diffBuffer, old, new); err != nil {
+		return err
 	}
 
 	return collector.Collect(key, common.Copy(diffBuffer.Bytes()))
@@ -608,6 +634,9 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 		return true
 	})
 	if err != nil {
+		return err
+	}
+	if err := s.antiquateEffectiveBalances(context.Background(), slot, state.RawValidatorSet(), compressor); err != nil {
 		return err
 	}
 	if err := s.antiquateField(context.Background(), slot, state.RawBalances(), compressor, "balances"); err != nil {

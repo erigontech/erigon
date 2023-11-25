@@ -174,6 +174,10 @@ func (b *BeaconState) RawBalances() []byte {
 	return b.balances.Bytes()
 }
 
+func (b *BeaconState) RawValidatorSet() []byte {
+	return b.validators.Bytes()
+}
+
 func (b *BeaconState) RawPreviousEpochParticipation() []byte {
 	return b.previousEpochParticipation.Bytes()
 }

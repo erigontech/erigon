@@ -55,6 +55,37 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	return compressor.Flush()
 }
 
+func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []byte) error {
+	if len(old) > len(new) {
+		return fmt.Errorf("old list is longer than new list")
+	}
+
+	compressor := compressorPool.Get().(*zstd.Encoder)
+	defer compressorPool.Put(compressor)
+	compressor.Reset(w)
+
+	if err := binary.Write(w, binary.BigEndian, uint32(len(new))); err != nil {
+		return err
+	}
+	temp := make([]byte, 8)
+	validatorSetSize := 121
+	for i := 0; i < len(old)/validatorSetSize; i++ {
+		// 80:88
+		binary.LittleEndian.PutUint64(temp, binary.LittleEndian.Uint64(new[i*validatorSetSize+80:i*validatorSetSize+88])-binary.LittleEndian.Uint64(old[i*validatorSetSize+80:i*validatorSetSize+88]))
+		if _, err := compressor.Write(temp); err != nil {
+			return err
+		}
+	}
+	// dump the remaining bytes
+	if _, err := compressor.Write(new[len(old):]); err != nil {
+		return err
+	}
+	if err := compressor.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]byte, error) {
 	out = out[:0]
 

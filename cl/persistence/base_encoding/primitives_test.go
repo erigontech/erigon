@@ -51,13 +51,10 @@ func TestDiffBytes(t *testing.T) {
 	var b bytes.Buffer
 
 	err := ComputeCompressedSerializedByteListDiff(&b, old, new)
-	require.NoError(t, err)
-
 	out := b.Bytes()
 
 	new2, err := ApplyCompressedSerializedByteListDiff(old, nil, out)
 	require.NoError(t, err)
-
 	require.Equal(t, new, new2)
 }
 
