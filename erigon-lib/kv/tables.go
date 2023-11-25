@@ -481,8 +481,15 @@ const (
 	PreviousEpochParticipation = "PreviousEpochParticipation"
 	CurrentEpochParticipation  = "CurrentEpochParticipation"
 	Checkpoints                = "Checkpoints"
-	RandaoMixes                = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
-	Proposers                  = "BlockProposers" // epoch => proposers indicies
+	NextSyncCommittee          = "NextSyncCommittee"
+	CurrentSyncCommittee       = "CurrentSyncCommittee"
+	HistoricalRoots            = "HistoricalRoots"
+	HistoricalSummaries        = "HistoricalSummaries"
+	EpochAttestations          = "EpochAttestations"
+	Eth1DataVotes              = "Eth1DataVotes"
+
+	RandaoMixes = "RandaoMixes"    // [validator_index+slot] => [randao_mix]
+	Proposers   = "BlockProposers" // epoch => proposers indicies
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 )
@@ -668,6 +675,12 @@ var ChaindataTables = []string{
 	CurrentEpochParticipation,
 	InactivityScores,
 	Checkpoints,
+	NextSyncCommittee,
+	CurrentSyncCommittee,
+	HistoricalRoots,
+	HistoricalSummaries,
+	EpochAttestations,
+	Eth1DataVotes,
 }
 
 const (
