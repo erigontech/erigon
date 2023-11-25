@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -216,7 +217,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation []byte
+	var prevBalances, inactivityScores, previousPartecipation, currentPartecipation, eth1DataBytes []byte
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -296,18 +297,26 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		OnNewCurrentSyncCommittee: func(committee *solid.SyncCommittee) error {
 			return currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
 		},
+		OnAppendEth1Data: func(data *cltypes.Eth1Data) error {
+			vote, err := data.EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
+			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
+		},
 	})
 	log.Info("Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+
 	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
 			return err
 		}
-		if slot%s.cfg.SlotsPerEpoch == 0 {
+		if slot%s.cfg.SlotsPerEpoch == 0 && s.currentState.Version() == clparams.Phase0Version {
 			if s.currentState.Version() == clparams.Phase0Version {
 				encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
 				if err != nil {
@@ -316,13 +325,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, &minimalBeaconStateBuf, compressedWriter); err != nil {
 					return err
 				}
-			}
-			encodedEth1Data, err := s.currentState.Eth1DataVotes().EncodeSSZ(nil)
-			if err != nil {
-				return err
-			}
-			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(slot-1), encodedEth1Data, eth1DataVotes, nil, nil); err != nil {
-				return err
 			}
 		}
 

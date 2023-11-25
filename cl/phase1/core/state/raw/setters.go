@@ -107,6 +107,9 @@ func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 }
 
 func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
+	if b.events.OnAppendEth1Data != nil {
+		b.events.OnAppendEth1Data(vote)
+	}
 	b.markLeaf(Eth1DataVotesLeafIndex)
 	b.eth1DataVotes.Append(vote)
 }

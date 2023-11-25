@@ -2,6 +2,7 @@ package raw
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
@@ -22,4 +23,5 @@ type Events struct {
 	OnEpochBoundary                          func(epoch uint64) error
 	OnNewNextSyncCommittee                   func(committee *solid.SyncCommittee) error
 	OnNewCurrentSyncCommittee                func(committee *solid.SyncCommittee) error
+	OnAppendEth1Data                         func(data *cltypes.Eth1Data) error
 }
