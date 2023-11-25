@@ -110,9 +110,10 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 	temp := make([]byte, 8)
 	for i := 0; i < len(old); i += 8 {
 		n, err := decompressor.Read(temp)
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
+		fmt.Println(temp, err, n)
 		if n != 8 {
 			return nil, io.EOF
 		}
@@ -122,9 +123,13 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 
 	// Append the remaining new bytes that were not in the old slice
 	remainingBytes := make([]byte, int(length)-len(old))
-	_, err = decompressor.Read(remainingBytes)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	var n int
+	n, err = decompressor.Read(remainingBytes)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
+	}
+	if n != len(remainingBytes) {
+		return nil, io.EOF
 	}
 	out = append(out, remainingBytes...)
 
@@ -214,7 +219,7 @@ func ApplyCompressedSerializedByteListDiff(old, out []byte, diff []byte) ([]byte
 	// Handle the remaining bytes with XOR
 	for i := blockXorLen * bytesClock; i < len(old); i++ {
 		n, err := decompressor.Read(readByte)
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 		if n != 1 {
@@ -225,9 +230,13 @@ func ApplyCompressedSerializedByteListDiff(old, out []byte, diff []byte) ([]byte
 
 	// Append the remaining new bytes that were not in the old slice
 	remainingBytes := make([]byte, int(length)-len(old))
-	_, err = decompressor.Read(remainingBytes)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	var n int
+	n, err = decompressor.Read(remainingBytes)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
+	}
+	if n != len(remainingBytes) {
+		return nil, io.EOF
 	}
 	out = append(out, remainingBytes...)
 
