@@ -324,6 +324,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err != nil {
 			return err
 		}
+		prevValidatorSetLength := s.currentState.ValidatorLength()
+		prevEpoch := state.Epoch(s.currentState)
+
 		if slot%s.cfg.SlotsPerEpoch == 0 && s.currentState.Version() == clparams.Phase0Version {
 			encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
 			if err != nil {
@@ -349,10 +352,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		// If we have a missed block, we just skip it.
-		if block == nil {
-			continue
-		}
 		// We now compute the difference between the two balances.
 		prevBalances = prevBalances[:0]
 		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
@@ -362,14 +361,16 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		currentPartecipation = append(currentPartecipation, s.currentState.RawCurrentEpochParticipation()...)
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
-		// We sanity check the state every 100k slots.
-		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
-			return err
+		if block != nil {
+			// We sanity check the state every 100k slots.
+			if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
+				return err
+			}
+			if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
+				return err
+			}
 		}
 
-		if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
-			return err
-		}
 		if slot%slotsPerDumps == 0 {
 			continue
 		}
@@ -379,14 +380,18 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
-		if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), proposers, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
-			return err
+		if prevValidatorSetLength != s.currentState.ValidatorLength() || prevEpoch != state.Epoch(s.currentState) {
+			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), proposers, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
+				return err
+			}
+			if s.currentState.Version() >= clparams.AltairVersion {
+				if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+					return err
+				}
+			}
 		}
 
 		if s.currentState.Version() >= clparams.AltairVersion {
-			if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
-				return err
-			}
 			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, base_encoding.ComputeCompressedSerializedByteListDiff); err != nil {
 				return err
 			}
