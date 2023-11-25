@@ -196,11 +196,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 	// buffers
 	var minimalBeaconStateBuf bytes.Buffer
-	compressedWriter, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	compressedWriter, err := zstd.NewWriter(&minimalBeaconStateBuf, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
 	if err != nil {
 		return err
 	}
 	defer compressedWriter.Close()
+
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
 		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
@@ -494,7 +495,7 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 		return err
 	}
 
-	if err := compressor.Flush(); err != nil {
+	if err := compressor.Close(); err != nil {
 		return err
 	}
 	return balancesFile.Sync()
@@ -519,7 +520,7 @@ func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64,
 		}
 	}
 
-	if err := compressor.Flush(); err != nil {
+	if err := compressor.Close(); err != nil {
 		return err
 	}
 	return balancesFile.Sync()
@@ -711,7 +712,7 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 	if _, err := compressor.Write(v); err != nil {
 		return err
 	}
-	if err := compressor.Flush(); err != nil {
+	if err := compressor.Close(); err != nil {
 		return err
 	}
 	return c.Collect(k, common.Copy(b.Bytes()))

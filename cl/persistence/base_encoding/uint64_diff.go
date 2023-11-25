@@ -52,7 +52,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	if _, err := compressor.Write(new[len(old):]); err != nil {
 		return err
 	}
-	return compressor.Flush()
+	return compressor.Close()
 }
 
 func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []byte) error {
@@ -80,7 +80,7 @@ func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []by
 	if _, err := compressor.Write(new[len(old):]); err != nil {
 		return err
 	}
-	if err := compressor.Flush(); err != nil {
+	if err := compressor.Close(); err != nil {
 		return err
 	}
 	return nil
@@ -164,7 +164,7 @@ func ComputeCompressedSerializedByteListDiff(w io.Writer, old, new []byte) error
 		return err
 	}
 
-	if err := compressor.Flush(); err != nil {
+	if err := compressor.Close(); err != nil {
 		return err
 	}
 

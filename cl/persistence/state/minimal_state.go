@@ -100,7 +100,7 @@ func (m *MinimalBeaconState) Serialize(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return compressor.Flush()
+	return compressor.Close()
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
