@@ -21,17 +21,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
-
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -43,7 +40,7 @@ import (
 )
 
 var (
-	BlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
+	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
@@ -86,7 +83,7 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (*EphemeralExecResult, error) {
 
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
+	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()

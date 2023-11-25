@@ -940,10 +940,10 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}
 	mxPruneInProgress.Inc()
-	defer mxPruneInProgress.Dec()
+	defer mxPruneInProgress.AddInt(-1)
 
 	ii := ic.ii
-	defer func(t time.Time) { mxPruneTookIndex.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
@@ -1485,7 +1485,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	stepTo := step + 1
 	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
 	start := time.Now()
-	defer mxCollateTook.UpdateDuration(start)
+	defer mxCollateTook.ObserveDuration(start)
 
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {

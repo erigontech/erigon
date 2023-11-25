@@ -502,7 +502,7 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 		d.updates.List(true)
 		return nil, nil
 	}
-	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
+	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
 	//fmt.Printf("[commitment] ComputeCommitment %d keys (mode=%s)\n", len(touchedKeys), d.mode)

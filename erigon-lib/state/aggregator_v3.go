@@ -520,7 +520,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
+			mxRunningFilesBuilding.AddInt(-1)
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -561,7 +561,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			}
 			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
+			mxRunningFilesBuilding.AddInt(-1)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -587,7 +587,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	mxStepTook.UpdateDuration(stepStartedAt)
+	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
 	a.aggregatedStep.Store(step)
 
@@ -628,7 +628,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	ac := a.MakeContext()
 	defer ac.Close()
 	mxRunningMerges.Inc()
-	defer mxRunningMerges.Dec()
+	defer mxRunningMerges.AddInt(-1)
 
 	closeAll := true
 	maxSpan := a.aggregationStep * StepsInColdFile

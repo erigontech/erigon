@@ -714,7 +714,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}
 	closeComp = false
-	mxCollationSizeHist.Set(uint64(historyComp.Count()))
+	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 	return HistoryCollation{
 		historyPath:  historyPath,
 		historyComp:  historyComp,
@@ -1081,7 +1081,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	if !hc.CanPrune(rwTx) {
 		return nil
 	}
-	defer func(t time.Time) { mxPruneTookHistory.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	historyKeysCursorForDeletes, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
 	if err != nil {

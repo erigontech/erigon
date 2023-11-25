@@ -41,6 +41,9 @@ import (
 var (
 	EmptyRootHash  = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyUncleHash = rlpHash([]*Header(nil))
+
+	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
