@@ -29,29 +29,61 @@ var bufferPool = sync.Pool{
 	},
 }
 
+var plainUint64BufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]uint64, 1028)
+	},
+}
+
+type repeatedPatternEntry struct {
+	val   uint64
+	count int
+}
+
 func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
 		return fmt.Errorf("old list is longer than new list")
 	}
+	repeatedPattern := []repeatedPatternEntry{}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
 	defer compressorPool.Put(compressor)
 	compressor.Reset(w)
 
+	// Get one plain buffer from the pool
+	plainBuffer := plainUint64BufferPool.Get().([]uint64)
+	defer plainUint64BufferPool.Put(plainBuffer)
+	plainBuffer = plainBuffer[:0]
+
 	if err := binary.Write(w, binary.BigEndian, uint32(len(new))); err != nil {
 		return err
 	}
-	temp := make([]byte, 8)
 	for i := 0; i < len(old); i += 8 {
-		binary.LittleEndian.PutUint64(temp, binary.LittleEndian.Uint64(new[i:i+8])-binary.LittleEndian.Uint64(old[i:i+8]))
-		if _, err := compressor.Write(temp); err != nil {
+		plainBuffer = append(plainBuffer, binary.LittleEndian.Uint64(new[i:i+8])-binary.LittleEndian.Uint64(old[i:i+8]))
+	}
+	// Find the repeated pattern
+	prevVal := plainBuffer[0]
+	count := 1
+	for i := 0; i < len(plainBuffer); i++ {
+		if plainBuffer[i] == prevVal {
+			count++
+			continue
+		}
+		repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
+		prevVal = plainBuffer[i]
+		count = 1
+	}
+
+	// Write the repeated pattern
+	for _, entry := range repeatedPattern {
+		if err := binary.Write(compressor, binary.BigEndian, uint32(entry.count)); err != nil {
+			return err
+		}
+		if err := binary.Write(compressor, binary.BigEndian, entry.val); err != nil {
 			return err
 		}
 	}
-	// dump the remaining bytes
-	if _, err := compressor.Write(new[len(old):]); err != nil {
-		return err
-	}
+
 	return compressor.Close()
 }
 
