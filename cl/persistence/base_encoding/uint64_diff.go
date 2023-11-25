@@ -73,6 +73,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 		prevVal = plainBuffer[i]
 		count = 1
 	}
+	fmt.Println(len(repeatedPattern) * 16)
 
 	// Write the repeated pattern
 	for _, entry := range repeatedPattern {
