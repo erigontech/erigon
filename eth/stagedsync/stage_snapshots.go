@@ -59,6 +59,7 @@ type SnapshotsCfg struct {
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
+	version          uint8
 	historyV3        bool
 	caplin           bool
 	agg              *state.AggregatorV3
@@ -69,6 +70,7 @@ type SnapshotsCfg struct {
 func StageSnapshotsCfg(db kv.RwDB,
 	chainConfig chain.Config,
 	dirs datadir.Dirs,
+	version uint8,
 	blockRetire services.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
@@ -82,6 +84,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
+		version:            version,
 		blockRetire:        blockRetire,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
@@ -180,7 +183,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, cfg.version, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
 

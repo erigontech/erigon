@@ -246,7 +246,8 @@ type BlockReader struct {
 }
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSnapshots.(*BorRoSnapshots)}
+	borSn, _ := borSnapshots.(*BorRoSnapshots)
+	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSn}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -261,8 +262,13 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	return nil
 }
 
-func (r *BlockReader) FrozenBlocks() uint64    { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64 { return r.borSn.BlocksAvailable() }
+func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenBorBlocks() uint64 {
+	if r.borSn != nil {
+		return r.borSn.BlocksAvailable()
+	}
+	return 0
+}
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
 	if r.borSn != nil {
@@ -952,6 +958,10 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 		return *n, true, nil
 	}
 
+	if r.borSn == nil {
+		return 0, false, nil
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1069,6 +1079,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 }
 
 func (r *BlockReader) LastFrozenEventID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Events()
@@ -1087,6 +1101,10 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 }
 
 func (r *BlockReader) LastFrozenSpanID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Spans()
@@ -1119,37 +1137,40 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		return common.Copy(v), nil
 	}
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-		if sn.idx == nil {
-			continue
+	if r.borSn != nil {
+		view := r.borSn.View()
+		defer view.Close()
+		segments := view.Spans()
+		for i := len(segments) - 1; i >= 0; i-- {
+			sn := segments[i]
+			if sn.idx == nil {
+				continue
+			}
+			var spanFrom uint64
+			if sn.ranges.from > zerothSpanEnd {
+				spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
+			}
+			if spanId < spanFrom {
+				continue
+			}
+			var spanTo uint64
+			if sn.ranges.to > zerothSpanEnd {
+				spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
+			}
+			if spanId >= spanTo {
+				continue
+			}
+			if sn.idx.KeyCount() == 0 {
+				continue
+			}
+			offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
+			gg := sn.seg.MakeGetter()
+			gg.Reset(offset)
+			result, _ := gg.Next(nil)
+			return common.Copy(result), nil
 		}
-		var spanFrom uint64
-		if sn.ranges.from > zerothSpanEnd {
-			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
-		}
-		if spanId < spanFrom {
-			continue
-		}
-		var spanTo uint64
-		if sn.ranges.to > zerothSpanEnd {
-			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
-		}
-		if spanId >= spanTo {
-			continue
-		}
-		if sn.idx.KeyCount() == 0 {
-			continue
-		}
-		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
-		gg := sn.seg.MakeGetter()
-		gg.Reset(offset)
-		result, _ := gg.Next(nil)
-		return common.Copy(result), nil
 	}
+
 	return nil, fmt.Errorf("span %d not found (snapshots)", spanId)
 }
 

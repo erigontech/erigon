@@ -32,6 +32,7 @@ type BeaconBlockSegment struct {
 	seg     *compress.Decompressor // value: chunked(ssz(SignedBeaconBlocks))
 	idxSlot *recsplit.Index        // slot       -> beacon_slot_segment_offset
 	ranges  Range
+	version uint8
 }
 
 func (sn *BeaconBlockSegment) closeIdx() {
@@ -52,7 +53,7 @@ func (sn *BeaconBlockSegment) close() {
 }
 func (sn *BeaconBlockSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks)
+	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -81,7 +82,7 @@ func (sn *BeaconBlockSegment) reopenIdx(dir string) (err error) {
 	if sn.seg == nil {
 		return nil
 	}
-	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks.String())
+	fileName := snaptype.IdxFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks.String())
 	sn.idxSlot, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -148,6 +149,7 @@ type CaplinSnapshots struct {
 
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
+	version     uint8
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -155,10 +157,11 @@ type CaplinSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger}
+func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *CaplinSnapshots {
+	return &CaplinSnapshots{dir: snapDir, version: version, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger}
 }
 
+func (s *CaplinSnapshots) Version() uint8      { return s.version }
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
 func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 
@@ -338,8 +341,8 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*BeaconBlockSegment, bool
 	return nil, false
 }
 
-func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
-	segName := snaptype.SegmentFileName(fromSlot, toSlot, snaptype.BeaconBlocks)
+func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockSource, version uint8, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
+	segName := snaptype.SegmentFileName(version, fromSlot, toSlot, snaptype.BeaconBlocks)
 	f, _ := snaptype.ParseFileName(snapDir, segName)
 
 	sn, err := compress.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, compress.MinPatternScore, workers, lvl, logger)
@@ -398,7 +401,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	return BeaconBlocksIdx(ctx, f, path.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
-func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
+func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, version uint8, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
@@ -409,7 +412,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 		}
 		to := chooseSegmentEnd(i, toSlot, blocksPerFile)
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
-		if err := dumpBeaconBlocksRange(ctx, db, b, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
+		if err := dumpBeaconBlocksRange(ctx, db, b, version, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -422,7 +425,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir)
+	segments, _, err := SegmentsCaplin(s.dir, 0)
 	if err != nil {
 		return err
 	}

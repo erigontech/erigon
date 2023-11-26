@@ -97,7 +97,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.Version, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		case snaptype.Bodies:
 			g.Go(func() error {
@@ -112,7 +112,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
 				dir, _ := filepath.Split(segment.Path)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.Version, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

@@ -149,4 +149,9 @@ var (
 		Name:  "record-dir",
 		Usage: "directory for states and block recordings",
 	}
+	SnapshotVersion = cli.IntFlag{
+		Name:  "snapshot.version",
+		Usage: `Which version of snapshot files to use`,
+		Value: 1,
+	}
 )

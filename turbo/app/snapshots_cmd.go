@@ -127,6 +127,11 @@ var (
 		Usage: "Do operation every N blocks",
 		Value: 1_000,
 	}
+	SnapshotVersionFlag = cli.IntFlag{
+		Name:  "version",
+		Usage: "Snapshot files version.",
+		Value: 1,
+	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
@@ -251,7 +256,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, uint8(cliCtx.Int(utils.SnapshotVersionFlag.Name)), logger)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
@@ -392,12 +397,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
+	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
+
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, version, logger)
+	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, version, logger)
 	if err := blockSnapshots.ReopenFolder(); err != nil {
 		return err
 	}

@@ -57,13 +57,13 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 				for _, t := range snaptype.BorSnapshotTypes {
 
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+						Path: snaptype.SegmentFileName(r.Version, r.Ranges.From, r.Ranges.To, t),
 					})
 				}
 			} else {
 				for _, t := range snaptype.BlockSnapshotTypes {
 					req.Items = append(req.Items, &proto_downloader.DownloadItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+						Path: snaptype.SegmentFileName(r.Version, r.Ranges.From, r.Ranges.To, t),
 					})
 				}
 			}
@@ -84,7 +84,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(ctx context.Context, snapshotsVersion uint8, logPrefix string, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -154,17 +154,17 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 		_, exists := existingFilesMap[p.Name]
 		_, borExists := borExistingFilesMap[p.Name]
 		if !exists && !borExists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(snapshotsVersion, nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
 
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(snapshotsVersion, r, "", "", false /* Bor */))
 	}
 	if cc.Bor != nil {
 		for _, r := range borMissingSnapshots {
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(snapshotsVersion, r, "", "", true /* Bor */))
 		}
 	}
 

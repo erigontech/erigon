@@ -99,19 +99,24 @@ var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, fileType string) string {
-	version := "v1"
-
-	if v := dbg.SnapshotVersion(); len(v) > 0 {
-		version = v
+func FileName(version uint8, from, to uint64, fileType string) string {
+	if v := dbg.SnapshotVersion(); len(v) > 1 {
+		v, _ := strconv.ParseInt(v[1:], 10, 8)
+		version = uint8(v)
 	}
 
-	return fmt.Sprintf("%s-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
 
-func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
-func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
-func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
+func SegmentFileName(version uint8, from, to uint64, t Type) string {
+	return FileName(version, from, to, t.String()) + ".seg"
+}
+func DatFileName(version uint8, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".dat"
+}
+func IdxFileName(version uint8, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".idx"
+}
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for _, f := range in {
@@ -147,8 +152,16 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if len(parts) < 4 {
 		return res, ok
 	}
-	version := parts[0]
-	_ = version
+
+	var version uint8
+	if len(parts[0]) > 1 && parts[0][0] == 'v' {
+		v, err := strconv.ParseUint(parts[0][1:], 10, 64)
+		if err != nil {
+			return
+		}
+		version = uint8(v)
+	}
+
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
@@ -161,7 +174,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if !ok {
 		return res, ok
 	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
+
+	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
 const Erigon3SeedableSteps = 32

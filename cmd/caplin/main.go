@@ -79,6 +79,8 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
+	snapshotVersion := uint8(cliCtx.Int(flags.SnapshotVersion.Name))
+
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        cfg.Addr,
 		Port:          int(cfg.Port),
@@ -121,7 +123,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
+	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
 		Protocol:        cfg.BeaconProtocol,
 		Address:         cfg.BeaconAddr,
 		ReadTimeTimeout: cfg.BeaconApiReadTimeout,

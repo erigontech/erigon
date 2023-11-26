@@ -71,7 +71,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, snapshotVersion uint8, logger log.Logger) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Accede()
@@ -108,7 +108,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			return nil, err
 		}
 		if h3 {
-			_, _, agg := allSnapshots(context.Background(), db, logger)
+			_, _, agg := allSnapshots(context.Background(), db, snapshotVersion, logger)
 			tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
 			if err != nil {
 				return nil, err

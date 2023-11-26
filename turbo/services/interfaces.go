@@ -124,14 +124,15 @@ type DBEventNotifier interface {
 }
 
 type DownloadRequest struct {
+	Version     uint8
 	Ranges      *Range
 	Path        string
 	TorrentHash string
 	Bor         bool
 }
 
-func NewDownloadRequest(ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
-	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
+func NewDownloadRequest(version uint8, ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
+	return DownloadRequest{Version: version, Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
 }
 
 type Range struct {

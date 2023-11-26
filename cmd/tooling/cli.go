@@ -36,7 +36,8 @@ type chainCfg struct {
 // }
 
 type withDatadir struct {
-	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
+	Datadir         string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
+	SnapshotVersion uint8  `help:"snapshot.version" default:"1"`
 }
 
 // func (w *withPPROF) withProfile() {
@@ -78,7 +79,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	tickerTriggerer := time.NewTicker(c.UploadPeriod)
 	defer tickerTriggerer.Stop()
 	// do the checking at first run
-	if err := checkSnapshots(ctx, beaconConfig, dirs); err != nil {
+	if err := checkSnapshots(ctx, beaconConfig, dirs, c.SnapshotVersion); err != nil {
 		return err
 	}
 	log.Info("Uploading snapshots to R2 bucket")
@@ -93,7 +94,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 		select {
 		case <-tickerTriggerer.C:
 			log.Info("Checking snapshots")
-			if err := checkSnapshots(ctx, beaconConfig, dirs); err != nil {
+			if err := checkSnapshots(ctx, beaconConfig, dirs, c.SnapshotVersion); err != nil {
 				return err
 			}
 			log.Info("Finishing snapshots")
@@ -111,7 +112,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	}
 }
 
-func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs) error {
+func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotVersion uint8) error {
 	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
@@ -132,7 +133,7 @@ func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}

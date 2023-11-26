@@ -261,7 +261,8 @@ type Config struct {
 }
 
 type Sync struct {
-	UseSnapshots bool
+	UseSnapshots    bool
+	SnapshotVersion uint8
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle     time.Duration
 	ExecWorkerCount  int

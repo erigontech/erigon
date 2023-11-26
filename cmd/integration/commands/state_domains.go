@@ -5,11 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -92,7 +93,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, snapshotVersion, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
