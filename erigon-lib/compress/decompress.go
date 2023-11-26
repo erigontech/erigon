@@ -396,14 +396,6 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableMadvNormal() *Decompressor {
-	if d == nil || d.mmapHandle1 == nil {
-		return d
-	}
-	d.readAheadRefcnt.Add(1)
-	_ = mmap.MadviseNormal(d.mmapHandle1)
-	return d
-}
 func (d *Decompressor) EnableWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
