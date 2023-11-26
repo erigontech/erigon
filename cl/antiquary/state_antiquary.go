@@ -303,7 +303,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		},
 		OnResetParticipation: func(previousParticipation *solid.BitList) error {
 			fmt.Println("A")
-			return s.antiquateField(ctx, state.Epoch(s.currentState), previousParticipation.Bytes(), compressedWriter, "partecipation")
+			if err := s.antiquateField(ctx, state.Epoch(s.currentState), previousParticipation.Bytes(), compressedWriter, "partecipation"); err != nil {
+				s.logger.Error("Failed to antiquate participation", "err", err)
+			}
+			return err
 		},
 	})
 	log.Info("Starting state processing", "from", slot, "to", to)
