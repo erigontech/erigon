@@ -197,7 +197,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 	accumulatedMixes := make([]libcommon.Hash, s.cfg.SlotsPerEpoch)
 	// buffers
-	var commonBuffer *bytes.Buffer
+	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
 	if err != nil {
 		return err
