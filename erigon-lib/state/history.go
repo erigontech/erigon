@@ -318,10 +318,18 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
+	if item.decompressor == nil {
+		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+	}
+
 	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.files.Get(search)
 	if !ok {
 		return nil
+	}
+
+	if iiItem.decompressor == nil {
+		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
