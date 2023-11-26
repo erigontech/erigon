@@ -9,10 +9,12 @@ import (
 	"sync"
 
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
@@ -285,6 +287,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, MissingSegment, nil
 	}
 
+	x := common.Copy(newState.RawCurrentEpochParticipation())
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
@@ -300,6 +303,13 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 		return nil, InvalidBlock, invalidBlockErr
 	}
+	if newState.Slot()%32 == 0 {
+		x = make([]byte, len(newState.RawCurrentEpochParticipation()))
+	}
+	var r bytes.Buffer
+	base_encoding.PartecipationBitlistDiff(&r, x, newState.RawCurrentEpochParticipation())
+	//fmt.Println(r.Bytes())
+	fmt.Println(len(x), len(r.Bytes()))
 
 	f.blocks[blockRoot] = signedBlock
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
