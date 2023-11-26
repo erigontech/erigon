@@ -307,7 +307,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		x = make([]byte, len(newState.RawCurrentEpochParticipation()))
 	}
 	var r bytes.Buffer
-	base_encoding.PartecipationBitlistDiff(&r, x, newState.RawCurrentEpochParticipation())
+	base_encoding.ComputeCompressedSerializedByteListDiff(&r, x, newState.RawCurrentEpochParticipation())
 	//fmt.Println(r.Bytes())
 	fmt.Println(len(x), len(r.Bytes()))
 

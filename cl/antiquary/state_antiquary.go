@@ -221,7 +221,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, currentPartecipation, prevValSet []byte
+	var prevBalances, inactivityScores, prevValSet []byte
 
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
@@ -281,12 +281,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
 				return err
 			}
-			// Zero out this piece of shit.
-			currentPartecipation = currentPartecipation[:cap(currentPartecipation)]
-			for i := 0; i < len(currentPartecipation); i++ {
-				currentPartecipation[i] = 0
-			}
-			currentPartecipation = currentPartecipation[:0]
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
@@ -360,8 +354,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
 		inactivityScores = inactivityScores[:0]
 		inactivityScores = append(inactivityScores, s.currentState.RawInactivityScores()...)
-		currentPartecipation = currentPartecipation[:0]
-		currentPartecipation = append(currentPartecipation, s.currentState.RawCurrentEpochParticipation()...)
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 
@@ -397,7 +389,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
 				return err
 			}
-
+			if err := s.antiquateField(ctx, prevEpoch, s.currentState.RawPreviousEpochParticipation(), compressedWriter, "partecipation"); err != nil {
+				return err
+			}
 		}
 		accumulatedMixes[slot%s.cfg.SlotsPerEpoch] = s.currentState.GetRandaoMixes(state.Epoch(s.currentState))
 
@@ -409,12 +403,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
 				}
-			}
-		}
-
-		if s.currentState.Version() >= clparams.AltairVersion {
-			if err := s.antiquateBytesListDiff(ctx, key, currentPartecipation, s.currentState.RawCurrentEpochParticipation(), currentPartecipationC, base_encoding.ComputeCompressedSerializedByteListDiff); err != nil {
-				return err
 			}
 		}
 

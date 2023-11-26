@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sync"
 	"unsafe"
 
@@ -16,7 +15,7 @@ import (
 // make a sync.pool of compressors (zstd)
 var compressorPool = sync.Pool{
 	New: func() interface{} {
-		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(8))
+		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		if err != nil {
 			panic(err)
 		}
@@ -225,18 +224,18 @@ func ComputeCompressedSerializedByteListDiff(w io.Writer, old, new []byte) error
 	tmp := make([]byte, bytesClock)
 	for i := 0; i < blockXorLen; i++ {
 		blockXOR(tmp, old[i*bytesClock:(i+1)*bytesClock], new[i*bytesClock:(i+1)*bytesClock])
-		if _, err := w.Write(tmp); err != nil {
+		if _, err := compressor.Write(tmp); err != nil {
 			return err
 		}
 	}
 	// Take full advantage of the blockXOR
 	for i := blockXorLen * bytesClock; i < len(old); i++ {
-		if _, err := w.Write([]byte{new[i] - old[i]}); err != nil {
+		if _, err := compressor.Write([]byte{new[i] - old[i]}); err != nil {
 			return err
 		}
 	}
 	// dump the remaining bytes
-	if _, err := w.Write(new[len(old):]); err != nil {
+	if _, err := compressor.Write(new[len(old):]); err != nil {
 		return err
 	}
 
@@ -329,57 +328,52 @@ func blockXOR(dst, a, b []byte) {
 	dw[7] = aw[7] ^ bw[7]
 }
 
-func PartecipationBitlistDiff(w io.Writer, old, new []byte) error {
-	if len(old) > len(new) {
-		return fmt.Errorf("old list is longer than new list")
-	}
+// func PartecipationBitlistDiff(w io.Writer, old, new []byte) error {
+// 	if len(old) > len(new) {
+// 		return fmt.Errorf("old list is longer than new list")
+// 	}
 
-	// ger bytes buffer from pool
-	tempBufPtr := plainBytesBufferPool.Get().(*[]byte)
-	defer plainBytesBufferPool.Put(tempBufPtr)
-	tempBuf := *tempBufPtr
-	tempBuf = tempBuf[:0]
+// 	// ger bytes buffer from pool
+// 	tempBufPtr := plainBytesBufferPool.Get().(*[]byte)
+// 	defer plainBytesBufferPool.Put(tempBufPtr)
+// 	tempBuf := *tempBufPtr
+// 	tempBuf = tempBuf[:0]
 
-	zeroCount := 0
-	nonZeroMetric := 0
-	for i := 0; i < len(new); i++ {
-		xored := new[i] ^ old[i]
-		if xored == 0 {
-			zeroCount++
-			if zeroCount == math.MaxUint8 {
-				tempBuf = append(tempBuf, 0x0)
-				tempBuf = append(tempBuf, byte(zeroCount))
-				zeroCount = 0
-			}
-			continue
-		}
-		nonZeroMetric++
-		if zeroCount > 0 {
-			tempBuf = append(tempBuf, 0x0)
-			tempBuf = append(tempBuf, byte(zeroCount))
-			zeroCount = 0
-		}
-		tempBuf = append(tempBuf, xored)
-	}
-	if zeroCount > 0 {
-		tempBuf = append(tempBuf, 0x0)
-		tempBuf = append(tempBuf, byte(zeroCount))
-	}
-	//fmt.Println(nonZeroMetric)
-	// bitmap := roaring.New()
-	//bitmap.AddMany()
+// 	zeroCount := 0
+// 	for i := 0; i < len(new); i++ {
+// 		xored := new[i] ^ old[i]
+// 		if xored == 0 {
+// 			zeroCount++
+// 			if zeroCount == math.MaxUint8 {
+// 				tempBuf = append(tempBuf, 0x0)
+// 				tempBuf = append(tempBuf, byte(zeroCount))
+// 				zeroCount = 0
+// 			}
+// 			continue
+// 		}
+// 		if zeroCount > 0 {
+// 			tempBuf = append(tempBuf, 0x0)
+// 			tempBuf = append(tempBuf, byte(zeroCount))
+// 			zeroCount = 0
+// 		}
+// 		tempBuf = append(tempBuf, xored)
+// 	}
+// 	if zeroCount > 0 {
+// 		tempBuf = append(tempBuf, 0x0)
+// 		tempBuf = append(tempBuf, byte(zeroCount))
+// 	}
 
-	if err := binary.Write(w, binary.BigEndian, uint32(len(tempBuf))); err != nil {
-		return err
-	}
+// 	if err := binary.Write(w, binary.BigEndian, uint32(len(tempBuf))); err != nil {
+// 		return err
+// 	}
 
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer compressorPool.Put(compressor)
-	compressor.Reset(w)
+// 	compressor := compressorPool.Get().(*zstd.Encoder)
+// 	defer compressorPool.Put(compressor)
+// 	compressor.Reset(w)
 
-	if _, err := compressor.Write(tempBuf); err != nil {
-		return err
-	}
+// 	if _, err := compressor.Write(tempBuf); err != nil {
+// 		return err
+// 	}
 
-	return compressor.Close()
-}
+// 	return compressor.Close()
+// }

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/cache"
@@ -59,6 +60,7 @@ func (b *CachingBeaconState) ComputeCommittee(indicies []uint64, slot uint64, in
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
+		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, indicies, slot)
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
