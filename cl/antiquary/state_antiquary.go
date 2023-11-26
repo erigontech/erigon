@@ -394,9 +394,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
 				return err
 			}
-			if err := s.antiquateField(ctx, prevEpoch, s.currentState.RawPreviousEpochParticipation(), compressedWriter, "partecipation"); err != nil {
-				return err
-			}
 		}
 		accumulatedMixes[slot%s.cfg.SlotsPerEpoch] = s.currentState.GetRandaoMixes(state.Epoch(s.currentState))
 
