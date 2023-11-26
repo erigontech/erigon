@@ -464,7 +464,6 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 	}
 	rs.LogLvl(log.LvlDebug)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
 RETRY:
 	g.Reset(0)
 	first = true
@@ -534,7 +533,6 @@ func BorSpansIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo
 	}
 	rs.LogLvl(log.LvlDebug)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
 RETRY:
 	g.Reset(0)
 	var i, offset, nextPos uint64
@@ -661,59 +659,6 @@ func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) erro
 		return fmt.Errorf("app must wait until all expected bor snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
-}
-
-// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (s *BorRoSnapshots) DisableReadAhead() {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.seg.DisableReadAhead()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.seg.DisableReadAhead()
-	}
-}
-func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.seg.EnableReadAhead()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.seg.EnableReadAhead()
-	}
-	return s
-}
-func (s *BorRoSnapshots) EnableMadvWillNeed() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.seg.EnableWillNeed()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.seg.EnableWillNeed()
-	}
-	return s
-}
-func (s *BorRoSnapshots) EnableMadvNormal() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.seg.EnableMadvNormal()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.seg.EnableMadvNormal()
-	}
-	return s
 }
 
 func (s *BorRoSnapshots) idxAvailability() uint64 {
