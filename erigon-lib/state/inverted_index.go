@@ -505,6 +505,7 @@ func (ii *InvertedIndex) openFiles() error {
 				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					invalidFileItems = append(invalidFileItems, item)
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}

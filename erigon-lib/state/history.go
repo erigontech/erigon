@@ -232,6 +232,7 @@ func (h *History) openFiles() error {
 				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+					invalidFileItems = append(invalidFileItems, item)
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}

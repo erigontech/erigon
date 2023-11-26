@@ -623,6 +623,7 @@ func (d *Domain) openFiles() (err error) {
 				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+					invalidFileItems = append(invalidFileItems, item)
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
