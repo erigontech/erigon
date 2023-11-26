@@ -26,11 +26,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
-
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
@@ -414,8 +413,8 @@ func (p *Peer) handle(msg Msg) error {
 
 		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
-			metrics.GetOrCreateCounter(m + "_packets").Set(1)
+			metrics.GetOrCreateGauge(m).SetUint32(msg.meterSize)
+			metrics.GetOrCreateGauge(m + "_packets").Set(1)
 		}
 		select {
 		case proto.in <- msg:

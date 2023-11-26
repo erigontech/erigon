@@ -52,7 +52,7 @@ type Cfg struct {
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
 	WebSeedS3Tokens                 []string
-	ExpectedTorrentFilesHashes      []string
+	ExpectedTorrentFilesHashes      snapcfg.Preverified
 	DownloadTorrentFilesFromWebseed bool
 	ChainName                       string
 
@@ -107,12 +107,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
 		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
-	}
-
-	torrentsHashes := []string{}
-	snapCfg := snapcfg.KnownCfg(chainName, nil, nil)
-	for _, item := range snapCfg.Preverified {
-		torrentsHashes = append(torrentsHashes, item.Hash)
 	}
 
 	// debug
@@ -178,10 +172,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	if dir.FileExist(localCfgFile) {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
+	//TODO: if don't pass "downloaded files list here" (which we store in db) - synced erigon will download new .torrent files. And erigon can't work with "unfinished" files.
+	snapCfg := snapcfg.KnownCfg(chainName, nil, nil)
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
-		DownloadTorrentFilesFromWebseed: false, ExpectedTorrentFilesHashes: torrentsHashes,
+		DownloadTorrentFilesFromWebseed: false, ExpectedTorrentFilesHashes: snapCfg.Preverified,
 	}, nil
 }
 
