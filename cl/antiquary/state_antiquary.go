@@ -184,8 +184,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer minimalBeaconStates.Close()
 	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer inactivityScoresC.Close()
-	currentPartecipationC := etl.NewCollector(kv.CurrentEpochParticipation, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer currentPartecipationC.Close()
 	checkpoints := etl.NewCollector(kv.Checkpoints, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer checkpoints.Close()
 	nextSyncCommittee := etl.NewCollector(kv.NextSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -199,8 +197,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 	accumulatedMixes := make([]libcommon.Hash, s.cfg.SlotsPerEpoch)
 	// buffers
-	var minimalBeaconStateBuf bytes.Buffer
-	compressedWriter, err := zstd.NewWriter(&minimalBeaconStateBuf, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	var commonBuffer *bytes.Buffer
+	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
 	if err != nil {
 		return err
 	}
@@ -221,7 +219,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, prevValSet []byte
+	var prevBalances, inactivityScores, prevValSet, slashingsBytes []byte
 
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
@@ -284,9 +282,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
-		OnNewSlashingSegment: func(index int, segment uint64) error {
-			return slashings.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(segment))
-		},
 		OnNewBlockRoot: func(index int, root common.Hash) error {
 			return blockRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
 		},
@@ -305,6 +300,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
+		},
+		OnResetParticipation: func(previousParticipation *solid.BitList) error {
+			return s.antiquateField(ctx, state.Epoch(s.currentState), previousParticipation.Bytes(), compressedWriter, "partecipation")
 		},
 	})
 	log.Info("Starting state processing", "from", slot, "to", to)
@@ -325,10 +323,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err != nil {
 				return err
 			}
-			if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, &minimalBeaconStateBuf, compressedWriter); err != nil {
+			if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, commonBuffer, compressedWriter); err != nil {
 				return err
 			}
-
 		}
 
 		if (slot-1)%slotsPerDumps == 0 {
@@ -343,6 +340,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 					return err
 				}
 			}
+			if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
+				return err
+			}
 		}
 
 		// If we have a missed block, we just skip it.
@@ -356,13 +356,15 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		inactivityScores = append(inactivityScores, s.currentState.RawInactivityScores()...)
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
+		slashingsBytes = slashingsBytes[:0]
+		slashingsBytes = append(slashingsBytes, s.currentState.RawSlashings()...)
 
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
 		}
 
-		if err := s.storeMinimalState(&minimalBeaconStateBuf, s.currentState, minimalBeaconStates); err != nil {
+		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
 		if slot%slotsPerDumps == 0 {
@@ -372,6 +374,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
 		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+			return err
+		}
+		if err := s.antiquateBytesListDiff(ctx, key, slashingsBytes, s.currentState.RawSlashings(), slashings, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
@@ -467,9 +472,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	if err := inactivityScoresC.Load(rwTx, kv.InactivityScores, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := currentPartecipationC.Load(rwTx, kv.CurrentEpochParticipation, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := intraRandaoMixes.Load(rwTx, kv.IntraRandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -742,4 +744,17 @@ func flattenRandaoMixes(hashes []libcommon.Hash) []byte {
 		copy(out[i*32:(i+1)*32], h[:])
 	}
 	return out
+}
+
+// antiquateFullSlashings goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
+func (s *Antiquary) antiquateFullSlashings(collector *etl.Collector, slot uint64, slashings []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
+	buffer.Reset()
+	compressor.Reset(buffer)
+	if _, err := compressor.Write(slashings); err != nil {
+		return err
+	}
+	if err := compressor.Close(); err != nil {
+		return err
+	}
+	return collector.Collect(base_encoding.Encode64ToBytes4(slot), common.Copy(buffer.Bytes()))
 }

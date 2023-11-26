@@ -24,4 +24,5 @@ type Events struct {
 	OnNewNextSyncCommittee                   func(committee *solid.SyncCommittee) error
 	OnNewCurrentSyncCommittee                func(committee *solid.SyncCommittee) error
 	OnAppendEth1Data                         func(data *cltypes.Eth1Data) error
+	OnResetParticipation                     func(previousParticipation *solid.BitList) error
 }

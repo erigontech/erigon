@@ -263,6 +263,9 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) 
 }
 
 func (b *BeaconState) ResetEpochParticipation() {
+	if b.events.OnResetParticipation != nil {
+		b.events.OnResetParticipation(b.previousEpochParticipation)
+	}
 	b.previousEpochParticipation = b.currentEpochParticipation
 	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)

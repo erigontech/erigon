@@ -193,3 +193,7 @@ func (b *BeaconState) HistoricalRoot(index int) common.Hash {
 func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
 	return b.historicalSummaries.Get(index)
 }
+
+func (b *BeaconState) RawSlashings() []byte {
+	return b.slashings.Bytes()
+}

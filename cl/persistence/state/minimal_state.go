@@ -15,12 +15,13 @@ type MinimalBeaconState struct {
 	// Block Header and Execution Headers can be retrieved from block snapshots
 	Version clparams.StateVersion
 	// Lengths
-	validatorLength                 uint64
-	eth1DataLength                  uint64
-	previousEpochAttestationsLength uint64
-	currentEpochAttestationsLength  uint64
+	ValidatorLength                 uint64
+	Eth1DataLength                  uint64
+	PreviousEpochAttestationsLength uint64
+	CurrentEpochAttestationsLength  uint64
 	HistoricalSummariesLength       uint64
 	HistoricalRootsLength           uint64
+	// Cached shit
 
 	// Phase0
 	Eth1Data          *cltypes.Eth1Data
@@ -36,10 +37,10 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &MinimalBeaconState{
-		validatorLength:                 uint64(s.ValidatorLength()),
-		eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
-		previousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
-		currentEpochAttestationsLength:  uint64(s.CurrentEpochAttestations().Len()),
+		ValidatorLength:                 uint64(s.ValidatorLength()),
+		Eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
+		PreviousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
+		CurrentEpochAttestationsLength:  uint64(s.CurrentEpochAttestations().Len()),
 		HistoricalSummariesLength:       s.HistoricalSummariesLength(),
 		HistoricalRootsLength:           s.HistoricalRootsLength(),
 		Version:                         s.Version(),
@@ -105,7 +106,7 @@ func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
 }
 
 func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.validatorLength, &m.eth1DataLength, &m.previousEpochAttestationsLength, &m.currentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, m.JustificationBits, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}
