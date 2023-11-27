@@ -42,6 +42,7 @@ func (c *IndiciesCache[K]) Get(key K) ([]uint64, bool) {
 	if !ok {
 		return nil, false
 	}
+	c.u[i].t = time.Now()
 	return c.u[i].v, true
 }
 
