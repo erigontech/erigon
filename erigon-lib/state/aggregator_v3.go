@@ -411,13 +411,6 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	return nil
 }
 
-// Deprecated
-func (a *AggregatorV3) SetTx(tx kv.RwTx) {
-	if a.domains != nil {
-		a.domains.SetTx(tx)
-	}
-}
-
 type AggV3Collation struct {
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
