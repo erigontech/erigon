@@ -228,6 +228,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDiff(cliCtx *cli.Context) error {
+	log.Info("staring")
 	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
 	src, err := compress.NewDecompressor(srcF)
