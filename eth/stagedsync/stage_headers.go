@@ -109,6 +109,7 @@ func SpawnStageHeaders(
 		if err != nil {
 			return err
 		}
+		fmt.Printf("a: begin %#v\n", tx)
 		defer tx.Rollback()
 	}
 	if initialCycle && cfg.blockReader.FreezingCfg().Enabled {

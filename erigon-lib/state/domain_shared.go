@@ -90,6 +90,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
+		aggCtx:      ac,
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
 		Account:     ac.a.accounts,
 		Code:        ac.a.code,
@@ -102,8 +103,8 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-
-	sd.SetContext(ac)
+	fmt.Printf("dbg1: %#v\n", tx)
+	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -365,6 +366,7 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
+	fmt.Printf("tx: %#v\n", sd.roTx)
 	v, _, err = sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("account %x read error: %w", addr, err)
@@ -609,14 +611,8 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	return err
 }
 
-func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
-	sd.aggCtx = ctx
-	if ctx != nil {
-		sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
-	}
-}
-
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
+	fmt.Printf("dbg SetTx: %#v\n", tx)
 	sd.roTx = tx
 }
 
