@@ -201,7 +201,8 @@ func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uin
 		return 0, false, err
 	}
 	if !ok {
-		return 0, false, nil
+		_min, _ := sd.CanUnwindDomainsToBlockNum(tx)
+		return _min, false, nil
 	}
 	return blockNumWithCommitment, true, nil
 }

@@ -314,16 +314,12 @@ Loop:
 			doms := state.NewSharedDomains(tx)
 			defer doms.Close()
 
-			unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
+			allowedUnwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
-				if err != nil {
-					return err
-				}
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 			}
 			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
