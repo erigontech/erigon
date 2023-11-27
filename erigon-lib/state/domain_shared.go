@@ -103,7 +103,6 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-	fmt.Printf("dbg1: %#v\n", tx)
 	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
