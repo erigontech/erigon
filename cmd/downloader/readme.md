@@ -47,14 +47,14 @@ Flag `--snapshots` is compatible with `--prune` flag
 # It will dump blocks from Database to .seg files:
 erigon snapshots retire --datadir=<your_datadir> 
 
-# Create .torrent files (Downloader will seed automatically all .torrent files)
+# Create .torrent files (you can think about them as "checksum")
+downloader torrent_create --datadir=<your_datadir>
+
 # output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader torrent_hashes --rebuild --datadir=<your_datadir>
+downloader torrent_hashes --datadir=<your_datadir>
 
-# Start downloader (seeds automatically)
+# Start downloader (read all .torrent files, and download/seed data)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
-
-# Erigon is not required for snapshots seeding. But Erigon with --snapshots also does seeding. 
 ```
 
 Additional info:
@@ -109,13 +109,50 @@ Technical details:
 - To prevent attack - .idx creation using random Seed - all nodes will have
   different .idx file (and same .seg files)
 - If you add/remove any .seg file manually, also need
-  remove `<your_datadir>/snapshots/db` folder
+  remove `<your_datadir>/downloader` folder
 
 ## How to verify that .seg files have the same checksum as current .torrent files
 
 ```
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader --verify --datadir=<your_datadir>
+downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadir>
+```
+
+## Create cheap seedbox
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seeding snapshots. But new network or new type of snapshots need Bootstraping
+step - no peers yet have this files.
+
+**Seedbox** - machie which ony seeding archive files:
+
+- Doesn't need synced erigon
+- Can work on very cheap disks, cpu, ram
+- It works exactly like Erigon node - downloading archive files and seed them
+
+```
+downloader --seedbox --datadir=<your> --chain=mainnet
+```
+
+Seedbox can fallback to **Webseed** - HTTP url to centralized infrastructure. For example: private S3 bucket with
+signed_urls, or any HTTP server with files. Main idea: erigon decentralized infrastructure has higher prioriity than
+centralized (which used as **support/fallback**).
+
+```
+# Erigon has default webseed url's - and you can create own
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file
+```
+
+--------- 
+
+## Utilities
+
+```
+downloader torrent_cat /path/to.torrent
+
+downloader torrent_magnet /path/to.torrent
 ```
 
 ## Faster rsync
@@ -135,26 +172,3 @@ crontab -e
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
 
-## Create seedbox to support network
-
-```
-# Can run on empty datadir
-downloader --datadir=<your> --chain=mainnet
-```
-
-## Launch new network or new type of snapshots
-
-Usually Erigon's network is self-sufficient - peers automatically producing and
-seedingsnapshots. But new network or new type of snapshots need Bootstraping
-step - no peers yet have this files.
-
-**WebSeed** - is centralized file-storage - used to Bootstrap network. For
-example S3 with signed_url.
-
-Erigon dev team can share existing **webseed_url**. Or you can create own.
-
-```
-downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
-
-# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
-```
