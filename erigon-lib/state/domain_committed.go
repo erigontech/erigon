@@ -227,7 +227,6 @@ type DomainCommitted struct {
 	updates      *UpdateTree
 	mode         CommitmentMode
 	patriciaTrie commitment.Trie
-	branchMerger *commitment.BranchMerger
 	justRestored atomic.Bool
 	discard      bool
 }
@@ -240,7 +239,6 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 		updates:      NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
-		branchMerger: commitment.NewHexBranchMerger(8192),
 	}
 }
 
