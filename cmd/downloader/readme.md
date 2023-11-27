@@ -172,6 +172,30 @@ crontab -e
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
 
+## Create seedbox to support network
+
+```
+# Can run on empty datadir
+downloader --datadir=<your> --chain=mainnet
+```
+
+## Launch new network or new type of snapshots
+
+Usually Erigon's network is self-sufficient - peers automatically producing and
+seedingsnapshots. But new network or new type of snapshots need Bootstraping
+step - no peers yet have this files.
+
+**WebSeed** - is centralized file-storage - used to Bootstrap network. For
+example S3 with signed_url.
+
+Erigon dev team can share existing **webseed_url**. Or you can create own.
+
+```
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+
+# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+```
+
 
 ---------------
 
@@ -246,4 +270,3 @@ datadir
 - to gather datadadir-usability feedback
 - discover bad data
     - re-gen of snapshts takes much time, better fix data-bugs in-advance
-
