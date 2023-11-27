@@ -302,7 +302,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 		},
 		OnResetParticipation: func(previousParticipation *solid.BitList) error {
-			fmt.Println("A")
 			if err := s.antiquateField(ctx, state.Epoch(s.currentState), previousParticipation.Bytes(), compressedWriter, "partecipation"); err != nil {
 				s.logger.Error("Failed to antiquate participation", "err", err)
 			}
