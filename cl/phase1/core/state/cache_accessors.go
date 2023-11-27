@@ -18,7 +18,8 @@ import (
 // these are view functions for the beacon state cache
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
-func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
+func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
+	var indicies []uint64
 	if b.threadUnsafe {
 		if cachedIndicies, ok := b.activeValidatorsCache2.Get(epoch); ok && len(cachedIndicies) > 0 {
 			return cachedIndicies
@@ -29,17 +30,21 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies 
 		return cachedIndicies
 	}
 
+	size := 0
 	b.ForEachValidator(func(v solid.Validator, i, total int) bool {
 		if !v.Active(epoch) {
 			return true
 		}
+		size++
 		indicies = append(indicies, uint64(i))
 		return true
 	})
 	if !b.threadUnsafe {
 		b.activeValidatorsCache.Add(epoch, indicies)
+	} else {
+		b.activeValidatorsCache2.Resize(epoch, size)
 	}
-	return
+	return indicies[:size]
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
@@ -69,8 +74,7 @@ func (b *CachingBeaconState) ComputeCommittee(indicies []uint64, slot uint64, in
 		var ok bool
 		if shuffledIndicies, ok = b.shuffledSetsCache2.Get(seed); !ok {
 			shuffledIndicies = b.shuffledSetsCache2.Make(seed, int(lenIndicies))
-			fmt.Println(len(shuffledIndicies), lenIndicies)
-			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
+			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies[:lenIndicies], slot)
 		}
 	} else {
 		if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok && !b.threadUnsafe {
@@ -185,14 +189,15 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 
 // GetBeaconCommitee grabs beacon committee using cache first
 func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	var cacheKey [16]byte
-	binary.BigEndian.PutUint64(cacheKey[:], slot)
-	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
+	// var cacheKey [16]byte
+	// binary.BigEndian.PutUint64(cacheKey[:], slot)
+	// binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
 
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
+	indicies := b.GetActiveValidatorsIndices(epoch)
 	committee, err := b.ComputeCommittee(
-		b.GetActiveValidatorsIndices(epoch),
+		indicies,
 		slot,
 		(slot%b.BeaconConfig().SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.BeaconConfig().SlotsPerEpoch,

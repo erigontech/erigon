@@ -4,6 +4,12 @@ import (
 	"sync"
 )
 
+type idxEntry[K comparable] struct {
+	k K
+	v []uint64
+	t uint64
+}
+
 // IndiciesCache is an lru cache for validator indicies.
 // I had to write a custom one because the default lru.Cache was not good enough and is prone
 // to annoying bugs, if paired with Sync.Pool, it has also slow and Put times. this cache works on a few principles:
@@ -13,11 +19,7 @@ import (
 // 4. it is not a general purpose cache, it is only used for validator indicies.
 // 5. it is gc friendly, it does not use sync.Pool, use only for historical reconstruction.
 type IndiciesCache[K comparable] struct { // Value is established to be a []uint64 but key can be whatever
-	u []struct {
-		k K
-		v []uint64
-		t uint64
-	}
+	u    []idxEntry[K]
 	c    int
 	i    uint64
 	lock sync.Mutex
@@ -65,15 +67,22 @@ func (c *IndiciesCache[K]) Make(key K, n int) []uint64 {
 		c.u[oldest].k = key
 		c.u[oldest].v = c.u[oldest].v[:n]
 		c.u[oldest].t = c.i
-		return c.u[oldest].v
+		return c.u[oldest].v[:n]
 	}
-	c.u = append(c.u, struct {
-		k K
-		v []uint64
-		t uint64
-	}{k: key, v: make([]uint64, n, n*2), t: c.i})
-
+	c.u = append(c.u, idxEntry[K]{k: key, v: make([]uint64, n, n*2), t: c.i})
 	return c.u[len(c.u)-1].v
+}
+
+// Resize resizes a previously allocated slice.
+func (c *IndiciesCache[K]) Resize(key K, n int) []uint64 {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	i, ok := c.linearSearch(key)
+	if !ok {
+		return nil
+	}
+	c.u[i].v = c.u[i].v[:n]
+	return c.u[i].v
 }
 
 // findOldest returns the index of the oldest entry in the cache.

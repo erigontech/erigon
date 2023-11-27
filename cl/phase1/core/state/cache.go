@@ -88,7 +88,6 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	seed := hash.Sum(nil)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
-
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)

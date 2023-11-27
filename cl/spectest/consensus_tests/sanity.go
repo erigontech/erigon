@@ -1,11 +1,12 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
+	"github.com/ledgerwatch/erigon/spectest"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/stretchr/testify/assert"
@@ -62,6 +63,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	blocks, err := spectest.ReadBlocks(root, c.Version())
 	require.NoError(t, err)
 
+	// testState.SetThreadUnsafe(true)
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
 		err = machine.TransitionState(c.Machine, testState, block)
