@@ -104,7 +104,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 }
 
 func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.VerifyData(ctx)
+	err := s.d.VerifyData(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
