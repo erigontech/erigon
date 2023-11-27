@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 
@@ -310,24 +309,13 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
-
-			doms := state.NewSharedDomains(tx)
-			defer doms.Close()
-
-			unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
-			if err != nil {
+			if err := u.UnwindTo(unwindTo, StagedUnwind, tx); err != nil {
 				return err
 			}
-			if !ok {
-				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
-				if err != nil {
-					return err
-				}
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
-			}
-			u.UnwindTo(unwindTo, StagedUnwind)
 		} else {
-			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
+			if err := u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind, tx); err != nil {
+				return err
+			}
 		}
 	}
 	if headerInserter.GetHighest() != 0 {

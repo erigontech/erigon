@@ -785,9 +785,13 @@ Loop:
 						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
-						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+							return err
+						}
 					} else {
-						u.UnwindTo(blockNum-1, ExecUnwind)
+						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+							return err
+						}
 					}
 					break Loop
 				}
@@ -1095,7 +1099,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
-	unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().MinUnwindDomainsBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1105,17 +1109,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
 	unwindTo := maxBlockNum - jump
 
-	// protect from too far unwind
-	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
-	if err != nil {
+	//unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
+	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	if err := u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
 		return false, err
 	}
-	if !ok {
-		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
-	}
-	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 

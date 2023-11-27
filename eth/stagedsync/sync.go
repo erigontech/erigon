@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -108,7 +109,19 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 }
 
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
-func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
+func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
+	if casted, ok := tx.(state.HasAggCtx); ok {
+		// protect from too far unwind
+		unwindPointWithCommitment, ok, err := casted.AggCtx().CanUnwindBeforeBlockNum(unwindPoint, tx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+		}
+		unwindPoint = unwindPointWithCommitment
+	}
+
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
 	} else {
@@ -117,6 +130,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
 
 	s.unwindPoint = &unwindPoint
 	s.unwindReason = reason
+	return nil
 }
 
 func (s *Sync) IsDone() bool {
