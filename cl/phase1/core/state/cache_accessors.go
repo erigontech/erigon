@@ -20,9 +20,16 @@ import (
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
-	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
+	if b.threadUnsafe {
+		if cachedIndicies, ok := b.activeValidatorsCache2.Get(epoch); ok && len(cachedIndicies) > 0 {
+			return cachedIndicies
+		}
+		indicies = b.activeValidatorsCache2.Make(epoch, b.ValidatorLength())
+		indicies = indicies[:0]
+	} else if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
+
 	b.ForEachValidator(func(v solid.Validator, i, total int) bool {
 		if !v.Active(epoch) {
 			return true
@@ -30,7 +37,9 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies 
 		indicies = append(indicies, uint64(i))
 		return true
 	})
-	b.activeValidatorsCache.Add(epoch, indicies)
+	if !b.threadUnsafe {
+		b.activeValidatorsCache.Add(epoch, indicies)
+	}
 	return
 }
 
@@ -56,12 +65,23 @@ func (b *CachingBeaconState) ComputeCommittee(indicies []uint64, slot uint64, in
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconAttester)
-	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
-		shuffledIndicies = shuffledIndicesInterface
+
+	if b.threadUnsafe {
+		var ok bool
+		if shuffledIndicies, ok = b.shuffledSetsCache2.Get(seed); !ok {
+			shuffledIndicies = b.shuffledSetsCache2.Make(seed, int(lenIndicies))
+			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
+		}
 	} else {
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, indicies, slot)
-		b.shuffledSetsCache.Add(seed, shuffledIndicies)
+		if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok && !b.threadUnsafe {
+			shuffledIndicies = shuffledIndicesInterface
+		} else {
+			shuffledIndicies = make([]uint64, lenIndicies)
+			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
+			b.shuffledSetsCache.Add(seed, shuffledIndicies)
+		}
 	}
+
 	return shuffledIndicies[start:end], nil
 }
 

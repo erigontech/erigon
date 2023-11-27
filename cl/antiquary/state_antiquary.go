@@ -314,6 +314,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
+	// there is optimized custom cache to recycle big GC overhead.
+	s.currentState.SetThreadUnsafe(true)
 	for ; slot < to; slot++ {
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
