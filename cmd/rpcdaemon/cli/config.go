@@ -142,7 +142,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.MaxGetProofRewindBlockCount, utils.RpcMaxGetProofRewindBlockCount.Name, utils.RpcMaxGetProofRewindBlockCount.Value, utils.RpcMaxGetProofRewindBlockCount.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
-	rootCmd.PersistentFlags().UintVar(&cfg.RPCSlowLogThreshold, "rpc.slow.log.threshold", 0, "Threshold to log slow RPC requests in miliseconds")
+	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, "rpc.slow.log.threshold", 0, "Threshold to log slow RPC requests in miliseconds")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)

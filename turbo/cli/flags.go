@@ -406,7 +406,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache:          kvcache.DefaultCoherentConfig,
-		RPCSlowLogThreshold: ctx.Uint(utils.RPCSlowLogThresholdFlag.Name),
+		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowLogThresholdFlag.Name),
 	}
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)

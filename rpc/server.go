@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	jsoniter "github.com/json-iterator/go"
@@ -55,11 +56,11 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
 	logger              log.Logger
-	rpcSlowLogThreshold uint
+	rpcSlowLogThreshold time.Duration
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold uint) *Server {
+func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	// Register the default service providing meta information about the RPC service such

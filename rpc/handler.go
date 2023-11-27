@@ -72,7 +72,7 @@ type handler struct {
 	traceRequests       bool
 
 	// metrics
-	rpcSlowLogThreshold uint
+	rpcSlowLogThreshold time.Duration
 	rpcMethodsBlacklist []string
 }
 
@@ -113,7 +113,7 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 	return nil
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold uint) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 
@@ -407,8 +407,8 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		return nil
 	case msg.isCall():
 		if h.rpcSlowLogThreshold > 0 && h.isRpcMethodNeedsCheck(msg.Method) {
-			slowTimer := time.AfterFunc(time.Duration(h.rpcSlowLogThreshold)*time.Millisecond, func() {
-				h.logger.Warn("[rpc.slow] - running", "method", msg.Method)
+			slowTimer := time.AfterFunc(h.rpcSlowLogThreshold, func() {
+				h.logger.Warn("[rpc.slow] - running", "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 			})
 
 			defer slowTimer.Stop()
@@ -418,8 +418,8 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 
 		if h.rpcSlowLogThreshold > 0 && h.isRpcMethodNeedsCheck(msg.Method) {
 			requestDuration := time.Since(start)
-			if requestDuration > time.Duration(h.rpcSlowLogThreshold)*time.Millisecond {
-				h.logger.Warn("[rpc.slow] - finished", "method", msg.Method, " duration", requestDuration)
+			if requestDuration > h.rpcSlowLogThreshold {
+				h.logger.Warn("[rpc.slow] - finished", "method", msg.Method, " duration", requestDuration, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 			}
 		}
 

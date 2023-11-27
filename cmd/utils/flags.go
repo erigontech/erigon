@@ -903,7 +903,7 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-	RPCSlowLogThresholdFlag = cli.UintFlag{
+	RPCSlowLogThresholdFlag = cli.DurationFlag{
 		Name:  "rpc.slow.log.threshold",
 		Usage: "Threshold to log slow RPC requests in miliseconds",
 		Value: 0,

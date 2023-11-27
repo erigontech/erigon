@@ -80,5 +80,5 @@ type HttpCfg struct {
 	// Ots API
 	OtsMaxPageSize uint64
 
-	RPCSlowLogThreshold uint
+	RPCSlowLogThreshold time.Duration
 }
