@@ -72,22 +72,13 @@ type handler struct {
 	traceRequests       bool
 
 	// metrics
-	diagMessage         diagMsg
-	diagLock            sync.Mutex
 	rpcSlowLogThreshold uint
-	rpcMethodsWhitelist []string
+	rpcMethodsBlacklist []string
 }
 
 type callProc struct {
 	ctx       context.Context
 	notifiers []*Notifier
-}
-
-type diagMsg struct {
-	Method      string
-	Time        time.Time
-	LastLogTime time.Time
-	Finished    bool
 }
 
 func HandleError(err error, stream *jsoniter.Stream) error {
@@ -144,55 +135,19 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		traceRequests:       traceRequests,
 
 		rpcSlowLogThreshold: rpcSlowLogThreshold,
-		diagMessage:         diagMsg{Method: "", Time: time.Unix(0, 0), LastLogTime: time.Unix(0, 0), Finished: true},
-		rpcMethodsWhitelist: []string{"eth_call", "eth_getBlock"},
+		rpcMethodsBlacklist: []string{"eth_call", "eth_getBlock"},
 	}
 
 	if conn.remoteAddr() != "" {
 		h.logger = h.logger.New("conn", conn.remoteAddr())
 	}
 	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe", h.logger)
-	if rpcSlowLogThreshold > 0 {
-		h.lookForSlowRpc()
-	}
+
 	return h
 }
 
-func (h *handler) lookForSlowRpc() {
-	logInterval := 30 * time.Second
-	updateThreshold := 100 * time.Millisecond
-	slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
-	if slowThreshold < updateThreshold {
-		updateThreshold = slowThreshold
-	}
-
-	go func() {
-		ticker := time.NewTicker(updateThreshold)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				h.diagLock.Lock()
-				if h.isRpcMethodNeedsCheck(h.diagMessage.Method) {
-					if !h.diagMessage.Finished {
-						requestDuration := time.Since(h.diagMessage.Time)
-						if requestDuration > slowThreshold && time.Since(h.diagMessage.LastLogTime) > logInterval {
-							h.logger.Warn("[Slow RPC] - request still processing", "method", h.diagMessage.Method, "Request duration", requestDuration)
-							h.diagMessage.LastLogTime = time.Now()
-						}
-					}
-				}
-				h.diagLock.Unlock()
-			case <-h.rootCtx.Done():
-				return
-			}
-		}
-	}()
-}
-
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	for _, m := range h.rpcMethodsWhitelist {
+	for _, m := range h.rpcMethodsBlacklist {
 		if m == method {
 			return false
 		}
@@ -451,18 +406,21 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 		return nil
 	case msg.isCall():
-		h.diagMessage = diagMsg{Method: msg.Method, Time: start, LastLogTime: time.Unix(0, 0), Finished: false}
+		if h.rpcSlowLogThreshold > 0 && h.isRpcMethodNeedsCheck(msg.Method) {
+			slowTimer := time.AfterFunc(time.Duration(h.rpcSlowLogThreshold)*time.Millisecond, func() {
+				h.logger.Warn("[rpc.slow] - running", "method", msg.Method)
+			})
+
+			defer slowTimer.Stop()
+		}
 
 		resp := h.handleCall(ctx, msg, stream)
 
-		if h.rpcSlowLogThreshold > 0 {
-			requestDuration := time.Since(h.diagMessage.Time)
-			slowThreshold := time.Duration(h.rpcSlowLogThreshold) * time.Millisecond
-			if requestDuration > slowThreshold {
-				h.logger.Warn("[Slow RPC] - request finished", "method", h.diagMessage.Method, "Request duration", requestDuration)
+		if h.rpcSlowLogThreshold > 0 && h.isRpcMethodNeedsCheck(msg.Method) {
+			requestDuration := time.Since(start)
+			if requestDuration > time.Duration(h.rpcSlowLogThreshold)*time.Millisecond {
+				h.logger.Warn("[rpc.slow] - finished", "method", msg.Method, " duration", requestDuration)
 			}
-
-			h.diagMessage.Finished = true
 		}
 
 		if resp != nil && resp.Error != nil {
