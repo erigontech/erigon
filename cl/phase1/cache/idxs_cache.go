@@ -1,7 +1,7 @@
 package cache
 
 import (
-	"time"
+	"sync"
 )
 
 // IndiciesCache is an lru cache for validator indicies.
@@ -16,9 +16,11 @@ type IndiciesCache[K comparable] struct { // Value is established to be a []uint
 	u []struct {
 		k K
 		v []uint64
-		t time.Time
+		t uint64
 	}
-	c int
+	c    int
+	i    uint64
+	lock sync.Mutex
 }
 
 // NewIndiciesCache returns a new IndiciesCache with the given capacity.
@@ -38,17 +40,22 @@ func (c *IndiciesCache[K]) linearSearch(key K) (int, bool) {
 
 // Get returns the value for the key and a bool indicating if the key was found.
 func (c *IndiciesCache[K]) Get(key K) ([]uint64, bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	i, ok := c.linearSearch(key)
 	if !ok {
 		return nil, false
 	}
-	c.u[i].t = time.Now()
+	c.i++
+	c.u[i].t = c.i
 	return c.u[i].v, true
 }
 
 // Make allocates space for n validator indicies.
 func (c *IndiciesCache[K]) Make(key K, n int) []uint64 {
-
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.i++
 	// if we are at our limit, reuse the oldest entry
 	if len(c.u) >= c.c {
 		oldest := c.findOldest()
@@ -57,14 +64,14 @@ func (c *IndiciesCache[K]) Make(key K, n int) []uint64 {
 		}
 		c.u[oldest].k = key
 		c.u[oldest].v = c.u[oldest].v[:n]
-		c.u[oldest].t = time.Now()
+		c.u[oldest].t = c.i
 		return c.u[oldest].v
 	}
 	c.u = append(c.u, struct {
 		k K
 		v []uint64
-		t time.Time
-	}{k: key, v: make([]uint64, n, n*2), t: time.Now()})
+		t uint64
+	}{k: key, v: make([]uint64, n, n*2), t: c.i})
 
 	return c.u[len(c.u)-1].v
 }
@@ -73,7 +80,7 @@ func (c *IndiciesCache[K]) Make(key K, n int) []uint64 {
 func (c *IndiciesCache[K]) findOldest() int {
 	var oldest int
 	for i := range c.u {
-		if c.u[i].t.Before(c.u[oldest].t) {
+		if c.u[i].t < c.u[oldest].t {
 			oldest = i
 		}
 	}

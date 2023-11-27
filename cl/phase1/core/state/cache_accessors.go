@@ -6,7 +6,6 @@ import (
 	"math"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
@@ -266,9 +265,9 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
-	if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
-		return cached, nil
-	}
+	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
+	// 	return cached, nil
+	// }
 	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
 	if err != nil {
 		return nil, err
@@ -289,7 +288,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
-	cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
+	// cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
 	return attestingIndices, nil
 }
 
