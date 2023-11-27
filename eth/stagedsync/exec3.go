@@ -592,7 +592,7 @@ func ExecV3(ctx context.Context,
 	}
 	if !parallel {
 		applyWorker.ResetTx(applyTx)
-		doms.SetTx(applyTx)
+		//doms.SetTx(applyTx)
 	}
 
 	slowDownLimit := time.NewTicker(time.Second)
