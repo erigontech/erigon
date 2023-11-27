@@ -70,6 +70,7 @@ func (b *CachingBeaconState) ComputeCommittee(indicies []uint64, slot uint64, in
 		var ok bool
 		if shuffledIndicies, ok = b.shuffledSetsCache2.Get(seed); !ok {
 			shuffledIndicies = b.shuffledSetsCache2.Make(seed, int(lenIndicies))
+			fmt.Println(len(shuffledIndicies), lenIndicies)
 			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
 		}
 	} else {
