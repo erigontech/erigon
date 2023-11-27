@@ -89,6 +89,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
+		aggCtx:      ac,
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
 		Account:     ac.a.accounts,
 		Code:        ac.a.code,
@@ -101,8 +102,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-
-	sd.SetContext(ac)
+	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -660,13 +660,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
 	return err
-}
-
-func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
-	sd.aggCtx = ctx
-	if ctx != nil {
-		sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
-	}
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
