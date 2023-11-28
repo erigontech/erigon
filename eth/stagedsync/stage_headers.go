@@ -310,6 +310,8 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
+			doms := state.NewSharedDomains(tx)
+			defer doms.Close()
 
 			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
