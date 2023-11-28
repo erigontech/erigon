@@ -419,7 +419,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if slowCheck {
 			requestDuration := time.Since(start)
 			if requestDuration > h.slowLogThreshold {
-				h.logger.Info("[rpc.slow] finished", "duration", requestDuration, "reqid", idForLog(msg.ID))
+				h.logger.Info("[rpc.slow] finished", "reqid", idForLog(msg.ID), "duration", requestDuration)
 			}
 		}
 
