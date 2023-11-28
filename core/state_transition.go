@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
@@ -214,8 +213,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if overflow {
 			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, blobGasVal)
 		}
-		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
-			return err
+		if gasBailout {
+			if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -243,8 +244,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	} else {
 		subBalance = true
 	}
-	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-		if !gasBailout {
+	if !gasBailout {
+		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 			return err
 		}
 	}
