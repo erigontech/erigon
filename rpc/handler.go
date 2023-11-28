@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"reflect"
 	"strconv"
@@ -397,7 +396,6 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
-	fmt.Printf("a: %s\n", msg.Method)
 	start := time.Now()
 	switch {
 	case msg.isNotification():
