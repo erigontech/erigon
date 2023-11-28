@@ -724,7 +724,27 @@ func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, err
 func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 {
 	return ac.maxTxNumInDomainFiles(false)
 }
+func (ac *AggregatorV3Context) MinUnwindDomainsBlockNum(tx kv.Tx) (uint64, error) {
+	_, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
+	return blockNum, err
+}
 
+func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
+	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	// not all blocks have commitment
+	blockNumWithCommitment, _, ok, err := ac.a.commitment.SeekCommitment(tx, ac.commitment, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
+		return _minBlockNum, false, nil
+	}
+	return blockNumWithCommitment, true, nil
+}
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
