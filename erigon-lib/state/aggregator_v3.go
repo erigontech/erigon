@@ -52,7 +52,6 @@ import (
 
 type AggregatorV3 struct {
 	db               kv.RoDB
-	domains          *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
