@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -336,6 +337,7 @@ func ConsensusClStages(ctx context.Context,
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
 							}
+							fmt.Println("processed block", block.Block.Slot)
 						}
 						if len(blockBatch) > 0 {
 							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
@@ -474,7 +476,6 @@ func ConsensusClStages(ctx context.Context,
 
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
-						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
@@ -490,6 +491,7 @@ func ConsensusClStages(ctx context.Context,
 						if err != nil {
 							return err
 						}
+						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 					}
 					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
 						return err
@@ -498,6 +500,9 @@ func ConsensusClStages(ctx context.Context,
 						if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
 							return err
 						}
+					}
+					if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
+						return err
 					}
 
 					// Increment validator set

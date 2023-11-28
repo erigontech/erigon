@@ -142,6 +142,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	defer tx.Rollback()
 
+	// maps which validators changes
+	changedValidators := make(map[uint64]struct{})
+
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
@@ -231,6 +234,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	s.currentState.SetEvents(raw.Events{
 
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
+			changedValidators[uint64(index)] = struct{}{}
 			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
 				return err
 			}
@@ -257,15 +261,19 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
+			changedValidators[uint64(index)] = struct{}{}
 			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
+			changedValidators[uint64(index)] = struct{}{}
 			return exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
+			changedValidators[uint64(index)] = struct{}{}
 			return withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
+			changedValidators[uint64(index)] = struct{}{}
 			slashedVal := []byte{0}
 			if newSlashed {
 				slashedVal = []byte{1}
@@ -273,9 +281,11 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
+			changedValidators[uint64(index)] = struct{}{}
 			return activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
+			changedValidators[uint64(index)] = struct{}{}
 			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
 		},
 		OnEpochBoundary: func(epoch uint64) error {
