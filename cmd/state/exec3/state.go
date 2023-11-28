@@ -163,12 +163,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
 		rw.SetReader(state.NewStateReaderV3(rw.rs))
-		//
-		//restoredHash, err := rw.rs.Domains().ComputeCommitment(context.Background(), false, false, txTask.BlockNum)
-		//if err != nil {
-		//	return
-		//}
-		//fmt.Printf("restored hash %x tx %d\n", restoredHash, txTask.TxNum)
 	}
 
 	if rw.background && rw.chainTx == nil {
