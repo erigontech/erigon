@@ -67,6 +67,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		}
 		newFlags = append(newFlags, v)
 	}
+	app.Flags = newFlags
 
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
