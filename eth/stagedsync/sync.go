@@ -122,8 +122,6 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			}
 			unwindPoint = unwindPointWithCommitment
 		}
-	} else {
-		panic("assert: nil tx")
 	}
 
 	if reason.Block != nil {
