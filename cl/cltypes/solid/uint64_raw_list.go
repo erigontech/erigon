@@ -123,7 +123,8 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 
 	lnRoot := merkle_tree.Uint64Root(uint64(len(arr.u)))
 	if len(arr.u) == 0 {
-		return utils.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:]), nil
+		arr.cachedHash = utils.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
+		return arr.cachedHash, nil
 	}
 
 	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
@@ -144,7 +145,8 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 
-	return utils.Sha256(elements[:32], lnRoot[:]), nil
+	arr.cachedHash = utils.Sha256(elements[:32], lnRoot[:])
+	return arr.cachedHash, nil
 }
 
 func (arr *RawUint64List) Pop() uint64 {
