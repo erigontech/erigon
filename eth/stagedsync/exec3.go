@@ -692,7 +692,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var gasUsed uint64
+		var gasUsed, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
@@ -759,18 +759,17 @@ Loop:
 					if txTask.Error != nil {
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
+					gasUsed += txTask.UsedGas
+					if txTask.Tx != nil {
+						blobGasUsed += txTask.Tx.GetBlobGas()
+					}
 					if txTask.Final {
-						gasUsed += txTask.UsedGas
-						if gasUsed != txTask.Header.GasUsed {
-							if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-								return fmt.Errorf("%w: gas used by execution: %d, in header: %d, headerNum=%d, %x",
-									consensus.ErrInvalidBlock, gasUsed, txTask.Header.GasUsed,
-									txTask.Header.Number.Uint64(), txTask.Header.Hash())
+						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+							if err := core.BlockPostValidation(gasUsed, blobGasUsed, txTask.Header); err != nil {
+								return fmt.Errorf("%w, %s", consensus.ErrInvalidBlock, err)
 							}
 						}
-						gasUsed = 0
-					} else {
-						gasUsed += txTask.UsedGas
+						gasUsed, blobGasUsed = 0, 0
 					}
 					return nil
 				}(); err != nil {
@@ -1160,6 +1159,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
+			// TODO: post-validation of gasUsed and blobGasUsed
 			i++
 		}
 
