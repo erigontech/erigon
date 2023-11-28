@@ -192,6 +192,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 	switch {
 	case txTask.TxIndex == -1:
+		hdr := rw.chain.GetHeaderByNumber(txTask.BlockNum)
+		rw.taskGasPool.AddGas(hdr.GasLimit).AddBlobGas(rw.chainConfig.GetMaxBlobGasPerBlock())
+
 		if txTask.BlockNum == 0 {
 			// Genesis block
 			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
