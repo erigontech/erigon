@@ -1360,7 +1360,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err
@@ -1455,7 +1455,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err

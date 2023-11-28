@@ -14,11 +14,10 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -90,6 +89,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
+		aggCtx:      ac,
 		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
 		Account:     ac.a.accounts,
 		Code:        ac.a.code,
@@ -102,8 +102,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-
-	sd.SetContext(ac)
+	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -185,30 +184,6 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 
 	sd.Commitment.Reset()
 	return sd.ComputeCommitment(ctx, true, false, blockNum)
-}
-
-func (sd *SharedDomains) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
-	return sd.aggCtx.CanUnwindDomainsToBlockNum(tx)
-}
-func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-	if err != nil {
-		return 0, false, err
-	}
-	// not all blocks have commitment
-	blockNumWithCommitment, _, ok, err := sd.SeekCommitment2(tx, sd.aggCtx.CanUnwindDomainsToTxNum(), unwindToTxNum)
-	if err != nil {
-		return 0, false, err
-	}
-	if !ok {
-		return 0, false, nil
-	}
-	return blockNumWithCommitment, true, nil
-}
-
-func (sd *SharedDomains) CanUnwindDomainsToTxNum() uint64 { return sd.aggCtx.CanUnwindDomainsToTxNum() }
-func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
-	return sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, sinceTx, untilTx)
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
@@ -633,13 +608,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	return err
 }
 
-func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
-	sd.aggCtx = ctx
-	if ctx != nil {
-		sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
-	}
-}
-
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 	sd.roTx = tx
 }
@@ -929,7 +897,7 @@ func (sd *SharedDomains) rotate() []flusher {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.UpdateDuration(time.Now())
+	defer mxFlushTook.ObserveDuration(time.Now())
 	flushers := sd.rotate()
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {

@@ -25,9 +25,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.withExistenceIndex = false
 		ii.scanStateFiles([]string{
-			"test.0-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -49,10 +49,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		ii = emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -70,10 +70,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.2-3.v",
-			"test.3-4.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.2-3.v",
+			"v1-test.3-4.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -93,10 +93,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -107,8 +107,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -130,9 +130,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, history not yet", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -143,8 +143,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -165,11 +165,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
-			"test.0-4.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
+			"v1-test.0-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -180,10 +180,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.2-3.v",
-			"test.3-4.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.2-3.v",
+			"v1-test.3-4.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -207,7 +207,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-4.ef",
+			"v1-test.0-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -218,10 +218,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.2-3.v",
-			"test.3-4.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.2-3.v",
+			"v1-test.3-4.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -244,8 +244,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -257,9 +257,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.0-2.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.0-2.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -283,11 +283,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.0-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.0-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -298,11 +298,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.0-2.v",
-			"test.2-3.v",
-			"test.3-4.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.0-2.v",
+			"v1-test.2-3.v",
+			"v1-test.3-4.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -326,10 +326,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.0-2.ef",
-			"test.2-3.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.0-2.ef",
+			"v1-test.2-3.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -340,9 +340,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.2-3.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.2-3.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -366,9 +366,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.0-2.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.0-2.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -379,10 +379,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanStateFiles([]string{
-			"test.0-1.v",
-			"test.1-2.v",
-			"test.0-2.v",
-			"test.2-3.v",
+			"v1-test.0-1.v",
+			"v1-test.1-2.v",
+			"v1-test.0-2.v",
+			"v1-test.2-3.v",
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -400,11 +400,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
 		ii.scanStateFiles([]string{
-			"test.0-1.ef",
-			"test.1-2.ef",
-			"test.0-2.ef",
-			"test.2-3.ef",
-			"test.3-4.ef",
+			"v1-test.0-1.ef",
+			"v1-test.1-2.ef",
+			"v1-test.0-2.ef",
+			"v1-test.2-3.ef",
+			"v1-test.3-4.ef",
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

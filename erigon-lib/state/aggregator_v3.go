@@ -52,7 +52,6 @@ import (
 
 type AggregatorV3 struct {
 	db               kv.RoDB
-	domains          *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
@@ -246,7 +245,7 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 }
 
 func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
-	log.Warn("[dbg] OpenList", "l", files)
+	//log.Warn("[dbg] OpenList", "l", files)
 
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
@@ -409,13 +408,6 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		}
 	}
 	return nil
-}
-
-// Deprecated
-func (a *AggregatorV3) SetTx(tx kv.RwTx) {
-	if a.domains != nil {
-		a.domains.SetTx(tx)
-	}
 }
 
 type AggV3Collation struct {
@@ -587,7 +579,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	mxStepTook.UpdateDuration(stepStartedAt)
+	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
 	a.aggregatedStep.Store(step)
 
@@ -698,30 +690,20 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
+func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
-			cmp.Min(
-				ac.account.maxTxNumInFiles(cold),
-				ac.code.maxTxNumInFiles(cold)),
-			cmp.Min(
-				ac.storage.maxTxNumInFiles(cold),
-				ac.commitment.maxTxNumInFiles(cold)),
-		),
+			ac.account.maxTxNumInDomainFiles(cold),
+			ac.code.maxTxNumInDomainFiles(cold)),
 		cmp.Min(
-			cmp.Min(
-				ac.logAddrs.maxTxNumInFiles(cold),
-				ac.logTopics.maxTxNumInFiles(cold)),
-			cmp.Min(
-				ac.tracesFrom.maxTxNumInFiles(cold),
-				ac.tracesTo.maxTxNumInFiles(cold)),
-		),
+			ac.storage.maxTxNumInDomainFiles(cold),
+			ac.commitment.maxTxNumInDomainFiles(cold)),
 	)
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
-	return ac.CanPruneFrom(tx) < ac.maxTxNumInFiles(false)
+	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInDomainFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
+	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
 }
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ac.a.tracesTo.indexKeysTable)
@@ -739,8 +721,30 @@ func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, err
 	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
 	return histBlockNumProgress, err
 }
-func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 { return ac.maxTxNumInFiles(false) }
+func (ac *AggregatorV3Context) CanUnwindDomainsToTxNum() uint64 {
+	return ac.maxTxNumInDomainFiles(false)
+}
+func (ac *AggregatorV3Context) MinUnwindDomainsBlockNum(tx kv.Tx) (uint64, error) {
+	_, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
+	return blockNum, err
+}
 
+func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
+	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+	// not all blocks have commitment
+	blockNumWithCommitment, _, ok, err := ac.a.commitment.SeekCommitment(tx, ac.commitment, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
+		return _minBlockNum, false, nil
+	}
+	return blockNumWithCommitment, true, nil
+}
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -813,11 +817,12 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
-	if ac.a.minimaxTxNumInFiles.Load() == 0 {
+	maxTxNum := ac.maxTxNumInDomainFiles(false)
+	if maxTxNum == 0 {
 		return
 	}
 
-	histBlockNumProgress := tx2block(ac.maxTxNumInFiles(false))
+	domainBlockNumProgress := tx2block(maxTxNum)
 	str := make([]string, 0, len(ac.account.files))
 	for _, item := range ac.account.files {
 		bn := tx2block(item.endTxNum)
@@ -840,7 +845,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
-		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
+		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
@@ -864,7 +869,7 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
-func (a *AggregatorV3) EndTxNumFrozenAndIndexed() uint64 {
+func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
 	return cmp.Min(
 		cmp.Min(
 			a.accounts.endIndexedTxNumMinimax(true),
@@ -1537,7 +1542,7 @@ type AggregatorStep struct {
 }
 
 func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
-	frozenAndIndexed := a.EndTxNumFrozenAndIndexed()
+	frozenAndIndexed := a.EndTxNumDomainsFrozen()
 	accountSteps := a.accounts.MakeSteps(frozenAndIndexed)
 	codeSteps := a.code.MakeSteps(frozenAndIndexed)
 	storageSteps := a.storage.MakeSteps(frozenAndIndexed)

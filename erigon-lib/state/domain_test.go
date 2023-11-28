@@ -169,9 +169,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1-base.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "base.0-1.v"))
+		require.True(t, strings.HasSuffix(c.historyPath, "v1-base.0-1.v"))
 		require.Equal(t, 3, c.historyCount)
 		require.Equal(t, 2, len(c.indexBitmaps))
 		require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
@@ -1016,12 +1016,12 @@ func TestScanStaticFilesD(t *testing.T) {
 		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
-		"test.0-1.kv",
-		"test.1-2.kv",
-		"test.0-4.kv",
-		"test.2-3.kv",
-		"test.3-4.kv",
-		"test.4-5.kv",
+		"v1-test.0-1.kv",
+		"v1-test.1-2.kv",
+		"v1-test.0-4.kv",
+		"v1-test.2-3.kv",
+		"v1-test.3-4.kv",
+		"v1-test.4-5.kv",
 	}
 	ii.scanStateFiles(files)
 	var found []string
@@ -1079,9 +1079,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1-base.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "base.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v1-base.0-1.v"))
 	require.EqualValues(t, 3*maxTx, c.historyCount)
 	require.Equal(t, 3, len(c.indexBitmaps))
 	require.Len(t, c.indexBitmaps["key2"].ToArray(), int(maxTx))

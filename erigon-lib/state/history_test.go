@@ -128,7 +128,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
 		require.NoError(err)
-		require.True(strings.HasSuffix(c.historyPath, "hist.0-1.v"))
+		require.True(strings.HasSuffix(c.historyPath, "v1-hist.0-1.v"))
 		require.Equal(6, c.historyCount)
 		require.Equal(3, len(c.indexBitmaps))
 		require.Equal([]uint64{7}, c.indexBitmaps["key3"].ToArray())
@@ -868,12 +868,12 @@ func TestScanStaticFilesH(t *testing.T) {
 		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
-		"test.0-1.v",
-		"test.1-2.v",
-		"test.0-4.v",
-		"test.2-3.v",
-		"test.3-4.v",
-		"test.4-5.v",
+		"v1-test.0-1.v",
+		"v1-test.1-2.v",
+		"v1-test.0-4.v",
+		"v1-test.2-3.v",
+		"v1-test.3-4.v",
+		"v1-test.4-5.v",
 	}
 	h.scanStateFiles(files)
 	require.Equal(t, 6, h.files.Len())

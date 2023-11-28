@@ -54,7 +54,7 @@ type requestGenerator struct {
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
 	db := memdb.New("")
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err
 		}
@@ -62,8 +62,7 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 			return err
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
@@ -86,11 +85,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 
 func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
 	tx, err := rg.bor.DB.BeginRo(context.Background())
-
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
-
 	defer tx.Rollback()
 
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)

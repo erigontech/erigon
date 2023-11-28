@@ -310,22 +310,17 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
-
-			doms := state.NewSharedDomains(tx)
+			doms := state.NewSharedDomains(tx) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 			defer doms.Close()
 
-			unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, tx)
+			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(tx)
-				if err != nil {
-					return err
-				}
-				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 			}
-			u.UnwindTo(unwindTo, StagedUnwind)
+			u.UnwindTo(allowedUnwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
 		}
