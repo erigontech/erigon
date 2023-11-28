@@ -463,15 +463,11 @@ const (
 	// ValidatorIndex => [Field]
 	ValidatorPublicKeys = "ValidatorPublickeys"
 	// ValidatorIndex + Slot => [Field]
-	ValidatorEffectiveBalance           = "ValidatorEffectiveBalance"
-	ValidatorSlashings                  = "ValidatorSlashings"
-	ValidatorSlashed                    = "ValidatorSlashed"
-	ValidatorActivationEligibilityEpoch = "ValidatorActivationEligibilityEpoch"
-	ValidatorActivationEpoch            = "ValidatorActivationEpoch"
-	ValidatorExitEpoch                  = "ValidatorExitEpoch"
-	ValidatorWithdrawableEpoch          = "ValidatorWithdrawableEpoch"
-	ValidatorWithdrawalCredentials      = "ValidatorWithdrawalCredentials"
-	ValidatorBalance                    = "ValidatorBalance"
+	ValidatorEffectiveBalance = "ValidatorEffectiveBalance"
+	ValidatorSlashings        = "ValidatorSlashings"
+	ValidatorBalance          = "ValidatorBalance"
+	StaticValidators          = "StaticValidators"
+	StateEvents               = "StateEvents"
 
 	// External data
 	StateRoot                  = "StateRoot"
@@ -657,14 +653,9 @@ var ChaindataTables = []string{
 	// State Reconstitution
 	ValidatorPublicKeys,
 	ValidatorEffectiveBalance,
-	ValidatorSlashed,
-	ValidatorActivationEligibilityEpoch,
-	ValidatorActivationEpoch,
-	ValidatorExitEpoch,
-	ValidatorWithdrawableEpoch,
-	ValidatorWithdrawalCredentials,
 	ValidatorBalance,
 	ValidatorSlashings,
+	StaticValidators,
 	// Other stuff (related to state reconstitution)
 	BlockRoot,
 	StateRoot,

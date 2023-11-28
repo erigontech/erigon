@@ -17,7 +17,6 @@ func TestMinimalState(t *testing.T) {
 		JustificationBits:            &cltypes.JustificationBits{},
 		NextWithdrawalIndex:          0,
 		NextWithdrawalValidatorIndex: 0,
-		LatestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.CapellaVersion),
 	}
 	var b bytes.Buffer
 	if err := m.Serialize(&b); err != nil {

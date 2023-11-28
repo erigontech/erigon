@@ -148,31 +148,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
-	// Setup ETL collectors for:
-	// ValidatorEffectiveBalance,
-	// ValidatorSlashed,
-	// ValidatorActivationEligibilityEpoch,
-	// ValidatorActivationEpoch,
-	// ValidatorExitEpoch,
-	// ValidatorWithdrawableEpoch,
-	// ValidatorWithdrawalCredentials,
-	// ValidatorBalance,
-	// RandaoMixes,
-	// Proposers,
+
 	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
-	slashed := etl.NewCollector(kv.ValidatorSlashed, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer slashed.Close()
-	activationEligibilityEpoch := etl.NewCollector(kv.ValidatorActivationEligibilityEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer activationEligibilityEpoch.Close()
-	activationEpoch := etl.NewCollector(kv.ValidatorActivationEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer activationEpoch.Close()
-	exitEpoch := etl.NewCollector(kv.ValidatorExitEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer exitEpoch.Close()
-	withdrawableEpoch := etl.NewCollector(kv.ValidatorWithdrawableEpoch, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer withdrawableEpoch.Close()
-	withdrawalCredentials := etl.NewCollector(kv.ValidatorWithdrawalCredentials, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer withdrawalCredentials.Close()
 	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer balances.Close()
 	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -213,14 +191,16 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
+		s.validatorsTable = state_accessors.NewStaticValidatorTable()
 		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
 		if err != nil {
 			return err
 		}
 		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(compressedWriter, s.currentState, effectiveBalance, slashed, activationEligibilityEpoch, activationEpoch, exitEpoch, withdrawableEpoch, withdrawalCredentials, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots); err != nil {
+		if err := s.collectGenesisState(compressedWriter, s.currentState, effectiveBalance, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots, changedValidators); err != nil {
 			return err
 		}
+		s.validatorsTable = state_accessors.NewStaticValidatorTable()
 	}
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
@@ -232,61 +212,33 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
-
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
-			if err := effectiveBalance.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
-				return err
-			}
-			slashedVal := []byte{0}
-			if v.Slashed() {
-				slashedVal = []byte{1}
-			}
-			if err := slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal); err != nil {
-				return err
-			}
-			if err := activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
-				return err
-			}
-			if err := activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
-				return err
-			}
-			if err := exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
-				return err
-			}
-			if err := withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
-				return err
-			}
-			w := v.WithdrawalCredentials()
-			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:])
+			return s.validatorsTable.AddValidator(v, uint64(index), slot)
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
-			return activationEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
+			return s.validatorsTable.AddActivationEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
-			return exitEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
+			return s.validatorsTable.AddExitEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
-			return withdrawableEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
+			return s.validatorsTable.AddWithdrawableEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
 			changedValidators[uint64(index)] = struct{}{}
-			slashedVal := []byte{0}
-			if newSlashed {
-				slashedVal = []byte{1}
-			}
-			return slashed.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal)
+			return s.validatorsTable.AddSlashed(uint64(index), slot, newSlashed)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
-			return activationEligibilityEpoch.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(epoch))
+			return s.validatorsTable.AddActivationEligibility(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
 			changedValidators[uint64(index)] = struct{}{}
-			return withdrawalCredentials.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), wc)
+			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
 			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
@@ -427,7 +379,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 				}
 			}
 		}
-
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
@@ -447,24 +398,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer rwTx.Rollback()
 	// Now load.
 	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := slashed.Load(rwTx, kv.ValidatorSlashed, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := activationEligibilityEpoch.Load(rwTx, kv.ValidatorActivationEligibilityEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := activationEpoch.Load(rwTx, kv.ValidatorActivationEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := exitEpoch.Load(rwTx, kv.ValidatorExitEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := withdrawableEpoch.Load(rwTx, kv.ValidatorWithdrawableEpoch, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := withdrawalCredentials.Load(rwTx, kv.ValidatorWithdrawalCredentials, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -512,6 +445,19 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
+	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+		if _, ok := changedValidators[validatorIndex]; !ok {
+			return true
+		}
+		commonBuffer.Reset()
+		if err = validator.Serialize(commonBuffer); err != nil {
+			return false
+		}
+		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(commonBuffer.Bytes())); err != nil {
+			return false
+		}
+		return true
+	})
 
 	log.Info("Restarting Caplin")
 	return rwTx.Commit()
@@ -633,7 +579,7 @@ func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string)
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
-func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, effectiveBalanceCollector, slashedCollector, activationEligibilityEpochCollector, activationEpochCollector, exitEpochCollector, withdrawableEpochCollector, withdrawalCredentialsCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector) error {
+func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, effectiveBalanceCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -643,30 +589,8 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 	}
 
 	state.ForEachValidator(func(v solid.Validator, index, total int) bool {
-		if err = effectiveBalanceCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.EffectiveBalance())); err != nil {
-			return false
-		}
-		slashedVal := []byte{0}
-		if v.Slashed() {
-			slashedVal = []byte{1}
-		}
-		if err = slashedCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), slashedVal); err != nil {
-			return false
-		}
-		if err = activationEligibilityEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEligibilityEpoch())); err != nil {
-			return false
-		}
-		if err = activationEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ActivationEpoch())); err != nil {
-			return false
-		}
-		if err = exitEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.ExitEpoch())); err != nil {
-			return false
-		}
-		if err = withdrawableEpochCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), base_encoding.EncodeCompactUint64(v.WithdrawableEpoch())); err != nil {
-			return false
-		}
-		w := v.WithdrawalCredentials()
-		if err = withdrawalCredentialsCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(index), slot), w[:]); err != nil {
+		changedValidators[uint64(index)] = struct{}{}
+		if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
 			return false
 		}
 		return true
@@ -674,56 +598,16 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 	if err != nil {
 		return err
 	}
-	if err := s.antiquateEffectiveBalances(context.Background(), slot, state.RawValidatorSet(), compressor); err != nil {
-		return err
-	}
-	if err := s.antiquateField(context.Background(), slot, state.RawBalances(), compressor, "balances"); err != nil {
-		return err
-	}
 	if state.Version() >= clparams.AltairVersion {
 		if err := s.antiquateField(context.Background(), slot, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
 			return err
 		}
-		if err := s.antiquateField(context.Background(), slot, state.RawPreviousEpochParticipation(), compressor, "previous_epoch_participation"); err != nil {
-			return err
-		}
-		if err := s.antiquateField(context.Background(), slot, state.RawCurrentEpochParticipation(), compressor, "current_epoch_participation"); err != nil {
-			return err
-		}
+
 	}
 
-	randaoMixes := state.RandaoMixes()
-	for i := 0; i < randaoMixes.Length(); i++ {
-		mix := randaoMixes.Get(i)
-		if err := randaoMixesCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(i), slot), mix[:]); err != nil {
-			return err
-		}
-	}
 	var b bytes.Buffer
 	if err := s.storeMinimalState(&b, state, minimalBeaconStateCollector); err != nil {
 		return err
-	}
-
-	for i := 0; i < raw.SlashingsLength; i++ {
-		if err := slashingsCollector.Collect(base_encoding.IndexAndPeriodKey(uint64(i), slot), base_encoding.EncodeCompactUint64(state.SlashingSegmentAt(i))); err != nil {
-			return err
-		}
-	}
-
-	brs := state.BlockRoots()
-	for i := 0; i < brs.Length(); i++ {
-		br := brs.Get(i)
-		if err := blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(uint64(i)), br[:]); err != nil {
-			return err
-		}
-	}
-
-	srs := state.StateRoots()
-	for i := 0; i < srs.Length(); i++ {
-		sr := srs.Get(i)
-		if err := stateRootsCollector.Collect(base_encoding.Encode64ToBytes4(uint64(i)), sr[:]); err != nil {
-			return err
-		}
 	}
 
 	return nil

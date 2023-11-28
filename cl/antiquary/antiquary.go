@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -23,18 +24,19 @@ const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalize
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
-	mainDB     kv.RwDB // this is the main DB
-	dirs       datadir.Dirs
-	downloader proto_downloader.DownloaderClient
-	logger     log.Logger
-	sn         *freezeblocks.CaplinSnapshots
-	snReader   freezeblocks.BeaconSnapshotReader
-	ctx        context.Context
-	beaconDB   persistence.BlockSource
-	backfilled *atomic.Bool
-	cfg        *clparams.BeaconChainConfig
-	states     bool
-	fs         afero.Fs
+	mainDB          kv.RwDB // this is the main DB
+	dirs            datadir.Dirs
+	downloader      proto_downloader.DownloaderClient
+	logger          log.Logger
+	sn              *freezeblocks.CaplinSnapshots
+	snReader        freezeblocks.BeaconSnapshotReader
+	ctx             context.Context
+	beaconDB        persistence.BlockSource
+	backfilled      *atomic.Bool
+	cfg             *clparams.BeaconChainConfig
+	states          bool
+	fs              afero.Fs
+	validatorsTable *state_accessors.StaticValidatorTable
 
 	// set to nil
 	currentState *state.CachingBeaconState
