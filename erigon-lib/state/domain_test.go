@@ -1769,46 +1769,8 @@ func TestDomain_Unwind(t *testing.T) {
 			et, err := ectx.hc.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			est, err := ectx.IteratePrefix2(etx, nil, nil, -1)
-			require.NoError(t, err)
-			for est.HasNext() {
-				k, v, err := est.Next()
-				require.NoError(t, err)
-
-				fmt.Printf("estate key %s -> %s\n", string(k), string(v))
-			}
-
-			iet, err := ectx.hc.IdxRange([]byte("key3"), 0, math.MaxInt, order.Asc, -1, etx)
-			require.NoError(t, err)
-			ilist := make([]uint64, 0)
-			for iet.HasNext() {
-				txn, err := iet.Next()
-				require.NoError(t, err)
-				ilist = append(ilist, txn)
-			}
-
-			uet, err := uc.hc.IdxRange([]byte("key3"), 0, math.MaxInt, order.Asc, -1, utx)
-			require.NoError(t, err)
-			ulist := make([]uint64, 0)
-			for uet.HasNext() {
-				txn, err := uet.Next()
-				require.NoError(t, err)
-				ulist = append(ulist, txn)
-			}
-			fmt.Printf("key3 e list %v\n", ilist)
-			fmt.Printf("key3 u list %v\n", ulist)
-
 			ut, err := uc.hc.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, utx)
 			require.NoError(t, err)
-
-			ust, err := uc.IteratePrefix2(utx, nil, nil, -1)
-			require.NoError(t, err)
-			for ust.HasNext() {
-				k, v, err := ust.Next()
-				require.NoError(t, err)
-
-				fmt.Printf("ustate key %s -> %s\n", string(k), string(v))
-			}
 
 			compareIterators(t, et, ut)
 		})
@@ -1849,14 +1811,14 @@ func TestDomain_Unwind(t *testing.T) {
 	}
 
 	writeKeys(t, d, db, maxTx)
-	//unwindAndCompare(t, d, db, 14)
+	unwindAndCompare(t, d, db, 14)
 	unwindAndCompare(t, d, db, 11)
-	//unwindAndCompare(t, d, db, 10)
-	//unwindAndCompare(t, d, db, 8)
-	//unwindAndCompare(t, d, db, 6)
-	//unwindAndCompare(t, d, db, 5)
-	//unwindAndCompare(t, d, db, 2)
-	//unwindAndCompare(t, d, db, 0)
+	unwindAndCompare(t, d, db, 10)
+	unwindAndCompare(t, d, db, 8)
+	unwindAndCompare(t, d, db, 6)
+	unwindAndCompare(t, d, db, 5)
+	unwindAndCompare(t, d, db, 2)
+	unwindAndCompare(t, d, db, 0)
 
 	return
 }
@@ -1864,24 +1826,24 @@ func TestDomain_Unwind(t *testing.T) {
 func compareIterators(t *testing.T, et, ut iter.KV) {
 	t.Helper()
 
-	for {
-		ek, ev, err1 := et.Next()
-		fmt.Printf("%s %s %v\n", ek, ev, err1)
-		if !et.HasNext() {
-			break
-		}
-	}
-
-	fmt.Printf("unwindedIterhas extra keys\n")
-	i := 0
-	for {
-		uk, uv, err2 := ut.Next()
-		fmt.Printf("i=%d key %s v %s err %v\n", i, string(uk), string(uv), err2)
-		i++
-		if !ut.HasNext() {
-			break
-		}
-	}
+	//i := 0
+	//for {
+	//	ek, ev, err1 := et.Next()
+	//	fmt.Printf("ei=%d %s %s %v\n", i, ek, ev, err1)
+	//	if !et.HasNext() {
+	//		break
+	//	}
+	//}
+	//
+	//i = 0
+	//for {
+	//	uk, uv, err2 := ut.Next()
+	//	fmt.Printf("ui=%d %s %s %v\n", i, string(uk), string(uv), err2)
+	//	i++
+	//	if !ut.HasNext() {
+	//		break
+	//	}
+	//}
 	for {
 		ek, ev, err1 := et.Next()
 		uk, uv, err2 := ut.Next()
@@ -1889,7 +1851,7 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		require.EqualValues(t, ek, uk)
 		require.EqualValues(t, ev, uv)
 		if !et.HasNext() {
-			require.False(t, ut.HasNext())
+			require.False(t, ut.HasNext(), "unwindedIterhas extra keys\n")
 			break
 		}
 	}

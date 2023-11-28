@@ -1089,9 +1089,9 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 }
 
 // Prune [txFrom; txTo)
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) error {
 	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
-	if !hc.CanPrune(rwTx) {
+	if !forced && !hc.CanPrune(rwTx) {
 		return nil
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
