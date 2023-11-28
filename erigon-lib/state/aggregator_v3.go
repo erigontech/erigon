@@ -52,7 +52,6 @@ import (
 
 type AggregatorV3 struct {
 	db               kv.RoDB
-	domains          *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
@@ -409,13 +408,6 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		}
 	}
 	return nil
-}
-
-// Deprecated
-func (a *AggregatorV3) SetTx(tx kv.RwTx) {
-	if a.domains != nil {
-		a.domains.SetTx(tx)
-	}
 }
 
 type AggV3Collation struct {
