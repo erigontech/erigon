@@ -700,8 +700,12 @@ func processAttestation(s abstract.BeaconState, attestation *solid.Attestation, 
 
 func verifyAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {
 	indexedAttestations := make([]*cltypes.IndexedAttestation, 0, attestations.Len())
+	commonBuffer := make([]byte, 8*2048)
 	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
-		indexedAttestations = append(indexedAttestations, state.GetIndexedAttestation(a, attestingIndicies[idx]))
+		idxAttestations := state.GetIndexedAttestation(a, attestingIndicies[idx])
+		idxAttestations.AttestingIndices.SetReusableHashBuffer(commonBuffer)
+		idxAttestations.HashSSZ()
+		indexedAttestations = append(indexedAttestations, idxAttestations)
 		return true
 	})
 
