@@ -1114,7 +1114,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 

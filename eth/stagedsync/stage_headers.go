@@ -321,7 +321,7 @@ Loop:
 			if !ok {
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 			}
-			u.UnwindTo(unwindTo, StagedUnwind)
+			u.UnwindTo(allowedUnwindTo, StagedUnwind)
 		} else {
 			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
 		}
