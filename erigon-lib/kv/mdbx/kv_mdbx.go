@@ -1744,11 +1744,9 @@ func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, ord
 }
 func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
-		fmt.Printf("asc %t fromPx %x toPx %x cmp %v\n", s.orderAscend, s.fromPrefix, s.toPrefix, bytes.Compare(s.fromPrefix, s.toPrefix))
 		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
 	}
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
-		fmt.Printf("asc %t fromPx %x toPx %x cmp %v\n", s.orderAscend, s.fromPrefix != nil, s.toPrefix != nil, bytes.Compare(s.fromPrefix, s.toPrefix))
 		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
 	c, err := tx.Cursor(table)
@@ -1862,11 +1860,9 @@ type cursorDup2iter struct {
 
 func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
-		fmt.Printf("asc %t fromPx %x toPx %x cmp %v\n", s.orderAscend, s.fromPrefix, s.toPrefix, bytes.Compare(s.fromPrefix, s.toPrefix))
 		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
 	}
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
-		fmt.Printf("asc %t fromPx %x toPx %x cmp %v\n", s.orderAscend, s.fromPrefix, s.toPrefix, bytes.Compare(s.fromPrefix, s.toPrefix))
 		return s, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
 	c, err := tx.CursorDupSort(table)
