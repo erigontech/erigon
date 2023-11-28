@@ -1007,11 +1007,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				return err
 			}
 			if !ok {
-				_min, err := doms.CanUnwindDomainsToBlockNum(tx)
-				if err != nil {
-					return err
-				}
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", doms.BlockNum()-unwind, _min)
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", doms.BlockNum()-unwind, blockNumWithCommitment)
 			}
 			unwind = s.BlockNumber - blockNumWithCommitment
 			return nil

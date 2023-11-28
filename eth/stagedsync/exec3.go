@@ -1105,16 +1105,15 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
 	if !ok {
-		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 	}
-	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
 	return false, nil
 }
 

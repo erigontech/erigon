@@ -14,11 +14,10 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -201,7 +200,8 @@ func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uin
 		return 0, false, err
 	}
 	if !ok {
-		return 0, false, nil
+		_min, _ := sd.CanUnwindDomainsToBlockNum(tx)
+		return _min, false, nil
 	}
 	return blockNumWithCommitment, true, nil
 }
