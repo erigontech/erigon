@@ -109,7 +109,7 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 	// The sender balance is after reducing: value and gasLimit.
 	// We need to re-add them to get the pre-tx balance.
 	fromBal := new(big.Int).Set(t.pre[from].Balance)
-	gasPrice := env.TxContext.GasPrice
+	gasPrice := env.GasPrice
 	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
 	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
 	t.pre[from].Balance = fromBal
