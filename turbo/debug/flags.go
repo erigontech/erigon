@@ -19,11 +19,12 @@ package debug
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
