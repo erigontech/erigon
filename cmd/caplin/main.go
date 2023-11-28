@@ -34,7 +34,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/app"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
@@ -50,6 +52,13 @@ func main() {
 }
 
 func runCaplinNode(cliCtx *cli.Context) error {
+	configFilePath := cliCtx.String(utils.ConfigFlag.Name)
+	if configFilePath != "" {
+		if err := erigoncli.SetFlagsFromConfigFile(cliCtx, configFilePath); err != nil {
+			log.Error("failed setting config flags from yaml/toml file", "err", err)
+			return err
+		}
+	}
 	ctx, cn := context.WithCancel(context.Background())
 	defer cn()
 

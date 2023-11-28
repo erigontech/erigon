@@ -6,6 +6,7 @@ import (
 )
 
 var CLDefaultFlags = []cli.Flag{
+	&utils.ConfigFlag,
 	&SentinelDiscoveryPort,
 	&SentinelDiscoveryAddr,
 	&SentinelServerPort,
