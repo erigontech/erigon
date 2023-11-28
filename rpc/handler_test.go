@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"golang.org/x/exp/slices"
 	"reflect"
 	"testing"
 
@@ -13,23 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func BenchmarkName(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			ok := slices.Contains(rpccfg.SlowLogBlackList, "eth_call")
-			_ = ok
-		}
-	})
-	b.Run("2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			for _, m := range rpccfg.SlowLogBlackList {
-				if m == "method" {
-					break
-				}
-			}
-		}
-	})
-}
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 
 	tests := map[string]struct {
