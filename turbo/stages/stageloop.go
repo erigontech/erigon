@@ -529,6 +529,7 @@ func NewPipelineStages(ctx context.Context,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	logger log.Logger,
+	tracer tracers.Tracer,
 	checkStateRoot bool,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
@@ -549,7 +550,7 @@ func NewPipelineStages(ctx context.Context,
 			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
-			&vm.Config{},
+			&vm.Config{Tracer: tracer},
 			notifications.Accumulator,
 			cfg.StateStream,
 			/*stateStream=*/ false,
@@ -574,7 +575,7 @@ func NewPipelineStages(ctx context.Context,
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
-	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
+	silkworm *silkworm.Silkworm, logger log.Logger, tracer tracers.Tracer) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil, nil),
@@ -588,7 +589,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{},
+				&vm.Config{Tracer: tracer},
 				notifications.Accumulator,
 				cfg.StateStream,
 				true,

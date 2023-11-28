@@ -162,13 +162,18 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	depth := evm.interpreter.Depth()
 	p, isPrecompile := evm.precompile(addr)
 
+	var code []byte
+	if !isPrecompile {
+		code = evm.intraBlockState.GetCode(addr)
+	}
+
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if evm.Config().Tracer != nil {
 		v := value
 		if typ == STATICCALL {
 			v = nil
 		}
-		evm.captureBegin(depth == 0, typ, caller.Address(), addr, isPrecompile, input, gas, v, nil)
+		evm.captureBegin(depth == 0, typ, caller.Address(), addr, isPrecompile, input, gas, v, code)
 		defer func(startGas uint64) {
 			evm.captureEnd(depth == 0, typ, startGas, leftOverGas, ret, err)
 		}(gas)
@@ -188,11 +193,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 				return nil, gas, ErrInsufficientBalance
 			}
 		}
-	}
-
-	var code []byte
-	if !isPrecompile {
-		code = evm.intraBlockState.GetCode(addr)
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()

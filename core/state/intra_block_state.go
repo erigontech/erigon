@@ -329,24 +329,27 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
-	// If this account has not been read, add to the balance increment map
-	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
-		needAccount = true
-	}
-	if !needAccount {
-		sdb.journal.append(balanceIncrease{
-			account:  &addr,
-			increase: *amount,
-		})
-		bi, ok := sdb.balanceInc[addr]
-		if !ok {
-			bi = &BalanceIncrease{}
-			sdb.balanceInc[addr] = bi
+
+	if sdb.logger == nil {
+		// If this account has not been read, add to the balance increment map
+		_, needAccount := sdb.stateObjects[addr]
+		if !needAccount && addr == ripemd && amount.IsZero() {
+			needAccount = true
 		}
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
-		return
+		if !needAccount {
+			sdb.journal.append(balanceIncrease{
+				account:  &addr,
+				increase: *amount,
+			})
+			bi, ok := sdb.balanceInc[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				sdb.balanceInc[addr] = bi
+			}
+			bi.increase.Add(&bi.increase, amount)
+			bi.count++
+			return
+		}
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
@@ -434,11 +437,18 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	if stateObject == nil || stateObject.deleted {
 		return false
 	}
+
+	prevBalance := *stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
 		account:     &addr,
 		prev:        stateObject.selfdestructed,
-		prevbalance: *stateObject.Balance(),
+		prevbalance: prevBalance,
 	})
+
+	if sdb.logger != nil && !prevBalance.IsZero() {
+		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), evmtypes.BalanceChangeSuicideWithdraw)
+	}
+
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
@@ -551,13 +561,14 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
-		// TODO: add isPrecompile check
-		if sdb.logger != nil {
-			sdb.logger.OnNewAccount(addr)
-		}
 	} else {
 		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
 	}
+
+	if sdb.logger != nil {
+		sdb.logger.OnNewAccount(addr)
+	}
+
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
 	return newobj

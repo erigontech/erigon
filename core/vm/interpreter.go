@@ -223,7 +223,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.depth++
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
-		if in.cfg.Debug && err != nil {
+		if in.cfg.Tracer != nil && err != nil {
 			if !logged {
 				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
 			} else {
@@ -297,7 +297,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				mem.Resize(memorySize)
 			}
 		}
-		if in.cfg.Debug {
+		if in.cfg.Tracer != nil {
 			in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, GasChangeCallOpCode)
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
 			logged = true
