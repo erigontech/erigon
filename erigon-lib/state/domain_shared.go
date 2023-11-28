@@ -16,7 +16,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -200,12 +199,10 @@ func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uin
 	if err != nil {
 		return 0, false, err
 	}
-	_min, _ := sd.CanUnwindDomainsToBlockNum(tx)
 	if !ok {
+		_min, _ := sd.CanUnwindDomainsToBlockNum(tx)
 		return _min, false, nil
 	}
-	blockNumWithCommitment = cmp.Max(blockNumWithCommitment, _min) // don't go too far
-
 	return blockNumWithCommitment, true, nil
 }
 
