@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"time"
 
@@ -337,7 +336,6 @@ func ConsensusClStages(ctx context.Context,
 								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
 							}
-							fmt.Println("processed block", block.Block.Slot)
 						}
 						if len(blockBatch) > 0 {
 							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
