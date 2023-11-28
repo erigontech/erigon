@@ -403,10 +403,10 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		}
 		return nil
 	case msg.isCall():
-		var slowCheck bool
+		var doSlowLog bool
 		if h.slowLogThreshold > 0 {
-			slowCheck = h.isRpcMethodNeedsCheck(msg.Method)
-			if slowCheck {
+			doSlowLog = h.isRpcMethodNeedsCheck(msg.Method)
+			if doSlowLog {
 				slowTimer := time.AfterFunc(h.slowLogThreshold, func() {
 					h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 				})
@@ -416,7 +416,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 
 		resp := h.handleCall(ctx, msg, stream)
 
-		if slowCheck {
+		if doSlowLog {
 			requestDuration := time.Since(start)
 			if requestDuration > h.slowLogThreshold {
 				h.logger.Info("[rpc.slow] finished", "method", msg.Method, "reqid", idForLog(msg.ID), "duration", requestDuration)
