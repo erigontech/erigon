@@ -997,17 +997,12 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	if unwind > 0 && historyV3 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			doms := libstate.NewSharedDomains(tx)
-			defer doms.Close()
-			if doms.BlockNum() < unwind {
-				return fmt.Errorf("too deep unwind requested: %d, current progress: %d\n", unwind, doms.BlockNum())
-			}
-			blockNumWithCommitment, ok, err := doms.CanUnwindBeforeBlockNum(doms.BlockNum()-unwind, tx)
+			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", doms.BlockNum()-unwind, blockNumWithCommitment)
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", s.BlockNumber-unwind, blockNumWithCommitment)
 			}
 			unwind = s.BlockNumber - blockNumWithCommitment
 			return nil
