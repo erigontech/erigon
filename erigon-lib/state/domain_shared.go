@@ -609,7 +609,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 }
 
 func (sd *SharedDomains) SetTx(tx kv.RwTx) {
-	fmt.Printf("dbg SetTx: %#v\n", tx)
 	sd.roTx = tx
 }
 
