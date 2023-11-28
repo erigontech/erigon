@@ -906,7 +906,7 @@ var (
 	}
 	RPCSlowFlag = cli.DurationFlag{
 		Name:  "rpc.slow",
-		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowBlackList, ","),
+		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
 		Value: 0,
 	}
 	CaplinBackfillingFlag = cli.BoolFlag{

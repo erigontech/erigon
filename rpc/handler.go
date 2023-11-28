@@ -137,7 +137,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		traceRequests:       traceRequests,
 
 		slowLogThreshold: rpcSlowLogThreshold,
-		slowLogBlacklist: rpccfg.SlowBlackList,
+		slowLogBlacklist: rpccfg.SlowLogBlackList,
 	}
 
 	if conn.remoteAddr() != "" {

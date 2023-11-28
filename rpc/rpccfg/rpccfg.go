@@ -38,7 +38,7 @@ var DefaultHTTPTimeouts = HTTPTimeouts{
 
 const DefaultEvmCallTimeout = 5 * time.Minute
 
-var SlowBlackList = []string{
+var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
 }
