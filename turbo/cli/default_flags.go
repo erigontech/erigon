@@ -182,4 +182,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinArchiveFlag,
 
 	&utils.TrustedSetupFile,
+
+	&utils.TxPoolGossipDisableFlag,
 }

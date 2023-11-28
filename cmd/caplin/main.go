@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
-	app "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
