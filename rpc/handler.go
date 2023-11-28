@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"golang.org/x/exp/slices"
 	"reflect"
 	"strconv"
 	"strings"
@@ -149,7 +148,12 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	return !slices.Contains(h.slowLogBlacklist, method)
+	for _, m := range h.slowLogBlacklist {
+		if m == method {
+			return false
+		}
+	}
+	return true
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
