@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"math/big"
 	"runtime"
 	"time"
@@ -109,7 +110,6 @@ func SpawnStageHeaders(
 		if err != nil {
 			return err
 		}
-		fmt.Printf("a: begin %#v\n", tx)
 		defer tx.Rollback()
 	}
 	if initialCycle && cfg.blockReader.FreezingCfg().Enabled {
@@ -310,6 +310,8 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
+			doms := state.NewSharedDomains(tx) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+			defer doms.Close()
 			if err := u.UnwindTo(unwindTo, StagedUnwind, tx); err != nil {
 				return err
 			}

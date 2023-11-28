@@ -3,7 +3,6 @@ package temporal
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
@@ -205,7 +204,6 @@ func (tx *Tx) Rollback() {
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
-	fmt.Printf("a: Rollback %s\n", dbg.Stack())
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
 	tx.autoClose()
@@ -223,7 +221,6 @@ func (tx *Tx) Commit() error {
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
-	fmt.Printf("a: Commit %s\n", dbg.Stack())
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
 	tx.autoClose()

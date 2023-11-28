@@ -364,7 +364,6 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
-	fmt.Printf("tx: %#v\n", sd.roTx)
 	v, _, err = sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("account %x read error: %w", addr, err)
