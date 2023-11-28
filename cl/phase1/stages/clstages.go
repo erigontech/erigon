@@ -458,9 +458,10 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					// Fix canonical chain in the indexed datatabase.
-					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, headSlot); err != nil {
-						return err
+
+					type canonicalEntry struct {
+						slot uint64
+						root common.Hash
 					}
 
 					currentRoot := headRoot
@@ -469,12 +470,12 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					reconnectionRoots := make([]canonicalEntry, 0, 1)
 
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
-						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
-							return err
-						}
+						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
+
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
@@ -487,6 +488,14 @@ func ConsensusClStages(ctx context.Context,
 						currentSlot = *newFoundSlot
 						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 						if err != nil {
+							return err
+						}
+					}
+					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
+						return err
+					}
+					for i := len(reconnectionRoots) - 1; i >= 0; i-- {
+						if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
 							return err
 						}
 					}
