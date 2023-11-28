@@ -18,7 +18,7 @@ func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 
 	fileConfig := make(map[string]interface{})
 
-	if fileExtension == ".yaml" {
+	if fileExtension == ".yml" || fileExtension == ".yaml" {
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err

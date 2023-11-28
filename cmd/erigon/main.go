@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
@@ -42,14 +41,6 @@ func main() {
 }
 
 func runErigon(cliCtx *cli.Context) error {
-	configFilePath := cliCtx.String(utils.ConfigFlag.Name)
-	if configFilePath != "" {
-		if err := erigoncli.SetFlagsFromConfigFile(cliCtx, configFilePath); err != nil {
-			log.Error("failed setting config flags from yaml/toml file", "err", err)
-			return err
-		}
-	}
-
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
