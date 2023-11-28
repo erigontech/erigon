@@ -113,6 +113,9 @@ func (arr *RawUint64List) hashBufLength() int {
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
+	if arr.cachedHash != (libcommon.Hash{}) {
+		return arr.cachedHash, nil
+	}
 	if cap(arr.hahsBuffer) < arr.hashBufLength() {
 		arr.hahsBuffer = make([]byte, 0, arr.hashBufLength())
 	}
