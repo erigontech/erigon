@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"reflect"
 	"strconv"
 	"strings"
@@ -135,7 +137,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		traceRequests:       traceRequests,
 
 		rpcSlowLogThreshold: rpcSlowLogThreshold,
-		rpcMethodsBlacklist: []string{"eth_call", "eth_getBlock"},
+		rpcMethodsBlacklist: rpccfg.SlowBlackList,
 	}
 
 	if conn.remoteAddr() != "" {
@@ -347,7 +349,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 		return false
 	case msg.isResponse():
 		h.handleResponse(msg)
-		h.logger.Trace("Handled RPC response", "reqid", idForLog{msg.ID}, "t", time.Since(start))
+		h.logger.Trace("[rpc] handled response", "reqid", idForLog(msg.ID), "t", time.Since(start))
 		return true
 	default:
 		return false
@@ -370,7 +372,7 @@ func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	op := h.respWait[string(msg.ID)]
 	if op == nil {
-		h.logger.Trace("Unsolicited RPC response", "reqid", idForLog{msg.ID})
+		h.logger.Trace("[rpc] unsolicited response", "reqid", idForLog(msg.ID))
 		return
 	}
 	delete(h.respWait, string(msg.ID))
@@ -395,23 +397,24 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
+	fmt.Printf("a: %s\n", msg.Method)
 	start := time.Now()
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
-			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Info("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		} else {
-			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Trace("[rpc] served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		}
 		return nil
 	case msg.isCall():
-		slowCheck := h.isRpcMethodNeedsCheck(msg.Method)
+		var slowCheck bool
 		if h.rpcSlowLogThreshold > 0 && slowCheck {
+			slowCheck = h.isRpcMethodNeedsCheck(msg.Method)
 			slowTimer := time.AfterFunc(h.rpcSlowLogThreshold, func() {
-				h.logger.Warn("[rpc.slow] - running", "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+				h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 			})
-
 			defer slowTimer.Stop()
 		}
 
@@ -420,23 +423,23 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if h.rpcSlowLogThreshold > 0 && slowCheck {
 			requestDuration := time.Since(start)
 			if requestDuration > h.rpcSlowLogThreshold {
-				h.logger.Warn("[rpc.slow] - finished", "method", msg.Method, " duration", requestDuration, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+				h.logger.Info("[rpc.slow] finished", "method", msg.Method, "duration", requestDuration, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 			}
 		}
 
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
-				h.logger.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.logger.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
 					"err", resp.Error.Message)
 			}
 		}
 		if h.traceRequests {
-			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		} else {
-			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
 
 		return resp
@@ -594,11 +597,11 @@ func (h *handler) unsubscribe(ctx context.Context, id ID) (bool, error) {
 	return true, nil
 }
 
-type idForLog struct{ json.RawMessage }
+type idForLog json.RawMessage
 
 func (id idForLog) String() string {
-	if s, err := strconv.Unquote(string(id.RawMessage)); err == nil {
+	if s, err := strconv.Unquote(string(id)); err == nil {
 		return s
 	}
-	return string(id.RawMessage)
+	return string(id)
 }

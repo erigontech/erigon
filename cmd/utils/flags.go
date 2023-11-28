@@ -20,6 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"math/big"
 	"path/filepath"
 	"runtime"
@@ -903,9 +904,9 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-	RPCSlowLogThresholdFlag = cli.DurationFlag{
-		Name:  "rpc.slow.log.threshold",
-		Usage: "Threshold to log slow RPC requests in miliseconds",
+	RPCSlowFlag = cli.DurationFlag{
+		Name:  "rpc.slow",
+		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowBlackList, ","),
 		Value: 0,
 	}
 	CaplinBackfillingFlag = cli.BoolFlag{
