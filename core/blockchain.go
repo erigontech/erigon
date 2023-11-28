@@ -321,3 +321,16 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil
 }
+
+func BlockPostValidation(gasUsed, blobGasUsed uint64, h *types.Header) error {
+	if gasUsed != h.GasUsed {
+		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
+			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+	}
+
+	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
+		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
+			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
+	}
+	return nil
+}
