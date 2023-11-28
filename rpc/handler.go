@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"golang.org/x/exp/slices"
 	"reflect"
 	"strconv"
 	"strings"
@@ -28,6 +28,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -72,9 +73,9 @@ type handler struct {
 	maxBatchConcurrency uint
 	traceRequests       bool
 
-	// metrics
-	rpcSlowLogThreshold time.Duration
-	rpcMethodsBlacklist []string
+	//slow requests
+	slowLogThreshold time.Duration
+	slowLogBlacklist []string
 }
 
 type callProc struct {
@@ -135,8 +136,8 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
 
-		rpcSlowLogThreshold: rpcSlowLogThreshold,
-		rpcMethodsBlacklist: rpccfg.SlowBlackList,
+		slowLogThreshold: rpcSlowLogThreshold,
+		slowLogBlacklist: rpccfg.SlowBlackList,
 	}
 
 	if conn.remoteAddr() != "" {
@@ -148,12 +149,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	for _, m := range h.rpcMethodsBlacklist {
-		if m == method {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
@@ -408,20 +404,22 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		return nil
 	case msg.isCall():
 		var slowCheck bool
-		if h.rpcSlowLogThreshold > 0 && slowCheck {
+		if h.slowLogThreshold > 0 {
 			slowCheck = h.isRpcMethodNeedsCheck(msg.Method)
-			slowTimer := time.AfterFunc(h.rpcSlowLogThreshold, func() {
-				h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
-			})
-			defer slowTimer.Stop()
+			if slowCheck {
+				slowTimer := time.AfterFunc(h.slowLogThreshold, func() {
+					h.logger.Info("[rpc.slow] running", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+				})
+				defer slowTimer.Stop()
+			}
 		}
 
 		resp := h.handleCall(ctx, msg, stream)
 
-		if h.rpcSlowLogThreshold > 0 && slowCheck {
+		if slowCheck {
 			requestDuration := time.Since(start)
-			if requestDuration > h.rpcSlowLogThreshold {
-				h.logger.Info("[rpc.slow] finished", "method", msg.Method, "duration", requestDuration, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+			if requestDuration > h.slowLogThreshold {
+				h.logger.Info("[rpc.slow] finished", "duration", requestDuration, "reqid", idForLog(msg.ID))
 			}
 		}
 
