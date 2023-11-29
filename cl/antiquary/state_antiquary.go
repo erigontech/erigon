@@ -149,6 +149,11 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
+	logLvl := log.LvlInfo
+	if to-s.currentState.Slot() < 96 {
+		logLvl = log.LvlDebug
+	}
+	start := time.Now()
 
 	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
@@ -253,17 +258,17 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		},
 		OnEpochBoundary: func(epoch uint64) error {
 			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
-			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot/s.cfg.SlotsPerEpoch), v); err != nil {
+			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot), v); err != nil {
 				return err
 			}
 			// truncate the file
 			return proposers.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(s.currentState))
 		},
 		OnNewBlockRoot: func(index int, root common.Hash) error {
-			return blockRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
+			return blockRoots.Collect(base_encoding.Encode64ToBytes4(s.currentState.Slot()), root[:])
 		},
 		OnNewStateRoot: func(index int, root common.Hash) error {
-			return stateRoots.Collect(base_encoding.Encode64ToBytes4(slot), root[:])
+			return stateRoots.Collect(base_encoding.Encode64ToBytes4(s.currentState.Slot()), root[:])
 		},
 		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
 			return nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
@@ -285,7 +290,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		},
 	})
-	log.Info("Starting state processing", "from", slot, "to", to)
+	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
@@ -397,15 +402,17 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			log.Info("State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
+			log.Log(logLvl, "State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
 			prevSlot = slot
 		default:
 		}
 	}
-	log.Info("State processing finished", "slot", s.currentState.Slot())
 	tx.Rollback()
-	log.Info("Stopping Caplin to load states")
 
+	log.Log(logLvl, "Stopping Caplin to load states")
+	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
+
+	start = time.Now()
 	rwTx, err := s.mainDB.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -477,7 +484,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return true
 	})
 
-	log.Info("Restarting Caplin")
+	log.Info("Historical antiquated", "slot", s.currentState.Slot(), "latency", time.Since(start))
 	return rwTx.Commit()
 }
 
