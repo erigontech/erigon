@@ -309,7 +309,7 @@ func ExecV3(ctx context.Context,
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
-	if (initialCycle) && blocksFreezeCfg.Produce {
+	if initialCycle && blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
