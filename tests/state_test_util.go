@@ -267,7 +267,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	if ethconfig.EnableHistoryV4InTest {
 		var root libcommon.Hash
-		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, false, header.Number.Uint64())
+		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, false, header.Number.Uint64(), "")
 		if err != nil {
 			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 		}

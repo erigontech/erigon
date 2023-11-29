@@ -15,9 +15,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -76,31 +77,22 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
 	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
-	//speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
-	var repeatRatio float64
-	if doneCount > p.prevCount {
-		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
-	}
+	//var repeatRatio float64
+	//if doneCount > p.prevCount {
+	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
+	//}
 	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
-		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
-		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"workers", p.workersCount,
+		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
+		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
+		//"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
-		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		//"inBlk", inputBlockNum,
+		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
-	//var txNums []string
-	//for _, t := range rws {
-	//	txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
-	//}
-	//s := strings.Join(txNums, ",")
-	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
 	p.prevCount = doneCount
@@ -338,7 +330,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(5 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
@@ -436,7 +428,7 @@ func ExecV3(ctx context.Context,
 						if doms.BlockNum() != outputBlockNum.GetValueUint64() {
 							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.GetValueUint64()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64())
+						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
 						if err != nil {
 							return err
 						}
@@ -1063,7 +1055,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
+	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64(), u.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}

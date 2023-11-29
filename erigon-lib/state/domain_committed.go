@@ -495,7 +495,7 @@ func (d *DomainCommitted) Close() {
 }
 
 // Evaluates commitment for processed state.
-func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, err error) {
+func (d *DomainCommitted) ComputeCommitment(ctx context.Context, logPrefix string, trace bool) (rootHash []byte, err error) {
 	if dbg.DiscardCommitment() {
 		d.updates.List(true)
 		return nil, nil
@@ -517,7 +517,7 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
+		rootHash, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys, logPrefix)
 		if err != nil {
 			return nil, err
 		}
@@ -570,7 +570,7 @@ func (d *DomainCommitted) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, u
 	// corner-case:
 	// it's normal to not have commitment.ef and commitment.v files. They are not determenistic - depend on batchSize, and not very useful.
 	// in this case `IdxRange` will be empty
-	// and can fallback to fallback to reading lstest commitment from .kv file
+	// and can fallback to reading latest commitment from .kv file
 	var latestState []byte
 	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
 		if len(value) < 16 {

@@ -42,7 +42,7 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Reads updates from storage
-	ProcessKeys(ctx context.Context, pk [][]byte) (rootHash []byte, err error)
+	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
 
 	// Process already gathered updates
 	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
@@ -160,6 +160,7 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 
 func (be *BranchEncoder) initCollector() {
 	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("branch-encoder"))
+	be.updates.LogLvl(log.LvlDebug)
 }
 
 // reads previous comitted value and merges current with it if needed.

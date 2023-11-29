@@ -1280,7 +1280,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 }
 
 // Process keys and updates in a single pass. Branch updates are written to PatriciaContext if no error occurs.
-func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
 	pks := make(map[string]int, len(plainKeys))
 	hashedKeys := make([][]byte, len(plainKeys))
 	for i, pk := range plainKeys {

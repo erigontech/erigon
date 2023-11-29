@@ -183,7 +183,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 	}
 
 	sd.Commitment.Reset()
-	return sd.ComputeCommitment(ctx, true, false, blockNum)
+	return sd.ComputeCommitment(ctx, true, false, blockNum, "")
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
@@ -641,13 +641,13 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, err = sd.Commitment.ComputeCommitment(ctx, trace)
+	rootHash, err = sd.Commitment.ComputeCommitment(ctx, logPrefix, trace)
 	if err != nil {
 		return nil, err
 	}
