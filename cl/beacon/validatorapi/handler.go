@@ -25,7 +25,7 @@ func (v *ValidatorApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		v.mux = chi.NewRouter()
 		v.init(v.mux)
 	}))
-	v.ServeHTTP(w, r)
+	v.mux.ServeHTTP(w, r)
 }
 
 func (v *ValidatorApiHandler) init(r chi.Router) {
