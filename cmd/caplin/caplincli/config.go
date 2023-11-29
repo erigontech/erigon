@@ -102,7 +102,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	cfg.TransitionChain = ctx.Bool(caplinflags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(caplinflags.InitSyncFlag.Name)
 
-	return nil, err
+	return cfg, err
 }
 
 func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
