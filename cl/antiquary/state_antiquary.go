@@ -84,7 +84,8 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 				s.logger.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
-			if progress >= finalized {
+			// Stay behind a little bit we rely on forkchoice up until (finalized - 2*slotsPerEpoch)
+			if progress+s.cfg.SlotsPerEpoch/2 >= finalized {
 				continue
 			}
 			if err := s.incrementBeaconState(ctx, finalized); err != nil {
@@ -349,13 +350,13 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
-		if slot%slotsPerDumps == 0 {
-			continue
-		}
 		if err := stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes()); err != nil {
 			return err
 		}
 		events.Reset()
+		if slot%slotsPerDumps == 0 {
+			continue
+		}
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
