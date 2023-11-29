@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
+	"github.com/ledgerwatch/erigon/cl/beacon/validatorapi"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
@@ -158,7 +159,15 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg.Active, beaconConfig)
 	if cfg.Active {
 		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn, syncedDataManager)
-		go beacon.ListenAndServe(apiHandler, cfg)
+		headApiHandler := &validatorapi.ValidatorApiHandler{
+			FC:             forkChoice,
+			BeaconChainCfg: beaconConfig,
+			GenesisCfg:     genesisConfig,
+		}
+		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
+			ValidatorApi: headApiHandler,
+			ArchiveApi:   apiHandler,
+		}, cfg)
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 

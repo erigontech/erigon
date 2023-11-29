@@ -7,12 +7,24 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type EndpointError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+func WrapEndpointError(err error) *EndpointError {
+	e := &EndpointError{}
+	if errors.As(err, e) {
+		return e
+	}
+	if errors.Is(err, fork_graph.ErrStateNotFound) {
+		return NewEndpointError(http.StatusNotFound, "Could not find beacon state")
+	}
+	return NewEndpointError(http.StatusInternalServerError, err.Error())
 }
 
 func NewEndpointError(code int, message string) *EndpointError {
@@ -52,11 +64,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ans, err := h.Handle(r)
 		if err != nil {
-			// check if is endpoint error, if so, handle specially
-			endpointError := &EndpointError{}
-			if !errors.As(err, &endpointError) {
-				endpointError = NewEndpointError(500, err.Error())
-			}
+			endpointError := WrapEndpointError(err)
 			endpointError.WriteTo(w)
 			return
 		}
