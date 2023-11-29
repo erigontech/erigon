@@ -71,6 +71,9 @@ type AggregatorV3 struct {
 
 	filesMutationLock sync.Mutex
 
+	collateAndBuildWorkers int // minimize amount of background workers by default
+	mergeWorkers           int // usually 1
+
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles           atomic.Bool
@@ -107,18 +110,20 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{
-		ctx:              ctx,
-		ctxCancel:        ctxCancel,
-		onFreeze:         func(frozenFileNames []string) {},
-		dirs:             dirs,
-		tmpdir:           tmpdir,
-		aggregationStep:  aggregationStep,
-		db:               db,
-		keepInDB:         1 * aggregationStep,
-		leakDetector:     dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:               background.NewProgressSet(),
-		backgroundResult: &BackgroundResult{},
-		logger:           logger,
+		ctx:                    ctx,
+		ctxCancel:              ctxCancel,
+		onFreeze:               func(frozenFileNames []string) {},
+		dirs:                   dirs,
+		tmpdir:                 tmpdir,
+		aggregationStep:        aggregationStep,
+		db:                     db,
+		keepInDB:               1 * aggregationStep,
+		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		ps:                     background.NewProgressSet(),
+		backgroundResult:       &BackgroundResult{},
+		logger:                 logger,
+		collateAndBuildWorkers: 1,
+		mergeWorkers:           1,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -291,6 +296,8 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
+func (a *AggregatorV3) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
+func (a *AggregatorV3) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *AggregatorV3) SetCompressWorkers(i int) {
 	a.accounts.compressWorkers = i
 	a.storage.compressWorkers = i
@@ -477,8 +484,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
 
-	//log.Warn("[dbg] collate", "step", step)
-
 	closeCollations := true
 	collListMu := sync.Mutex{}
 	collations := make([]Collation, 0)
@@ -492,6 +497,8 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}()
 
 	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.collateAndBuildWorkers)
+	log.Warn("[dbg] collate and build", "step", step, "workers", a.collateAndBuildWorkers)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 
@@ -616,7 +623,7 @@ Loop:
 	return nil
 }
 
-func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
+func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	ac := a.MakeContext()
 	defer ac.Close()
 	mxRunningMerges.Inc()
@@ -639,7 +646,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 		return false, err
 	}
 
-	in, err := ac.mergeFiles(ctx, outs, r, workers)
+	in, err := ac.mergeFiles(ctx, outs, r)
 	if err != nil {
 		return true, err
 	}
@@ -654,9 +661,9 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	return true, nil
 }
 
-func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
+func (a *AggregatorV3) MergeLoop(ctx context.Context) error {
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, workers)
+		somethingMerged, err := a.mergeLoopStep(ctx)
 		if err != nil {
 			return err
 		}
@@ -1121,10 +1128,10 @@ func (mf MergedFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, workers int) (MergedFilesV3, error) {
+func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3) (MergedFilesV3, error) {
 	var mf MergedFilesV3
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
+	g.SetLimit(ac.a.mergeWorkers)
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -1138,7 +1145,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		predicates.Add(1)
 		g.Go(func() (err error) {
 			defer predicates.Done()
-			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
+			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
@@ -1147,13 +1154,13 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		predicates.Add(1)
 		g.Go(func() (err error) {
 			defer predicates.Done()
-			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, ac.a.ps)
+			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
 	}
 	if r.code.any() {
 		g.Go(func() (err error) {
-			mf.code, mf.codeIdx, mf.codeHist, err = ac.a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, workers, ac.a.ps)
+			mf.code, mf.codeIdx, mf.codeHist, err = ac.a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, ac.a.ps)
 			return err
 		})
 	}
@@ -1164,7 +1171,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			var v4Files SelectedStaticFiles
 			var v4MergedF MergedFiles
 
-			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, workers, ac.a.ps)
+			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
 			return err
 		})
 	}
@@ -1172,28 +1179,28 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			mf.logAddrs, err = ac.a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers, ac.a.ps)
+			mf.logAddrs, err = ac.a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.logTopics {
 		g.Go(func() error {
 			var err error
-			mf.logTopics, err = ac.a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers, ac.a.ps)
+			mf.logTopics, err = ac.a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesFrom {
 		g.Go(func() error {
 			var err error
-			mf.tracesFrom, err = ac.a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers, ac.a.ps)
+			mf.tracesFrom, err = ac.a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesTo {
 		g.Go(func() error {
 			var err error
-			mf.tracesTo, err = ac.a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers, ac.a.ps)
+			mf.tracesTo, err = ac.a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
 			return err
 		})
 	}
@@ -1303,7 +1310,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.wg.Done()
 			defer a.mergeingFiles.Store(false)
 			defer func() { close(fin) }()
-			if err := a.MergeLoop(a.ctx, 1); err != nil {
+			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return
 				}
@@ -1488,7 +1495,7 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 // --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
-	if ac.a == nil { // invariant: it's safe to call Close multiple times
+	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
 	ac.a.leakDetector.Del(ac._leakID)
