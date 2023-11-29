@@ -70,6 +70,7 @@ type AggregatorV3 struct {
 	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
+	collateWorkers    int // minimize amount of background workers by default
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -119,6 +120,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		ps:               background.NewProgressSet(),
 		backgroundResult: &BackgroundResult{},
 		logger:           logger,
+		collateWorkers:   1,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -291,6 +293,7 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
+func (a *AggregatorV3) SetCollateWorkers(i int) { a.collateWorkers = i }
 func (a *AggregatorV3) SetCompressWorkers(i int) {
 	a.accounts.compressWorkers = i
 	a.storage.compressWorkers = i
@@ -492,6 +495,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}()
 
 	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.collateWorkers)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 

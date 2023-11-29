@@ -202,6 +202,10 @@ func ExecV3(ctx context.Context,
 				return histBlockNumProgress
 			})
 		}
+		if useExternalTx {
+			agg.SetCollateWorkers(1024)
+			defer agg.SetCollateWorkers(1)
+		}
 	}
 
 	stageProgress := execStage.BlockNumber

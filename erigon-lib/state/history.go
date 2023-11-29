@@ -641,7 +641,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	indexBitmaps := map[string]*roaring64.Bitmap{}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	i := 0
 	for k, v, err := keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
@@ -663,17 +662,11 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return HistoryCollation{}, ctx.Err()
 		default:
 		}
-
-		i++
-		if i%1_000_000 == 0 {
-			for _, bm := range indexBitmaps {
-				bm.RunOptimize()
-			}
-		}
 	}
 	keys := make([]string, 0, len(indexBitmaps))
-	for key := range indexBitmaps {
+	for key, bm := range indexBitmaps {
 		keys = append(keys, key)
+		bm.RunOptimize()
 	}
 	slices.Sort(keys)
 	historyCount := 0
