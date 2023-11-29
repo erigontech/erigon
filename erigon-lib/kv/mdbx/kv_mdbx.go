@@ -150,6 +150,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 512 * datasize.MB
+	opts.dirtySpace = uint64(128 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
 	return opts
@@ -276,6 +277,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+		return nil, err
+	}
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 100_000_000); err != nil {
 		return nil, err
 	}
 

@@ -76,31 +76,22 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
 	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
-	//speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
-	var repeatRatio float64
-	if doneCount > p.prevCount {
-		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
-	}
+	//var repeatRatio float64
+	//if doneCount > p.prevCount {
+	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
+	//}
 	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
-		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
-		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"workers", p.workersCount,
+		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
+		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
+		//"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
-		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		//"inBlk", inputBlockNum,
+		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
-	//var txNums []string
-	//for _, t := range rws {
-	//	txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
-	//}
-	//s := strings.Join(txNums, ",")
-	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
 	p.prevCount = doneCount
@@ -163,9 +154,15 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
+		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
+		defer agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1024)
+		defer agg.SetCollateAndBuildWorkers(1)
+
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
@@ -304,8 +301,7 @@ func ExecV3(ctx context.Context,
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
-	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
+	if initialCycle && blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
@@ -334,7 +330,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(5 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
@@ -432,7 +428,7 @@ func ExecV3(ctx context.Context,
 						if doms.BlockNum() != outputBlockNum.GetValueUint64() {
 							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.GetValueUint64()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64())
+						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
 						if err != nil {
 							return err
 						}
@@ -693,7 +689,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var gasUsed uint64
+		var gasUsed, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
@@ -760,18 +756,17 @@ Loop:
 					if txTask.Error != nil {
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
+					gasUsed += txTask.UsedGas
+					if txTask.Tx != nil {
+						blobGasUsed += txTask.Tx.GetBlobGas()
+					}
 					if txTask.Final {
-						gasUsed += txTask.UsedGas
-						if gasUsed != txTask.Header.GasUsed {
-							if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-								return fmt.Errorf("%w: gas used by execution: %d, in header: %d, headerNum=%d, %x",
-									consensus.ErrInvalidBlock, gasUsed, txTask.Header.GasUsed,
-									txTask.Header.Number.Uint64(), txTask.Header.Hash())
+						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+							if err := core.BlockPostValidation(gasUsed, blobGasUsed, txTask.Header); err != nil {
+								return fmt.Errorf("%w, %s", consensus.ErrInvalidBlock, err)
 							}
 						}
-						gasUsed = 0
-					} else {
-						gasUsed += txTask.UsedGas
+						gasUsed, blobGasUsed = 0, 0
 					}
 					return nil
 				}(); err != nil {
@@ -786,9 +781,13 @@ Loop:
 						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
-						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+							return err
+						}
 					} else {
-						u.UnwindTo(blockNum-1, ExecUnwind)
+						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+							return err
+						}
 					}
 					break Loop
 				}
@@ -1056,7 +1055,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64())
+	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64(), u.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
@@ -1096,7 +1095,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
-	unwindToLimit, err := doms.CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1107,16 +1106,17 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	unwindTo, ok, err := doms.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
 	if !ok {
-		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, unwindToLimit)
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 	}
-	unwindTo = cmp.Max(unwindTo, unwindToLimit) // don't go too far
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
@@ -1163,6 +1163,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
+			// TODO: post-validation of gasUsed and blobGasUsed
 			i++
 		}
 
@@ -1727,7 +1728,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
-	if err := agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
 

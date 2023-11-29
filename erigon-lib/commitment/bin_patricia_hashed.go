@@ -1286,7 +1286,7 @@ func (bph *BinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[1:], nil // first byte is 128+hash_len
 }
 
-func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte) (rootHash []byte, err error) {
+func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
 	pks := make(map[string]int, len(plainKeys))
 	hashedKeys := make([][]byte, len(plainKeys))
 	for i, pk := range plainKeys {

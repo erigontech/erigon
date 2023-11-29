@@ -14,11 +14,10 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -184,31 +183,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 	}
 
 	sd.Commitment.Reset()
-	return sd.ComputeCommitment(ctx, true, false, blockNum)
-}
-
-func (sd *SharedDomains) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
-	return sd.aggCtx.CanUnwindDomainsToBlockNum(tx)
-}
-func (sd *SharedDomains) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-	if err != nil {
-		return 0, false, err
-	}
-	// not all blocks have commitment
-	blockNumWithCommitment, _, ok, err := sd.SeekCommitment2(tx, sd.aggCtx.CanUnwindDomainsToTxNum(), unwindToTxNum)
-	if err != nil {
-		return 0, false, err
-	}
-	if !ok {
-		return 0, false, nil
-	}
-	return blockNumWithCommitment, true, nil
-}
-
-func (sd *SharedDomains) CanUnwindDomainsToTxNum() uint64 { return sd.aggCtx.CanUnwindDomainsToTxNum() }
-func (sd *SharedDomains) SeekCommitment2(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
-	return sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, sinceTx, untilTx)
+	return sd.ComputeCommitment(ctx, true, false, blockNum, "")
 }
 
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
@@ -663,13 +638,13 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64) (rootHash []byte, err error) {
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, err = sd.Commitment.ComputeCommitment(ctx, trace)
+	rootHash, err = sd.Commitment.ComputeCommitment(ctx, logPrefix, trace)
 	if err != nil {
 		return nil, err
 	}

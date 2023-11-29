@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -246,7 +245,6 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
-	cfg.agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
 	//if initialCycle {
 	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
@@ -516,9 +514,13 @@ Loop:
 				}
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
-				u.UnwindTo(blockNum-1, BadBlock(blockHash, err))
+				if err := u.UnwindTo(blockNum-1, BadBlock(blockHash, err), tx); err != nil {
+					return err
+				}
 			} else {
-				u.UnwindTo(blockNum-1, ExecUnwind)
+				if err := u.UnwindTo(blockNum-1, ExecUnwind, tx); err != nil {
+					return err
+				}
 			}
 			break Loop
 		}

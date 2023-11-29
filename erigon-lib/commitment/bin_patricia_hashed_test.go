@@ -45,7 +45,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	fmt.Println("1. Running sequential updates over the bin trie")
 	var seqHash []byte
 	for i := 0; i < len(updates); i++ {
-		sh, err := trie.ProcessKeys(ctx, plainKeys[i:i+1])
+		sh, err := trie.ProcessKeys(ctx, plainKeys[i:i+1], "")
 		require.NoError(t, err)
 		require.Len(t, sh, length.Hash)
 		// WARN! provided sequential branch updates are incorrect - lead to deletion of prefixes (afterMap is zero)
@@ -58,7 +58,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 
 	fmt.Println("2. Running batch updates over the bin trie")
 
-	batchHash, err := trieBatch.ProcessKeys(ctx, plainKeys)
+	batchHash, err := trieBatch.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	//ms2.applyBranchNodeUpdates(branchBatchUpdates)
 
@@ -124,7 +124,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sequentialRoot, err := trieOne.ProcessKeys(ctx, plainKeys[i:i+1])
+		sequentialRoot, err := trieOne.ProcessKeys(ctx, plainKeys[i:i+1], "")
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
@@ -137,7 +137,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, err := trieTwo.ProcessKeys(ctx, plainKeys)
+	batchRoot, err := trieTwo.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	//renderUpdates(branchNodeUpdatesTwo)
 
@@ -174,7 +174,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, err := hph.ProcessKeys(ctx, plainKeys)
+	firstRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 
 	t.Logf("root hash %x\n", firstRootHash)
@@ -193,7 +193,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, err := hph.ProcessKeys(ctx, plainKeys)
+	secondRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEqualValues(t, firstRootHash, secondRootHash)
 
@@ -210,7 +210,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	thirdRootHash, err := hph.ProcessKeys(ctx, plainKeys)
+	thirdRootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEqualValues(t, secondRootHash, thirdRootHash)
 
@@ -237,7 +237,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashBeforeEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys)
+	hashBeforeEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
@@ -254,7 +254,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashAfterEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys)
+	hashAfterEmptyUpdate, err := hph.ProcessKeys(ctx, plainKeys, "")
 	require.NoError(t, err)
 
 	//ms.applyBranchNodeUpdates(branchNodeUpdates)

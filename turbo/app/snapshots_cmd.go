@@ -496,6 +496,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
+	agg.SetCollateAndBuildWorkers(estimate.AlmostAllCPUs())
+	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
 	var cc *chain.Config
@@ -607,7 +611,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		defer ac.Close()
 		sd := libstate.NewSharedDomains(tx)
 		defer sd.Close()
-		if _, err = sd.ComputeCommitment(ctx, true, false, sd.BlockNum()); err != nil {
+		if _, err = sd.ComputeCommitment(ctx, true, false, sd.BlockNum(), ""); err != nil {
 			return err
 		}
 		if err := sd.Flush(ctx, tx); err != nil {
@@ -678,7 +682,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	if err = agg.MergeLoop(ctx, estimate.AlmostAllCPUs()); err != nil {
+	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
 	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {

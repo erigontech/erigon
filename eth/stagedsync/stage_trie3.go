@@ -65,7 +65,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
+			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
 			if err != nil {
 				return err
 			}
@@ -84,7 +84,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum())
+	rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
