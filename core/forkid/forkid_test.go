@@ -159,7 +159,8 @@ func TestCreation(t *testing.T) {
 			params.AmoyChainConfig,
 			params.AmoyGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0x190a55ad), Next: 0}},
+				{0, 0, ID{Hash: checksumToBytes(0xbe06a477), Next: 73100}},
+				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 0}}, // First London, Jaipur, Delhi, Indore, Agra
 			},
 		},
 		// Bor mainnet test cases
