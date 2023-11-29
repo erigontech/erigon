@@ -1114,15 +1114,15 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	//allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, applyTx)
-	//if err != nil {
-	//	return false, err
-	//}
-	//if !ok {
-	//	return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
-	//}
+	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
+	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	if err := u.UnwindTo(unwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
 		return false, err
 	}
 	return false, nil

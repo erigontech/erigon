@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -11,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
