@@ -320,9 +320,13 @@ Loop:
 			if !ok {
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 			}
-			u.UnwindTo(allowedUnwindTo, StagedUnwind)
+			if err := u.UnwindTo(allowedUnwindTo, StagedUnwind, tx); err != nil {
+				return err
+			}
 		} else {
-			u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind)
+			if err := u.UnwindTo(headerInserter.UnwindPoint(), StagedUnwind, tx); err != nil {
+				return err
+			}
 		}
 	}
 	if headerInserter.GetHighest() != 0 {

@@ -516,9 +516,13 @@ Loop:
 				}
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
-				u.UnwindTo(blockNum-1, BadBlock(blockHash, err))
+				if err := u.UnwindTo(blockNum-1, BadBlock(blockHash, err), tx); err != nil {
+					return err
+				}
 			} else {
-				u.UnwindTo(blockNum-1, ExecUnwind)
+				if err := u.UnwindTo(blockNum-1, ExecUnwind, tx); err != nil {
+					return err
+				}
 			}
 			break Loop
 		}
