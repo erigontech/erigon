@@ -399,7 +399,7 @@ func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.AmoyChainConfig,
 		Nonce:      0,
-		Timestamp:  1558348305,
+		Timestamp:  1700225065,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
 		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
