@@ -64,6 +64,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ans, err := h.Handle(r)
 		if err != nil {
+			log.Error("beacon api request error", "err", err)
 			endpointError := WrapEndpointError(err)
 			endpointError.WriteTo(w)
 			return
@@ -72,15 +73,17 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		// TODO: potentially add a context option to buffer these
 		contentType := r.Header.Get("Accept")
 		switch contentType {
-		case "application/json":
+		case "application/octet-stream":
+			NewEndpointError(http.StatusNotImplemented, "Not Implemented").WriteTo(w)
+		default:
+			fallthrough
+		case "application/json", "":
+			w.Header().Add("content-type", "application/json")
 			err := json.NewEncoder(w).Encode(ans)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
 				// this error is fatal, log to console
 				log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
 			}
-		case "application/octet-stream":
-			NewEndpointError(http.StatusNotImplemented, "Not Implemented").WriteTo(w)
 		}
 	})
 }

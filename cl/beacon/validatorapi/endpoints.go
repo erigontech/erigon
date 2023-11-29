@@ -25,7 +25,7 @@ func (v *ValidatorApiHandler) GetEthV1ConfigSpec(r *http.Request) (*clparams.Bea
 
 func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(r *http.Request) (any, error) {
 	if v.GenesisCfg == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "beacon config not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis config not found")
 	}
 	digest, err := fork.ComputeForkDigest(v.BeaconChainCfg, v.GenesisCfg)
 	if err != nil {
@@ -34,7 +34,7 @@ func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(r *http.Request) (any, error
 	return map[string]any{
 		"genesis_time":           v.GenesisCfg.GenesisTime,
 		"genesis_validator_root": v.GenesisCfg.GenesisValidatorRoot,
-		"genesis_fork_version":   digest,
+		"genesis_fork_version":   hexutility.Bytes(digest[:]),
 	}, nil
 }
 
