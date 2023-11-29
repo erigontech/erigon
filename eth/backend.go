@@ -258,17 +258,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return err
 		}
-		if config.HistoryV3 {
-			agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainKv, logger)
-			if err != nil {
-				return err
-			}
-
-			chainKv, err = temporal.New(chainKv, agg, nil)
-			if err != nil {
-				return err
-			}
-		}
 
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
 		if err != nil {
