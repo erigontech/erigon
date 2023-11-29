@@ -22,11 +22,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"hash"
 	"io"
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -1290,11 +1292,18 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
 	})
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	var m runtime.MemStats
+
 	stagedCell := new(Cell)
 	for i, hashedKey := range hashedKeys {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info("[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		default:
 		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
