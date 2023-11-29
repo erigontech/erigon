@@ -42,7 +42,7 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Reads updates from storage
-	ProcessKeys(ctx context.Context, pk [][]byte) (rootHash []byte, err error)
+	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
 
 	// Process already gathered updates
 	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)

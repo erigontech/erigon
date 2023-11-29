@@ -495,7 +495,7 @@ func (d *DomainCommitted) Close() {
 }
 
 // Evaluates commitment for processed state.
-func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (rootHash []byte, err error) {
+func (d *DomainCommitted) ComputeCommitment(ctx context.Context, logPrefix string, trace bool) (rootHash []byte, err error) {
 	if dbg.DiscardCommitment() {
 		d.updates.List(true)
 		return nil, nil
@@ -517,7 +517,7 @@ func (d *DomainCommitted) ComputeCommitment(ctx context.Context, trace bool) (ro
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys)
+		rootHash, err = d.patriciaTrie.ProcessKeys(ctx, touchedKeys, logPrefix)
 		if err != nil {
 			return nil, err
 		}

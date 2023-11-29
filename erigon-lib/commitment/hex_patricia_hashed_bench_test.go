@@ -38,7 +38,7 @@ func Benchmark_HexPatriciaHahsed_ReviewKeys(b *testing.B) {
 				j = 0
 			}
 
-			hph.ProcessKeys(ctx, pk[j:j+1])
+			hph.ProcessKeys(ctx, pk[j:j+1], "")
 		}
 	})
 }
