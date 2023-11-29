@@ -69,8 +69,10 @@ type AggregatorV3 struct {
 	minimaxTxNumInFiles atomic.Uint64
 	aggregatedStep      atomic.Uint64
 
-	filesMutationLock      sync.Mutex
+	filesMutationLock sync.Mutex
+
 	collateAndBuildWorkers int // minimize amount of background workers by default
+	mergeWorkers           int // usually 1
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -121,6 +123,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		backgroundResult:       &BackgroundResult{},
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
+		mergeWorkers:           1,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -294,6 +297,7 @@ func (a *AggregatorV3) Close() {
 }
 
 func (a *AggregatorV3) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
+func (a *AggregatorV3) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *AggregatorV3) SetCompressWorkers(i int) {
 	a.accounts.compressWorkers = i
 	a.storage.compressWorkers = i
@@ -619,7 +623,7 @@ Loop:
 	return nil
 }
 
-func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
+func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	ac := a.MakeContext()
 	defer ac.Close()
 	mxRunningMerges.Inc()
@@ -642,7 +646,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 		return false, err
 	}
 
-	in, err := ac.mergeFiles(ctx, outs, r, workers)
+	in, err := ac.mergeFiles(ctx, outs, r)
 	if err != nil {
 		return true, err
 	}
@@ -657,9 +661,9 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	return true, nil
 }
 
-func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
+func (a *AggregatorV3) MergeLoop(ctx context.Context) error {
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, workers)
+		somethingMerged, err := a.mergeLoopStep(ctx)
 		if err != nil {
 			return err
 		}
@@ -1124,10 +1128,10 @@ func (mf MergedFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, workers int) (MergedFilesV3, error) {
+func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3) (MergedFilesV3, error) {
 	var mf MergedFilesV3
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
+	g.SetLimit(ac.a.mergeWorkers)
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -1167,7 +1171,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			var v4Files SelectedStaticFiles
 			var v4MergedF MergedFiles
 
-			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, workers, ac.a.ps)
+			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
 			return err
 		})
 	}
@@ -1306,7 +1310,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.wg.Done()
 			defer a.mergeingFiles.Store(false)
 			defer func() { close(fin) }()
-			if err := a.MergeLoop(a.ctx, 1); err != nil {
+			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return
 				}

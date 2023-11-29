@@ -1736,7 +1736,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
-	if err := agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
 
