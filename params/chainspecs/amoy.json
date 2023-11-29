@@ -11,8 +11,10 @@
     "istanbulBlock": 0,
     "muirGlacierBlock": 0,
     "berlinBlock": 0,
+    "londonBlock": 73100,
     "burntContract": {
-      "0": "0x000000000000000000000000000000000000dead"
+      "0": "0x000000000000000000000000000000000000dead",
+      "73100": "0xeCDD77cE6f146cCf5dab707941d318Bd50eeD2C9"
     },
     "bor": {
       "period": {
@@ -32,7 +34,11 @@
       },
       "validatorContract": "0x0000000000000000000000000000000000001000",
       "stateReceiverContract": "0x0000000000000000000000000000000000001001",
-      "overrideStateSyncRecords": null
+      "overrideStateSyncRecords": null,
+      "jaipurBlock": 73100,
+      "delhiBlock": 73100,
+      "indoreBlock": 73100,
+      "agraBlock": 73100
     }
   }
   
