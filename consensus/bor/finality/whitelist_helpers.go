@@ -37,16 +37,24 @@ func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHeim
 		return blockNum, blockHash, errCheckpoint
 	}
 
-	config.logger.Info("[bor.heimdall] Got new checkpoint", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
-
 	// Verify if the checkpoint fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the checkpoint. If not,
 	// it will return appropriate error.
 	hash, err := verifier.verify(ctx, config, checkpoint.StartBlock.Uint64(), checkpoint.EndBlock.Uint64(), checkpoint.RootHash.String()[2:], true)
+
 	if err != nil {
-		config.logger.Warn("[bor.heimdall] Failed to whitelist checkpoint", "err", err)
+		if errors.Is(err, errMissingBlocks) {
+			config.logger.Debug("[bor.heimdall] Got new checkpoint", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
+			config.logger.Debug("[bor.heimdall] Failed to whitelist checkpoint", "err", err)
+		} else {
+			config.logger.Info("[bor.heimdall] Got new checkpoint", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
+			config.logger.Warn("[bor.heimdall] Failed to whitelist checkpoint", "err", err)
+		}
+
 		return blockNum, blockHash, err
 	}
+
+	config.logger.Info("[bor.heimdall] Got new checkpoint", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
 
 	blockNum = checkpoint.EndBlock.Uint64()
 	blockHash = common.HexToHash(hash)
