@@ -877,18 +877,17 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 	emptyBadHash := config.BadBlockHash == libcommon.Hash{}
 	if !emptyBadHash {
-		var badBlockHeader *types.Header
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
-			badBlockHeader = header
+		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
+			if badBlockHeader != nil {
+				unwindPoint := badBlockHeader.Number.Uint64() - 1
+				if err := s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, fmt.Errorf("Init unwind")), tx); err != nil {
+					return err
+				}
+			}
 			return hErr
 		}); err != nil {
 			return err
-		}
-
-		if badBlockHeader != nil {
-			unwindPoint := badBlockHeader.Number.Uint64() - 1
-			s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, fmt.Errorf("Init unwind")))
 		}
 	}
 

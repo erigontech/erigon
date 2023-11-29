@@ -178,7 +178,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(1500, UnwindReason{})
+					_ = u.UnwindTo(1500, UnwindReason{}, nil)
 					return nil
 				}
 				return nil
@@ -271,7 +271,7 @@ func TestUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, UnwindReason{})
+					_ = u.UnwindTo(500, UnwindReason{}, nil)
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -325,7 +325,7 @@ func TestUnwind(t *testing.T) {
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
-	state.UnwindTo(100, UnwindReason{})
+	_ = state.UnwindTo(100, UnwindReason{}, nil)
 	err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
@@ -375,7 +375,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, UnwindReason{})
+					_ = u.UnwindTo(500, UnwindReason{}, nil)
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -563,7 +563,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, UnwindReason{})
+					_ = u.UnwindTo(500, UnwindReason{}, nil)
 					return s.Update(tx, 3000)
 				}
 				return nil

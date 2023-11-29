@@ -784,9 +784,13 @@ Loop:
 						return err
 					}
 					if errors.Is(err, consensus.ErrInvalidBlock) {
-						u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err))
+						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+							return err
+						}
 					} else {
-						u.UnwindTo(blockNum-1, ExecUnwind)
+						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+							return err
+						}
 					}
 					break Loop
 				}
@@ -1113,7 +1117,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash))
+	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 

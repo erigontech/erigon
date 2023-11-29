@@ -139,7 +139,9 @@ func BorHeimdallForward(
 				{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 
 			dataflow.HeaderDownloadStates.AddChange(headNumber, dataflow.HeaderInvalidated)
-			s.state.UnwindTo(unwindPoint, ForkReset(header.Hash()))
+			if err := s.state.UnwindTo(unwindPoint, ForkReset(header.Hash()), tx); err != nil {
+				return err
+			}
 			return fmt.Errorf("verification failed for header %d: %x", headNumber, header.Hash())
 		}
 	}
@@ -154,7 +156,9 @@ func BorHeimdallForward(
 				if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
 					logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
 					dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
-					s.state.UnwindTo(minedHeadNumber-1, ForkReset(minedHeader.Hash()))
+					if err := s.state.UnwindTo(minedHeadNumber-1, ForkReset(minedHeader.Hash()), tx); err != nil {
+						return err
+					}
 					return fmt.Errorf("mining on a wrong fork %d:%x", minedHeadNumber, minedHeader.Hash())
 				}
 			}
@@ -273,7 +277,9 @@ func BorHeimdallForward(
 					cfg.penalize(ctx, []headerdownload.PenaltyItem{
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
+					if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()), tx); err != nil {
+						return err
+					}
 					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
@@ -660,7 +666,9 @@ func PersistValidatorSets(
 						break
 					}
 				}
-				u.UnwindTo(snap.Number, BadBlock(badHash, err))
+				if err := u.UnwindTo(snap.Number, BadBlock(badHash, err), tx); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
 			}

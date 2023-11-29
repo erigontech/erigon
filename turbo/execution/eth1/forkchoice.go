@@ -215,7 +215,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			}
 		}
 
-		e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice)
+		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
 
 		if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
