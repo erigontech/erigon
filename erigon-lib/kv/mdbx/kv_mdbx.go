@@ -278,6 +278,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 100_000_000); err != nil {
+		return nil, err
+	}
 
 	if opts.flags&mdbx.Accede == 0 {
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
