@@ -233,7 +233,7 @@ func BorHeimdallForward(
 	var eventRecords int
 	var lastSpanId uint64
 
-	logTimer := time.NewTicker(30 * time.Second)
+	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
 
 	if endSpanID >= nextSpanId {
@@ -610,7 +610,7 @@ func PersistValidatorSets(
 					})
 				}
 				if header == nil {
-					log.Debug(fmt.Sprintf("[%s] PersistValidatorSets nil header", logPrefix), "blockNum", i)
+					return fmt.Errorf("missing header persisting validator sets: (inside loop at %d)", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
