@@ -179,6 +179,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer epochAttestations.Close()
 	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer eth1DataVotes.Close()
+	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer stateEvents.Close()
 
 	accumulatedMixes := make([]libcommon.Hash, s.cfg.SlotsPerEpoch)
 	// buffers
@@ -197,7 +199,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(compressedWriter, s.currentState, effectiveBalance, randaoMixes, proposers, slashings, minimalBeaconStates, blockRoots, stateRoots, changedValidators); err != nil {
+		if err := s.collectGenesisState(compressedWriter, s.currentState, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 			return err
 		}
 		s.validatorsTable = state_accessors.NewStaticValidatorTable()
@@ -207,6 +209,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	slot := s.currentState.Slot() + 1
 
 	var prevBalances, inactivityScores, prevValSet, slashingsBytes []byte
+	events := state_accessors.NewStateEvents()
 
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
@@ -214,30 +217,37 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	s.currentState.SetEvents(raw.Events{
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.AddValidator(uint64(index), v)
 			return s.validatorsTable.AddValidator(v, uint64(index), slot)
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeActivationEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeExitEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddExitEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeWithdrawableEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddWithdrawableEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeSlashed(uint64(index), newSlashed)
 			return s.validatorsTable.AddSlashed(uint64(index), slot, newSlashed)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeActivationEligibilityEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEligibility(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
 			changedValidators[uint64(index)] = struct{}{}
+			events.ChangeWithdrawalCredentials(uint64(index), libcommon.BytesToHash(wc))
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
@@ -342,6 +352,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if slot%slotsPerDumps == 0 {
 			continue
 		}
+		if err := stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes()); err != nil {
+			return err
+		}
+		events.Reset()
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
@@ -440,6 +454,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	if err := eth1DataVotes.Load(rwTx, kv.Eth1DataVotes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := stateEvents.Load(rwTx, kv.StateEvents, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
@@ -579,7 +596,7 @@ func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string)
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
-func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, effectiveBalanceCollector, randaoMixesCollector, proposersCollector, slashingsCollector, minimalBeaconStateCollector, blockRootsCollector, stateRootsCollector *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -588,11 +605,14 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 		return err
 	}
 
+	events := state_accessors.NewStateEvents()
+
 	state.ForEachValidator(func(v solid.Validator, index, total int) bool {
 		changedValidators[uint64(index)] = struct{}{}
 		if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
 			return false
 		}
+		events.AddValidator(uint64(index), v)
 		return true
 	})
 	if err != nil {
@@ -610,7 +630,7 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 		return err
 	}
 
-	return nil
+	return stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
 func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {

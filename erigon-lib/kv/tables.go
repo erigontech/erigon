@@ -656,6 +656,7 @@ var ChaindataTables = []string{
 	ValidatorBalance,
 	ValidatorSlashings,
 	StaticValidators,
+	StateEvents,
 	// Other stuff (related to state reconstitution)
 	BlockRoot,
 	StateRoot,
