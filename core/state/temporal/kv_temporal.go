@@ -201,29 +201,27 @@ func (tx *Tx) LockDBInRam() error                 { return tx.MdbxTx.LockDBInRam
 func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
 func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
 func (tx *Tx) Rollback() {
+	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
-	tx.autoClose()
 	mdbxTx.Rollback()
 }
 func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	if tx.aggCtx != nil {
-		tx.aggCtx.Close()
-	}
+	tx.aggCtx.Close()
 }
 func (tx *Tx) Commit() error {
+	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
-	tx.autoClose()
 	return mdbxTx.Commit()
 }
 

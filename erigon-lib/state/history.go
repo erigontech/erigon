@@ -664,8 +664,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}
 	keys := make([]string, 0, len(indexBitmaps))
-	for key := range indexBitmaps {
+	for key, bm := range indexBitmaps {
 		keys = append(keys, key)
+		bm.RunOptimize()
 	}
 	slices.Sort(keys)
 	historyCount := 0

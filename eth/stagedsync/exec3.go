@@ -163,9 +163,15 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
+		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
+		defer agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1024)
+		defer agg.SetCollateAndBuildWorkers(1)
+
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
@@ -303,8 +309,7 @@ func ExecV3(ctx context.Context,
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
-	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
+	if initialCycle && blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
@@ -1731,7 +1736,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
-	if err := agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
 
