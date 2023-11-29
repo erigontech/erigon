@@ -504,7 +504,7 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, workers int, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
+func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -527,14 +527,13 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 			}
 		}
 	}()
-	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles,
-		HistoryRanges{
-			historyStartTxNum: r.historyStartTxNum,
-			historyEndTxNum:   r.historyEndTxNum,
-			history:           r.history,
-			indexStartTxNum:   r.indexStartTxNum,
-			indexEndTxNum:     r.indexEndTxNum,
-			index:             r.index}, workers, ps); err != nil {
+	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles, HistoryRanges{
+		historyStartTxNum: r.historyStartTxNum,
+		historyEndTxNum:   r.historyEndTxNum,
+		history:           r.history,
+		indexStartTxNum:   r.indexStartTxNum,
+		indexEndTxNum:     r.indexEndTxNum,
+		index:             r.index}, ps); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -550,7 +549,7 @@ func (d *Domain) mergeFiles(ctx context.Context, domainFiles, indexFiles, histor
 
 	fromStep, toStep := r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep
 	kvFilePath := d.kvFilePath(fromStep, toStep)
-	kvFile, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
+	kvFile, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 	}
@@ -690,14 +689,13 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			}
 		}
 	}()
-	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles,
-		HistoryRanges{
-			historyStartTxNum: r.historyStartTxNum,
-			historyEndTxNum:   r.historyEndTxNum,
-			history:           r.history,
-			indexStartTxNum:   r.indexStartTxNum,
-			indexEndTxNum:     r.indexEndTxNum,
-			index:             r.index}, workers, ps); err != nil {
+	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles, HistoryRanges{
+		historyStartTxNum: r.historyStartTxNum,
+		historyEndTxNum:   r.historyEndTxNum,
+		history:           r.history,
+		indexStartTxNum:   r.indexStartTxNum,
+		indexEndTxNum:     r.indexEndTxNum,
+		index:             r.index}, ps); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -713,7 +711,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 	fromStep, toStep := r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep
 	kvFilePath := d.kvFilePath(fromStep, toStep)
-	compr, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, d.logger)
+	compr, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 	}
@@ -835,7 +833,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	return
 }
 
-func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, workers int, ps *background.ProgressSet) (*filesItem, error) {
+func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
 	for _, h := range files {
 		defer h.decompressor.EnableReadAhead().DisableReadAhead()
 	}
@@ -864,7 +862,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	fromStep, toStep := startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep
 
 	datPath := ii.efFilePath(fromStep, toStep)
-	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, ii.logger); err != nil {
+	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.dirs.Tmp, compress.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
 	if ii.noFsync {
@@ -977,7 +975,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	return outItem, nil
 }
 
-func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*filesItem, r HistoryRanges, workers int, ps *background.ProgressSet) (indexIn, historyIn *filesItem, err error) {
+func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*filesItem, r HistoryRanges, ps *background.ProgressSet) (indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
 		return nil, nil, nil
 	}
@@ -989,7 +987,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			}
 		}
 	}()
-	if indexIn, err = h.InvertedIndex.mergeFiles(ctx, indexFiles, r.indexStartTxNum, r.indexEndTxNum, workers, ps); err != nil {
+	if indexIn, err = h.InvertedIndex.mergeFiles(ctx, indexFiles, r.indexStartTxNum, r.indexEndTxNum, ps); err != nil {
 		return nil, nil, err
 	}
 	if r.history {
@@ -1027,7 +1025,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		fromStep, toStep := r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep
 		datPath := h.vFilePath(fromStep, toStep)
 		idxPath := h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.dirs.Tmp, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
+		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
 		compr := NewArchiveWriter(comp, h.compression)

@@ -1141,7 +1141,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		predicates.Add(1)
 		g.Go(func() (err error) {
 			defer predicates.Done()
-			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
+			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
@@ -1150,13 +1150,13 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		predicates.Add(1)
 		g.Go(func() (err error) {
 			defer predicates.Done()
-			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, ac.a.ps)
+			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
 	}
 	if r.code.any() {
 		g.Go(func() (err error) {
-			mf.code, mf.codeIdx, mf.codeHist, err = ac.a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, workers, ac.a.ps)
+			mf.code, mf.codeIdx, mf.codeHist, err = ac.a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, ac.a.ps)
 			return err
 		})
 	}
@@ -1175,28 +1175,28 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			mf.logAddrs, err = ac.a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers, ac.a.ps)
+			mf.logAddrs, err = ac.a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.logTopics {
 		g.Go(func() error {
 			var err error
-			mf.logTopics, err = ac.a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers, ac.a.ps)
+			mf.logTopics, err = ac.a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesFrom {
 		g.Go(func() error {
 			var err error
-			mf.tracesFrom, err = ac.a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers, ac.a.ps)
+			mf.tracesFrom, err = ac.a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesTo {
 		g.Go(func() error {
 			var err error
-			mf.tracesTo, err = ac.a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers, ac.a.ps)
+			mf.tracesTo, err = ac.a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
 			return err
 		})
 	}
