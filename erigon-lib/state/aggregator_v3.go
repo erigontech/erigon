@@ -480,8 +480,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
 
-	//log.Warn("[dbg] collate", "step", step)
-
 	closeCollations := true
 	collListMu := sync.Mutex{}
 	collations := make([]Collation, 0)
@@ -496,6 +494,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
+	log.Warn("[dbg] collate and build", "step", step, "workers", a.collateAndBuildWorkers)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 
