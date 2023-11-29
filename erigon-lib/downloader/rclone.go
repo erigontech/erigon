@@ -61,7 +61,7 @@ func (i *rcloneInfo) From() uint64 {
 
 func (i *rcloneInfo) To() uint64 {
 	if i.snapInfo != nil {
-		return i.snapInfo.From
+		return i.snapInfo.To
 	}
 
 	return 0
@@ -655,17 +655,13 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 
 	go func() {
 		for req := range c.syncQueue {
+
 			if gctx.Err() != nil {
 				req.cerr <- gctx.Err()
 				continue
 			}
 
-			state := req.info
-
-			func() {
-				state.Lock()
-				defer state.Unlock()
-
+			func(req syncRequest) {
 				g.Go(func() error {
 					c.activeSyncCount.Add(1)
 
@@ -706,21 +702,23 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 						return nil
 					}
 
-					localInfo, _ := os.Stat(filepath.Join(c.localFs, state.file))
+					info := req.info
 
-					state.Lock()
-					state.localInfo = localInfo
-					state.remoteInfo = remoteInfo{
-						Name:    state.file,
+					localInfo, _ := os.Stat(filepath.Join(c.localFs, info.file))
+
+					info.Lock()
+					info.localInfo = localInfo
+					info.remoteInfo = remoteInfo{
+						Name:    info.file,
 						Size:    uint64(localInfo.Size()),
 						ModTime: localInfo.ModTime(),
 					}
-					state.Unlock()
+					info.Unlock()
 
 					req.cerr <- nil
 					return nil
 				})
-			}()
+			}(req)
 		}
 
 		c.syncScheduled.Store(false)

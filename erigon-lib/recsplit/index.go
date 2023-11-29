@@ -178,6 +178,7 @@ func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 func (idx *Index) FilePath() string   { return idx.filePath }
 func (idx *Index) FileName() string   { return idx.fileName }
+func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
 
 func (idx *Index) Close() {
 	if idx == nil {

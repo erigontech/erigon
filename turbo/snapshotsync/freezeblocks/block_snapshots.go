@@ -88,6 +88,21 @@ func (sn *HeaderSegment) close() {
 	sn.closeSeg()
 	sn.closeIdx()
 }
+
+func (sn *HeaderSegment) openFiles() []string {
+	var files []string
+
+	if sn.seg.IsOpen() {
+		files = append(files, sn.seg.FilePath())
+	}
+
+	if sn.idxHeaderHash != nil {
+		files = append(files, sn.idxHeaderHash.FilePath())
+	}
+
+	return files
+}
+
 func (sn *HeaderSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
 	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.Headers)
@@ -142,6 +157,20 @@ func (sn *BodySegment) closeIdx() {
 func (sn *BodySegment) close() {
 	sn.closeSeg()
 	sn.closeIdx()
+}
+
+func (sn *BodySegment) openFiles() []string {
+	var files []string
+
+	if sn.seg.IsOpen() {
+		files = append(files, sn.seg.FilePath())
+	}
+
+	if sn.idxBodyNumber != nil {
+		files = append(files, sn.idxBodyNumber.FilePath())
+	}
+
+	return files
 }
 
 func (sn *BodySegment) reopenSeg(dir string) (err error) {
@@ -203,6 +232,25 @@ func (sn *TxnSegment) close() {
 	sn.closeSeg()
 	sn.closeIdx()
 }
+
+func (sn *TxnSegment) openFiles() []string {
+	var files []string
+
+	if sn.Seg.IsOpen() {
+		files = append(files, sn.Seg.FilePath())
+	}
+
+	if sn.IdxTxnHash != nil && sn.IdxTxnHash.IsOpen() {
+		files = append(files, sn.IdxTxnHash.FilePath())
+	}
+
+	if sn.IdxTxnHash2BlockNum != nil && sn.IdxTxnHash2BlockNum.IsOpen() {
+		files = append(files, sn.IdxTxnHash2BlockNum.FilePath())
+	}
+
+	return files
+}
+
 func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
 	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.Transactions)
@@ -538,6 +586,29 @@ func (s *RoSnapshots) Files() (list []string) {
 		list = append(list, fName)
 	}
 	slices.Sort(list)
+	return list
+}
+
+func (s *RoSnapshots) OpenFiles() (list []string) {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+
+	for _, header := range s.Headers.segments {
+		list = append(list, header.openFiles()...)
+	}
+
+	for _, body := range s.Bodies.segments {
+		list = append(list, body.openFiles()...)
+	}
+
+	for _, txs := range s.Txs.segments {
+		list = append(list, txs.openFiles()...)
+	}
+
 	return list
 }
 
@@ -1997,8 +2068,11 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 	if d.Count() != expectedCount {
 		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
 	}
-	p.Name.Store(&segFileName)
-	p.Total.Store(uint64(d.Count() * 2))
+
+	if p != nil {
+		p.Name.Store(&segFileName)
+		p.Total.Store(uint64(d.Count() * 2))
+	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    d.Count(),
@@ -2052,7 +2126,10 @@ RETRY:
 	}
 
 	for g.HasNext() {
-		p.Processed.Add(1)
+		if p != nil {
+			p.Processed.Add(1)
+		}
+
 		word, nextPos = g.Next(word[:0])
 		select {
 		case <-ctx.Done():
@@ -2136,14 +2213,20 @@ func HeadersIdx(ctx context.Context, chainConfig *chain.Config, segmentFilePath 
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.Name.Store(&fname)
-	p.Total.Store(uint64(d.Count()))
+
+	if p != nil {
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
 
 	hasher := crypto.NewKeccakState()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common2.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.Processed.Add(1)
+		if p != nil {
+			p.Processed.Add(1)
+		}
+
 		headerRlp := word[1:]
 		hasher.Reset()
 		hasher.Write(headerRlp)
@@ -2175,11 +2258,16 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.Name.Store(&fname)
-	p.Total.Store(uint64(d.Count()))
+
+	if p != nil {
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
 
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.Processed.Add(1)
+		if p != nil {
+			p.Processed.Add(1)
+		}
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
