@@ -163,9 +163,15 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
+		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
+		defer agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1024)
+		defer agg.SetCollateAndBuildWorkers(1)
+
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
@@ -201,10 +207,6 @@ func ExecV3(ctx context.Context,
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
 				return histBlockNumProgress
 			})
-		}
-		if useExternalTx {
-			agg.SetCollateWorkers(1024)
-			defer agg.SetCollateWorkers(1)
 		}
 	}
 
@@ -307,7 +309,6 @@ func ExecV3(ctx context.Context,
 		"inputTxNum", inputTxNum, "restored_block", blockNum,
 		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
 
-	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())

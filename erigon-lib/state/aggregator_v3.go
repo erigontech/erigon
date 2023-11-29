@@ -69,8 +69,8 @@ type AggregatorV3 struct {
 	minimaxTxNumInFiles atomic.Uint64
 	aggregatedStep      atomic.Uint64
 
-	filesMutationLock sync.Mutex
-	collateWorkers    int // minimize amount of background workers by default
+	filesMutationLock      sync.Mutex
+	collateAndBuildWorkers int // minimize amount of background workers by default
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -108,19 +108,19 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{
-		ctx:              ctx,
-		ctxCancel:        ctxCancel,
-		onFreeze:         func(frozenFileNames []string) {},
-		dirs:             dirs,
-		tmpdir:           tmpdir,
-		aggregationStep:  aggregationStep,
-		db:               db,
-		keepInDB:         1 * aggregationStep,
-		leakDetector:     dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:               background.NewProgressSet(),
-		backgroundResult: &BackgroundResult{},
-		logger:           logger,
-		collateWorkers:   1,
+		ctx:                    ctx,
+		ctxCancel:              ctxCancel,
+		onFreeze:               func(frozenFileNames []string) {},
+		dirs:                   dirs,
+		tmpdir:                 tmpdir,
+		aggregationStep:        aggregationStep,
+		db:                     db,
+		keepInDB:               1 * aggregationStep,
+		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		ps:                     background.NewProgressSet(),
+		backgroundResult:       &BackgroundResult{},
+		logger:                 logger,
+		collateAndBuildWorkers: 1,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -293,7 +293,7 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
-func (a *AggregatorV3) SetCollateWorkers(i int) { a.collateWorkers = i }
+func (a *AggregatorV3) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
 func (a *AggregatorV3) SetCompressWorkers(i int) {
 	a.accounts.compressWorkers = i
 	a.storage.compressWorkers = i
@@ -495,7 +495,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}()
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateWorkers)
+	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 
