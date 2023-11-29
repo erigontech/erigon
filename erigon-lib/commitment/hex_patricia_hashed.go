@@ -1796,11 +1796,17 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	copy(hph.afterMap[:], s.AfterMap[:])
 
 	if hph.root.apl > 0 {
+		if hph.ctx == nil {
+			panic("nil ctx")
+		}
 		if err := hph.ctx.GetAccount(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
 			return err
 		}
 	}
 	if hph.root.spl > 0 {
+		if hph.ctx == nil {
+			panic("nil ctx")
+		}
 		if err := hph.ctx.GetStorage(hph.root.spk[:hph.root.spl], &hph.root); err != nil {
 			return err
 		}

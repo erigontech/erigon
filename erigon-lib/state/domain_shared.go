@@ -458,6 +458,9 @@ func (ctx *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 }
 
 func (ctx *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
+	if ctx.sd == nil {
+		panic("nil sd")
+	}
 	encAccount, err := ctx.sd.LatestAccount(plainKey)
 	if err != nil {
 		return fmt.Errorf("GetAccount failed: %w", err)
