@@ -170,7 +170,7 @@ func (a *ApiHandler) getFullState(r *http.Request) *beaconResponse {
 		return newCriticalErrorResponse(err)
 	}
 
-	state, err := a.forkchoiceStore.GetFullState(blockRoot, true)
+	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
 	if err != nil {
 		return newApiErrorResponse(http.StatusBadRequest, err.Error())
 	}

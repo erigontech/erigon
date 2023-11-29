@@ -29,3 +29,7 @@ func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(r *http.Request) (any, error
 		"genesis_fork_version":   digest,
 	}, nil
 }
+
+func (v *ValidatorApiHandlerA) GetEthV1BeaconStatesStateIdFork(r *http.Request) (any, error) {
+
+}

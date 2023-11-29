@@ -33,7 +33,7 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 				})
 				r.Get("/node/syncing", nil)
 			})
-			r.Get("/config/spec", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconGenesis))
+			r.Get("/config/spec", beaconhttp.HandleEndpointFunc(v.GetEthV1ConfigSpec))
 			r.Get("/events", nil)
 			r.Route("/validator", func(r chi.Router) {
 				r.Route("/duties", func(r chi.Router) {

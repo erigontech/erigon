@@ -34,21 +34,21 @@ func (e *EndpointError) WriteTo(w http.ResponseWriter) {
 	}
 }
 
-type EndpointHandler interface {
-	Handle(r *http.Request) (any, error)
+type EndpointHandler[T any] interface {
+	Handle(r *http.Request) (T, error)
 }
 
-type EndpointHandlerFunc func(r *http.Request) (any, error)
+type EndpointHandlerFunc[T any] func(r *http.Request) (T, error)
 
-func (e EndpointHandlerFunc) Handle(r *http.Request) (any, error) {
+func (e EndpointHandlerFunc[T]) Handle(r *http.Request) (T, error) {
 	return e(r)
 }
 
-func HandleEndpointFunc(h EndpointHandlerFunc) http.HandlerFunc {
-	return HandleEndpoint(h)
+func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
+	return HandleEndpoint[T](h)
 }
 
-func HandleEndpoint(h EndpointHandler) http.HandlerFunc {
+func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ans, err := h.Handle(r)
 		if err != nil {
