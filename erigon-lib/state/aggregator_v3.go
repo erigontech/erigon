@@ -1495,7 +1495,7 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 // --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
-	if ac.a == nil { // invariant: it's safe to call Close multiple times
+	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
 	ac.a.leakDetector.Del(ac._leakID)
