@@ -1090,9 +1090,9 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 }
 
 // Prune [txFrom; txTo)
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) error {
 	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
-	if !hc.CanPrune(rwTx) {
+	if !forced && !hc.CanPrune(rwTx) {
 		return nil
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
@@ -1680,6 +1680,7 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
+		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(k[len(k)-8:]), k[:len(k)-8])
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
 		return nil
@@ -1719,6 +1720,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		}
 		hi.nextKey = k
 		hi.nextVal = v[8:]
+		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(v[:8]), k)
 		return nil
 	}
 	hi.nextKey = nil
@@ -2008,14 +2010,13 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 					hi.nextKey = nil
 					return nil
 				}
-				//fmt.Printf("next [seek=%x] %x %x\n", seek, k, v)
 				if bytes.Compare(seek[:len(seek)-8], k[:len(k)-8]) < 0 {
 					break
 				}
 			}
 		}
 		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
-		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) {
+		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) /*|| int(binary.BigEndian.Uint64(k[len(k)-8:])) > hi.endTxNum */ {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)
 				continue

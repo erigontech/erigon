@@ -1597,8 +1597,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
-	t.Skip("fix me!")
-
 	db, d := testDbAndDomain(t, log.New())
 	defer d.Close()
 	defer db.Close()
@@ -1620,8 +1618,8 @@ func TestDomain_Unwind(t *testing.T) {
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
 			dc.SetTxNum(i)
-			if i%3 == 0 {
-				if i%12 == 0 {
+			if i%3 == 0 && i > 0 { // once in 3 tx put key3 -> value3.i and skip other keys update
+				if i%12 == 0 { // once in 12 tx delete key3 before update
 					err = dc.DeleteWithPrev([]byte("key3"), nil, preval3)
 					require.NoError(t, err)
 					preval3 = nil
@@ -1634,13 +1632,13 @@ func TestDomain_Unwind(t *testing.T) {
 				preval3 = v3
 				continue
 			}
+
 			v1 := []byte(fmt.Sprintf("value1.%d", i))
 			v2 := []byte(fmt.Sprintf("value2.%d", i))
 			nv3 := []byte(fmt.Sprintf("valuen3.%d", i))
 
 			err = dc.PutWithPrev([]byte("key1"), nil, v1, preval1)
 			require.NoError(t, err)
-
 			err = dc.PutWithPrev([]byte("key2"), nil, v2, preval2)
 			require.NoError(t, err)
 			err = dc.PutWithPrev([]byte("k4"), nil, nv3, preval4)
@@ -1725,7 +1723,6 @@ func TestDomain_Unwind(t *testing.T) {
 		})
 		t.Run("WalkAsOf"+suf, func(t *testing.T) {
 			t.Helper()
-			t.Skip()
 
 			etx, err := tmpDb.BeginRo(ctx)
 			defer etx.Rollback()
@@ -1751,7 +1748,12 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("HistoryRange"+suf, func(t *testing.T) {
 			t.Helper()
 
-			etx, err := tmpDb.BeginRo(ctx)
+			tmpDb2, expected2 := testDbAndDomain(t, log.New())
+			defer expected2.Close()
+			defer tmpDb2.Close()
+			writeKeys(t, expected2, tmpDb2, unwindTo)
+
+			etx, err := tmpDb2.BeginRo(ctx)
 			defer etx.Rollback()
 			require.NoError(t, err)
 
@@ -1759,15 +1761,15 @@ func TestDomain_Unwind(t *testing.T) {
 			defer utx.Rollback()
 			require.NoError(t, err)
 
-			ectx := expected.MakeContext()
+			ectx := expected2.MakeContext()
 			defer ectx.Close()
 			uc := d.MakeContext()
 			defer uc.Close()
 
-			et, err := ectx.hc.HistoryRange(int(unwindTo)+1, -1, order.Asc, -1, etx)
+			et, err := ectx.hc.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.hc.HistoryRange(int(unwindTo), -1, order.Asc, -1, utx)
+			ut, err := uc.hc.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -1809,7 +1811,7 @@ func TestDomain_Unwind(t *testing.T) {
 	}
 
 	writeKeys(t, d, db, maxTx)
-	//unwindAndCompare(t, d, db, 14)
+	unwindAndCompare(t, d, db, 14)
 	unwindAndCompare(t, d, db, 11)
 	unwindAndCompare(t, d, db, 10)
 	unwindAndCompare(t, d, db, 8)
@@ -1824,6 +1826,24 @@ func TestDomain_Unwind(t *testing.T) {
 func compareIterators(t *testing.T, et, ut iter.KV) {
 	t.Helper()
 
+	//i := 0
+	//for {
+	//	ek, ev, err1 := et.Next()
+	//	fmt.Printf("ei=%d %s %s %v\n", i, ek, ev, err1)
+	//	if !et.HasNext() {
+	//		break
+	//	}
+	//}
+	//
+	//i = 0
+	//for {
+	//	uk, uv, err2 := ut.Next()
+	//	fmt.Printf("ui=%d %s %s %v\n", i, string(uk), string(uv), err2)
+	//	i++
+	//	if !ut.HasNext() {
+	//		break
+	//	}
+	//}
 	for {
 		ek, ev, err1 := et.Next()
 		uk, uv, err2 := ut.Next()
@@ -1831,7 +1851,7 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		require.EqualValues(t, ek, uk)
 		require.EqualValues(t, ev, uv)
 		if !et.HasNext() {
-			require.False(t, ut.HasNext())
+			require.False(t, ut.HasNext(), "unwindedIterhas extra keys\n")
 			break
 		}
 	}

@@ -36,12 +36,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -732,6 +731,9 @@ func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
 
 func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
+	if tracePutWithPrev == dc.d.filenameBase {
+		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, prev)
+	}
 	if err := dc.hc.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
@@ -1509,9 +1511,9 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnindFrom, limit uint64) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnwindFrom, limit uint64) error {
 	d := dc.d
-	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d largeValues=%t\n", d.filenameBase, txNumUnindTo, txNumUnindFrom, step, d.domainLargeValues)
+	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d\n", d.filenameBase, txNumUnindTo, txNumUnwindFrom, step)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
@@ -1520,13 +1522,26 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	seen := make(map[string]struct{})
 	restored := dc.newWriter(dc.d.dirs.Tmp, false)
 
-	dc.SetTxNum(txNumUnindTo - 1) // todo what if we actually had to decrease current step to provide correct update?
-	for histRng.HasNext() {
+	for histRng.HasNext() && txNumUnindTo > 0 {
 		k, v, err := histRng.Next()
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("[%s]unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
+
+		ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
+		if err != nil {
+			return err
+		}
+		if ic.HasNext() {
+			nextTxn, err := ic.Next()
+			if err != nil {
+				return err
+			}
+			dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
+		} else {
+			dc.SetTxNum(txNumUnindTo - 1)
+		}
+		//fmt.Printf("[%s]unwinding %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, dc.TxNum())
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
@@ -1561,7 +1576,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}
-		if _, replaced := seen[string(k)]; !replaced {
+		if _, replaced := seen[string(k)]; !replaced && txNumUnindTo > 0 {
 			continue
 		}
 
@@ -1587,8 +1602,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnindFrom, limit, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnindFrom, err)
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnwindFrom, limit, true, logEvery); err != nil {
+		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnwindFrom, err)
 	}
 	return restored.flush(ctx, rwTx)
 }
@@ -2129,7 +2144,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil
