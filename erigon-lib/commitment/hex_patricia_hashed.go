@@ -1290,11 +1290,20 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
 	})
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	stagedCell := new(Cell)
 	for i, hashedKey := range hashedKeys {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-logEvery.C:
+			currentKey := hashedKey
+			if len(currentKey) > 6 {
+				currentKey = currentKey[:6]
+			}
+			log.Info("[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000))
 		default:
 		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
