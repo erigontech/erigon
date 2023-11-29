@@ -1299,10 +1299,6 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-logEvery.C:
-			currentKey := hashedKey
-			if len(currentKey) > 6 {
-				currentKey = currentKey[:6]
-			}
 			log.Info("[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000))
 		default:
 		}
