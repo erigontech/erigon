@@ -215,7 +215,7 @@ Windows users may run erigon in 3 possible ways:
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
     * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.20
-    * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
+    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
