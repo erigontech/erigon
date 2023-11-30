@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -192,8 +193,14 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 
 	var stateWriter state.StateWriter
+	var doms *state2.SharedDomains
 	if histV3 {
-		stateWriter = state.NewNoopWriter()
+		//stateWriter = state.NewNoopWriter()
+		doms = state2.NewSharedDomains(tx)
+		defer doms.Close()
+		doms.StartWrites()
+		defer doms.FinishWrites()
+		stateWriter = state.NewWriterV4(doms)
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {
@@ -224,6 +231,14 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 			}
 		}
+	} else {
+		if err := doms.Flush(context.Background(), tx); err != nil {
+			return nil, statedb, fmt.Errorf("cannot flush domains: %w", err)
+		}
+		//_, err := doms.ComputeCommitment(context.Background(), true, false, 0, "genesis")
+		//if err != nil {
+		//	return nil, statedb, fmt.Errorf("cannot compute commitment: %w", err)
+		//}
 	}
 	return block, statedb, nil
 }

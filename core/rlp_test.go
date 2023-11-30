@@ -22,11 +22,11 @@ import (
 	"math/big"
 	"testing"
 
+	"golang.org/x/crypto/sha3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -74,9 +74,9 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 // TestRlpIterator tests that individual transactions can be picked out
 // from blocks without full unmarshalling/marshalling
 func TestRlpIterator(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
-	}
+	//if ethconfig.EnableHistoryV4InTest {
+	//	t.Skip("fix me")
+	//}
 	t.Parallel()
 	for _, tt := range []struct {
 		txs      int
