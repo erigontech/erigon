@@ -617,6 +617,7 @@ func init() {
 	withConfig(cmdForceSetHistoryV3)
 	withDataDir2(cmdForceSetHistoryV3)
 	cmdForceSetHistoryV3.Flags().BoolVar(&_forceSetHistoryV3, "history.v3", false, "")
+	must(cmdSetPrune.MarkFlagRequired("history.v3"))
 	rootCmd.AddCommand(cmdForceSetHistoryV3)
 
 	withConfig(cmdSetPrune)
