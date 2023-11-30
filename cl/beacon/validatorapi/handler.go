@@ -45,7 +45,7 @@ func (v *ValidatorApiHandler) init(r chi.Router) {
 					r.Post("/attestations", http.NotFound)
 					r.Post("/sync_committees", http.NotFound)
 				})
-				r.Get("/node/syncing", http.NotFound)
+				r.Get("/node/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
 			})
 			r.Get("/config/spec", beaconhttp.HandleEndpointFunc(v.GetEthV1ConfigSpec))
 			r.Get("/events", http.NotFound)

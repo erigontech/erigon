@@ -14,7 +14,44 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
+
+func (v *ValidatorApiHandler) GetEthV1NodeSyncing(r *http.Request) (any, error) {
+	_, slot, err := v.FC.GetHead()
+	if err != nil {
+		return nil, err
+	}
+
+	realHead := utils.GetCurrentSlot(v.GenesisCfg.GenesisTime, v.BeaconChainCfg.SecondsPerSlot)
+
+	isSyncing := realHead > slot
+
+	syncDistance := 0
+	if isSyncing {
+		syncDistance = int(realHead) - int(slot)
+	}
+
+	elOffline := true
+	if v.FC.Engine() != nil {
+		val, err := v.FC.Engine().Ready()
+		if err == nil {
+			elOffline = !val
+		}
+	}
+
+	return map[string]any{
+		"head_slot":     strconv.FormatUint(slot, 10),
+		"sync_distance": syncDistance,
+		"is_syncing":    isSyncing,
+		"el_offline":    elOffline,
+		// TODO: figure out how to populat this field
+		"is_optimistic": true,
+	}, nil
+}
+
+func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
+}
 
 func (v *ValidatorApiHandler) GetEthV1ConfigSpec(r *http.Request) (*clparams.BeaconChainConfig, error) {
 	if v.BeaconChainCfg == nil {
