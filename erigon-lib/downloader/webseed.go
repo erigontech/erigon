@@ -137,7 +137,6 @@ func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url
 		return nil, err
 	}
 	u := webSeedProviderUrl.ResolveReference(ref)
-	fmt.Printf("alex: %s\n", u.String())
 	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
