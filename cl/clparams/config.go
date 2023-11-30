@@ -498,6 +498,11 @@ func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
 	return slot - (slot % slotsPerSyncCommitteePeriod)
 }
 
+func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
+	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
+	return slot - (slot % p)
+}
+
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch, b.DenebForkEpoch}
 	stateVersion := Phase0Version

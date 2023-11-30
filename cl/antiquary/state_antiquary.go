@@ -188,7 +188,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateEvents.Close()
 
-	accumulatedMixes := make([]libcommon.Hash, s.cfg.SlotsPerEpoch)
 	// buffers
 	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
@@ -220,6 +219,9 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
+		OnRandaoMixChange: func(index int, mix [32]byte) error {
+			return intraRandaoMixes.Collect(base_encoding.Encode64ToBytes4(slot), mix[:])
+		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
 			changedValidators[uint64(index)] = struct{}{}
 			events.AddValidator(uint64(index), v)
@@ -259,6 +261,11 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
 			k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
 			if err := checkpoints.Collect(k, v); err != nil {
+				return err
+			}
+			prevEpoch := epoch - 1
+			mix := s.currentState.GetRandaoMixes(prevEpoch)
+			if err := randaoMixes.Collect(base_encoding.Encode64ToBytes4(prevEpoch*s.cfg.SlotsPerEpoch), mix[:]); err != nil {
 				return err
 			}
 			// truncate the file
@@ -374,22 +381,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
-
-		if isEpochCrossed {
-			prevEpochKey := base_encoding.Encode64ToBytes4(prevEpoch)
-			epochKey := base_encoding.Encode64ToBytes4(state.Epoch(s.currentState))
-			// Write flattened randao, with per-epoch randaos.
-			flattenedRandaoMixes := flattenRandaoMixes(accumulatedMixes)
-			if err := intraRandaoMixes.Collect(prevEpochKey, flattenedRandaoMixes); err != nil {
-				return err
-			}
-			mix := s.currentState.GetRandaoMixes(prevEpoch)
-			// the last randao is put here
-			if err := randaoMixes.Collect(epochKey, mix[:]); err != nil {
-				return err
-			}
-		}
-		accumulatedMixes[slot%s.cfg.SlotsPerEpoch] = s.currentState.GetRandaoMixes(state.Epoch(s.currentState))
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
 			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), effectiveBalance, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {

@@ -3,13 +3,13 @@ package historical_states_reader
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -22,7 +22,6 @@ type HistoricalStatesReader struct {
 	genesisCfg     *clparams.GenesisConfig
 	fs             afero.Fs                              // some data is on filesystem to avoid database fragmentation
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
-	lock           sync.RWMutex
 	blockReader    freezeblocks.BeaconSnapshotReader
 	genesisState   *state.CachingBeaconState
 }
@@ -137,7 +136,18 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		Epoch:           r.cfg.GetForkEpochByVersion(stateVersion),
 	})
 	// History
+	stateRoots, blockRoots := solid.NewHashList(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashList(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
+
+	if err := r.readHistoryHashVector(tx, r.genesisState.BlockRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.BlockRoot, blockRoots); err != nil {
+		return nil, err
+	}
+	ret.SetBlockRoots(blockRoots)
+
+	if err := r.readHistoryHashVector(tx, r.genesisState.StateRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.StateRoot, stateRoots); err != nil {
+		return nil, err
+	}
+	ret.SetStateRoots(stateRoots)
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
 	if err := state_accessors.ReadHistoricalRoots(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
@@ -149,12 +159,21 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetHistoricalRoots(historicalRoots)
 
 	// Eth1
+	eth1DataVotes := solid.NewDynamicListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()))
+	if err := r.readEth1DataVotes(tx, slot, eth1DataVotes); err != nil {
+		return nil, err
+	}
+	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
 	// Registry
 
 	// Randomness
-
+	randaoMixes := solid.NewHashList(int(r.cfg.EpochsPerHistoricalVector))
+	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
+		return nil, err
+	}
+	ret.SetRandaoMixes(randaoMixes)
 	// Slashings
 
 	// Participation
@@ -199,7 +218,17 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetCurrentSyncCommittee(currentSyncCommittee)
 	ret.SetNextSyncCommittee(nextSyncCommittee)
 	// Execution
-
+	if ret.Version() < clparams.BellatrixVersion {
+		return ret, nil
+	}
+	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
+	if err != nil {
+		return nil, err
+	}
+	ret.SetLatestExecutionPayloadHeader(payloadHeader)
+	if ret.Version() < clparams.CapellaVersion {
+		return ret, nil
+	}
 	// Withdrawals
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
@@ -213,4 +242,113 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetHistoricalSummaries(historicalSummaries)
 
 	return ret, nil
+}
+
+func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {
+	var needFromGenesis, inserted uint64
+	if uint64(size) > slot {
+		needFromGenesis = size - slot
+	}
+	needFromDB := size - needFromGenesis
+	cursor, err := tx.Cursor(table)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	var currKeySlot uint64
+	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(slot - needFromDB)); err == nil && k != nil; k, v, err = cursor.Prev() {
+		if len(v) != 32 {
+			return fmt.Errorf("invalid key %x", k)
+		}
+		currKeySlot = base_encoding.Decode64FromBytes4(k)
+		out.Set(int(currKeySlot%size), common.BytesToHash(v))
+		inserted++
+		if inserted == needFromDB {
+			break
+		}
+	}
+
+	for i := 0; i < int(needFromGenesis); i++ {
+		currKeySlot++
+		out.Set(int(currKeySlot%size), genesisVector.Get(int(currKeySlot%size)))
+	}
+	return nil
+}
+
+func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
+	initialSlot := r.cfg.RoundSlotToVotePeriod(slot)
+	initialKey := base_encoding.Encode64ToBytes4(initialSlot)
+	cursor, err := tx.Cursor(kv.Eth1DataVotes)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	k, v, err := cursor.Seek(initialKey)
+	if err != nil {
+		return err
+	}
+	for initialSlot > base_encoding.Decode64FromBytes4(k) {
+		k, v, err = cursor.Next()
+		if err != nil {
+			return err
+		}
+		if k == nil {
+			return fmt.Errorf("eth1 data votes not found for slot %d", slot)
+		}
+	}
+	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
+	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
+		eth1Data := &cltypes.Eth1Data{}
+		if err := eth1Data.DecodeSSZ(v, 0); err != nil {
+			return err
+		}
+		out.Append(eth1Data)
+		k, v, err = cursor.Next()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out solid.HashVectorSSZ) error {
+	slotLookBehind := r.cfg.SlotsPerEpoch * r.cfg.EpochsPerHistoricalVector // how much we must look behind
+	slotRoundedToEpoch := r.cfg.RoundSlotToEpoch(slot)
+	var initialSlot uint64
+	if slotRoundedToEpoch > slotLookBehind {
+		initialSlot = slotRoundedToEpoch - slotLookBehind
+	}
+	initialKey := base_encoding.Encode64ToBytes4(initialSlot)
+	cursor, err := tx.Cursor(kv.RandaoMixes)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	inserted := 0
+	var currEpoch uint64
+	for k, v, err := cursor.Seek(initialKey); err == nil && k != nil && slotRoundedToEpoch > base_encoding.Decode64FromBytes4(k); k, v, err = cursor.Next() {
+		if len(v) != 32 {
+			return fmt.Errorf("invalid key %x", k)
+		}
+		currKeySlot := base_encoding.Decode64FromBytes4(k)
+		currEpoch = r.cfg.RoundSlotToEpoch(currKeySlot)
+		inserted++
+		out.Set(int(currEpoch%r.cfg.EpochsPerHistoricalVector), common.BytesToHash(v))
+	}
+	// If we have not enough data, we need to read from genesis
+	for i := inserted; i < int(r.cfg.EpochsPerHistoricalVector); i++ {
+		currEpoch++
+		out.Set(int(currEpoch%r.cfg.EpochsPerHistoricalVector), r.genesisState.RandaoMixes().Get(int(currEpoch%r.cfg.EpochsPerHistoricalVector)))
+	}
+	// Now we need to read the intra epoch randao mix.
+	intraRandaoMix, err := tx.GetOne(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return err
+	}
+	if len(intraRandaoMix) != 32 {
+		return fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
+	}
+	out.Set(int(slot%r.cfg.EpochsPerHistoricalVector), common.BytesToHash(intraRandaoMix))
+	return nil
+
 }

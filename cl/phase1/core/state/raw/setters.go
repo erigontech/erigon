@@ -106,6 +106,11 @@ func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.eth1Data = eth1Data
 }
 
+func (b *BeaconState) SetEth1DataVotes(votes *solid.ListSSZ[*cltypes.Eth1Data]) {
+	b.markLeaf(Eth1DataVotesLeafIndex)
+	b.eth1DataVotes = votes
+}
+
 func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 	if b.events.OnAppendEth1Data != nil {
 		b.events.OnAppendEth1Data(vote)
@@ -122,6 +127,11 @@ func (b *BeaconState) ResetEth1DataVotes() {
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.markLeaf(Eth1DepositIndexLeafIndex)
 	b.eth1DepositIndex = eth1DepositIndex
+}
+
+func (b *BeaconState) SetRandaoMixes(mixes solid.HashVectorSSZ) {
+	b.markLeaf(RandaoMixesLeafIndex)
+	b.randaoMixes = mixes
 }
 
 func (b *BeaconState) SetHistoricalRoots(hRoots solid.HashListSSZ) {
@@ -450,10 +460,4 @@ func (b *BeaconState) SetBlockRoots(roots solid.HashVectorSSZ) {
 func (b *BeaconState) SetStateRoots(roots solid.HashVectorSSZ) {
 	b.markLeaf(StateRootsLeafIndex)
 	b.stateRoots = roots
-}
-
-// SetEth1DataVotes sets the Eth1 data votes of the BeaconState.
-func (b *BeaconState) SetEth1DataVotes(votes *solid.ListSSZ[*cltypes.Eth1Data]) {
-	b.markLeaf(Eth1DataVotesLeafIndex)
-	b.eth1DataVotes = votes
 }
