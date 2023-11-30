@@ -145,12 +145,7 @@ func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) 
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
 func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
-	c, err := tx.Cursor(kv.Checkpoints)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	v, err := tx.GetOne(kv.Checkpoints, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -163,12 +158,7 @@ func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous 
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
 func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	c, err := tx.Cursor(kv.NextSyncCommittee)
-	if err != nil {
-		return nil, err
-	}
-
-	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	v, err := tx.GetOne(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -182,12 +172,7 @@ func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommitte
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
 func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	c, err := tx.Cursor(kv.CurrentSyncCommittee)
-	if err != nil {
-		return nil, err
-	}
-
-	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	v, err := tx.GetOne(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
