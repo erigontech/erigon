@@ -15,7 +15,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
@@ -29,15 +32,41 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-type ConsensusHandlers struct {
-	handlers      map[protocol.ID]network.StreamHandler
-	host          host.Host
-	metadata      *cltypes.Metadata
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
-	ctx           context.Context
 
-	beaconDB persistence.RawBeaconBlockChain
+
+type RateLimiter struct {
+	Counter uint32
+	LastRequestTime time.Time
+	Limited bool
+}
+
+type RateLimits struct {
+    pingLimit        uint32
+    goodbyeLimit     uint32
+    metadataV1Limit  uint32
+    metadataV2Limit  uint32
+    statusLimit      uint32
+}
+
+const punishmentPeriod = 15 //mins
+
+var defaultRateLimits = RateLimits{
+    pingLimit:       5000,
+    goodbyeLimit:    5000,
+    metadataV1Limit: 5000,
+    metadataV2Limit: 5000,
+    statusLimit:     5000,
+}
+
+type ConsensusHandlers struct {
+	handlers      	map[protocol.ID]network.StreamHandler
+	host          	host.Host
+	metadata      	*cltypes.Metadata
+	beaconConfig  	*clparams.BeaconChainConfig
+	genesisConfig 	*clparams.GenesisConfig
+	ctx           	context.Context
+	beaconDB 		persistence.RawBeaconBlockChain
+	peerRateLimits  map[string]map[string]*RateLimiter
 }
 
 const (
@@ -54,6 +83,7 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		genesisConfig: genesisConfig,
 		beaconConfig:  beaconConfig,
 		ctx:           ctx,
+		peerRateLimits: make(map[string]map[string]*RateLimiter),
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -71,6 +101,58 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		c.handlers[protocol.ID(k)] = c.wrapStreamHandler(k, v)
 	}
 	return c
+}
+
+func (limiter *RateLimiter) incrementCounter() {
+	atomic.AddUint32(&limiter.Counter, 1)
+}
+
+func (limiter *RateLimiter) resetCounter() {
+	atomic.StoreUint32(&limiter.Counter, 0)
+}
+
+func (limiter *RateLimiter) loadCounter() uint32 {
+	return atomic.LoadUint32(&limiter.Counter)
+}
+
+
+func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit uint32) error {
+    // Initialize
+	if _, ok := c.peerRateLimits[peerId]; !ok {
+        c.peerRateLimits[peerId] = make(map[string]*RateLimiter)
+    }
+	if _, ok := c.peerRateLimits[peerId][method]; !ok {
+        c.peerRateLimits[peerId][method] = &RateLimiter{Counter: 0, LastRequestTime: time.Now(), Limited: false}
+    }
+
+	limiter := c.peerRateLimits[peerId][method]
+
+    // Check if the peer is in the punishment period
+	now := time.Now()
+	if limiter.Limited {
+		punishmentEndTime := limiter.LastRequestTime.Add(punishmentPeriod * time.Minute)
+		if now.After(punishmentEndTime) {
+			limiter.Limited = false
+		} else { 
+			return errors.New("rate limited")
+		}
+    }
+
+	// reset counter after 1 minute
+	afterMinute := limiter.LastRequestTime.Add(time.Minute)
+	if now.After(afterMinute) {
+		limiter.resetCounter()
+    }
+
+	limiter.incrementCounter()
+	limiter.LastRequestTime = now
+	
+    // Check the rate limit
+    if limiter.loadCounter() >= limit {
+		limiter.Limited = true
+		return errors.New("rate limit exceeded")
+    }
+    return nil
 }
 
 func (c *ConsensusHandlers) Start() {
