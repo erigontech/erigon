@@ -47,9 +47,6 @@ func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.
 	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
-func (d *WebSeeds) downloadManifestFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
-
-}
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Providers []string, httpProviders []*url.URL, diskProviders []string) {
 	log.Debug("[snapshots] webseed providers", "http", len(httpProviders), "s3", len(s3Providers), "disk", len(diskProviders))
 	list := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
@@ -66,29 +63,29 @@ func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, s3Provi
 		}
 		list = append(list, response)
 	}
-	//
-	//for _, webSeedProviderURL := range s3Providers {
-	//	select {
-	//	case <-ctx.Done():
-	//		break
-	//	default:
-	//	}
-	//	response, err := d.callS3Provider(ctx, webSeedProviderURL)
-	//	if err != nil { // don't fail on error
-	//		d.logger.Debug("[snapshots.webseed] get from S3 provider", "err", err)
-	//		continue
-	//	}
-	//	list = append(list, response)
-	//}
-	//// add to list files from disk
-	//for _, webSeedFile := range diskProviders {
-	//	response, err := d.readWebSeedsFile(webSeedFile)
-	//	if err != nil { // don't fail on error
-	//		d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
-	//		continue
-	//	}
-	//	list = append(list, response)
-	//}
+
+	for _, webSeedProviderURL := range s3Providers {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+		response, err := d.callS3Provider(ctx, webSeedProviderURL)
+		if err != nil { // don't fail on error
+			d.logger.Debug("[snapshots.webseed] get from S3 provider", "err", err)
+			continue
+		}
+		list = append(list, response)
+	}
+	// add to list files from disk
+	for _, webSeedFile := range diskProviders {
+		response, err := d.readWebSeedsFile(webSeedFile)
+		if err != nil { // don't fail on error
+			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
+			continue
+		}
+		list = append(list, response)
+	}
 
 	webSeedUrls, torrentUrls := snaptype.WebSeedUrls{}, snaptype.TorrentUrls{}
 	for _, urls := range list {
