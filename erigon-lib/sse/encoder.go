@@ -1,107 +1,82 @@
 package sse
 
-import (
-	"bytes"
-	"io"
-	"unicode/utf8"
-	//"github.com/segmentio/asm/utf8" -- can switch to this library in the future if needed
-)
+import "io"
 
-type Option func(*Options)
+// Packet represents an event to send
+// the order in this struct is the order that they will be sent.
+type Packet struct {
 
-func OptionValidateUtf8(enable bool) Option {
-	return func(o *Options) {
-		o.validateUTF8 = true
-	}
+	// as a special case, an empty value of event will not write an event header
+	Event string
+
+	// additional headers to be added.
+	// using the reserved headers event, header, data, id is undefined behavior
+	// note that this is the canonical way to send the "retry" header
+	Header map[string]string
+
+	// the io.Reader to source the data from
+	Data io.Reader
+
+	// whether or not to send an id, and if so, what id to send
+	// a nil id means to not send an id.
+	// empty string means to simply send the string "id\n"
+	// otherwise, the id is sent as is
+	// id is always sent at the end of the packet
+	ID *string
 }
 
-type Options struct {
-	validateUTF8 bool
+func ID(x string) *string {
+	return &x
 }
 
-func (e *Options) ValidateUTF8() bool {
-	return e.validateUTF8
-}
-
-type encodeState struct {
-	inMessage        bool
-	trailingCarriage bool
-}
-
-// encoder is not thread safe :)
+// Encoder works at a higher level than the encoder.
+// it works on the packet level.
 type Encoder struct {
-	raw io.Writer
-	buf bytes.Buffer
+	wr *Writer
 
-	es encodeState
-
-	o *Options
+	firstWriteDone bool
 }
 
-func NewEncoder(w io.Writer, opts ...Option) *Encoder {
-	o := &Options{}
-	for _, v := range opts {
-		v(o)
-	}
+func NewEncoder(w io.Writer) *Encoder {
+	wr := NewWriter(w)
 	return &Encoder{
-		raw: w,
-		o:   o,
+		wr: wr,
 	}
 }
 
-func (e *Encoder) Write(xs []byte) (n int64, err error) {
-	if e.o.ValidateUTF8() && !utf8.Valid(xs) {
-		return 0, ErrInvalidUTF8Bytes
-	}
-	e.checkMessage()
-	for _, x := range xs {
-		// see if there was a trailing carriage left over from the last write
-		if e.es.trailingCarriage {
-			// if there is, see if the character is a newline
-			if x != '\n' {
-				// its not a newline, so we should flush first and create a new data entry
-				err = e.flushMessage()
-				if err != nil {
-					return
-				}
-				e.checkMessage()
-			}
-			// in the case that the character is a newline
-			// we will just write the newline and flush immediately after
-			// in both cases, the trailing carriage is
-
-			e.es.trailingCarriage = false
+func (e *Encoder) Encode(p *Packet) error {
+	if e.firstWriteDone {
+		err := e.wr.Next()
+		if err != nil {
+			return err
 		}
-		// write the byte no matter what
-		e.buf.WriteByte(x)
-		// flush if it is a newline always
-		if x == '\n' {
-			err = e.flushMessage()
-			if err != nil {
-				return
+	}
+	e.firstWriteDone = true
+	if len(p.Event) > 0 {
+		if err := e.wr.Header("event", p.Event); err != nil {
+			return err
+		}
+	}
+	if p.Header != nil {
+		for k, v := range p.Header {
+			if err := e.wr.Header(k, v); err != nil {
+				return err
 			}
 		}
-		// if x is a carriage return, mark it as trailing carriage
-		if x == '\r' {
-			e.es.trailingCarriage = true
+	}
+	if p.Data != nil {
+		if err := e.wr.WriteData(p.Data); err != nil {
+			return err
 		}
 	}
-	return 0, nil
-}
-
-func (e *Encoder) checkMessage() {
-	if !e.es.inMessage {
-		e.es.inMessage = true
-		e.buf.WriteString("data: ")
-	}
-}
-
-func (e *Encoder) flushMessage() error {
-	_, err := e.buf.WriteTo(e.raw)
+	err := e.wr.Flush()
 	if err != nil {
 		return err
 	}
-	e.es.inMessage = false
+	if p.ID != nil {
+		if err := e.wr.Header("id", *p.ID); err != nil {
+			return err
+		}
+	}
 	return nil
-
 }
