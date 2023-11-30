@@ -106,7 +106,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == bor-mainnet",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, tmpdir)
 				return core.CommitGenesisBlock(db, core.BorMainnetGenesisBlock(), tmpdir, logger)
 			},
@@ -116,7 +116,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == mumbai",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, tmpdir)
 				return core.CommitGenesisBlock(db, core.MumbaiGenesisBlock(), tmpdir, logger)
 			},
@@ -126,7 +126,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == amoy",
-			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
+			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, tmpdir)
 				return core.CommitGenesisBlock(db, core.AmoyGenesisBlock(), tmpdir, logger)
 			},
