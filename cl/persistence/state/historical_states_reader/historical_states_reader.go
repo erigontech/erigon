@@ -1,6 +1,7 @@
 package historical_states_reader
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -87,7 +88,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
+func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	ret := state.New(r.cfg)
 
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
@@ -103,6 +104,16 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 	if slot == 0 {
 		return r.genesisState.Copy()
 	}
+	// Read the current block (we need the block header) + other stuff
+	block, err := r.blockReader.ReadBlockBySlot(ctx, tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block at slot %d not found", slot)
+	}
+	blockHeader := block.SignedBeaconBlockHeader().Header
+	blockHeader.Root = common.Hash{}
 	// Read the minimal beacon state which have the small fields.
 	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
 	if err != nil {
@@ -126,6 +137,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 		Epoch:           r.cfg.GetForkEpochByVersion(stateVersion),
 	})
 	// History
+	ret.SetLatestBlockHeader(blockHeader)
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
 	if err := state_accessors.ReadHistoricalRoots(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
