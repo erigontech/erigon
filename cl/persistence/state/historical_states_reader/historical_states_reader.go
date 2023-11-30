@@ -35,49 +35,6 @@ type HistoricalStatesReader struct {
 	genesisState   *state.CachingBeaconState
 }
 
-// class BeaconState(Container):
-//     # Versioning
-//     genesis_time: uint64
-//     genesis_validators_root: Root
-//     slot: Slot
-//     fork: Fork
-//     # History
-//     latest_block_header: BeaconBlockHeader
-//     block_roots: Vector[Root, SLOTS_PER_HISTORICAL_ROOT]
-//     state_roots: Vector[Root, SLOTS_PER_HISTORICAL_ROOT]
-//     historical_roots: List[Root, HISTORICAL_ROOTS_LIMIT]  # Frozen in Capella, replaced by historical_summaries
-//     # Eth1
-//     eth1_data: Eth1Data
-//     eth1_data_votes: List[Eth1Data, EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH]
-//     eth1_deposit_index: uint64
-//     # Registry
-//     validators: List[Validator, VALIDATOR_REGISTRY_LIMIT]
-//     balances: List[Gwei, VALIDATOR_REGISTRY_LIMIT]
-//     # Randomness
-//     randao_mixes: Vector[Bytes32, EPOCHS_PER_HISTORICAL_VECTOR]
-//     # Slashings
-//     slashings: Vector[Gwei, EPOCHS_PER_SLASHINGS_VECTOR]  # Per-epoch sums of slashed effective balances
-//     # Participation
-//     previous_epoch_participation: List[ParticipationFlags, VALIDATOR_REGISTRY_LIMIT]
-//     current_epoch_participation: List[ParticipationFlags, VALIDATOR_REGISTRY_LIMIT]
-//     # Finality
-//     justification_bits: Bitvector[JUSTIFICATION_BITS_LENGTH]  # Bit set for every recent justified epoch
-//     previous_justified_checkpoint: Checkpoint
-//     current_justified_checkpoint: Checkpoint
-//     finalized_checkpoint: Checkpoint
-//     # Inactivity
-//     inactivity_scores: List[uint64, VALIDATOR_REGISTRY_LIMIT]
-//     # Sync
-//     current_sync_committee: SyncCommittee
-//     next_sync_committee: SyncCommittee
-//     # Execution
-//     latest_execution_payload_header: ExecutionPayloadHeader  # [Modified in Capella]
-//     # Withdrawals
-//     next_withdrawal_index: WithdrawalIndex  # [New in Capella]
-//     next_withdrawal_validator_index: ValidatorIndex  # [New in Capella]
-//     # Deep history valid from Capella onwards
-//     historical_summaries: List[HistoricalSummary, HISTORICAL_ROOTS_LIMIT]  # [New in Capella]
-
 func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, fs afero.Fs, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
 	return &HistoricalStatesReader{
 		cfg:            cfg,
@@ -206,8 +163,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetSlashings(slashings)
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
-		previousEpoch := state.PreviousEpoch(ret)
-
+		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
+		if err != nil {
+			return nil, err
+		}
+		ret.SetCurrentEpochAttestations(currentAtts)
+		ret.SetPreviousEpochAttestations(previousAtts)
 	} else {
 
 	}
@@ -524,14 +485,21 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 	return out, nil
 }
 
-func (r *HistoricalStatesReader) readPendingEpochs(slot uint64, epochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
-	currentEpoch := slot / r.cfg.SlotsPerEpoch
-	var previousEpoch uint64
-	if currentEpoch > 0 {
-		previousEpoch = currentEpoch - 1
-	}
-	if currentEpoch == 0 {
+func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, currentEpochAttestationsLength, previousEpochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
+	if slot < r.cfg.SlotsPerEpoch {
 		return r.genesisState.CurrentEpochAttestations(), r.genesisState.PreviousEpochAttestations(), nil
 	}
-
+	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
+	// Read the current epoch attestations
+	currentEpochAttestations, err := state_accessors.ReadCurrentEpochAttestations(tx, roundedSlot, int(r.cfg.CurrentEpochAttestationsLength()))
+	if err != nil {
+		return nil, nil, err
+	}
+	previousEpochAttestations, err := state_accessors.ReadPreviousEpochAttestations(tx, roundedSlot, int(r.cfg.PreviousEpochAttestationsLength()))
+	if err != nil {
+		return nil, nil, err
+	}
+	currentEpochAttestations.Truncate(int(currentEpochAttestationsLength))
+	previousEpochAttestations.Truncate(int(previousEpochAttestationsLength))
+	return currentEpochAttestations, previousEpochAttestations, nil
 }

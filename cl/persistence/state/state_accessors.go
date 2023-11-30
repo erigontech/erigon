@@ -2,7 +2,9 @@ package state_accessors
 
 import (
 	"bytes"
+	"io"
 
+	"github.com/DataDog/zstd"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -215,4 +217,44 @@ func ReadHistoricalSummaries(tx kv.Tx, l uint64, fn func(idx int, historicalSumm
 		}
 	}
 	return nil
+}
+
+func ReadCurrentEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.ListSSZ[*solid.PendingAttestation], error) {
+	v, err := tx.GetOne(kv.CurrentEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
+	reader := zstd.NewReader(bytes.NewReader(v))
+	fullSZZ, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := attestations.DecodeSSZ(fullSZZ, 0); err != nil {
+		return nil, err
+	}
+	return attestations, nil
+}
+
+func ReadPreviousEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.ListSSZ[*solid.PendingAttestation], error) {
+	v, err := tx.GetOne(kv.PreviousEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
+	reader := zstd.NewReader(bytes.NewReader(v))
+	fullSZZ, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := attestations.DecodeSSZ(fullSZZ, 0); err != nil {
+		return nil, err
+	}
+	return attestations, nil
 }

@@ -438,6 +438,11 @@ func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }
 
+func (b *BeaconState) SetCurrentEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) {
+	b.markLeaf(CurrentEpochParticipationLeafIndex)
+	b.currentEpochAttestations = attestations
+}
+
 func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations

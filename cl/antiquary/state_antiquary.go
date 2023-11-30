@@ -149,11 +149,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return next(k, k, v)
 	}
-	logLvl := log.LvlInfo
-	if to-s.currentState.Slot() < 96 {
-		logLvl = log.LvlDebug
-	}
-	start := time.Now()
 
 	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
@@ -210,6 +205,11 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 	}
+	logLvl := log.LvlInfo
+	if to-s.currentState.Slot() < 96 {
+		logLvl = log.LvlDebug
+	}
+	start := time.Now()
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
