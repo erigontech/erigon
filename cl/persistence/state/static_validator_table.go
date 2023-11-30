@@ -36,22 +36,22 @@ type StaticValidator struct {
 
 // NewStaticValidatorFromValidator creates a new StaticValidator from a given Validator and Slot,
 // initializing the fields with the current state of the Validator at the given Slot.
-func NewStaticValidatorFromValidator(v solid.Validator, Slot uint64) *StaticValidator {
+func NewStaticValidatorFromValidator(v solid.Validator, slot uint64) *StaticValidator {
 	return &StaticValidator{
 		// Initializes each field with the current state of the validator.
-		withdrawalCredentials: []staticValidatorField[libcommon.Hash]{{Slot, v.WithdrawalCredentials()}},
-		slashed:               []staticValidatorField[bool]{{Slot, v.Slashed()}},
-		activationEligibility: []staticValidatorField[uint64]{{Slot, v.ActivationEligibilityEpoch()}},
-		activationEpoch:       []staticValidatorField[uint64]{{Slot, v.ActivationEpoch()}},
-		exitEpoch:             []staticValidatorField[uint64]{{Slot, v.ExitEpoch()}},
-		withdrawableEpoch:     []staticValidatorField[uint64]{{Slot, v.WithdrawableEpoch()}},
+		withdrawalCredentials: []staticValidatorField[libcommon.Hash]{{slot, v.WithdrawalCredentials()}},
+		slashed:               []staticValidatorField[bool]{{slot, v.Slashed()}},
+		activationEligibility: []staticValidatorField[uint64]{{slot, v.ActivationEligibilityEpoch()}},
+		activationEpoch:       []staticValidatorField[uint64]{{slot, v.ActivationEpoch()}},
+		exitEpoch:             []staticValidatorField[uint64]{{slot, v.ExitEpoch()}},
+		withdrawableEpoch:     []staticValidatorField[uint64]{{slot, v.WithdrawableEpoch()}},
 	}
 }
 
 // AddWithdrawalCredentials adds a new withdrawal credential entry to the validator.
 // This method is used to track changes in withdrawal credentials over time.
-func (s *StaticValidator) AddWithdrawalCredentials(Slot uint64, withdrawalCredentials libcommon.Hash) {
-	s.withdrawalCredentials = append(s.withdrawalCredentials, staticValidatorField[libcommon.Hash]{Slot, withdrawalCredentials})
+func (s *StaticValidator) AddWithdrawalCredentials(slot uint64, withdrawalCredentials libcommon.Hash) {
+	s.withdrawalCredentials = append(s.withdrawalCredentials, staticValidatorField[libcommon.Hash]{slot, withdrawalCredentials})
 }
 
 // cborStaticValidator is a struct used for CBOR serialization of StaticValidator data.
@@ -91,8 +91,8 @@ func (s *StaticValidator) Deserialize(r io.Reader) error {
 	return nil
 }
 
-func (s *StaticValidator) AddSlashed(Slot uint64, slashed bool) {
-	s.slashed = append(s.slashed, staticValidatorField[bool]{Slot, slashed})
+func (s *StaticValidator) AddSlashed(slot uint64, slashed bool) {
+	s.slashed = append(s.slashed, staticValidatorField[bool]{slot, slashed})
 }
 
 func (s *StaticValidator) AddActivationEligibility(slot uint64, activationEligibility uint64) {
@@ -112,10 +112,10 @@ func (s *StaticValidator) AddWithdrawableEpoch(slot uint64, withdrawableEpoch ui
 	s.withdrawableEpoch = append(s.withdrawableEpoch, staticValidatorField[uint64]{slot, withdrawableEpoch})
 }
 
-func (s *StaticValidator) WithdrawalCredentials(Slot uint64) libcommon.Hash {
+func (s *StaticValidator) WithdrawalCredentials(slot uint64) libcommon.Hash {
 	currIndex := 0
 	for i, v := range s.withdrawalCredentials {
-		if v.Slot > Slot {
+		if v.Slot > slot {
 			break
 		}
 		currIndex = i
@@ -123,10 +123,10 @@ func (s *StaticValidator) WithdrawalCredentials(Slot uint64) libcommon.Hash {
 	return s.withdrawalCredentials[currIndex].Field
 }
 
-func (s *StaticValidator) Slashed(Slot uint64) bool {
+func (s *StaticValidator) Slashed(slot uint64) bool {
 	currIndex := 0
 	for i, v := range s.slashed {
-		if v.Slot > Slot {
+		if v.Slot > slot {
 			break
 		}
 		currIndex = i
@@ -134,10 +134,10 @@ func (s *StaticValidator) Slashed(Slot uint64) bool {
 	return s.slashed[currIndex].Field
 }
 
-func (s *StaticValidator) ActivationEligibilityEpoch(Slot uint64) uint64 {
+func (s *StaticValidator) ActivationEligibilityEpoch(slot uint64) uint64 {
 	currIndex := 0
 	for i, v := range s.activationEligibility {
-		if v.Slot > Slot {
+		if v.Slot > slot {
 			break
 		}
 		currIndex = i
@@ -145,10 +145,10 @@ func (s *StaticValidator) ActivationEligibilityEpoch(Slot uint64) uint64 {
 	return s.activationEligibility[currIndex].Field
 }
 
-func (s *StaticValidator) ActivationEpoch(Slot uint64) uint64 {
+func (s *StaticValidator) ActivationEpoch(slot uint64) uint64 {
 	currIndex := 0
 	for i, v := range s.activationEpoch {
-		if v.Slot > Slot {
+		if v.Slot > slot {
 			break
 		}
 		currIndex = i
@@ -179,13 +179,13 @@ func (s *StaticValidator) WithdrawableEpoch(slot uint64) uint64 {
 	return s.withdrawableEpoch[currIndex].Field
 }
 
-func (s *StaticValidator) ToValidator(v solid.Validator, Slot uint64) {
-	v.SetWithdrawalCredentials(s.WithdrawalCredentials(Slot))
-	v.SetSlashed(s.Slashed(Slot))
-	v.SetActivationEligibilityEpoch(s.ActivationEligibilityEpoch(Slot))
-	v.SetActivationEpoch(s.ActivationEpoch(Slot))
-	v.SetExitEpoch(s.ExitEpoch(Slot))
-	v.SetWithdrawableEpoch(s.WithdrawableEpoch(Slot))
+func (s *StaticValidator) ToValidator(v solid.Validator, slot uint64) {
+	v.SetWithdrawalCredentials(s.WithdrawalCredentials(slot))
+	v.SetSlashed(s.Slashed(slot))
+	v.SetActivationEligibilityEpoch(s.ActivationEligibilityEpoch(slot))
+	v.SetActivationEpoch(s.ActivationEpoch(slot))
+	v.SetExitEpoch(s.ExitEpoch(slot))
+	v.SetWithdrawableEpoch(s.WithdrawableEpoch(slot))
 }
 
 type staticValidatorField[V any] struct {
@@ -197,6 +197,7 @@ type staticValidatorField[V any] struct {
 // It is used for tracking multiple validators and their state changes.
 type StaticValidatorTable struct {
 	validatorTable []*StaticValidator
+	slot           uint64
 	sync           sync.RWMutex // Mutex for safe concurrent access.
 }
 
@@ -207,53 +208,53 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 	}
 }
 
-func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, Slot uint64) error {
+func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, Slot))
+	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
 	if validatorIndex >= uint64(len(s.validatorTable)) {
 		return fmt.Errorf("validator index mismatch")
 	}
 	return nil
 }
 
-func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, Slot uint64, withdrawalCredentials libcommon.Hash) error {
+func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uint64, withdrawalCredentials libcommon.Hash) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	if validatorIndex >= uint64(len(s.validatorTable)) {
 		return fmt.Errorf("validator index mismatch")
 	}
-	s.validatorTable[validatorIndex].AddWithdrawalCredentials(Slot, withdrawalCredentials)
+	s.validatorTable[validatorIndex].AddWithdrawalCredentials(slot, withdrawalCredentials)
 	return nil
 }
 
-func (s *StaticValidatorTable) AddSlashed(validatorIndex, Slot uint64, slashed bool) error {
+func (s *StaticValidatorTable) AddSlashed(validatorIndex, slot uint64, slashed bool) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	if validatorIndex >= uint64(len(s.validatorTable)) {
 		return fmt.Errorf("validator index mismatch")
 	}
-	s.validatorTable[validatorIndex].AddSlashed(Slot, slashed)
+	s.validatorTable[validatorIndex].AddSlashed(slot, slashed)
 	return nil
 }
 
-func (s *StaticValidatorTable) AddActivationEligibility(validatorIndex, Slot uint64, activationEligibility uint64) error {
+func (s *StaticValidatorTable) AddActivationEligibility(validatorIndex, slot uint64, activationEligibility uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	if validatorIndex >= uint64(len(s.validatorTable)) {
 		return fmt.Errorf("validator index mismatch")
 	}
-	s.validatorTable[validatorIndex].AddActivationEligibility(Slot, activationEligibility)
+	s.validatorTable[validatorIndex].AddActivationEligibility(slot, activationEligibility)
 	return nil
 }
 
-func (s *StaticValidatorTable) AddActivationEpoch(validatorIndex, Slot uint64, activationEpoch uint64) error {
+func (s *StaticValidatorTable) AddActivationEpoch(validatorIndex, slot uint64, activationEpoch uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 	if validatorIndex >= uint64(len(s.validatorTable)) {
 		return fmt.Errorf("validator index mismatch")
 	}
-	s.validatorTable[validatorIndex].AddActivationEpoch(Slot, activationEpoch)
+	s.validatorTable[validatorIndex].AddActivationEpoch(slot, activationEpoch)
 	return nil
 }
 
@@ -333,4 +334,17 @@ func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *Static
 	s.sync.RLock()
 	defer s.sync.RUnlock()
 	return s.validatorTable[validatorIndex]
+}
+
+// This is for versioning
+func (s *StaticValidatorTable) SetSlot(slot uint64) {
+	s.sync.Lock()
+	defer s.sync.Unlock()
+	s.slot = slot
+}
+
+func (s *StaticValidatorTable) Slot() uint64 {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return s.slot
 }

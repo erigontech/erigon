@@ -42,22 +42,23 @@ type Antiquary struct {
 	currentState *state.CachingBeaconState
 }
 
-func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
-		mainDB:     mainDB,
-		dirs:       dirs,
-		downloader: downloader,
-		logger:     logger,
-		sn:         sn,
-		beaconDB:   beaconDB,
-		ctx:        ctx,
-		backfilled: backfilled,
-		cfg:        cfg,
-		states:     states,
-		snReader:   reader,
-		fs:         fs,
+		mainDB:          mainDB,
+		dirs:            dirs,
+		downloader:      downloader,
+		logger:          logger,
+		sn:              sn,
+		beaconDB:        beaconDB,
+		ctx:             ctx,
+		backfilled:      backfilled,
+		cfg:             cfg,
+		states:          states,
+		snReader:        reader,
+		fs:              fs,
+		validatorsTable: validatorsTable,
 	}
 }
 
@@ -253,6 +254,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
+	a.validatorsTable.SetSlot(to)
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
 		return err
 	}

@@ -64,7 +64,7 @@ func excludeDuplicatesIdentity() etl.LoadFunc {
 
 func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
-	reqRetryTimer := time.NewTicker(3 * time.Second)
+	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
 	defer reqRetryTimer.Stop()
 	if !initial_state.IsGenesisStateSupported(clparams.NetworkType(s.cfg.DepositNetworkID)) {
 		s.logger.Warn("Genesis state is not supported for this network, no historical states data will be available")
@@ -208,7 +208,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.collectGenesisState(compressedWriter, s.currentState, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 			return err
 		}
-		s.validatorsTable = state_accessors.NewStaticValidatorTable()
 	}
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)

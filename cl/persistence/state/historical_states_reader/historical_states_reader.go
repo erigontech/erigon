@@ -1,6 +1,7 @@
 package historical_states_reader
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,14 +15,13 @@ import (
 )
 
 type HistoricalStatesReader struct {
-	cfg                            *clparams.BeaconChainConfig
-	genesisCfg                     *clparams.GenesisConfig
-	fs                             afero.Fs                              // some data is on filesystem to avoid database fragmentation
-	validatorTable                 *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
-	validatorTableLastSlotAccessed uint64
-	lock                           sync.RWMutex
-	blockReader                    freezeblocks.BeaconSnapshotReader
-	genesisState                   *state.CachingBeaconState
+	cfg            *clparams.BeaconChainConfig
+	genesisCfg     *clparams.GenesisConfig
+	fs             afero.Fs                              // some data is on filesystem to avoid database fragmentation
+	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
+	lock           sync.RWMutex
+	blockReader    freezeblocks.BeaconSnapshotReader
+	genesisState   *state.CachingBeaconState
 }
 
 // class BeaconState(Container):
@@ -67,12 +67,13 @@ type HistoricalStatesReader struct {
 //     # Deep history valid from Capella onwards
 //     historical_summaries: List[HistoricalSummary, HISTORICAL_ROOTS_LIMIT]  # [New in Capella]
 
-func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, fs afero.Fs, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
+func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, fs afero.Fs, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
 	return &HistoricalStatesReader{
-		cfg:          cfg,
-		fs:           fs,
-		blockReader:  blockReader,
-		genesisState: genesisState,
+		cfg:            cfg,
+		fs:             fs,
+		blockReader:    blockReader,
+		genesisState:   genesisState,
+		validatorTable: validatorTable,
 	}
 }
 
@@ -93,7 +94,8 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 	}
 
 	// If this happens, we need to update our static tables
-	if latestProcessedState > r.validatorTableLastSlotAccessed {
+	if slot > latestProcessedState || slot > r.validatorTable.Slot() {
+		return nil, fmt.Errorf("slot %d is greater than latest processed state %d", slot, latestProcessedState)
 	}
 
 	if slot == 0 {

@@ -107,7 +107,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}
 	}
 
-	antiq := antiquary.NewAntiquary(ctx, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states, af)
+	vTables := state_accessors.NewStaticValidatorTable()
+	antiq := antiquary.NewAntiquary(ctx, vTables, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states, af)
 	// Create the antiquary
 	if snDownloader != nil {
 		go func() {
