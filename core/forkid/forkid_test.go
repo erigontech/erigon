@@ -154,6 +154,15 @@ func TestCreation(t *testing.T) {
 				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 0}},        // First Agra block
 			},
 		},
+		// Amoy test cases
+		{
+			params.AmoyChainConfig,
+			params.AmoyGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0xbe06a477), Next: 73100}},
+				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 0}}, // First London, Jaipur, Delhi, Indore, Agra
+			},
+		},
 		// Bor mainnet test cases
 		{
 			params.BorMainnetChainConfig,

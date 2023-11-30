@@ -121,7 +121,7 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.Aggre
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.v2: %t, blocks=%d, segments=%d, indices=%d\n\n", snapshots.Cfg().Enabled, snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 	h3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err

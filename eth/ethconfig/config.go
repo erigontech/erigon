@@ -103,9 +103,6 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
-
-	// applies if SilkwormLibraryPath is set
-	SilkwormExecution: true,
 }
 
 func init() {
@@ -256,10 +253,9 @@ type Config struct {
 	ForcePartialCommit bool
 
 	// Embedded Silkworm support
-	SilkwormLibraryPath string
-	SilkwormExecution   bool
-	SilkwormRpcDaemon   bool
-	SilkwormSentry      bool
+	SilkwormExecution bool
+	SilkwormRpcDaemon bool
+	SilkwormSentry    bool
 
 	DisableTxPoolGossip bool
 }
@@ -281,6 +277,7 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.SepoliaChainName:    {},
 	networkname.GoerliChainName:     {},
 	networkname.MumbaiChainName:     {},
+	networkname.AmoyChainName:       {},
 	networkname.BorMainnetChainName: {},
 	networkname.GnosisChainName:     {},
 	networkname.ChiadoChainName:     {},
