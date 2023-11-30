@@ -168,13 +168,14 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 
 		if strings.HasPrefix(webseed, "v1:") {
-			if !strings.HasPrefix(webseed[3:], "https:") {
+			withoutVerisonPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
 				webseedS3Providers = append(webseedS3Providers, webseed)
 				continue
 			}
-			uri, err := url.ParseRequestURI(webseed[3:])
+			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
 			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", webseed[3:])
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
 				continue
 			}
 			webseedHttpProviders = append(webseedHttpProviders, uri)
