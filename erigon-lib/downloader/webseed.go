@@ -261,10 +261,10 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] get .torrent file from webseed", "name", name)
+				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := saveTorrent(tPath, res); err != nil {
 					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
