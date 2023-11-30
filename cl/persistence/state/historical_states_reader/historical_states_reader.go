@@ -255,6 +255,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Withdrawals
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
+	// Deep history valid from Capella onwards
 	historicalSummaries := solid.NewDynamicListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit))
 	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
 		historicalSummaries.Append(historicalSummary)
@@ -263,7 +264,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, err
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
-
 	return ret, nil
 }
 
@@ -514,4 +514,16 @@ func (r *HistoricalStatesReader) getInitialDumpForUint64List(tx kv.Tx, genesisFi
 		return nil, err
 	}
 	return currentList, nil
+}
+
+func (r *HistoricalStatesReader) readValidatorsForHistoricalState(slot, validatorSetLength uint64) (*solid.ValidatorSet, error) {
+	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
+	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
+	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+		if validatorIndex >= validatorSetLength {
+			return false
+		}
+		validator.ToValidator(out.Get(int(validatorIndex)), slot)
+		return true
+	})
 }

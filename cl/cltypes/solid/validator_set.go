@@ -52,6 +52,14 @@ func NewValidatorSet(c int) *ValidatorSet {
 	}
 }
 
+func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
+	return &ValidatorSet{
+		c:      c,
+		l:      l,
+		buffer: make([]byte, l*validatorSize),
+	}
+}
+
 func (v *ValidatorSet) Bytes() []byte {
 	return v.buffer[:v.l*validatorSize]
 }

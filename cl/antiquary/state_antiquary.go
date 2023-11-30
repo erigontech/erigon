@@ -463,6 +463,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
+	rofl := time.Now()
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if _, ok := changedValidators[validatorIndex]; !ok {
 			return true
@@ -476,6 +477,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		return true
 	})
+	if err != nil {
+		return err
+	}
+	fmt.Println("rofl", time.Since(rofl))
 
 	log.Info("Historical antiquated", "slot", s.currentState.Slot(), "latency", time.Since(start))
 	return rwTx.Commit()
