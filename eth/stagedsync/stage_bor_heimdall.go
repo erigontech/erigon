@@ -294,8 +294,10 @@ func BorHeimdallForward(
 			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
 
 			if snap == nil && blockNum <= chain.FrozenBlocks() {
-				initValidatorSets(ctx, snap, tx, cfg.blockReader, cfg.chainConfig.Bor,
+				snap, err = initValidatorSets(ctx, snap, tx, cfg.blockReader, cfg.chainConfig.Bor,
 					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+
+				return fmt.Errorf("can't initialise validator sets: %w", err)
 			}
 
 			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
@@ -654,7 +656,7 @@ func initValidatorSets(
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
 	logger log.Logger,
-	logPrefix string) error {
+	logPrefix string) (*bor.Snapshot, error) {
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -669,17 +671,17 @@ func initValidatorSets(
 			// get validators and current span
 			zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			var zeroSpan span.HeimdallSpan
 			if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
-				return err
+				return nil, err
 			}
 
 			// new snap shot
 			snap = bor.NewSnapshot(config, signatures, 0, hash, zeroSpan.ValidatorSet.Validators, logger)
 			if err := snap.Store(snapDb); err != nil {
-				return fmt.Errorf("snap.Store (0): %w", err)
+				return nil, fmt.Errorf("snap.Store (0): %w", err)
 			}
 			logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
 			g := errgroup.Group{}
@@ -704,12 +706,12 @@ func initValidatorSets(
 					})
 				}
 				if header == nil {
-					return fmt.Errorf("missing header persisting validator sets: (inside loop at %d)", i)
+					return nil, fmt.Errorf("missing header persisting validator sets: (inside loop at %d)", i)
 				}
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
 					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-						return fmt.Errorf("snap.Apply (inside loop): %w", err)
+						return nil, fmt.Errorf("snap.Apply (inside loop): %w", err)
 					}
 					parentHeader = initialHeaders[len(initialHeaders)-1]
 					initialHeaders = initialHeaders[:0]
@@ -721,12 +723,12 @@ func initValidatorSets(
 				}
 			}
 			if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-				return fmt.Errorf("snap.Apply (outside loop): %w", err)
+				return nil, fmt.Errorf("snap.Apply (outside loop): %w", err)
 			}
 		}
 	}
 
-	return nil
+	return snap, nil
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
