@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/DataDog/zstd"
+	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -228,7 +228,11 @@ func ReadCurrentEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.List
 		return nil, nil
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
-	reader := zstd.NewReader(bytes.NewReader(v))
+	reader, err := zstd.NewReader(bytes.NewReader(v))
+	if err != nil {
+		return nil, err
+	}
+
 	fullSZZ, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
@@ -248,7 +252,10 @@ func ReadPreviousEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.Lis
 		return nil, nil
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
-	reader := zstd.NewReader(bytes.NewReader(v))
+	reader, err := zstd.NewReader(bytes.NewReader(v))
+	if err != nil {
+		return nil, err
+	}
 	fullSZZ, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
