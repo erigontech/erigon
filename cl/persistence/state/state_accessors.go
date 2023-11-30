@@ -185,7 +185,7 @@ func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommi
 	return
 }
 
-func ReadHistoricalRootsRange(tx kv.Tx, l uint64, fn func(idx int, root libcommon.Hash) error) error {
+func ReadHistoricalRoots(tx kv.Tx, l uint64, fn func(idx int, root libcommon.Hash) error) error {
 	for i := 0; i < int(l); i++ {
 		key := base_encoding.Encode64ToBytes4(uint64(i))
 		v, err := tx.GetOne(kv.HistoricalRoots, key)
