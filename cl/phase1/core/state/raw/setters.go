@@ -366,6 +366,11 @@ func (b *BeaconState) SetInactivityScores(scores []uint64) {
 	b.markLeaf(InactivityScoresLeafIndex)
 }
 
+func (b *BeaconState) SetInactivityScoresRaw(scores solid.Uint64VectorSSZ) {
+	b.inactivityScores = scores
+	b.markLeaf(InactivityScoresLeafIndex)
+}
+
 func (b *BeaconState) AddInactivityScore(score uint64) {
 	b.inactivityScores.Append(score)
 	b.markLeaf(InactivityScoresLeafIndex)
@@ -460,4 +465,15 @@ func (b *BeaconState) SetBlockRoots(roots solid.HashVectorSSZ) {
 func (b *BeaconState) SetStateRoots(roots solid.HashVectorSSZ) {
 	b.markLeaf(StateRootsLeafIndex)
 	b.stateRoots = roots
+}
+
+// SetBlockRoots sets the block roots of the BeaconState.
+func (b *BeaconState) SetBalances(balances solid.Uint64VectorSSZ) {
+	b.markLeaf(BalancesLeafIndex)
+	b.balances = balances
+}
+
+func (b *BeaconState) SetSlashings(slashings solid.Uint64VectorSSZ) {
+	b.markLeaf(SlashingsLeafIndex)
+	b.slashings = slashings
 }

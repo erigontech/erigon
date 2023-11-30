@@ -1,9 +1,13 @@
 package historical_states_reader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"path"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -15,6 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
+)
+
+const (
+	subDivisionFolderSize = 10_000
+	slotsPerDumps         = 2048
 )
 
 type HistoricalStatesReader struct {
@@ -167,6 +176,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
 	// Registry
+	balances, err := r.reconstructDiffedUint64List(tx, slot, r.genesisState.Balances(), kv.ValidatorBalance, "balances")
+	if err != nil {
+		return nil, err
+	}
+	ret.SetBalances(balances)
 
 	// Randomness
 	randaoMixes := solid.NewHashList(int(r.cfg.EpochsPerHistoricalVector))
@@ -175,7 +189,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetRandaoMixes(randaoMixes)
 	// Slashings
-
+	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, r.genesisState.Slashings(), kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
+	if err != nil {
+		return nil, err
+	}
+	ret.SetSlashings(slashings)
 	// Participation
 
 	// Finality
@@ -197,6 +215,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
 	// Inactivity
+	inactivityScores, err := r.reconstructDiffedUint64Vector(tx, slot, r.genesisState.InactivityScores(), kv.InactivityScores, int(r.cfg.EpochsPerSlashingsVector))
+	if err != nil {
+		return nil, err
+	}
+	ret.SetInactivityScoresRaw(inactivityScores)
 
 	// Sync
 	syncCommitteeSlot := r.cfg.RoundSlotToSyncCommitteePeriod(slot)
@@ -350,5 +373,145 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	}
 	out.Set(int(slot%r.cfg.EpochsPerHistoricalVector), common.BytesToHash(intraRandaoMix))
 	return nil
+}
 
+func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint64, genesisField solid.Uint64ListSSZ, diffBucket string, fileSuffix string) (solid.Uint64ListSSZ, error) {
+	// Read the file
+	freshDumpSlot := slot - slot%slotsPerDumps
+	_, filePath := epochToPaths(freshDumpSlot, r.cfg, fileSuffix)
+	file, err := r.fs.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the diff file
+	zstdReader, err := zstd.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer zstdReader.Close()
+	currentList, err := r.getInitialDumpForUint64List(tx, genesisField, slot, diffBucket, fileSuffix)
+	if err != nil {
+		return nil, err
+	}
+	out := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+
+	if freshDumpSlot == slot {
+		return out, out.DecodeSSZ(currentList, 0)
+	}
+	// now start diffing
+	diffCursor, err := tx.Cursor(diffBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer diffCursor.Close()
+	_, _, err = diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return nil, err
+	}
+	for k, v, err := diffCursor.Next(); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) != slot; k, v, err = diffCursor.Next() {
+		if len(k) != 4 {
+			return nil, fmt.Errorf("invalid key %x", k)
+		}
+		if base_encoding.Decode64FromBytes4(k) > slot {
+			return nil, fmt.Errorf("diff not found for slot %d", slot)
+		}
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, out.DecodeSSZ(currentList, 0)
+}
+
+func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, genesisField solid.Uint64VectorSSZ, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
+	freshDumpSlot := slot - slot%slotsPerDumps
+	diffCursor, err := tx.Cursor(diffBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer diffCursor.Close()
+
+	var currentList []byte
+	if freshDumpSlot == 0 {
+		currentList, err = genesisField.EncodeSSZ(nil)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
+		if err != nil {
+			return nil, err
+		}
+		if k == nil {
+			return nil, fmt.Errorf("diff not found for slot %d", slot)
+		}
+		var b bytes.Buffer
+		if _, err := b.Write(v); err != nil {
+			return nil, err
+		}
+		// Read the diff file
+		zstdReader, err := zstd.NewReader(&b)
+		if err != nil {
+			return nil, err
+		}
+		defer zstdReader.Close()
+
+		currentList, err = io.ReadAll(zstdReader)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if freshDumpSlot == slot {
+		out := solid.NewUint64VectorSSZ(size)
+		return out, out.DecodeSSZ(currentList, 0)
+	}
+
+	for k, v, err := diffCursor.Next(); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) != slot; k, v, err = diffCursor.Next() {
+		if len(k) != 4 {
+			return nil, fmt.Errorf("invalid key %x", k)
+		}
+		if base_encoding.Decode64FromBytes4(k) > slot {
+			return nil, fmt.Errorf("diff not found for slot %d", slot)
+		}
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := solid.NewUint64VectorSSZ(size)
+	return out, out.DecodeSSZ(currentList, 0)
+}
+
+func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
+}
+
+func (r *HistoricalStatesReader) getInitialDumpForUint64List(tx kv.Tx, genesisField solid.Uint64ListSSZ, slot uint64, diffBucket string, fileSuffix string) ([]byte, error) {
+	freshDumpSlot := slot - slot%slotsPerDumps
+
+	if freshDumpSlot == 0 {
+		return genesisField.EncodeSSZ(nil)
+	}
+
+	_, filePath := epochToPaths(freshDumpSlot, r.cfg, fileSuffix)
+	file, err := r.fs.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the diff file
+	zstdReader, err := zstd.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer zstdReader.Close()
+	currentList, err := io.ReadAll(zstdReader)
+	if err != nil {
+		return nil, err
+	}
+	return currentList, nil
 }

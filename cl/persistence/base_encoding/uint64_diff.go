@@ -207,6 +207,7 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 	if err != nil {
 		return nil, err
 	}
+	defer decompressor.Close()
 
 	temp := make([]byte, 8)
 	currIndex := 0
@@ -302,6 +303,7 @@ func ApplyCompressedSerializedByteListDiff(old, out []byte, diff []byte) ([]byte
 	if err != nil {
 		return nil, err
 	}
+	defer decompressor.Close()
 
 	bytesClock := 64
 
