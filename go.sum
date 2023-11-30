@@ -292,6 +292,8 @@ github.com/erigontech/mdbx-go v0.27.21 h1:Pv47QIiRXR8Nv+nltZteLm4xkRwuvqmOCjzZj9
 github.com/erigontech/mdbx-go v0.27.21/go.mod h1:FAMxbOgqOnRDx51j8HjuJZIgznbDwjX7LItd+/UWyA4=
 github.com/erigontech/silkworm-go v0.6.0 h1:fEGifV+kb6slayhmNowLjVTerWMycQaBNaYea3O4KEI=
 github.com/erigontech/silkworm-go v0.6.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
+github.com/erigontech/silkworm-go v0.7.0 h1:LBp9DGB6PTIbDiqUqLhqgDZmTjjUIMEjNFqO6zMeuFM=
+github.com/erigontech/silkworm-go v0.7.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c h1:CndMRAH4JIwxbW8KYq6Q+cGWcGHz0FjGR3QqcInWcW0=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c/go.mod h1:AzA8Lj6YtixmJWL+wkKoBGsLWy9gFrAzi4g+5bCKwpY=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
