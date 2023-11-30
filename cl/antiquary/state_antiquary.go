@@ -258,7 +258,8 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 		},
 		OnEpochBoundary: func(epoch uint64) error {
 			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
-			if err := checkpoints.Collect(base_encoding.Encode64ToBytes4(slot), v); err != nil {
+			k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
+			if err := checkpoints.Collect(k, v); err != nil {
 				return err
 			}
 			// truncate the file
@@ -271,10 +272,12 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return stateRoots.Collect(base_encoding.Encode64ToBytes4(s.currentState.Slot()), root[:])
 		},
 		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
-			return nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
+			roundedSlot := s.cfg.RoundSlotToSyncCommitteePeriod(slot)
+			return nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
 		},
 		OnNewCurrentSyncCommittee: func(committee *solid.SyncCommittee) error {
-			return currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), committee[:])
+			roundedSlot := s.cfg.RoundSlotToSyncCommitteePeriod(slot)
+			return currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
 		},
 		OnAppendEth1Data: func(data *cltypes.Eth1Data) error {
 			vote, err := data.EncodeSSZ(nil)

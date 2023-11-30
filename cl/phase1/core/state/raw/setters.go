@@ -417,3 +417,33 @@ func (b *BeaconState) ResetPreviousEpochAttestations() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }
+
+// SetGenesisTime sets the genesis time of the BeaconState.
+func (b *BeaconState) SetGenesisTime(time uint64) {
+	b.markLeaf(GenesisTimeLeafIndex)
+	b.genesisTime = time
+}
+
+// SetGenesisValidatorsRoot sets the genesis validators root of the BeaconState.
+func (b *BeaconState) SetGenesisValidatorsRoot(root libcommon.Hash) {
+	b.markLeaf(GenesisValidatorsRootLeafIndex)
+	b.genesisValidatorsRoot = root
+}
+
+// SetBlockRoots sets the block roots of the BeaconState.
+func (b *BeaconState) SetBlockRoots(roots solid.HashVectorSSZ) {
+	b.markLeaf(BlockRootsLeafIndex)
+	b.blockRoots = roots
+}
+
+// SetStateRoots sets the state roots of the BeaconState.
+func (b *BeaconState) SetStateRoots(roots solid.HashVectorSSZ) {
+	b.markLeaf(StateRootsLeafIndex)
+	b.stateRoots = roots
+}
+
+// SetEth1DataVotes sets the Eth1 data votes of the BeaconState.
+func (b *BeaconState) SetEth1DataVotes(votes *solid.ListSSZ[*cltypes.Eth1Data]) {
+	b.markLeaf(Eth1DataVotesLeafIndex)
+	b.eth1DataVotes = votes
+}

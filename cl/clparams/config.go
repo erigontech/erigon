@@ -489,6 +489,15 @@ type BeaconChainConfig struct {
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 }
 
+func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
+	return slot - (slot % b.SlotsPerEpoch)
+}
+
+func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
+	slotsPerSyncCommitteePeriod := b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod
+	return slot - (slot % slotsPerSyncCommitteePeriod)
+}
+
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch, b.DenebForkEpoch}
 	stateVersion := Phase0Version
@@ -942,6 +951,22 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return b.CapellaForkVersion
 	case DenebVersion:
 		return b.DenebForkVersion
+	}
+	panic("invalid version")
+}
+
+func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version:
+		return 0
+	case AltairVersion:
+		return b.AltairForkEpoch
+	case BellatrixVersion:
+		return b.BellatrixForkEpoch
+	case CapellaVersion:
+		return b.CapellaForkEpoch
+	case DenebVersion:
+		return b.DenebForkEpoch
 	}
 	panic("invalid version")
 }

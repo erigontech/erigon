@@ -94,14 +94,16 @@ func (a *ApiHandler) getStateFork(r *http.Request) *beaconResponse {
 		return newApiErrorResponse(http.StatusNotFound, err.Error())
 	}
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	forkEpoch := a.beaconChainCfg.GetForkEpochByVersion(stateVersion)
 	currentVersion := a.beaconChainCfg.GetForkVersionByVersion(stateVersion)
 	previousVersion := a.beaconChainCfg.GetForkVersionByVersion(previousVersion(stateVersion))
 
 	return newBeaconResponse(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
-		Epoch:           epoch,
+		Epoch:           forkEpoch,
 	})
 }
 

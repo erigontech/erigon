@@ -1,6 +1,8 @@
 package state_accessors
 
 import (
+	"bytes"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
@@ -125,4 +127,74 @@ func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
 
 func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
+}
+
+func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) {
+	minimalState := &MinimalBeaconState{}
+	v, err := tx.GetOne(kv.MinimalBeaconState, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+
+	return minimalState, minimalState.Deserialize(buf)
+}
+
+// ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
+func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
+	c, err := tx.Cursor(kv.Checkpoints)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil, nil, nil
+	}
+	// Current, Pre
+	return solid.Checkpoint(v[0:40]), solid.Checkpoint(v[40:80]), solid.Checkpoint(v[80:120]), nil
+}
+
+// ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
+func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
+	c, err := tx.Cursor(kv.NextSyncCommittee)
+	if err != nil {
+		return nil, err
+	}
+
+	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	committee = &solid.SyncCommittee{}
+	copy(committee[:], v)
+	return
+}
+
+// ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
+func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
+	c, err := tx.Cursor(kv.CurrentSyncCommittee)
+	if err != nil {
+		return nil, err
+	}
+
+	_, v, err := c.Seek(base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	committee = &solid.SyncCommittee{}
+	copy(committee[:], v)
+	return
 }
