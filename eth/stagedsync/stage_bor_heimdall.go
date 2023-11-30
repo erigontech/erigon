@@ -297,7 +297,9 @@ func BorHeimdallForward(
 				snap, err = initValidatorSets(ctx, snap, tx, cfg.blockReader, cfg.chainConfig.Bor,
 					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
-				return fmt.Errorf("can't initialise validator sets: %w", err)
+				if err != nil {
+					return fmt.Errorf("can't initialise validator sets: %w", err)
+				}
 			}
 
 			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
@@ -667,6 +669,10 @@ func initValidatorSets(
 		if zeroHeader != nil {
 			// get checkpoint data
 			hash := zeroHeader.Hash()
+
+			if zeroSnap := loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); zeroSnap != nil {
+				return nil, nil
+			}
 
 			// get validators and current span
 			zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
