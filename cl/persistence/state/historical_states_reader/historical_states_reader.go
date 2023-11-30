@@ -175,12 +175,22 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
-	// Registry
-	balances, err := r.reconstructDiffedUint64List(tx, slot, r.genesisState.Balances(), kv.ValidatorBalance, "balances")
+	// Registry (Validators + Balances)
+	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
 		return nil, err
 	}
+	balances := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
+		return nil, err
+	}
 	ret.SetBalances(balances)
+
+	validatorSet, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
+	if err != nil {
+		return nil, err
+	}
+	ret.SetValidators(validatorSet)
 
 	// Randomness
 	randaoMixes := solid.NewHashList(int(r.cfg.EpochsPerHistoricalVector))
@@ -189,7 +199,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetRandaoMixes(randaoMixes)
 	// Slashings
-	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, r.genesisState.Slashings(), kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
+	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
 	if err != nil {
 		return nil, err
 	}
@@ -215,8 +225,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
 	// Inactivity
-	inactivityScores, err := r.reconstructDiffedUint64Vector(tx, slot, r.genesisState.InactivityScores(), kv.InactivityScores, int(r.cfg.EpochsPerSlashingsVector))
+	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
 	if err != nil {
+		return nil, err
+	}
+	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+	if err := inactivityScores.DecodeSSZ(inactivityScoresBytes, 0); err != nil {
 		return nil, err
 	}
 	ret.SetInactivityScoresRaw(inactivityScores)
@@ -375,7 +389,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	return nil
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint64, genesisField solid.Uint64ListSSZ, diffBucket string, fileSuffix string) (solid.Uint64ListSSZ, error) {
+func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint64, diffBucket string, fileSuffix string) ([]byte, error) {
 	// Read the file
 	freshDumpSlot := slot - slot%slotsPerDumps
 	_, filePath := epochToPaths(freshDumpSlot, r.cfg, fileSuffix)
@@ -391,14 +405,13 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		return nil, err
 	}
 	defer zstdReader.Close()
-	currentList, err := r.getInitialDumpForUint64List(tx, genesisField, slot, diffBucket, fileSuffix)
+	currentList, err := io.ReadAll(zstdReader)
 	if err != nil {
 		return nil, err
 	}
-	out := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 
 	if freshDumpSlot == slot {
-		return out, out.DecodeSSZ(currentList, 0)
+		return currentList, nil
 	}
 	// now start diffing
 	diffCursor, err := tx.Cursor(diffBucket)
@@ -422,10 +435,10 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 			return nil, err
 		}
 	}
-	return out, out.DecodeSSZ(currentList, 0)
+	return currentList, nil
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, genesisField solid.Uint64VectorSSZ, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
+func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
 	freshDumpSlot := slot - slot%slotsPerDumps
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
@@ -433,36 +446,29 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 	}
 	defer diffCursor.Close()
 
-	var currentList []byte
-	if freshDumpSlot == 0 {
-		currentList, err = genesisField.EncodeSSZ(nil)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
-		if err != nil {
-			return nil, err
-		}
-		if k == nil {
-			return nil, fmt.Errorf("diff not found for slot %d", slot)
-		}
-		var b bytes.Buffer
-		if _, err := b.Write(v); err != nil {
-			return nil, err
-		}
-		// Read the diff file
-		zstdReader, err := zstd.NewReader(&b)
-		if err != nil {
-			return nil, err
-		}
-		defer zstdReader.Close()
-
-		currentList, err = io.ReadAll(zstdReader)
-		if err != nil {
-			return nil, err
-		}
+	k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return nil, err
 	}
+	if k == nil {
+		return nil, fmt.Errorf("diff not found for slot %d", slot)
+	}
+	var b bytes.Buffer
+	if _, err := b.Write(v); err != nil {
+		return nil, err
+	}
+	// Read the diff file
+	zstdReader, err := zstd.NewReader(&b)
+	if err != nil {
+		return nil, err
+	}
+	defer zstdReader.Close()
+
+	currentList, err := io.ReadAll(zstdReader)
+	if err != nil {
+		return nil, err
+	}
+
 	if freshDumpSlot == slot {
 		out := solid.NewUint64VectorSSZ(size)
 		return out, out.DecodeSSZ(currentList, 0)
@@ -489,34 +495,7 @@ func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
 }
 
-func (r *HistoricalStatesReader) getInitialDumpForUint64List(tx kv.Tx, genesisField solid.Uint64ListSSZ, slot uint64, diffBucket string, fileSuffix string) ([]byte, error) {
-	freshDumpSlot := slot - slot%slotsPerDumps
-
-	if freshDumpSlot == 0 {
-		return genesisField.EncodeSSZ(nil)
-	}
-
-	_, filePath := epochToPaths(freshDumpSlot, r.cfg, fileSuffix)
-	file, err := r.fs.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read the diff file
-	zstdReader, err := zstd.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer zstdReader.Close()
-	currentList, err := io.ReadAll(zstdReader)
-	if err != nil {
-		return nil, err
-	}
-	return currentList, nil
-}
-
-func (r *HistoricalStatesReader) readValidatorsForHistoricalState(slot, validatorSetLength uint64) (*solid.ValidatorSet, error) {
+func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot, validatorSetLength uint64) (*solid.ValidatorSet, error) {
 	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
@@ -526,4 +505,12 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(slot, validato
 		validator.ToValidator(out.Get(int(validatorIndex)), slot)
 		return true
 	})
+	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorEffectiveBalance, "effective_balances")
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < int(validatorSetLength); i += 8 {
+		out.Get(i / 8).SetEffectiveBalanceFromBytes(bytesEffectiveBalances[i : i+8])
+	}
+	return out, nil
 }

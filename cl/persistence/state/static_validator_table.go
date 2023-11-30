@@ -26,12 +26,13 @@ import (
 // It keeps track of attributes such as withdrawal credentials, slashed status, and various epochs
 // that typically change at most twice during the validator's lifespan.
 type StaticValidator struct {
-	withdrawalCredentials []staticValidatorField[libcommon.Hash] // Tracks changes in withdrawal credentials.
-	slashed               []staticValidatorField[bool]           // Tracks changes in slashed status.
-	activationEligibility []staticValidatorField[uint64]         // Tracks changes in activation eligibility epoch.
-	activationEpoch       []staticValidatorField[uint64]         // Tracks changes in activation epoch.
-	exitEpoch             []staticValidatorField[uint64]         // Tracks changes in exit epoch.
-	withdrawableEpoch     []staticValidatorField[uint64]         // Tracks changes in withdrawable epoch.
+	publicKeys            []staticValidatorField[libcommon.Bytes48] // Tracks changes in public keys.
+	withdrawalCredentials []staticValidatorField[libcommon.Hash]    // Tracks changes in withdrawal credentials.
+	slashed               []staticValidatorField[bool]              // Tracks changes in slashed status.
+	activationEligibility []staticValidatorField[uint64]            // Tracks changes in activation eligibility epoch.
+	activationEpoch       []staticValidatorField[uint64]            // Tracks changes in activation epoch.
+	exitEpoch             []staticValidatorField[uint64]            // Tracks changes in exit epoch.
+	withdrawableEpoch     []staticValidatorField[uint64]            // Tracks changes in withdrawable epoch.
 }
 
 // NewStaticValidatorFromValidator creates a new StaticValidator from a given Validator and Slot,
@@ -39,6 +40,7 @@ type StaticValidator struct {
 func NewStaticValidatorFromValidator(v solid.Validator, slot uint64) *StaticValidator {
 	return &StaticValidator{
 		// Initializes each field with the current state of the validator.
+		publicKeys:            []staticValidatorField[libcommon.Bytes48]{{slot, v.PublicKey()}},
 		withdrawalCredentials: []staticValidatorField[libcommon.Hash]{{slot, v.WithdrawalCredentials()}},
 		slashed:               []staticValidatorField[bool]{{slot, v.Slashed()}},
 		activationEligibility: []staticValidatorField[uint64]{{slot, v.ActivationEligibilityEpoch()}},
@@ -56,6 +58,7 @@ func (s *StaticValidator) AddWithdrawalCredentials(slot uint64, withdrawalCreden
 
 // cborStaticValidator is a struct used for CBOR serialization of StaticValidator data.
 type cborStaticValidator struct {
+	PublicKeys            []staticValidatorField[libcommon.Bytes48]
 	WithdrawalCredentials []staticValidatorField[libcommon.Hash]
 	Slashed               []staticValidatorField[bool]
 	ActivationEligibility []staticValidatorField[uint64]
@@ -67,6 +70,7 @@ type cborStaticValidator struct {
 // Serialize encodes the StaticValidator data into CBOR format and writes it to the given writer.
 func (s *StaticValidator) Serialize(w io.Writer) error {
 	return cbor.Marshal(w, cborStaticValidator{
+		PublicKeys:            s.publicKeys,
 		WithdrawalCredentials: s.withdrawalCredentials,
 		Slashed:               s.slashed,
 		ActivationEligibility: s.activationEligibility,
@@ -88,6 +92,7 @@ func (s *StaticValidator) Deserialize(r io.Reader) error {
 	s.activationEpoch = tmp.ActivationEpoch
 	s.exitEpoch = tmp.ExitEpoch
 	s.withdrawableEpoch = tmp.WithdrawableEpoch
+	s.publicKeys = tmp.PublicKeys
 	return nil
 }
 
@@ -158,7 +163,6 @@ func (s *StaticValidator) ActivationEpoch(slot uint64) uint64 {
 
 func (s *StaticValidator) ExitEpoch(slot uint64) uint64 {
 	currIndex := 0
-	fmt.Println(s.exitEpoch)
 	for i, v := range s.exitEpoch {
 		if v.Slot > slot {
 			break
@@ -179,7 +183,19 @@ func (s *StaticValidator) WithdrawableEpoch(slot uint64) uint64 {
 	return s.withdrawableEpoch[currIndex].Field
 }
 
+func (s *StaticValidator) PublicKey(slot uint64) libcommon.Bytes48 {
+	currIndex := 0
+	for i, v := range s.publicKeys {
+		if v.Slot > slot {
+			break
+		}
+		currIndex = i
+	}
+	return s.publicKeys[currIndex].Field
+}
+
 func (s *StaticValidator) ToValidator(v solid.Validator, slot uint64) {
+	v.SetPublicKey(s.PublicKey(slot))
 	v.SetWithdrawalCredentials(s.WithdrawalCredentials(slot))
 	v.SetSlashed(s.Slashed(slot))
 	v.SetActivationEligibilityEpoch(s.ActivationEligibilityEpoch(slot))

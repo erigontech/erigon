@@ -204,7 +204,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(compressedWriter, s.currentState, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+		if err := s.collectGenesisState(compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 			return err
 		}
 	}
@@ -602,7 +602,7 @@ func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string)
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
-func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.CachingBeaconState, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings *etl.Collector, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -624,8 +624,24 @@ func (s *Antiquary) collectGenesisState(compressor *zstd.Encoder, state *state.C
 	if err != nil {
 		return err
 	}
+	if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressor, "balances"); err != nil {
+		return err
+	}
+	if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawBalances(), compressor); err != nil {
+		return err
+	}
+	if s.currentState.Version() >= clparams.AltairVersion {
+		if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+			return err
+		}
+	}
+	var commonBuffer bytes.Buffer
+	if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
+		return err
+	}
+
 	if state.Version() >= clparams.AltairVersion {
-		if err := s.antiquateField(context.Background(), slot, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+		if err := s.antiquateField(ctx, slot, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
 			return err
 		}
 

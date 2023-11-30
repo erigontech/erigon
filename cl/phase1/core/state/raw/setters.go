@@ -129,6 +129,11 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
+func (b *BeaconState) SetValidators(validators *solid.ValidatorSet) {
+	b.markLeaf(ValidatorsLeafIndex)
+	b.validators = validators
+}
+
 func (b *BeaconState) SetRandaoMixes(mixes solid.HashVectorSSZ) {
 	b.markLeaf(RandaoMixesLeafIndex)
 	b.randaoMixes = mixes
