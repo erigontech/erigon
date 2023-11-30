@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"runtime"
 	"strings"
 	"sync"
@@ -470,6 +471,11 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
+	ff, ok := snaptype.ParseFileName(name, name)
+	if ok && !ff.Seedable() {
+		return nil
+	}
+
 	// if we don't have the torrent file we build it if we have the .seg file
 	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
 	if err != nil {
