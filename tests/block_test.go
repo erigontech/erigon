@@ -47,9 +47,6 @@ func TestBlockchain(t *testing.T) {
 		// HistoryV3: doesn't produce receipts on execution by design
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
 		bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
-
-		//TODO: AlexSharov - need to fix this test
-		bt.skipLoad(`^ValidBlocks/bcForkStressTest/ForkStressTest.json`)
 	}
 
 	checkStateRoot := true
