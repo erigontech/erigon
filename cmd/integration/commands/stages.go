@@ -427,8 +427,17 @@ var cmdSetSnap = &cobra.Command{
 		defer borSn.Close()
 		defer agg.Close()
 
+		cfg := sn.Cfg()
+		flags := cmd.Flags()
+		if flags.Lookup("snapshots") != nil {
+			cfg.Enabled, err = flags.GetBool("snapshots")
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snap.ForceSetFlags(tx, sn.Cfg())
+			return snap.ForceSetFlags(tx, cfg)
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -601,6 +610,7 @@ func init() {
 	withConfig(cmdSetSnap)
 	withDataDir2(cmdSetSnap)
 	withChain(cmdSetSnap)
+	cmdSetPrune.Flags().Bool("snapshots", false, "")
 	rootCmd.AddCommand(cmdSetSnap)
 
 	withConfig(cmdForceSetHistoryV3)
