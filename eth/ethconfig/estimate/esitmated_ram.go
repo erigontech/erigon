@@ -14,7 +14,8 @@ type estimatedRamPerWorker datasize.ByteSize
 func (r estimatedRamPerWorker) Workers() int {
 	// 50% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM
 	maxWorkersForGivenMemory := (mmap.TotalMemory() / 2) / uint64(r)
-	return cmp.Min(AlmostAllCPUs(), int(maxWorkersForGivenMemory))
+	res := cmp.Min(AlmostAllCPUs(), int(maxWorkersForGivenMemory))
+	return cmp.Max(1, res) // must have at-least 1 worker
 }
 
 func (r estimatedRamPerWorker) WorkersHalf() int    { return cmp.Max(1, r.Workers()/2) }
