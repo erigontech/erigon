@@ -125,7 +125,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 		CurrentVersion:  utils.Uint32ToBytes4(r.cfg.GetForkVersionByVersion(stateVersion)),
 		Epoch:           r.cfg.GetForkEpochByVersion(stateVersion),
 	})
-
 	// History
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
@@ -193,7 +192,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
 	historicalSummaries := solid.NewDynamicListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit))
-	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
+	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
 		historicalSummaries.Append(historicalSummary)
 		return nil
 	}); err != nil {
