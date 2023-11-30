@@ -288,14 +288,26 @@ func BorHeimdallForward(
 			fetchTime += callTime
 		}
 
-		if err = PersistValidatorSets(u, ctx, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
-			return fmt.Errorf("persistValidatorSets: %w", err)
-		}
-		if !mine && header != nil {
-			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
-				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
-					return err
+		var snap *bor.Snapshot
+
+		if header != nil {
+			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+
+			if snap == nil && blockNum <= chain.FrozenBlocks() {
+				initValidatorSets(ctx, snap, tx, cfg.blockReader, cfg.chainConfig.Bor,
+					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+			}
+
+			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+				return fmt.Errorf("can't persist validator sets: %w", err)
+			}
+
+			if !mine {
+				sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+				if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
+					if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -377,6 +389,10 @@ func fetchAndWriteBorEvents(
 		from uint64
 		to   time.Time
 	)
+
+	if header == nil {
+		return 0, 0, 0, fmt.Errorf("can't fetch events for nil header")
+	}
 
 	blockNum := header.Number.Uint64()
 
@@ -485,10 +501,29 @@ func fetchAndWriteSpans(
 	return spanId, nil
 }
 
-// Not used currently
-func PersistValidatorSets(
-	u Unwinder,
+func loadSnapshot(blockNum uint64, hash libcommon.Hash, config *chain.BorConfig, recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	snapDb kv.RwDB,
+	logger log.Logger) *bor.Snapshot {
+
+	if s, ok := recents.Get(hash); ok {
+		return s
+	}
+
+	if blockNum%snapshotPersistInterval == 0 {
+		if s, err := bor.LoadSnapshot(config, signatures, snapDb, hash); err == nil {
+			logger.Trace("Loaded snapshot from disk", "number", blockNum, "hash", hash)
+			return s
+		}
+	}
+
+	return nil
+}
+
+func persistValidatorSets(
 	ctx context.Context,
+	snap *bor.Snapshot,
+	u Unwinder,
 	tx kv.Tx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
@@ -504,7 +539,6 @@ func PersistValidatorSets(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// Search for a snapshot in memory or on disk for checkpoints
-	var snap *bor.Snapshot
 
 	headers := make([]*types.Header, 0, 16)
 	var parent *types.Header
@@ -565,7 +599,67 @@ func PersistValidatorSets(
 		default:
 		}
 	}
-	if snap == nil && chain != nil && blockNum <= chain.FrozenBlocks() {
+
+	// check if snapshot is nil
+	if snap == nil {
+		return fmt.Errorf("unknown error while retrieving snapshot at block number %v", blockNum)
+	}
+
+	// Previous snapshot found, apply any pending headers on top of it
+	for i := 0; i < len(headers)/2; i++ {
+		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+	}
+
+	if len(headers) > 0 {
+		var err error
+		if snap, err = snap.Apply(parent, headers, logger); err != nil {
+			if snap != nil {
+				var badHash common.Hash
+				for _, header := range headers {
+					if header.Number.Uint64() == snap.Number+1 {
+						badHash = header.Hash()
+						break
+					}
+				}
+				u.UnwindTo(snap.Number, BadBlock(badHash, err))
+			} else {
+				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
+			}
+		}
+	}
+
+	recents.Add(snap.Hash, snap)
+
+	// If we've generated a new persistent snapshot, save to disk
+	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
+		if err := snap.Store(snapDb); err != nil {
+			return fmt.Errorf("snap.Store: %w", err)
+		}
+
+		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
+	}
+
+	return nil
+}
+
+func initValidatorSets(
+	ctx context.Context,
+	snap *bor.Snapshot,
+	tx kv.Tx,
+	blockReader services.FullBlockReader,
+	config *chain.BorConfig,
+	chain consensus.ChainHeaderReader,
+	blockNum uint64,
+	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	snapDb kv.RwDB,
+	logger log.Logger,
+	logPrefix string) error {
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if snap == nil {
 		// Special handling of the headers in the snapshot
 		zeroHeader := chain.GetHeaderByNumber(0)
 		if zeroHeader != nil {
@@ -630,45 +724,6 @@ func PersistValidatorSets(
 				return fmt.Errorf("snap.Apply (outside loop): %w", err)
 			}
 		}
-	}
-
-	// check if snapshot is nil
-	if snap == nil {
-		return fmt.Errorf("unknown error while retrieving snapshot at block number %v", blockNum)
-	}
-
-	// Previous snapshot found, apply any pending headers on top of it
-	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
-	}
-
-	if len(headers) > 0 {
-		var err error
-		if snap, err = snap.Apply(parent, headers, logger); err != nil {
-			if snap != nil {
-				var badHash common.Hash
-				for _, header := range headers {
-					if header.Number.Uint64() == snap.Number+1 {
-						badHash = header.Hash()
-						break
-					}
-				}
-				u.UnwindTo(snap.Number, BadBlock(badHash, err))
-			} else {
-				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
-			}
-		}
-	}
-
-	recents.Add(snap.Hash, snap)
-
-	// If we've generated a new persistent snapshot, save to disk
-	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
-		if err := snap.Store(snapDb); err != nil {
-			return fmt.Errorf("snap.Store: %w", err)
-		}
-
-		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return nil
