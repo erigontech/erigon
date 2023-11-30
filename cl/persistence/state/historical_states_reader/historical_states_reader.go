@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -124,6 +126,17 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 		Epoch:           r.cfg.GetForkEpochByVersion(stateVersion),
 	})
 
+	// History
+
+	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
+	if err := state_accessors.ReadHistoricalRootsRange(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
+		historicalRoots.Append(root)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	ret.SetHistoricalRoots(historicalRoots)
+
 	// Eth1
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
@@ -179,6 +192,14 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 	// Withdrawals
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
+	historicalSummaries := solid.NewDynamicListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit))
+	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
+		historicalSummaries.Append(historicalSummary)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	ret.SetHistoricalSummaries(historicalSummaries)
 
 	return ret, nil
 }

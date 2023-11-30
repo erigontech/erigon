@@ -124,6 +124,11 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
+func (b *BeaconState) SetHistoricalRoots(hRoots solid.HashListSSZ) {
+	b.markLeaf(HistoricalRootsLeafIndex)
+	b.historicalRoots = hRoots
+}
+
 func (b *BeaconState) SetValidatorSlashed(index int, slashed bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
@@ -325,6 +330,11 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 
 func (b *BeaconState) ResetHistoricalSummaries() {
 	b.historicalSummaries.Clear()
+	b.markLeaf(HistoricalSummariesLeafIndex)
+}
+
+func (b *BeaconState) SetHistoricalSummaries(l *solid.ListSSZ[*cltypes.HistoricalSummary]) {
+	b.historicalSummaries = l
 	b.markLeaf(HistoricalSummariesLeafIndex)
 }
 

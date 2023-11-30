@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -182,4 +183,36 @@ func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommi
 	committee = &solid.SyncCommittee{}
 	copy(committee[:], v)
 	return
+}
+
+func ReadHistoricalRootsRange(tx kv.Tx, l uint64, fn func(idx int, root libcommon.Hash) error) error {
+	for i := 0; i < int(l); i++ {
+		key := base_encoding.Encode64ToBytes4(uint64(i))
+		v, err := tx.GetOne(kv.HistoricalRoots, key)
+		if err != nil {
+			return err
+		}
+		if err := fn(i, libcommon.BytesToHash(v)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ReadHistoricalSummaries(tx kv.Tx, l uint64, fn func(idx int, historicalSummary *cltypes.HistoricalSummary) error) error {
+	for i := 0; i < int(l); i++ {
+		key := base_encoding.Encode64ToBytes4(uint64(i))
+		v, err := tx.GetOne(kv.HistoricalSummaries, key)
+		if err != nil {
+			return err
+		}
+		historicalSummary := &cltypes.HistoricalSummary{}
+		if err := historicalSummary.DecodeSSZ(v, 0); err != nil {
+			return err
+		}
+		if err := fn(i, historicalSummary); err != nil {
+			return err
+		}
+	}
+	return nil
 }
