@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -136,24 +135,34 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 }
 func (d *WebSeeds) callHttpProvider(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	baseUrl := webSeedProviderUrl.String()
-	request, err := http.NewRequest(http.MethodGet, path.Join(baseUrl, "manifest.txt"), nil)
+	ref, err := url.Parse("manifest.txt")
 	if err != nil {
 		return nil, err
 	}
+	u := webSeedProviderUrl.ResolveReference(ref)
+	fmt.Printf("alex: %s\n", u.String())
+	request, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.http: host=%s, url=%s, %w", webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath(), err)
+		return nil, fmt.Errorf("webseed.http: %w, host=%s, url=%s", err, webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath())
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.http: %w, host=%s, url=%s, ", webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath(), err)
+		return nil, fmt.Errorf("webseed.http: %w, host=%s, url=%s, ", err, webSeedProviderUrl.Hostname(), webSeedProviderUrl.EscapedPath())
 	}
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
 	for _, f := range fileNames {
-		response[f] = path.Join(baseUrl, f)
+		response[f], err = url.JoinPath(baseUrl, f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "host", webSeedProviderUrl.Hostname(), "url", webSeedProviderUrl.EscapedPath())
 	return response, nil

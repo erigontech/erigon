@@ -17,7 +17,6 @@
 package downloadercfg
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net"
 	"net/url"
@@ -169,7 +168,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 
 		if strings.HasPrefix(webseed, "v1:") {
-			fmt.Printf("c: %s\n", webseed[3:])
 			if !strings.HasPrefix(webseed[3:], "https:") {
 				webseedS3Providers = append(webseedS3Providers, webseed)
 				continue
