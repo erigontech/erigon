@@ -170,6 +170,7 @@ func ExecV3(ctx context.Context,
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+
 		if !parallel {
 			var err error
 			applyTx, err = chainDb.BeginRw(ctx) //nolint

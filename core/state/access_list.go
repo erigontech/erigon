@@ -60,6 +60,10 @@ func newAccessList() *accessList {
 		addresses: make(map[common.Address]int),
 	}
 }
+func (al *accessList) Reset() {
+	clear(al.addresses)
+	clear(al.slots)
+}
 
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {

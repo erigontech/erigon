@@ -199,6 +199,7 @@ func TestSetupGenesis(t *testing.T) {
 			}
 
 			if genesis.Hash() != test.wantHash {
+
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
