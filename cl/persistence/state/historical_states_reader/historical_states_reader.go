@@ -128,7 +128,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(tx kv.Tx, slot uint64) (*st
 	// History
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
-	if err := state_accessors.ReadHistoricalRootsRange(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
+	if err := state_accessors.ReadHistoricalRoots(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
 		historicalRoots.Append(root)
 		return nil
 	}); err != nil {
