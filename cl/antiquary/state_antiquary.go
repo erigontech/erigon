@@ -181,8 +181,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer nextSyncCommittee.Close()
 	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer currentSyncCommittee.Close()
-	epochAttestations := etl.NewCollector(kv.EpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer epochAttestations.Close()
+	currentEpochAttestations := etl.NewCollector(kv.CurrentEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer currentEpochAttestations.Close()
+	previousEpochAttestations := etl.NewCollector(kv.PreviousEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer previousEpochAttestations.Close()
 	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer eth1DataVotes.Close()
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -204,7 +206,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+		if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 			return err
 		}
 	}
@@ -320,12 +322,19 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 			if err != nil {
 				return err
 			}
-			if err := s.dumpPayload(base_encoding.Encode64ToBytes4((slot-1)/s.cfg.SlotsPerEpoch), encoded, epochAttestations, commonBuffer, compressedWriter); err != nil {
+			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot-1)), encoded, currentEpochAttestations, commonBuffer, compressedWriter); err != nil {
+				return err
+			}
+			encoded, err = s.currentState.PreviousEpochAttestations().EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
+			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot-1)), encoded, previousEpochAttestations, commonBuffer, compressedWriter); err != nil {
 				return err
 			}
 		}
 
-		if (slot-1)%slotsPerDumps == 0 {
+		if slot%slotsPerDumps == 0 {
 			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
 			}
@@ -451,7 +460,10 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := currentSyncCommittee.Load(rwTx, kv.CurrentSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := epochAttestations.Load(rwTx, kv.EpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := currentEpochAttestations.Load(rwTx, kv.CurrentEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := previousEpochAttestations.Load(rwTx, kv.PreviousEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := eth1DataVotes.Load(rwTx, kv.Eth1DataVotes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

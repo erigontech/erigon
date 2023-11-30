@@ -205,6 +205,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetSlashings(slashings)
 	// Participation
+	if ret.Version() == clparams.Phase0Version {
+		previousEpoch := state.PreviousEpoch(ret)
+
+	} else {
+
+	}
 
 	// Finality
 	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(slot))
@@ -224,6 +230,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
+	if ret.Version() < clparams.AltairVersion {
+		return ret, nil
+	}
 	// Inactivity
 	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
 	if err != nil {
@@ -513,4 +522,16 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		out.Get(i / 8).SetEffectiveBalanceFromBytes(bytesEffectiveBalances[i : i+8])
 	}
 	return out, nil
+}
+
+func (r *HistoricalStatesReader) readPendingEpochs(slot uint64, epochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
+	currentEpoch := slot / r.cfg.SlotsPerEpoch
+	var previousEpoch uint64
+	if currentEpoch > 0 {
+		previousEpoch = currentEpoch - 1
+	}
+	if currentEpoch == 0 {
+		return r.genesisState.CurrentEpochAttestations(), r.genesisState.PreviousEpochAttestations(), nil
+	}
+
 }
