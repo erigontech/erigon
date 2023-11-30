@@ -611,6 +611,7 @@ func init() {
 	withDataDir2(cmdSetSnap)
 	withChain(cmdSetSnap)
 	cmdSetPrune.Flags().Bool("snapshots", false, "")
+	must(cmdSetPrune.MarkFlagRequired("snapshots"))
 	rootCmd.AddCommand(cmdSetSnap)
 
 	withConfig(cmdForceSetHistoryV3)
