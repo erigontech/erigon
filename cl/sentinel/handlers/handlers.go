@@ -17,11 +17,13 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -64,7 +66,7 @@ type ConsensusHandlers struct {
 	genesisConfig  *clparams.GenesisConfig
 	ctx            context.Context
 	beaconDB       persistence.RawBeaconBlockChain
-	peerRateLimits map[string]map[string]*RateLimiter
+	peerRateLimits sync.Map
 }
 
 const (
@@ -81,7 +83,7 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		genesisConfig:  genesisConfig,
 		beaconConfig:   beaconConfig,
 		ctx:            ctx,
-		peerRateLimits: make(map[string]map[string]*RateLimiter),
+		peerRateLimits: sync.Map{},
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -114,15 +116,10 @@ func (limiter *RateLimiter) loadCounter() uint32 {
 }
 
 func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit uint32) error {
-	// Initialize
-	if _, ok := c.peerRateLimits[peerId]; !ok {
-		c.peerRateLimits[peerId] = make(map[string]*RateLimiter)
-	}
-	if _, ok := c.peerRateLimits[peerId][method]; !ok {
-		c.peerRateLimits[peerId][method] = &RateLimiter{counter: 0, lastRequestTime: time.Now(), limited: false}
-	}
+	key := utils.Keccak256([]byte(peerId), []byte(method))
 
-	limiter := c.peerRateLimits[peerId][method]
+	value, _ := c.peerRateLimits.LoadOrStore(key, &RateLimiter{counter: 0, lastRequestTime: time.Now(), limited: false})
+	limiter := value.(*RateLimiter)
 
 	// Check if the peer is in the punishment period
 	now := time.Now()
