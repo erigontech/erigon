@@ -328,7 +328,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		select {
 		case <-t.GotInfo():
 			stats.MetadataReady++
-			for _, peer := range t.PeerConns() {
+			peersOfThisFile := t.PeerConns()
+			for _, peer := range peersOfThisFile {
 				stats.ConnectionsTotal++
 				peers[peer.PeerID] = struct{}{}
 			}
@@ -339,11 +340,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					peersOfThisFile := make(map[torrent.PeerID]struct{}, 16)
-					for _, peer := range t.PeerConns() {
-						peersOfThisFile[peer.PeerID] = struct{}{}
+					rates := make([]string, 0, len(peersOfThisFile)*2)
+					for _, peer := range peersOfThisFile {
+						rates = append(rates, fmt.Sprintf("%s:%s=%s/s", peer.Network, peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
 					}
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
+					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile), "rates", strings.Join(rates, ","))
 				}
 			}
 		default:
