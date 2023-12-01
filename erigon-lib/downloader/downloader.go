@@ -350,7 +350,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						d.logger.Log(d.verbosity, "[snapshots] webseed rates", "file", t.Name(), "rates", strings.Join(webseedRates, ","))
 						rates := make([]string, 0, len(peersOfThisFile)*2)
 						for _, peer := range peersOfThisFile {
-							rates = append(rates, fmt.Sprintf("%s:%s=%s/s", peer.Network, peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
+							rates = append(rates, fmt.Sprintf("%s=%s/s", peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
 						}
 						d.logger.Log(d.verbosity, "[snapshots] bittorrent rates", "file", t.Name(), "rates", strings.Join(rates, ","))
 
