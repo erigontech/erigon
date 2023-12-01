@@ -20,21 +20,23 @@ jobs:
 #  tests:
 #    strategy:
 #      matrix:
-#        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+#        #        disable macos-11 until https://github.com/ledgerwatch/erigon/issues/8789
+#        #        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
+#        os: [ ubuntu-20.04 ] # list of os: https://github.com/actions/virtual-environments
 #    runs-on: ${{ matrix.os }}
 #
 #    steps:
 #      - uses: actions/checkout@v3
 #      - uses: actions/setup-go@v4
 #        with:
-#          go-version: '1.21'
+#          go-version: '1.20'
 #      - name: Install dependencies on Linux
 #        if: runner.os == 'Linux'
 #        run: sudo apt update && sudo apt install build-essential
-
+#
 #      - name: test-integration-caplin
 #        run: cd cl/spectest && make tests && make mainnet
-
+#
 #  tests-windows:
 #    strategy:
 #      matrix:
@@ -45,7 +47,7 @@ jobs:
 #      - uses: actions/checkout@v3
 #      - uses: actions/setup-go@v4
 #        with:
-#          go-version: '1.21'
+#          go-version: '1.20'
 #
 #      - uses: actions/cache@v3
 #        with:
@@ -55,8 +57,8 @@ jobs:
 #          key: chocolatey-${{ matrix.os }}
 #      - name: Install dependencies
 #        run: |
-#          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
-#          choco install cmake -y --no-progress --version 3.23.1
-
+#          choco upgrade mingw -y --no-progress --version 13.2.0
+#          choco install cmake -y --no-progress --version 3.27.8
+#
 #      - name: test-integration-caplin
 #        run: cd ./cl/spectest/ && .\wmake.ps1 Tests Mainnet
