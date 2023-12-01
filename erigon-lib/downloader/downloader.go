@@ -347,7 +347,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				break //of switch
 			}
 
-			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			if d.verbosity < log.LvlInfo {
 				break //of switch
 			}
