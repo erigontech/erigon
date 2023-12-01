@@ -46,7 +46,7 @@ type RateLimits struct {
 	statusLimit     uint32
 }
 
-const punishmentPeriod = 15 //mins
+const punishmentPeriod = 15 * time.Minute
 
 var defaultRateLimits = RateLimits{
 	pingLimit:       5000,
@@ -127,7 +127,7 @@ func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit u
 	// Check if the peer is in the punishment period
 	now := time.Now()
 	if limiter.limited {
-		punishmentEndTime := limiter.lastRequestTime.Add(punishmentPeriod * time.Minute)
+		punishmentEndTime := limiter.lastRequestTime.Add(punishmentPeriod)
 		if now.After(punishmentEndTime) {
 			limiter.limited = false
 		} else {
