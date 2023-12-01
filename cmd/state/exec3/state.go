@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -242,6 +243,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
+
+		logconfig := &logger.LogConfig{
+			DisableMemory:     true,
+			DisableStack:      true,
+			DisableStorage:    false,
+			DisableReturnData: false,
+			Debug:             true,
+		}
+		rw.vmCfg.Tracer = logger.NewStructLogger(logconfig)
+
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
