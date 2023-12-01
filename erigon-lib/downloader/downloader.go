@@ -341,18 +341,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if progress == 0 {
 					zeroProgress = append(zeroProgress, t.Name())
 				} else {
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
+					d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
 					if d.verbosity >= log.LvlInfo {
 						webseedRates := make([]string, 0, len(weebseedPeersOfThisFile)*2)
 						for _, peer := range weebseedPeersOfThisFile {
-							webseedRates = append(webseedRates, fmt.Sprintf("%s:%s=%s/s", peer.Network, peer.String(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
+							webseedRates = append(webseedRates, fmt.Sprintf("%s=%s/s", peer.String(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
 						}
-						d.logger.Log(d.verbosity, "[snapshots] webseed rates", "name", t.Name(), "rates", strings.Join(webseedRates, ","))
+						d.logger.Log(d.verbosity, "[snapshots] webseed rates", "file", t.Name(), "rates", strings.Join(webseedRates, ","))
 						rates := make([]string, 0, len(peersOfThisFile)*2)
 						for _, peer := range peersOfThisFile {
 							rates = append(rates, fmt.Sprintf("%s:%s=%s/s", peer.Network, peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable()))
 						}
-						d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "rates", strings.Join(rates, ","))
+						d.logger.Log(d.verbosity, "[snapshots] bittorrent rates", "file", t.Name(), "rates", strings.Join(rates, ","))
 
 					}
 
