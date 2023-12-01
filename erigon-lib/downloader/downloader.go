@@ -351,8 +351,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 								if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
 									webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
 								}
-							} else {
-
 							}
 						}
 						d.logger.Info(fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
