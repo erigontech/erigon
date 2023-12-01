@@ -420,99 +420,77 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	defer rwTx.Rollback()
 	start = time.Now()
 	log.Log(logLvl, "Stopped Caplin to load states")
-	rofl := time.Now()
 	// Now load.
 	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("effectiveBalance", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := randaoMixes.Load(rwTx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("randaoMixes", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := balances.Load(rwTx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("balances", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := proposers.Load(rwTx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("proposers", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := slashings.Load(rwTx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("slashings", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := blockRoots.Load(rwTx, kv.BlockRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("blockRoots", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := stateRoots.Load(rwTx, kv.StateRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("stateRoots", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := minimalBeaconStates.Load(rwTx, kv.MinimalBeaconState, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("minimalBeaconStates", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := inactivityScoresC.Load(rwTx, kv.InactivityScores, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("inactivityScoresC", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := intraRandaoMixes.Load(rwTx, kv.IntraRandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("intraRandaoMixes", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := checkpoints.Load(rwTx, kv.Checkpoints, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("checkpoints", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := nextSyncCommittee.Load(rwTx, kv.NextSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("nextSyncCommittee", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := currentSyncCommittee.Load(rwTx, kv.CurrentSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("currentSyncCommittee", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := currentEpochAttestations.Load(rwTx, kv.CurrentEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("currentEpochAttestations", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := previousEpochAttestations.Load(rwTx, kv.PreviousEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("previousEpochAttestations", time.Since(rofl))
-	rofl = time.Now()
+
 	if err := eth1DataVotes.Load(rwTx, kv.Eth1DataVotes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("eth1DataVotes", time.Since(rofl))
-	rofl = time.Now()
 	if err := stateEvents.Load(rwTx, kv.StateEvents, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	fmt.Println("stateEvents", time.Since(rofl))
-	rofl = time.Now()
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
-	fmt.Println("rofl", time.Since(rofl))
 
-	rofl = time.Now()
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if _, ok := changedValidators[validatorIndex]; !ok {
 			return true
@@ -529,7 +507,6 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("validatorsTable", time.Since(rofl))
 
 	log.Info("Historical antiquated", "slot", s.currentState.Slot(), "latency", time.Since(start))
 	return rwTx.Commit()
