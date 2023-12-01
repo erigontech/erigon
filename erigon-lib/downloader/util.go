@@ -98,20 +98,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		subs := historyFileRegex.FindStringSubmatch(name)
-		if len(subs) != 5 {
-			continue
-		}
-		// Check that it's seedable
-		from, err := strconv.ParseUint(subs[2], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
-		}
-		to, err := strconv.ParseUint(subs[3], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
-		}
-		if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
+		if !e3seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -119,6 +106,25 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	return res, nil
 }
 
+func e3seedable(name string) bool {
+	subs := historyFileRegex.FindStringSubmatch(name)
+	if len(subs) != 5 {
+		return false
+	}
+	// Check that it's seedable
+	from, err := strconv.ParseUint(subs[2], 10, 64)
+	if err != nil {
+		return false
+	}
+	to, err := strconv.ParseUint(subs[3], 10, 64)
+	if err != nil {
+		return false
+	}
+	if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
+		return false
+	}
+	return true
+}
 func ensureCantLeaveDir(fName, root string) (string, error) {
 	if filepath.IsAbs(fName) {
 		newFName, err := filepath.Rel(root, fName)
