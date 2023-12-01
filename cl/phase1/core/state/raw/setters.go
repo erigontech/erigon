@@ -283,10 +283,10 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) 
 }
 
 func (b *BeaconState) ResetEpochParticipation() {
+	b.previousEpochParticipation = b.currentEpochParticipation
 	if b.events.OnResetParticipation != nil {
 		b.events.OnResetParticipation(b.previousEpochParticipation)
 	}
-	b.previousEpochParticipation = b.currentEpochParticipation
 	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
@@ -446,6 +446,16 @@ func (b *BeaconState) SetCurrentEpochAttestations(attestations *solid.ListSSZ[*s
 func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations
+}
+
+func (b *BeaconState) SetCurrentEpochParticipation(participation *solid.BitList) {
+	b.markLeaf(CurrentEpochParticipationLeafIndex)
+	b.currentEpochParticipation = participation
+}
+
+func (b *BeaconState) SetPreviousEpochParticipation(participation *solid.BitList) {
+	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	b.previousEpochParticipation = participation
 }
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
