@@ -248,6 +248,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		if doms.TxNum() == _max {
+			fmt.Printf("alex: %d, %d\n", blockNum, execStage.BlockNumber)
 			blockNum++
 			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 			if err != nil {
