@@ -44,6 +44,18 @@ type DownloadStatistics struct {
 	StagePrefix      string  `json:"stagePrefix"`
 }
 
+type TorrentFile struct {
+	Name            string `json:"name"`
+	TotalBytes      uint64 `json:"totalBytes"`
+	DownloadedBytes uint64 `json:"downloadedBytes"`
+	SeedsCount      int    `json:"seedsCount"`
+	PeersCount      int    `json:"peersCount"`
+}
+
 func (ti DownloadStatistics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti TorrentFile) Type() Type {
 	return TypeOf(ti)
 }

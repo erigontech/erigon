@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -115,6 +116,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	if err := d.addTorrentFilesFromDisk(false); err != nil {
 		return nil, err
 	}
+
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
 	// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
 	d.wg.Add(1)
@@ -342,6 +344,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					for _, peer := range t.PeerConns() {
 						peersOfThisFile[peer.PeerID] = struct{}{}
 					}
+
+					diagnostics.Send(diagnostics.TorrentFile{
+						Name:            t.Name(),
+						TotalBytes:      uint64(t.Length()),
+						DownloadedBytes: uint64(t.BytesCompleted()),
+						SeedsCount:      len(t.Metainfo().UrlList),
+						PeersCount:      len(peersOfThisFile),
+					})
+
 					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 				}
 			}
@@ -351,6 +362,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
+	//fmt.Println("noMetadata", noMetadata)
+	//fmt.Println("zeroProgress", zeroProgress)
+
 	if len(noMetadata) > 0 {
 		amount := len(noMetadata)
 		if len(noMetadata) > 5 {
