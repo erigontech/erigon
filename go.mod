@@ -14,7 +14,7 @@ replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
-	github.com/99designs/gqlgen v0.17.33
+	github.com/99designs/gqlgen v0.17.40
 	github.com/Giulio2002/bls v0.0.0-20230906201036-c2330c97dc7d
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
@@ -83,7 +83,7 @@ require (
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.6
+	github.com/vektah/gqlparser/v2 v2.5.10
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/crypto v0.15.0
@@ -256,6 +256,7 @@ require (
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
+	github.com/sosodev/duration v1.1.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/supranational/blst v0.3.11 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
