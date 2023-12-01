@@ -345,8 +345,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					if d.verbosity >= log.LvlInfo {
 						webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 						for _, peer := range weebseedPeersOfThisFile {
-							fmt.Printf("a: %#v\n", peer.String())
-							fmt.Printf("a: %#v\n", strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
 							shortName := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
 							webseedRates = append(webseedRates, shortName, datasize.ByteSize(peer.DownloadRate()).HumanReadable())
 						}
