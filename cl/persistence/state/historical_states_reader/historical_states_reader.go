@@ -586,7 +586,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 			}
 			// apply the flags
 			for _, idx := range attestingIndicies {
-				for flagIndex, _ := range r.cfg.ParticipationWeights() {
+				for flagIndex := range r.cfg.ParticipationWeights() {
 					var flagParticipation cltypes.ParticipationFlags
 					if isCurrentEpoch {
 						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
