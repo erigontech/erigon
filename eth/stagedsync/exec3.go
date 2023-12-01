@@ -249,20 +249,25 @@ func ExecV3(ctx context.Context,
 		}
 		if doms.TxNum() == _max {
 			blockNum++
+			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
+			if err != nil {
+				return err
+			}
+			inputTxNum = _min
+		} else {
+			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
+			if err != nil {
+				return err
+			}
+
+			if doms.TxNum() > _min {
+				// if stopped in the middle of the block: start from beginning of block.
+				// first part will be executed in HistoryExecution mode
+				offsetFromBlockBeginning = doms.TxNum() - _min
+			}
+			inputTxNum = _min
 		}
 
-		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
-		if err != nil {
-			return err
-		}
-
-		if doms.TxNum() > _min {
-			// if stopped in the middle of the block: start from beginning of block.
-			// first part will be executed in HistoryExecution mode
-			offsetFromBlockBeginning = doms.TxNum() - _min
-		}
-
-		inputTxNum = _min
 		outputTxNum.Store(inputTxNum)
 
 		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
