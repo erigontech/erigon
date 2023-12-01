@@ -485,11 +485,11 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	// if we don't have the torrent file we build it if we have the .seg file
 	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
 	if err != nil {
-		return err
+		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	ts, err := loadTorrent(torrentFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
