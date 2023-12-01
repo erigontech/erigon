@@ -346,12 +346,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 						for _, peer := range weebseedPeersOfThisFile {
 							shortName := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
-							webseedRates = append(webseedRates, shortName, datasize.ByteSize(peer.DownloadRate()).HumanReadable())
+							webseedRates = append(webseedRates, shortName, fmt.Sprintf("%s/s", datasize.ByteSize(peer.DownloadRate()).String()))
 						}
 						d.logger.Info(fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
 						rates := make([]interface{}, 0, len(peersOfThisFile)*2)
 						for _, peer := range peersOfThisFile {
-							rates = append(rates, peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable())
+							rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", datasize.ByteSize(peer.DownloadRate()).String()))
 						}
 						d.logger.Info(fmt.Sprintf("[snapshots] bittorrent rates file=%s", t.Name()), rates...)
 					}
