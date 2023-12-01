@@ -489,7 +489,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 	ts, err := loadTorrent(torrentFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
