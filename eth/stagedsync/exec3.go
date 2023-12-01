@@ -247,14 +247,17 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+		//1371875000, 1371874909
+		//24018942
 		if doms.TxNum() == _max {
-			fmt.Printf("alex: %d, %d\n", blockNum, execStage.BlockNumber)
+			fmt.Printf("alex1: %d, %d\n", blockNum, execStage.BlockNumber)
 			blockNum++
 			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 			if err != nil {
 				return err
 			}
 			inputTxNum = _min
+			fmt.Printf("alex2: %d -> %d\n", doms.TxNum(), _min)
 		} else {
 			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 			if err != nil {
