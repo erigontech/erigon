@@ -42,7 +42,7 @@ type RateLimits struct {
 	statusLimit     int
 }
 
-const punishmentPeriod = 15 * time.Minute
+const punishmentPeriod = time.Minute
 
 var defaultRateLimits = RateLimits{
 	pingLimit:       5000,
@@ -66,6 +66,7 @@ type ConsensusHandlers struct {
 
 const (
 	SuccessfulResponsePrefix = 0x00
+	RateLimitedPrefix        = 0x02
 	ResourceUnavaiablePrefix = 0x03
 )
 
