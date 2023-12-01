@@ -155,10 +155,10 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 
 	fPath := filepath.Join(root, fName)
 	if dir2.FileExist(fPath + ".torrent") {
-		return
+		return fPath, nil
 	}
 	if !dir2.FileExist(fPath) {
-		return
+		return fPath, nil
 	}
 
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
