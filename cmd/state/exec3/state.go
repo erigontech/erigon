@@ -257,6 +257,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+
+		if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
+			ftracer.Flush(txTask.Tx)
+		}
+
 		if err != nil {
 			txTask.Error = err
 		} else {
