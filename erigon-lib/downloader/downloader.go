@@ -345,14 +345,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					if d.verbosity >= log.LvlInfo {
 						webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 						for _, peer := range weebseedPeersOfThisFile {
-							webseedRates = append(webseedRates, peer.String(), datasize.ByteSize(peer.DownloadRate()).HumanReadable())
+							fmt.Printf("a: %#v\n", peer.String())
+							fmt.Printf("a: %#v\n", strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
+							shortName := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+							webseedRates = append(webseedRates, shortName, datasize.ByteSize(peer.DownloadRate()).HumanReadable())
 						}
-						d.logger.Log(d.verbosity, fmt.Sprintf("[snapshots] webseed rates %s", t.Name()), webseedRates...)
+						d.logger.Log(d.verbosity, fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
 						rates := make([]interface{}, 0, len(peersOfThisFile)*2)
 						for _, peer := range peersOfThisFile {
 							rates = append(rates, peer.PeerClientName.Load(), datasize.ByteSize(peer.DownloadRate()).HumanReadable())
 						}
-						d.logger.Log(d.verbosity, fmt.Sprintf("[snapshots] webseed rates %s", t.Name()), rates...)
+						d.logger.Log(d.verbosity, fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), rates...)
 					}
 
 				}
