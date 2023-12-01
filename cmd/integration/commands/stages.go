@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -1506,27 +1507,26 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		//useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, logger)
-
 		var err error
 		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.OpenFolder(false) //TODO: open in read-only if erigon running?
-		if err != nil {
-			panic(err)
-		}
 
 		if useSnapshots {
-			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
+			g := &errgroup.Group{}
+			g.Go(func() error { return _allSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error { return _allBorSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error { return _aggSingleton.OpenFolder(false) }) //TODO: open in read-only if erigon running?
+			err := g.Wait()
+			if err != nil {
 				panic(err)
 			}
+
 			_allSnapshotsSingleton.LogStat()
-			if err := _allBorSnapshotsSingleton.ReopenFolder(); err != nil {
-				panic(err)
-			}
 			_allBorSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
