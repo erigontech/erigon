@@ -86,5 +86,9 @@ func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp
 }
 
 func (cr ChainReader) BorSpan(spanId uint64) []byte {
-	panic("")
+	spanBytes, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+	if err != nil {
+		log.Error("BorSpan failed", "err", err)
+	}
+	return spanBytes
 }

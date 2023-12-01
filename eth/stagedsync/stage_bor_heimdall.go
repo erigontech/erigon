@@ -142,31 +142,27 @@ func BorHeimdallForward(
 		}
 	}
 
-	if mine {
-		minedHeader := cfg.miningState.MiningBlock.Header
+	// if mine {
+	// 	minedHeader := cfg.miningState.MiningBlock.Header
 
-		if minedHeadNumber := minedHeader.Number.Uint64(); minedHeadNumber > headNumber {
-			// Whitelist service is called to check if the bor chain is
-			// on the cannonical chain according to milestones
-			if service != nil {
-				if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
-					logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
-					dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
-					s.state.UnwindTo(minedHeadNumber-1, ForkReset(minedHeader.Hash()))
-					return fmt.Errorf("mining on a wrong fork %d:%x", minedHeadNumber, minedHeader.Hash())
-				}
-			}
-		} else {
-			return fmt.Errorf("attempting to mine %d, which is behind current head: %d", minedHeadNumber, headNumber)
-		}
-	}
+	// 	if minedHeadNumber := minedHeader.Number.Uint64(); minedHeadNumber > headNumber {
+	// 		// Whitelist service is called to check if the bor chain is
+	// 		// on the cannonical chain according to milestones
+	// 		if service != nil {
+	// 			if !service.IsValidChain(minedHeadNumber, []*types.Header{minedHeader}) {
+	// 				logger.Debug("[BorHeimdall] Verification failed for mined header", "hash", minedHeader.Hash(), "height", minedHeadNumber, "err", err)
+	// 				dataflow.HeaderDownloadStates.AddChange(minedHeadNumber, dataflow.HeaderInvalidated)
+	// 				s.state.UnwindTo(minedHeadNumber-1, ForkReset(minedHeader.Hash()))
+	// 				return fmt.Errorf("mining on a wrong fork %d:%x", minedHeadNumber, minedHeader.Hash())
+	// 			}
+	// 		}
+	// 	} else {
+	// 		return fmt.Errorf("attempting to mine %d, which is behind current head: %d", minedHeadNumber, headNumber)
+	// 	}
+	// }
 
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
-	}
-
-	if s.BlockNumber == headNumber {
-		return nil
 	}
 
 	// Find out the latest event Id
@@ -206,12 +202,14 @@ func BorHeimdallForward(
 		nextSpanId = binary.BigEndian.Uint64(k) + 1
 	}
 	snapshotLastSpanId := cfg.blockReader.(LastFrozen).LastFrozenSpanID()
-	if snapshotLastSpanId+1 > nextSpanId {
+	if s.BlockNumber != 0 && snapshotLastSpanId+1 > nextSpanId {
 		nextSpanId = snapshotLastSpanId + 1
 	}
 	var endSpanID uint64
 	if headNumber > zerothSpanEnd {
 		endSpanID = 2 + (headNumber-zerothSpanEnd)/spanLength
+	} else {
+		endSpanID = 1
 	}
 
 	lastBlockNum := s.BlockNumber

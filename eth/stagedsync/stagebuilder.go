@@ -28,15 +28,6 @@ func MiningStages(
 ) []*Stage {
 	return []*Stage{
 		{
-			ID:          stages.MiningCreateBlock,
-			Description: "Mining: construct new block from tx pool",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done(), logger)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
-		},
-		{
 			ID:          stages.BorHeimdall,
 			Description: "Download Bor-specific data from Heimdall",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -51,6 +42,15 @@ func MiningStages(
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
 			},
+		},
+		{
+			ID:          stages.MiningCreateBlock,
+			Description: "Mining: construct new block from tx pool",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done(), logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningExecution,
