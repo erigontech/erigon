@@ -352,6 +352,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				break //of switch
 			}
 
+			// more detailed statistic: download rate per file per peer
 			webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 			for _, peer := range weebseedPeersOfThisFile {
 				urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
