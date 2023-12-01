@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -345,8 +346,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					if d.verbosity >= log.LvlInfo {
 						webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 						for _, peer := range weebseedPeersOfThisFile {
-							shortName := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
-							webseedRates = append(webseedRates, shortName, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+							urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+							if urlObj, err := url.Parse(urlS); err == nil {
+								if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
+									webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+								}
+							} else {
+
+							}
 						}
 						d.logger.Info(fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
 						rates := make([]interface{}, 0, len(peersOfThisFile)*2)
