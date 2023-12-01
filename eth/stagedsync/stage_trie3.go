@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -63,9 +64,11 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		processed atomic.Uint64
 	)
 
+	sdCtx := state.NewSharedDomainsCommitmentContext(domains, state.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+		if sdCtx.KeysCount() >= batchSize {
+			rh, err := sdCtx.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
 			if err != nil {
 				return err
 			}
@@ -74,7 +77,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
-		domains.Commitment.TouchPlainKey(string(k), nil, nil)
+		sdCtx.TouchPlainKey(string(k), nil, nil)
 
 		return nil
 	}
@@ -84,7 +87,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+	rh, err := sdCtx.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}

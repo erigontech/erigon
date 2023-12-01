@@ -30,16 +30,17 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
@@ -500,7 +501,7 @@ func (d *Downloader) exists(name string) bool {
 	return false
 }
 func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	if d.exists(name) {
+	if d.exists(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}

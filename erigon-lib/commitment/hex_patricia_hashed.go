@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"hash"
 	"io"
 	"math/bits"
@@ -32,6 +31,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -1370,6 +1371,9 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
+
+	// TODO we're using domain wals which order writes, and here we preorder them. Need to measure which approach
+	// is better in speed and memory consumption
 	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err

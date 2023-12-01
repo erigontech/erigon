@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -50,6 +51,7 @@ func (l *KvList) Swap(i, j int) {
 type SharedDomains struct {
 	*membatch.Mapmutation
 	aggCtx *AggregatorV3Context
+	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
 
 	txNum    uint64
@@ -66,7 +68,7 @@ type SharedDomains struct {
 	Account    *Domain
 	Storage    *Domain
 	Code       *Domain
-	Commitment *DomainCommitted
+	Commitment *Domain
 	TracesTo   *InvertedIndex
 	LogAddrs   *InvertedIndex
 	LogTopics  *InvertedIndex
@@ -102,7 +104,8 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-	sd.Commitment.ResetFns(&SharedDomainsCommitmentContext{sd: sd})
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
@@ -166,7 +169,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchAccount)
+		sd.sdCtx.TouchPlainKey(string(k), nil, sd.sdCtx.TouchAccount)
 	}
 
 	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
@@ -179,15 +182,16 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.Commitment.TouchPlainKey(string(k), nil, sd.Commitment.TouchStorage)
+		sd.sdCtx.TouchPlainKey(string(k), nil, sd.sdCtx.TouchStorage)
 	}
 
-	sd.Commitment.Reset()
+	sd.sdCtx.Reset()
 	return sd.ComputeCommitment(ctx, true, false, blockNum, "")
 }
 
+// SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	bn, txn, ok, err := sd.Commitment.SeekCommitment(tx, sd.aggCtx.commitment, 0, math.MaxUint64)
+	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggCtx.commitment, 0, math.MaxUint64)
 	if err != nil {
 		return 0, err
 	}
@@ -246,8 +250,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.code = map[string][]byte{}
 	sd.commitment = map[string][]byte{}
 	if resetCommitment {
-		sd.Commitment.updates.List(true)
-		sd.Commitment.Reset()
+		sd.sdCtx.updates.List(true)
+		sd.sdCtx.Reset()
 	}
 
 	sd.storage = btree2.NewMap[string, []byte](128)
@@ -436,87 +440,16 @@ func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
 	return v, nil
 }
 
-type SharedDomainsCommitmentContext struct {
-	sd *SharedDomains
-}
-
-func (ctx *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, error) {
-	v, err := ctx.sd.LatestCommitment(pref)
-	if err != nil {
-		return nil, fmt.Errorf("GetBranch failed: %w", err)
-	}
-	//fmt.Printf("GetBranch: %x: %x\n", pref, v)
-	if len(v) == 0 {
-		return nil, nil
-	}
-	return v, nil
-}
-
-func (ctx *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	//fmt.Printf("PutBranch: %x: %x\n", pref, branch)
-	return ctx.sd.updateCommitmentData(prefix, data, prevData)
-}
-
-func (ctx *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, err := ctx.sd.LatestAccount(plainKey)
-	if err != nil {
-		return fmt.Errorf("GetAccount failed: %w", err)
-	}
-	cell.Nonce = 0
-	cell.Balance.Clear()
-	if len(encAccount) > 0 {
-		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
-		cell.Nonce = nonce
-		cell.Balance.Set(balance)
-		if len(chash) > 0 {
-			copy(cell.CodeHash[:], chash)
-		}
-		//fmt.Printf("GetAccount: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
-	}
-
-	code, err := ctx.sd.LatestCode(plainKey)
-	if err != nil {
-		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
-	}
-	if len(code) > 0 {
-		//fmt.Printf("GetAccount: code %x - %x\n", plainKey, code)
-		ctx.sd.Commitment.updates.keccak.Reset()
-		ctx.sd.Commitment.updates.keccak.Write(code)
-		ctx.sd.Commitment.updates.keccak.Read(cell.CodeHash[:])
-	} else {
-		cell.CodeHash = commitment.EmptyCodeHashArray
-	}
-	cell.Delete = len(encAccount) == 0 && len(code) == 0
-	return nil
-}
-
-func (ctx *SharedDomainsCommitmentContext) TempDir() string {
-	return ctx.sd.aggCtx.a.dirs.Tmp
-}
-
-func (ctx *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
-	// Look in the summary table first
-	enc, err := ctx.sd.LatestStorage(plainKey)
-	if err != nil {
-		return err
-	}
-	//fmt.Printf("GetStorage: %x|%x - %x\n", addr, loc, enc)
-	cell.StorageLen = len(enc)
-	copy(cell.Storage[:], enc)
-	cell.Delete = cell.StorageLen == 0
-	return nil
-}
-
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte) error {
 	addrS := string(addr)
-	sd.Commitment.TouchPlainKey(addrS, account, sd.Commitment.TouchAccount)
+	sd.sdCtx.TouchPlainKey(addrS, account, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.aggCtx.account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
 	addrS := string(addr)
-	sd.Commitment.TouchPlainKey(addrS, code, sd.Commitment.TouchCode)
+	sd.sdCtx.TouchPlainKey(addrS, code, sd.sdCtx.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.aggCtx.code.DeleteWithPrev(addr, nil, prevCode)
@@ -531,7 +464,7 @@ func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte) 
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
-	sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
+	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.aggCtx.account.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
@@ -543,7 +476,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 		return err
 	}
 	if len(pc) > 0 {
-		sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchCode)
+		sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchCode)
 		sd.put(kv.CodeDomain, addrS, nil)
 		if err := sd.aggCtx.code.DeleteWithPrev(addr, nil, pc); err != nil {
 			return err
@@ -568,7 +501,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	for _, tomb := range tombs {
 		ks := string(tomb.k)
 		sd.put(kv.StorageDomain, ks, nil)
-		sd.Commitment.TouchPlainKey(ks, nil, sd.Commitment.TouchStorage)
+		sd.sdCtx.TouchPlainKey(ks, nil, sd.sdCtx.TouchStorage)
 		err = sd.aggCtx.storage.DeleteWithPrev(tomb.k, nil, tomb.v)
 		if err != nil {
 			return err
@@ -584,7 +517,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 		composite = append(append(composite, addr...), loc...)
 	}
 	compositeS := string(composite)
-	sd.Commitment.TouchPlainKey(compositeS, value, sd.Commitment.TouchStorage)
+	sd.sdCtx.TouchPlainKey(compositeS, value, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
 	if len(value) == 0 {
 		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
@@ -639,30 +572,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter, trace bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	// if commitment mode is Disabled, there will be nothing to compute on.
-	mxCommitmentRunning.Inc()
-	defer mxCommitmentRunning.Dec()
-
-	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, err = sd.Commitment.ComputeCommitment(ctx, logPrefix, trace)
-	if err != nil {
-		return nil, err
-	}
-
-	if saveStateAfter {
-		prevState, been, err := sd.aggCtx.commitment.GetLatest(keyCommitmentState, nil, sd.roTx)
-		if err != nil {
-			return nil, err
-		}
-
-		if !been {
-			prevState = nil
-		}
-		if err := sd.Commitment.storeCommitmentState(sd.aggCtx.commitment, blockNum, rootHash, prevState); err != nil {
-			return nil, err
-		}
-	}
-	return rootHash, nil
+	return sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, trace, blockNum, logPrefix)
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -802,6 +712,10 @@ func (sd *SharedDomains) Close() {
 	sd.SetBlockNum(0)
 	if sd.aggCtx != nil {
 		sd.SetTxNum(context.Background(), 0)
+	}
+	if sd.sdCtx != nil {
+		sd.sdCtx.updates.keys = nil
+		sd.sdCtx.updates.tree.Clear(true)
 	}
 	sd.account = nil
 	sd.code = nil
@@ -1001,3 +915,315 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	return nil
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
+
+type SharedDomainsCommitmentContext struct {
+	sd           *SharedDomains
+	trace        bool
+	discard      bool
+	updates      *UpdateTree
+	mode         CommitmentMode
+	patriciaTrie commitment.Trie
+	justRestored atomic.Bool
+}
+
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+	ctx := &SharedDomainsCommitmentContext{
+		sd:           sd,
+		mode:         mode,
+		updates:      NewUpdateTree(mode),
+		discard:      dbg.DiscardCommitment(),
+		patriciaTrie: commitment.InitializeTrie(trieVariant),
+	}
+
+	ctx.patriciaTrie.ResetContext(ctx)
+	return ctx
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, error) {
+	v, err := ctx.sd.LatestCommitment(pref)
+	if err != nil {
+		return nil, fmt.Errorf("GetBranch failed: %w", err)
+	}
+	//fmt.Printf("GetBranch: %x: %x\n", pref, v)
+	if len(v) == 0 {
+		return nil, nil
+	}
+	return v, nil
+}
+
+func (ctx *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	//fmt.Printf("PutBranch: %x: %x\n", pref, branch)
+	return ctx.sd.updateCommitmentData(prefix, data, prevData)
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, err := ctx.sd.LatestAccount(plainKey)
+	if err != nil {
+		return fmt.Errorf("GetAccount failed: %w", err)
+	}
+	cell.Nonce = 0
+	cell.Balance.Clear()
+	if len(encAccount) > 0 {
+		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
+		cell.Nonce = nonce
+		cell.Balance.Set(balance)
+		if len(chash) > 0 {
+			copy(cell.CodeHash[:], chash)
+		}
+		//fmt.Printf("GetAccount: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
+	}
+
+	code, err := ctx.sd.LatestCode(plainKey)
+	if err != nil {
+		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+	}
+	if len(code) > 0 {
+		//fmt.Printf("GetAccount: code %x - %x\n", plainKey, code)
+		ctx.updates.keccak.Reset()
+		ctx.updates.keccak.Write(code)
+		ctx.updates.keccak.Read(cell.CodeHash[:])
+	} else {
+		cell.CodeHash = commitment.EmptyCodeHashArray
+	}
+	cell.Delete = len(encAccount) == 0 && len(code) == 0
+	return nil
+}
+
+func (ctx *SharedDomainsCommitmentContext) TempDir() string {
+	return ctx.sd.aggCtx.a.dirs.Tmp
+}
+
+func (ctx *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
+	// Look in the summary table first
+	enc, err := ctx.sd.LatestStorage(plainKey)
+	if err != nil {
+		return err
+	}
+	//fmt.Printf("GetStorage: %x|%x - %x\n", addr, loc, enc)
+	cell.StorageLen = len(enc)
+	copy(cell.Storage[:], enc)
+	cell.Delete = cell.StorageLen == 0
+	return nil
+}
+
+func (ctx *SharedDomainsCommitmentContext) Reset() {
+	if !ctx.justRestored.Load() {
+		ctx.patriciaTrie.Reset()
+	}
+}
+
+//func (ctx *SharedDomainsCommitmentContext) Hasher() hash.Hash { return ctx.updates.keccak }
+//
+//func (ctx *SharedDomainsCommitmentContext) SetCommitmentMode(m CommitmentMode) { ctx.mode = m }
+//
+
+// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// (different behaviour for Code, Account and Storage key modifications).
+func (ctx *SharedDomainsCommitmentContext) TouchPlainKey(key string, val []byte, fn func(c *commitmentItem, val []byte)) {
+	if ctx.discard {
+		return
+	}
+	ctx.updates.TouchPlainKey(key, val, fn)
+}
+
+func (ctx *SharedDomainsCommitmentContext) KeysCount() uint64 {
+	return ctx.updates.Size()
+}
+
+func (ctx *SharedDomainsCommitmentContext) TouchAccount(c *commitmentItem, val []byte) {
+	ctx.updates.TouchAccount(c, val)
+}
+
+func (ctx *SharedDomainsCommitmentContext) TouchStorage(c *commitmentItem, val []byte) {
+	ctx.updates.TouchStorage(c, val)
+}
+
+func (ctx *SharedDomainsCommitmentContext) TouchCode(c *commitmentItem, val []byte) {
+	ctx.updates.TouchCode(c, val)
+}
+
+// Evaluates commitment for processed state.
+func (d *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context, saveState bool, trace bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	if dbg.DiscardCommitment() {
+		d.updates.List(true)
+		return nil, nil
+	}
+	mxCommitmentRunning.Inc()
+	defer mxCommitmentRunning.Dec()
+	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+
+	touchedKeys, updates := d.updates.List(true)
+	//fmt.Printf("[commitment] ComputeCommitment %d keys (mode=%s)\n", len(touchedKeys), d.mode)
+	//defer func() { fmt.Printf("root hash %x\n", rootHash) }()
+	if len(touchedKeys) == 0 {
+		rootHash, err = d.patriciaTrie.RootHash()
+		return rootHash, err
+	}
+
+	d.Reset()
+
+	// data accessing functions should be set when domain is opened/shared context updated
+	d.patriciaTrie.SetTrace(trace)
+
+	switch d.mode {
+	case CommitmentModeDirect:
+		rootHash, err = d.patriciaTrie.ProcessKeys(ctext, touchedKeys, logPrefix)
+		if err != nil {
+			return nil, err
+		}
+	case CommitmentModeUpdate:
+		rootHash, err = d.patriciaTrie.ProcessUpdates(ctext, touchedKeys, updates)
+		if err != nil {
+			return nil, err
+		}
+	case CommitmentModeDisabled:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
+	}
+	d.justRestored.Store(false)
+
+	if saveState {
+		prevState, err := d.GetBranch(keyCommitmentState)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(prevState) == 0 && prevState != nil {
+			prevState = nil
+		}
+		if err := d.storeCommitmentState(d.sd.aggCtx.commitment, blockNum, rootHash, prevState); err != nil {
+			return nil, err
+		}
+	}
+
+	return rootHash, err
+}
+
+func (d *SharedDomainsCommitmentContext) storeCommitmentState(dc *DomainContext, blockNum uint64, rh, prevState []byte) error {
+	state, err := d.encodePatriciaState()
+	if err != nil {
+		return err
+	}
+	cs := &commitmentState{txNum: dc.hc.ic.txNum, trieState: state, blockNum: blockNum}
+	encoded, err := cs.Encode()
+	if err != nil {
+		return err
+	}
+
+	if d.trace {
+		fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
+	}
+	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *SharedDomainsCommitmentContext) encodePatriciaState() ([]byte, error) {
+	var state []byte
+	var err error
+
+	switch trie := (d.patriciaTrie).(type) {
+	case *commitment.HexPatriciaHashed:
+		state, err = trie.EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
+	}
+	return state, nil
+}
+
+// by that key stored latest root hash and tree state
+//var keyCommitmentState = []byte("state")
+
+// SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
+// and if state found, sets it up to current domain
+func (d *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+	if dbg.DiscardCommitment() {
+		return 0, 0, false, nil
+	}
+	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
+		return 0, 0, false, fmt.Errorf("state storing is only supported hex patricia trie")
+	}
+
+	//decodeTxBlockNums := func(v []byte) (uint64, uint64, error) {
+	//	if len(v) < 16 {
+	//		return 0, 0, fmt.Errorf("invalid state value size %d [%x]", len(v), v)
+	//	}
+	//	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16]), nil
+	//}
+
+	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
+	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
+	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if it.HasNext() {
+		txn, err := it.Next()
+		if err != nil {
+			return 0, 0, false, err
+		}
+		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+		if err != nil {
+			return 0, 0, false, err
+		}
+		//blockNum, txNum, err = decodeTxBlockNums(v)
+		blockNum, txNum, err = d.restorePatriciaState(v)
+		return blockNum, txNum, true, err
+	}
+	// corner-case:
+	// it's normal to not have commitment.ef and commitment.v files. They are not determenistic - depend on batchSize, and not very useful.
+	// in this case `IdxRange` will be empty
+	// and can fallback to reading latest commitment from .kv file
+	var latestState []byte
+	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
+		if len(value) < 16 {
+			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
+		}
+		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
+		_ = bn
+		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
+		if txn >= sinceTx && txn <= untilTx {
+			latestState = value
+		}
+		return nil
+	}); err != nil {
+		return 0, 0, false, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
+	}
+	blockNum, txNum, err = d.restorePatriciaState(latestState)
+	//blockNum, txNum, err = decodeTxBlockNums(latestState)
+	return blockNum, txNum, true, err
+}
+
+// After commitment state is retored, method .Reset() should NOT be called until new updates.
+// Otherwise state should be restorePatriciaState()d again.
+
+func (d *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
+	cs := new(commitmentState)
+	if err := cs.Decode(value); err != nil {
+		if len(value) > 0 {
+			return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
+		}
+		// nil value is acceptable for SetState and will reset trie
+	}
+	if hext, ok := d.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
+		if err := hext.SetState(cs.trieState); err != nil {
+			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+		}
+		d.justRestored.Store(true) // to prevent double reset
+		if d.trace {
+			rh, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
+		}
+	} else {
+		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
+	}
+	return cs.blockNum, cs.txNum, nil
+}
