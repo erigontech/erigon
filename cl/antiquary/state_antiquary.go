@@ -411,15 +411,15 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	tx.Rollback()
 
-	log.Log(logLvl, "Stopping Caplin to load states")
 	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
 
-	start = time.Now()
 	rwTx, err := s.mainDB.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer rwTx.Rollback()
+	start = time.Now()
+	log.Log(logLvl, "Stopped Caplin to load states")
 	rofl := time.Now()
 	// Now load.
 	if err := effectiveBalance.Load(rwTx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
