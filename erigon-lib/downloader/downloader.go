@@ -344,27 +344,28 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
 			if progress == 0 {
 				zeroProgress = append(zeroProgress, t.Name())
-			} else {
-				d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
-				if d.verbosity >= log.LvlInfo {
-					webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
-					for _, peer := range weebseedPeersOfThisFile {
-						urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
-						if urlObj, err := url.Parse(urlS); err == nil {
-							if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
-								webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
-							}
-						}
-					}
-					d.logger.Info(fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
-					rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-					for _, peer := range peersOfThisFile {
-						rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
-					}
-					d.logger.Info(fmt.Sprintf("[snapshots] bittorrent rates file=%s", t.Name()), rates...)
-				}
-
+				break //of switch
 			}
+
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList))
+			if d.verbosity < log.LvlInfo {
+				break //of switch
+			}
+			webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
+			for _, peer := range weebseedPeersOfThisFile {
+				urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+				if urlObj, err := url.Parse(urlS); err == nil {
+					if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
+						webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+					}
+				}
+			}
+			d.logger.Info(fmt.Sprintf("[snapshots] webseed rates file=%s", t.Name()), webseedRates...)
+			rates := make([]interface{}, 0, len(peersOfThisFile)*2)
+			for _, peer := range peersOfThisFile {
+				rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+			}
+			d.logger.Info(fmt.Sprintf("[snapshots] bittorrent rates file=%s", t.Name()), rates...)
 		default:
 			noMetadata = append(noMetadata, t.Name())
 		}
