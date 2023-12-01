@@ -36,6 +36,7 @@ import (
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -303,6 +304,25 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
 
+var (
+	// if non empty, will skip downloading any non-v1 snapshots
+	envUseOnlyBlockSnapshotsV1 = dbg.EnvString("DOWNLOADER_ONLY_BLOCKS", "")
+)
+
+// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
+func IsSnapNameAllowed(name string) bool {
+	if envUseOnlyBlockSnapshotsV1 == "" {
+		return true
+	}
+	prefixes := []string{"domain", "history", "idx"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			return false
+		}
+	}
+	return strings.HasPrefix(name, "v1")
+}
+
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
@@ -314,7 +334,7 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	default:
 	}
 
-	if !strings.HasPrefix(ts.DisplayName, "v1") {
+	if !IsSnapNameAllowed(ts.DisplayName) {
 		return nil
 	}
 	wsUrls, ok := webseeds.ByFileName(ts.DisplayName)

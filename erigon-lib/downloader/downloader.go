@@ -501,7 +501,7 @@ func (d *Downloader) exists(name string) bool {
 	return false
 }
 func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	if d.exists(name) || !strings.HasPrefix(name, "v1") {
+	if d.exists(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
 
