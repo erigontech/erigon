@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -244,23 +243,23 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		logconfig := &logger.LogConfig{
-			DisableMemory:     true,
-			DisableStack:      true,
-			DisableStorage:    false,
-			DisableReturnData: false,
-			Debug:             true,
-		}
-		rw.vmCfg.Tracer = logger.NewStructLogger(logconfig)
+		//logconfig := &logger.LogConfig{
+		//	DisableMemory:     true,
+		//	DisableStack:      true,
+		//	DisableStorage:    false,
+		//	DisableReturnData: false,
+		//	Debug:             true,
+		//}
+		//rw.vmCfg.Tracer = logger.NewStructLogger(logconfig)
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
-		if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
-			ftracer.Flush(txTask.Tx)
-		}
+		//if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
+		//	ftracer.Flush(txTask.Tx)
+		//}
 
 		if err != nil {
 			txTask.Error = err
