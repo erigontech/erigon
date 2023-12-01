@@ -259,6 +259,7 @@ func ExecV3(ctx context.Context,
 			inputTxNum = _min
 			fmt.Printf("alex2: %d -> %d\n", doms.TxNum(), _min)
 		} else {
+			fmt.Printf("alex3: %d, %d\n", doms.TxNum(), _max)
 			_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
 			if err != nil {
 				return err
