@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -431,7 +432,7 @@ var cmdSetPrune = &cobra.Command{
 }
 
 var cmdSetSnap = &cobra.Command{
-	Use:   "force_set_snapshot",
+	Use:   "force_set_snap",
 	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -446,8 +447,17 @@ var cmdSetSnap = &cobra.Command{
 		defer borSn.Close()
 		defer agg.Close()
 
+		cfg := sn.Cfg()
+		flags := cmd.Flags()
+		if flags.Lookup("snapshots") != nil {
+			cfg.Enabled, err = flags.GetBool("snapshots")
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snap.ForceSetFlags(tx, sn.Cfg())
+			return snap.ForceSetFlags(tx, cfg)
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -632,11 +642,14 @@ func init() {
 	withConfig(cmdSetSnap)
 	withDataDir2(cmdSetSnap)
 	withChain(cmdSetSnap)
+	cmdSetSnap.Flags().Bool("snapshots", false, "")
+	must(cmdSetSnap.MarkFlagRequired("snapshots"))
 	rootCmd.AddCommand(cmdSetSnap)
 
 	withConfig(cmdForceSetHistoryV3)
 	withDataDir2(cmdForceSetHistoryV3)
 	cmdForceSetHistoryV3.Flags().BoolVar(&_forceSetHistoryV3, "history.v3", false, "")
+	must(cmdForceSetHistoryV3.MarkFlagRequired("history.v3"))
 	rootCmd.AddCommand(cmdForceSetHistoryV3)
 
 	withConfig(cmdSetPrune)
@@ -1494,27 +1507,26 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		//useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, logger)
-
 		var err error
 		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.OpenFolder(false) //TODO: open in read-only if erigon running?
-		if err != nil {
-			panic(err)
-		}
 
 		if useSnapshots {
-			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
+			g := &errgroup.Group{}
+			g.Go(func() error { return _allSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error { return _allBorSnapshotsSingleton.ReopenFolder() })
+			g.Go(func() error { return _aggSingleton.OpenFolder(false) }) //TODO: open in read-only if erigon running?
+			err := g.Wait()
+			if err != nil {
 				panic(err)
 			}
+
 			_allSnapshotsSingleton.LogStat()
-			if err := _allBorSnapshotsSingleton.ReopenFolder(); err != nil {
-				panic(err)
-			}
 			_allBorSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
