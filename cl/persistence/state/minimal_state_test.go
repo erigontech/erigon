@@ -13,6 +13,7 @@ func TestMinimalState(t *testing.T) {
 	m := &MinimalBeaconState{
 		Version:                      clparams.CapellaVersion,
 		Eth1Data:                     &cltypes.Eth1Data{},
+		Fork:                         &cltypes.Fork{},
 		Eth1DepositIndex:             0,
 		JustificationBits:            &cltypes.JustificationBits{},
 		NextWithdrawalIndex:          0,

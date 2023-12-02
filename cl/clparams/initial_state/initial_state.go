@@ -2,7 +2,6 @@ package initial_state
 
 import (
 	_ "embed"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -29,8 +28,8 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	default:
-		return nil, fmt.Errorf("unsupported network for genesis fetching")
+	case clparams.GoerliNetwork:
+		return nil, nil
 	}
 	return returnState, nil
 }

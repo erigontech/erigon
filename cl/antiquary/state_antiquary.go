@@ -88,7 +88,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			if progress+s.cfg.SlotsPerEpoch/2 >= finalized {
 				continue
 			}
-			if err := s.incrementBeaconState(ctx, finalized); err != nil {
+			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
 				slot := uint64(0)
 				if s.currentState != nil {
 					slot = s.currentState.Slot()
@@ -135,7 +135,7 @@ func uint64BalancesList(s *state.CachingBeaconState, out []uint64) []uint64 {
 	return out
 }
 
-func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
+func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
 	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {

@@ -109,8 +109,8 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
-	preverifiedHistoricalSummaries.Add(anchorRoot, uint64(anchorState.HistoricalSummariesLength()))
-	preverifiedHistoricalRoots.Add(anchorRoot, uint64(anchorState.HistoricalRootsLength()))
+	preverifiedHistoricalSummaries.Add(anchorRoot, anchorState.HistoricalSummariesLength())
+	preverifiedHistoricalRoots.Add(anchorRoot, anchorState.HistoricalRootsLength())
 	preverifiedValidators.Add(anchorRoot, uint64(anchorState.ValidatorLength()))
 	return &ForkChoiceStore{
 		ctx:                            ctx,

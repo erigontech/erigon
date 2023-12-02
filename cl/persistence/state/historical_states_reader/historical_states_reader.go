@@ -267,12 +267,10 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {
 	var needFromGenesis, inserted uint64
-	if uint64(size) > slot {
-		needFromGenesis = size - slot
-	}
-	if slot-size <= r.genesisState.Slot() {
+	if size > slot || slot-size <= r.genesisState.Slot() {
 		needFromGenesis = size - (slot - r.genesisState.Slot())
 	}
+
 	needFromDB := size - needFromGenesis
 	cursor, err := tx.Cursor(table)
 	if err != nil {
@@ -341,7 +339,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
 	epoch := slot / r.cfg.SlotsPerEpoch
 	genesisEpoch := r.genesisState.Slot() / r.cfg.SlotsPerEpoch
-	if uint64(size) > epoch || epoch-size <= genesisEpoch {
+	if size > epoch || epoch-size <= genesisEpoch {
 		needFromGenesis = size - (epoch - genesisEpoch)
 	}
 

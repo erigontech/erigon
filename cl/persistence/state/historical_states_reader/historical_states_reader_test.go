@@ -1,17 +1,18 @@
-package antiquary
+package historical_states_reader_test
 
 import (
 	"context"
 	"testing"
 
-	_ "embed"
-
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
@@ -25,9 +26,24 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	f := afero.NewMemMapFs()
-	a := NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
-	// TODO: add more meaning here, like checking db values, will do so once i see some bugs
+
+	// Now lets test it against the reader
+	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
+	require.NoError(t, err)
+
+	postHash, err := s.HashSSZ()
+	require.NoError(t, err)
+	postHash2, err := postState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(postHash2), libcommon.Hash(postHash))
+
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {

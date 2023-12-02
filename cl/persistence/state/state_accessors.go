@@ -77,7 +77,7 @@ func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, prever
 }
 
 func IncrementHistoricalRootsTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
-	for i := preverifiedIndicies; i < uint64(state.HistoricalRootsLength()); i++ {
+	for i := preverifiedIndicies; i < state.HistoricalRootsLength(); i++ {
 		key := base_encoding.Encode64ToBytes4(i)
 		root := state.HistoricalRoot(int(i))
 		if err := tx.Put(kv.HistoricalRoots, key, root[:]); err != nil {
@@ -90,7 +90,7 @@ func IncrementHistoricalRootsTable(tx kv.RwTx, state *state.CachingBeaconState, 
 func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
 	var temp []byte
 	var err error
-	for i := preverifiedIndicies; i < uint64(state.HistoricalSummariesLength()); i++ {
+	for i := preverifiedIndicies; i < state.HistoricalSummariesLength(); i++ {
 		temp = temp[:0]
 		key := base_encoding.Encode64ToBytes4(i)
 		summary := state.HistoricalSummary(int(i))
