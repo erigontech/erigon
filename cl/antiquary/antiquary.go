@@ -108,7 +108,16 @@ func (a *Antiquary) Loop() error {
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(a.ctx, tx, header, false); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(a.ctx, tx, header.Header.Slot, blockRoot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteParentBlockRoot(a.ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {

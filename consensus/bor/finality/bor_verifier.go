@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -31,7 +31,7 @@ var (
 	errEndBlock = errors.New("failed to get end block")
 
 	//Metrics for collecting the rewindLength
-	rewindLengthMeter = metrics.GetOrCreateCounter("chain_autorewind_length")
+	rewindLengthMeter = metrics.GetOrCreateGauge("chain_autorewind_length")
 )
 
 type borVerifier struct {
@@ -59,13 +59,13 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	// check if we have the given blocks
 	currentBlock := rawdb.ReadCurrentBlockNumber(roTx)
 	if currentBlock == nil {
-		log.Debug("[bor] Failed to fetch current block from blockchain while verifying incoming", "str", str)
+		log.Debug("[bor] no current block marker yet: syncing...", "incoming", str)
 		return hash, errMissingBlocks
 	}
 
 	head := *currentBlock
 	if head < end {
-		log.Debug("[bor] Current head block behind incoming", "block", str, "head", head, "end block", end)
+		log.Debug("[bor] current head block behind incoming", "block", str, "head", head, "end block", end)
 		return hash, errMissingBlocks
 	}
 
@@ -157,7 +157,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 // Stop the miner if the mining process is running and rewind back the chain
 func rewindBack(head uint64, rewindTo uint64) {
-	rewindLengthMeter.Set(head - rewindTo)
+	rewindLengthMeter.SetUint64(head - rewindTo)
 
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable

@@ -25,8 +25,6 @@ type ApiHandler struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
 	syncedData      *synced_data.SyncedDataManager
-
-	proposerKnight
 }
 
 func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager) *ApiHandler {
@@ -73,7 +71,7 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", nil) // otterscan
 					r.Get("/head/committees", nil)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
-						r.Get("/validators", beaconHandlerWrapper(a.getValidators, false))
+						r.Get("/validators", nil)
 						r.Get("/root", beaconHandlerWrapper(a.getStateRoot, false))
 						r.Get("/fork", beaconHandlerWrapper(a.getStateFork, false))
 						r.Get("/validators/{id}", nil)

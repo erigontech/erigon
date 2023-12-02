@@ -1,10 +1,10 @@
 package stagedsync
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
@@ -51,7 +51,7 @@ func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
 	if m, ok := syncMetrics[s.ID]; ok {
-		m.Set(newBlockNum)
+		m.SetUint64(newBlockNum)
 	}
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }

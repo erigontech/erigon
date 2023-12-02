@@ -34,15 +34,16 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pbnjay/memory"
+	"golang.org/x/exp/maps"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pbnjay/memory"
-	"golang.org/x/exp/maps"
-	"golang.org/x/sync/semaphore"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -149,6 +150,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 512 * datasize.MB
+	opts.dirtySpace = uint64(128 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
 	return opts
@@ -630,33 +632,33 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.Set(info.Geo.Current)
-	kv.DbPgopsNewly.Set(info.PageOps.Newly)
-	kv.DbPgopsCow.Set(info.PageOps.Cow)
-	kv.DbPgopsClone.Set(info.PageOps.Clone)
-	kv.DbPgopsSplit.Set(info.PageOps.Split)
-	kv.DbPgopsMerge.Set(info.PageOps.Merge)
-	kv.DbPgopsSpill.Set(info.PageOps.Spill)
-	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
-	kv.DbPgopsWops.Set(info.PageOps.Wops)
+	kv.DbSize.SetUint64(info.Geo.Current)
+	kv.DbPgopsNewly.SetUint64(info.PageOps.Newly)
+	kv.DbPgopsCow.SetUint64(info.PageOps.Cow)
+	kv.DbPgopsClone.SetUint64(info.PageOps.Clone)
+	kv.DbPgopsSplit.SetUint64(info.PageOps.Split)
+	kv.DbPgopsMerge.SetUint64(info.PageOps.Merge)
+	kv.DbPgopsSpill.SetUint64(info.PageOps.Spill)
+	kv.DbPgopsUnspill.SetUint64(info.PageOps.Unspill)
+	kv.DbPgopsWops.SetUint64(info.PageOps.Wops)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.Set(txInfo.SpaceDirty)
-	kv.TxLimit.Set(tx.db.txSize)
-	kv.TxSpill.Set(txInfo.Spill)
-	kv.TxUnspill.Set(txInfo.Unspill)
+	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
+	kv.TxLimit.SetUint64(tx.db.txSize)
+	kv.TxSpill.SetUint64(txInfo.Spill)
+	kv.TxUnspill.SetUint64(txInfo.Unspill)
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.Set(gc.LeafPages)
-	kv.GcOverflowMetric.Set(gc.OverflowPages)
-	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
+	kv.GcLeafMetric.SetUint64(gc.LeafPages)
+	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
+	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket
@@ -832,12 +834,12 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	if tx.db.opts.label == kv.ChainDB {
-		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
+		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
 		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Update(latency.Write.Seconds())
-		kv.DbCommitSync.Update(latency.Sync.Seconds())
-		kv.DbCommitEnding.Update(latency.Ending.Seconds())
-		kv.DbCommitTotal.Update(latency.Whole.Seconds())
+		kv.DbCommitWrite.Observe(latency.Write.Seconds())
+		kv.DbCommitSync.Observe(latency.Sync.Seconds())
+		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
+		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
