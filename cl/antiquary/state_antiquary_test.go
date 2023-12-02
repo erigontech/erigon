@@ -34,6 +34,18 @@ var capella_pre_state_ssz_snappy []byte
 //go:embed test_data/capella/post.ssz_snappy
 var capella_post_state_ssz_snappy []byte
 
+//go:embed test_data/phase0/blocks_0.ssz_snappy
+var phase0_blocks_0_ssz_snappy []byte
+
+//go:embed test_data/phase0/blocks_1.ssz_snappy
+var phase0_blocks_1_ssz_snappy []byte
+
+//go:embed test_data/phase0/pre.ssz_snappy
+var phase0_pre_state_ssz_snappy []byte
+
+//go:embed test_data/phase0/post.ssz_snappy
+var phase0_post_state_ssz_snappy []byte
+
 type MockBlockReader struct {
 	u map[uint64]*cltypes.SignedBeaconBlock
 }
@@ -66,15 +78,41 @@ func LoadChain(t *testing.T, blocks []*cltypes.SignedBeaconBlock, db kv.RwDB) *M
 		m.u[block.Block.Slot] = block
 		h := block.SignedBeaconBlockHeader()
 		require.NoError(t, beacon_indicies.WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, h, true))
-		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+32))
+		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
 
 	require.NoError(t, tx.Commit())
 	return m
 }
 
-func TestStateAntiquary(t *testing.T) {
+func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
+	db := memdb.NewTestDB(t)
+	reader := LoadChain(t, blocks, db)
+
 	ctx := context.Background()
+	vt := state_accessors.NewStaticValidatorTable()
+	f := afero.NewMemMapFs()
+	a := NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
+	require.NoError(t, a.incrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+
+	// Now lets test it against the reader
+	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
+	require.NoError(t, err)
+
+	postHash, err := s.HashSSZ()
+	require.NoError(t, err)
+	postHash2, err := postState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(postHash2), libcommon.Hash(postHash))
+
+}
+
+func TestStateAntiquaryCapella(t *testing.T) {
 	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 
@@ -85,8 +123,7 @@ func TestStateAntiquary(t *testing.T) {
 	if err := utils.DecodeSSZSnappy(block2, capella_blocks_1_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
-	db := memdb.NewTestDB(t)
-	reader := LoadChain(t, []*cltypes.SignedBeaconBlock{block1, block2}, db)
+
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
@@ -95,24 +132,29 @@ func TestStateAntiquary(t *testing.T) {
 	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
+	runTest(t, []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState)
+}
 
-	vt := state_accessors.NewStaticValidatorTable()
-	f := afero.NewMemMapFs()
-	a := NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
-	require.NoError(t, a.incrementBeaconState(ctx, block2.Block.Slot+2))
+func TestStateAntiquaryPhase0(t *testing.T) {
+	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 
-	// Now lets test it against the reader
-	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	// Lets do te
+	if err := utils.DecodeSSZSnappy(block1, phase0_blocks_0_ssz_snappy, int(clparams.Phase0Version)); err != nil {
+		t.Fatal(err)
+	}
+	if err := utils.DecodeSSZSnappy(block2, phase0_blocks_1_ssz_snappy, int(clparams.Phase0Version)); err != nil {
+		t.Fatal(err)
+	}
 
-	s, err := hr.ReadHistoricalState(ctx, tx, block2.Block.Slot)
-	require.NoError(t, err)
+	preState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(preState, phase0_pre_state_ssz_snappy, int(clparams.Phase0Version)); err != nil {
+		t.Fatal(err)
+	}
+	postState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(postState, phase0_post_state_ssz_snappy, int(clparams.Phase0Version)); err != nil {
+		t.Fatal(err)
+	}
 
-	postHash, err := s.HashSSZ()
-	require.NoError(t, err)
-	postHash2, err := postState.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(postHash2), libcommon.Hash(postHash))
+	runTest(t, []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState)
 }
