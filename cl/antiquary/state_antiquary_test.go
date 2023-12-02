@@ -22,17 +22,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed test_data/blocks_0.ssz_snappy
-var blocks_0_ssz_snappy []byte
+//go:embed test_data/capella/blocks_0.ssz_snappy
+var capella_blocks_0_ssz_snappy []byte
 
-//go:embed test_data/blocks_1.ssz_snappy
-var blocks_1_ssz_snappy []byte
+//go:embed test_data/capella/blocks_1.ssz_snappy
+var capella_blocks_1_ssz_snappy []byte
 
-//go:embed test_data/pre.ssz_snappy
-var pre_state_ssz_snappy []byte
+//go:embed test_data/capella/pre.ssz_snappy
+var capella_pre_state_ssz_snappy []byte
 
-//go:embed test_data/post.ssz_snappy
-var post_state_ssz_snappy []byte
+//go:embed test_data/capella/post.ssz_snappy
+var capella_post_state_ssz_snappy []byte
 
 type MockBlockReader struct {
 	u map[uint64]*cltypes.SignedBeaconBlock
@@ -79,20 +79,20 @@ func TestStateAntiquary(t *testing.T) {
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 
 	// Lets do te
-	if err := utils.DecodeSSZSnappy(block1, blocks_0_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
+	if err := utils.DecodeSSZSnappy(block1, capella_blocks_0_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
-	if err := utils.DecodeSSZSnappy(block2, blocks_1_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
+	if err := utils.DecodeSSZSnappy(block2, capella_blocks_1_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
 	db := memdb.NewTestDB(t)
 	reader := LoadChain(t, []*cltypes.SignedBeaconBlock{block1, block2}, db)
 	preState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(preState, pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
+	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(postState, post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
+	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
 
