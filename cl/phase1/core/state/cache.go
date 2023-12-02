@@ -7,7 +7,6 @@ import (
 	"math"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -35,11 +34,6 @@ type CachingBeaconState struct {
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
-	// Extra caches to optimize the single threaded execution vase
-	activeValidatorsCache2 *cache.IndiciesCache[uint64]
-	shuffledSetsCache2     *cache.IndiciesCache[common.Hash]
-
-	threadUnsafe bool
 
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
@@ -218,12 +212,7 @@ func (b *CachingBeaconState) initCaches() error {
 	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
 		return err
 	}
-	if b.activeValidatorsCache2 = cache.NewIndiciesCache[uint64](activeValidatorsCacheSize); err != nil {
-		return err
-	}
-	if b.shuffledSetsCache2 = cache.NewIndiciesCache[common.Hash](shuffledSetsCacheSize); err != nil {
-		return err
-	}
+
 	return nil
 }
 
@@ -463,8 +452,4 @@ func (b *CachingBeaconState) decodeShuffledSetsCache(r io.Reader, num []byte) er
 	}
 
 	return nil
-}
-
-func (b *CachingBeaconState) SetThreadUnsafe(v bool) {
-	b.threadUnsafe = v
 }

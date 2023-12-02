@@ -63,7 +63,6 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	blocks, err := spectest.ReadBlocks(root, c.Version())
 	require.NoError(t, err)
 
-	// testState.SetThreadUnsafe(true)
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
 		err = machine.TransitionState(c.Machine, testState, block)
