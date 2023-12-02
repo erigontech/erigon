@@ -28,7 +28,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"golang.org/x/exp/slices"
 )
@@ -100,11 +99,6 @@ var (
 )
 
 func FileName(version uint8, from, to uint64, fileType string) string {
-	if v := dbg.SnapshotVersion(); len(v) > 1 {
-		v, _ := strconv.ParseInt(v[1:], 10, 8)
-		version = uint8(v)
-	}
-
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
 

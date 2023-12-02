@@ -79,7 +79,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
-	snapshotVersion := uint8(cliCtx.Int(flags.SnapshotVersion.Name))
+	snapshotVersion := uint8(cliCtx.Int(caplinflags.SnapshotVersion.Name))
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        cfg.Addr,

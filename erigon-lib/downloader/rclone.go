@@ -265,54 +265,61 @@ func (c *RCloneSession) Stop() {
 
 type syncRequest struct {
 	ctx       context.Context
-	info      *rcloneInfo
+	info      map[string]*rcloneInfo
 	cerr      chan error
 	request   *rcloneRequest
 	retryTime time.Duration
 }
 
-func (c *RCloneSession) Upload(ctx context.Context, file string) error {
+func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 	c.Lock()
-	info, ok := c.files[file]
 
-	if !ok || info.localInfo == nil {
-		localInfo, err := os.Stat(filepath.Join(c.localFs, file))
+	reqInfo := map[string]*rcloneInfo{}
 
-		if err != nil {
-			c.Unlock()
-			return fmt.Errorf("can't upload: %s: %w", file, err)
-		}
+	for _, file := range files {
+		info, ok := c.files[file]
 
-		if !localInfo.Mode().IsRegular() || localInfo.Size() == 0 {
-			c.Unlock()
-			return fmt.Errorf("can't upload: %s: %s", file, "file is not uploadable")
-		}
+		if !ok || info.localInfo == nil {
+			localInfo, err := os.Stat(filepath.Join(c.localFs, file))
 
-		if ok {
-			info.localInfo = localInfo
-		} else {
-			info := &rcloneInfo{
-				file:      file,
-				localInfo: localInfo,
+			if err != nil {
+				c.Unlock()
+				return fmt.Errorf("can't upload: %s: %w", file, err)
 			}
 
-			if snapInfo, ok := snaptype.ParseFileName(c.localFs, file); ok {
-				info.snapInfo = &snapInfo
+			if !localInfo.Mode().IsRegular() || localInfo.Size() == 0 {
+				c.Unlock()
+				return fmt.Errorf("can't upload: %s: %s", file, "file is not uploadable")
 			}
 
-			c.files[file] = info
+			if ok {
+				info.localInfo = localInfo
+			} else {
+				info := &rcloneInfo{
+					file:      file,
+					localInfo: localInfo,
+				}
+
+				if snapInfo, ok := snaptype.ParseFileName(c.localFs, file); ok {
+					info.snapInfo = &snapInfo
+				}
+
+				c.files[file] = info
+			}
 		}
+
+		reqInfo[file] = info
 	}
 
 	cerr := make(chan error, 1)
 
-	c.syncQueue <- syncRequest{ctx, info, cerr,
+	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
 		&rcloneRequest{
 			Group: c.Label(),
 			SrcFs: c.localFs,
 			DstFs: c.remoteFs,
 			Filter: rcloneFilter{
-				IncludeRule: []string{file},
+				IncludeRule: files,
 			}}, 0}
 
 	c.Unlock()
@@ -320,44 +327,44 @@ func (c *RCloneSession) Upload(ctx context.Context, file string) error {
 	return <-cerr
 }
 
-func (c *RCloneSession) Download(ctx context.Context, file string) (fs.FileInfo, error) {
+func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 	c.Lock()
 
 	if len(c.files) == 0 {
 		c.Unlock()
 		_, err := c.ReadRemoteDir(ctx, false)
 		if err != nil {
-			return nil, fmt.Errorf("can't download: %s: %w", file, err)
+			return fmt.Errorf("can't download: %s: %w", files, err)
 		}
 		c.Lock()
 	}
 
-	info, ok := c.files[file]
+	reqInfo := map[string]*rcloneInfo{}
 
-	if !ok || info.remoteInfo.Size == 0 {
-		c.Unlock()
-		return nil, fmt.Errorf("can't download: %s: %w", file, os.ErrNotExist)
+	for _, file := range files {
+		info, ok := c.files[file]
+
+		if !ok || info.remoteInfo.Size == 0 {
+			c.Unlock()
+			return fmt.Errorf("can't download: %s: %w", file, os.ErrNotExist)
+		}
+
+		reqInfo[file] = info
 	}
 
 	cerr := make(chan error, 1)
 
-	c.syncQueue <- syncRequest{ctx, info, cerr,
+	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
 		&rcloneRequest{
 			SrcFs: c.remoteFs,
 			DstFs: c.localFs,
 			Filter: rcloneFilter{
-				IncludeRule: []string{file},
+				IncludeRule: files,
 			}}, 0}
 
 	c.Unlock()
 
-	err := <-cerr
-
-	if err != nil {
-		return nil, err
-	}
-
-	return os.Stat(filepath.Join(c.localFs, file))
+	return <-cerr
 }
 
 func (c *RCloneSession) Cat(ctx context.Context, file string) (io.Reader, error) {
@@ -702,18 +709,18 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 						return nil
 					}
 
-					info := req.info
+					for _, info := range req.info {
+						localInfo, _ := os.Stat(filepath.Join(c.localFs, info.file))
 
-					localInfo, _ := os.Stat(filepath.Join(c.localFs, info.file))
-
-					info.Lock()
-					info.localInfo = localInfo
-					info.remoteInfo = remoteInfo{
-						Name:    info.file,
-						Size:    uint64(localInfo.Size()),
-						ModTime: localInfo.ModTime(),
+						info.Lock()
+						info.localInfo = localInfo
+						info.remoteInfo = remoteInfo{
+							Name:    info.file,
+							Size:    uint64(localInfo.Size()),
+							ModTime: localInfo.ModTime(),
+						}
+						info.Unlock()
 					}
-					info.Unlock()
 
 					req.cerr <- nil
 					return nil

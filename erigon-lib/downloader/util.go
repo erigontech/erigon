@@ -284,7 +284,7 @@ func AllTorrentSpecs(dirs datadir.Dirs) (res []*torrent.TorrentSpec, err error) 
 		if len(fPath) == 0 {
 			continue
 		}
-		a, err := loadTorrent(fPath)
+		a, err := LoadTorrent(fPath)
 		if err != nil {
 			return nil, fmt.Errorf("AllTorrentSpecs: %w", err)
 		}

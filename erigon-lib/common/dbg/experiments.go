@@ -332,22 +332,6 @@ func SnapshotUploadFs() string {
 }
 
 var (
-	snapshotVersionFlag string
-	snapshotVersion     sync.Once
-)
-
-func SnapshotVersion() string {
-	snapshotVersion.Do(func() {
-		v, _ := os.LookupEnv("SNAPSHOT_VERSION")
-		if v != "" {
-			snapshotVersionFlag = v
-			log.Info("[Experiment]", "SNAPSHOT_VERSION", snapshotVersionFlag)
-		}
-	})
-	return snapshotVersionFlag
-}
-
-var (
 	frozenBlockLimit     uint64
 	frozenBlockLimitOnce sync.Once
 )
