@@ -110,7 +110,6 @@ func (s *StaticValidator) AddActivationEpoch(slot uint64, activationEpoch uint64
 
 func (s *StaticValidator) AddExitEpoch(slot uint64, exitEpoch uint64) {
 	s.exitEpoch = append(s.exitEpoch, staticValidatorField[uint64]{slot, exitEpoch})
-	fmt.Println(s.exitEpoch)
 }
 
 func (s *StaticValidator) AddWithdrawableEpoch(slot uint64, withdrawableEpoch uint64) {

@@ -3,6 +3,7 @@ package historical_states_reader
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +32,6 @@ const (
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
-	genesisCfg     *clparams.GenesisConfig
 	fs             afero.Fs                              // some data is on filesystem to avoid database fragmentation
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
 	blockReader    freezeblocks.BeaconSnapshotReader
@@ -104,8 +104,8 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// Versioning
 	ret.SetVersion(minimalBeaconState.Version)
-	ret.SetGenesisTime(r.genesisCfg.GenesisTime)
-	ret.SetGenesisValidatorsRoot(r.genesisCfg.GenesisValidatorRoot)
+	ret.SetGenesisTime(r.genesisState.GenesisTime())
+	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
 	ret.SetSlot(slot)
 	epoch := state.Epoch(ret)
 	stateVersion := r.cfg.GetCurrentStateVersion(epoch)
@@ -115,7 +115,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		Epoch:           r.cfg.GetForkEpochByVersion(stateVersion),
 	})
 	// History
-	stateRoots, blockRoots := solid.NewHashList(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashList(int(r.cfg.SlotsPerHistoricalRoot))
+	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
 
 	if err := r.readHistoryHashVector(tx, r.genesisState.BlockRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.BlockRoot, blockRoots); err != nil {
@@ -163,7 +163,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetValidators(validatorSet)
 
 	// Randomness
-	randaoMixes := solid.NewHashList(int(r.cfg.EpochsPerHistoricalVector))
+	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
 	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
 		return nil, err
 	}
@@ -395,8 +395,14 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		return nil, err
 	}
 	defer zstdReader.Close()
-	currentList, err := io.ReadAll(zstdReader)
-	if err != nil {
+
+	lenRaw := uint64(0)
+	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
+		return nil, err
+	}
+	currentList := make([]byte, lenRaw)
+
+	if _, err := zstdReader.Read(currentList); err != nil {
 		return nil, err
 	}
 
@@ -409,11 +415,11 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		return nil, err
 	}
 	defer diffCursor.Close()
-	_, _, err = diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
-	if err != nil {
-		return nil, err
-	}
-	for k, v, err := diffCursor.Next(); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) != slot; k, v, err = diffCursor.Next() {
+
+	for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
+		if err != nil {
+			return nil, err
+		}
 		if len(k) != 4 {
 			return nil, fmt.Errorf("invalid key %x", k)
 		}
@@ -425,7 +431,8 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 			return nil, err
 		}
 	}
-	return currentList, nil
+
+	return currentList, err
 }
 
 func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
@@ -454,8 +461,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 	}
 	defer zstdReader.Close()
 
-	currentList, err := io.ReadAll(zstdReader)
-	if err != nil {
+	currentList := make([]byte, size*8)
+
+	if _, err := zstdReader.Read(currentList); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 
@@ -482,7 +490,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 
 func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
 	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
 func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot, validatorSetLength uint64) (*solid.ValidatorSet, []uint64, []uint64, error) {
@@ -516,8 +524,9 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	for i := 0; i < int(validatorSetLength); i += 8 {
-		out.Get(i / 8).SetEffectiveBalanceFromBytes(bytesEffectiveBalances[i : i+8])
+	for i := 0; i < int(validatorSetLength); i++ {
+		out.Get(i).
+			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
 	}
 	return out, activeIds, prevActiveIds, nil
 }
@@ -562,10 +571,8 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 			continue
 		}
 		currentEpoch := slot / r.cfg.SlotsPerEpoch
-		// Read the attestations
-		attestations := block.Block.Body.Attestations
 		// Read the participation flags
-		attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
+		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
 			data := attestation.AttestantionData()
 			isCurrentEpoch := data.Target().Epoch() == currentEpoch
 			var activeIndicies []uint64
@@ -627,8 +634,13 @@ func (r *HistoricalStatesReader) readPreviousPartecipation(slot, validatorLength
 		return nil, err
 	}
 	defer zstdReader.Close()
-	_, err = io.ReadFull(zstdReader, out)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	// Ignore the length here.
+	lenTmp := uint64(0)
+	if err := binary.Read(file, binary.LittleEndian, &lenTmp); err != nil {
+		return nil, err
+	}
+
+	if _, err = zstdReader.Read(out); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	ret := solid.NewBitList(0, int(r.cfg.ValidatorRegistryLimit))

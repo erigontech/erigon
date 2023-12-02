@@ -37,12 +37,12 @@ type Antiquary struct {
 	states          bool
 	fs              afero.Fs
 	validatorsTable *state_accessors.StaticValidatorTable
-
+	genesisState    *state.CachingBeaconState
 	// set to nil
 	currentState *state.CachingBeaconState
 }
 
-func NewAntiquary(ctx context.Context, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -59,6 +59,7 @@ func NewAntiquary(ctx context.Context, validatorsTable *state_accessors.StaticVa
 		snReader:        reader,
 		fs:              fs,
 		validatorsTable: validatorsTable,
+		genesisState:    genesisState,
 	}
 }
 

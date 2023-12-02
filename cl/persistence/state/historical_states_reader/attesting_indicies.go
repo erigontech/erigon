@@ -10,7 +10,13 @@ import (
 )
 
 func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, randaoMixes solid.HashVectorSSZ, idxs []uint64) ([]uint64, error) {
-	committee, err := r.computeCommittee(randaoMixes, idxs, attestation.Slot(), attestation.ValidatorIndex())
+	slot := attestation.Slot()
+	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+	committeeIndex := attestation.ValidatorIndex()
+	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+	count := committeesPerSlot * r.cfg.SlotsPerEpoch
+
+	committee, err := r.computeCommittee(randaoMixes, idxs, attestation.Slot(), count, index)
 	if err != nil {
 		return nil, err
 	}
@@ -34,10 +40,10 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 }
 
 // computeCommittee uses cache to compute compittee
-func (r *HistoricalStatesReader) computeCommittee(randaoMixes solid.HashVectorSSZ, indicies []uint64, slot uint64, index uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) computeCommittee(randaoMixes solid.HashVectorSSZ, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
 	cfg := r.cfg
-	count := committeeCount(cfg, slot/cfg.SlotsPerEpoch, indicies)
 	lenIndicies := uint64(len(indicies))
+
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64

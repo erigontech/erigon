@@ -195,8 +195,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
-		s.validatorsTable = state_accessors.NewStaticValidatorTable()
-		s.currentState, err = initial_state.GetGenesisState(clparams.NetworkType(s.cfg.DepositNetworkID))
+		s.currentState, err = s.genesisState.Copy()
 		if err != nil {
 			return err
 		}
@@ -490,6 +489,7 @@ func (s *Antiquary) incrementBeaconState(ctx context.Context, to uint64) error {
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
+	s.validatorsTable.SetSlot(s.currentState.Slot())
 
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if _, ok := changedValidators[validatorIndex]; !ok {
@@ -523,6 +523,10 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	defer balancesFile.Close()
 	compressor.Reset(balancesFile)
 
+	if err := binary.Write(balancesFile, binary.LittleEndian, uint64(len(uncompressed))); err != nil {
+		return err
+	}
+
 	if _, err := compressor.Write(uncompressed); err != nil {
 		return err
 	}
@@ -544,6 +548,10 @@ func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64,
 	defer balancesFile.Close()
 	compressor.Reset(balancesFile)
 	validatorSetSize := 121
+
+	if err := binary.Write(balancesFile, binary.LittleEndian, uint64((len(uncompressed)/validatorSetSize)*8)); err != nil {
+		return err
+	}
 
 	for i := 0; i < len(uncompressed)/validatorSetSize; i++ {
 		// 80:88
@@ -620,7 +628,7 @@ const subDivisionFolderSize = 10_000
 
 func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
 	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot/config.SlotsPerEpoch, suffix))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
 func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
@@ -650,24 +658,25 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	if err != nil {
 		return err
 	}
-	if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressor, "balances"); err != nil {
+	roundedSlotToDump := slot - (slot % slotsPerDumps)
+	if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawBalances(), compressor, "balances"); err != nil {
 		return err
 	}
-	if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawBalances(), compressor); err != nil {
+	if err := s.antiquateEffectiveBalances(ctx, roundedSlotToDump, s.currentState.RawValidatorSet(), compressor); err != nil {
 		return err
 	}
 	if s.currentState.Version() >= clparams.AltairVersion {
-		if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+		if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
 			return err
 		}
 	}
 	var commonBuffer bytes.Buffer
-	if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
+	if err := s.antiquateFullSlashings(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
 		return err
 	}
 
 	if state.Version() >= clparams.AltairVersion {
-		if err := s.antiquateField(ctx, slot, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+		if err := s.antiquateField(ctx, roundedSlotToDump, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
 			return err
 		}
 
