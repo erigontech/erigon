@@ -153,6 +153,7 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 }
 
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error) {
+
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target().Epoch() == Epoch(b) {

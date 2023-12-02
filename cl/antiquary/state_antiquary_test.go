@@ -31,6 +31,9 @@ var blocks_1_ssz_snappy []byte
 //go:embed test_data/pre.ssz_snappy
 var pre_state_ssz_snappy []byte
 
+//go:embed test_data/post.ssz_snappy
+var post_state_ssz_snappy []byte
+
 type MockBlockReader struct {
 	u map[uint64]*cltypes.SignedBeaconBlock
 }
@@ -88,6 +91,11 @@ func TestStateAntiquary(t *testing.T) {
 	if err := utils.DecodeSSZSnappy(preState, pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		t.Fatal(err)
 	}
+	postState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(postState, post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
+		t.Fatal(err)
+	}
+
 	vt := state_accessors.NewStaticValidatorTable()
 	f := afero.NewMemMapFs()
 	a := NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
@@ -98,9 +106,13 @@ func TestStateAntiquary(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	_ = hr
+
 	s, err := hr.ReadHistoricalState(ctx, tx, block2.Block.Slot)
 	require.NoError(t, err)
-	_ = s
-	panic("A")
+
+	postHash, err := s.HashSSZ()
+	require.NoError(t, err)
+	postHash2, err := postState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(postHash2), libcommon.Hash(postHash))
 }

@@ -75,36 +75,3 @@ func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64
 	}
 	return committeCount
 }
-
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(epoch uint64, currentJustifiedCheckpoint, previousJustified solid.Checkpoint, blockRoots solid.HashVectorSSZ, data solid.AttestationData, inclusionDelay uint64) ([]uint8, error) {
-	var justifiedCheckpoint solid.Checkpoint
-	// get checkpoint from epoch
-	if data.Target().Epoch() == epoch {
-		justifiedCheckpoint = currentJustifiedCheckpoint
-	} else {
-		justifiedCheckpoint = previousJustified
-	}
-	// Matching roots
-	if !data.Source().Equal(justifiedCheckpoint) {
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
-	}
-	blockRootPositionTarget := int((epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot)
-	blockRootPositionHead := int(data.Slot() % r.cfg.SlotsPerHistoricalRoot)
-
-	targetRoot := blockRoots.Get(blockRootPositionTarget)
-	headRoot := blockRoots.Get(blockRootPositionHead)
-
-	matchingTarget := data.Target().BlockRoot() == targetRoot
-	matchingHead := matchingTarget && data.BeaconBlockRoot() == headRoot
-	participationFlagIndicies := []uint8{}
-	if inclusionDelay <= utils.IntegerSquareRoot(r.cfg.SlotsPerEpoch) {
-		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelySourceFlagIndex)
-	}
-	if matchingTarget && inclusionDelay <= r.cfg.SlotsPerEpoch {
-		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyTargetFlagIndex)
-	}
-	if matchingHead && inclusionDelay == r.cfg.MinAttestationInclusionDelay {
-		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyHeadFlagIndex)
-	}
-	return participationFlagIndicies, nil
-}
