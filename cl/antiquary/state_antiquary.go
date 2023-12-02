@@ -199,9 +199,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("AX")
-		fmt.Println(s.genesisState.HashSSZ())
-		fmt.Println(s.currentState.HashSSZ())
 		// Collect genesis state if we are at genesis
 		if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 			return err
@@ -366,7 +363,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		slashingsBytes = slashingsBytes[:0]
 		slashingsBytes = append(slashingsBytes, s.currentState.RawSlashings()...)
 
-		fmt.Println(s.currentState.HashSSZ())
 		// We sanity check the state every 100k slots.
 		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
 			return err
