@@ -993,7 +993,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	if blockHeight >= r.FrozenBorBlocks() {
+	if blockHeight > r.FrozenBorBlocks() {
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1111,7 +1111,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
-	if endBlock >= r.FrozenBorBlocks() {
+	if endBlock > r.FrozenBorBlocks() {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
