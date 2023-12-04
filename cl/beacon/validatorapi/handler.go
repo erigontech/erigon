@@ -21,10 +21,10 @@ type ValidatorApiHandler struct {
 }
 
 func (v *ValidatorApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	v.o.Do(sync.OnceFunc(func() {
+	v.o.Do(func() {
 		v.mux = chi.NewRouter()
 		v.init(v.mux)
-	}))
+	})
 	v.mux.ServeHTTP(w, r)
 }
 
