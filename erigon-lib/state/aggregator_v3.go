@@ -735,22 +735,24 @@ func (ac *AggregatorV3Context) MinUnwindDomainsBlockNum(tx kv.Tx) (uint64, error
 }
 
 func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	//unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-	//if err != nil {
-	//	return 0, false, err
-	//}
+	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
+	if err != nil {
+		return 0, false, err
+	}
+
 	// not all blocks have commitment
+	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
 	domains := NewSharedDomains(tx)
 	defer domains.Close()
 
-	_, err := domains.SeekCommitment(context.Background(), tx)
-	if err != nil {
+	blockNumWithCommitment, _, state, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	if err != nil || state == nil {
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
 		return _minBlockNum, false, nil //nolint
 	}
-
-	return domains.BlockNum(), true, nil
+	return blockNumWithCommitment, true, nil
 }
+
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

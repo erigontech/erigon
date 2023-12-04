@@ -212,9 +212,6 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 	}
 }
 
-// by that key stored latest root hash and tree state
-var keyCommitmentState = []byte("state")
-
 type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64

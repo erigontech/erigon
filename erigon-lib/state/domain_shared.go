@@ -989,10 +989,6 @@ func (ctx *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 	return nil
 }
 
-func (ctx *SharedDomainsCommitmentContext) TempDir() string {
-	return ctx.sd.aggCtx.a.dirs.Tmp
-}
-
 func (ctx *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
 	enc, err := ctx.sd.LatestStorage(plainKey)
@@ -1010,6 +1006,10 @@ func (ctx *SharedDomainsCommitmentContext) Reset() {
 	if !ctx.justRestored.Load() {
 		ctx.patriciaTrie.Reset()
 	}
+}
+
+func (ctx *SharedDomainsCommitmentContext) TempDir() string {
+	return ctx.sd.aggCtx.a.dirs.Tmp
 }
 
 //func (ctx *SharedDomainsCommitmentContext) Hasher() hash.Hash { return ctx.updates.keccak }
@@ -1054,7 +1054,7 @@ func (d *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context
 
 	touchedKeys, updates := d.updates.List(true)
 	//fmt.Printf("[commitment] ComputeCommitment %d keys (mode=%s)\n", len(touchedKeys), d.mode)
-	//defer func() { fmt.Printf("root hash %x\n", rootHash) }()
+	//defer func() { fmt.Printf("root hash %x block %d\n", rootHash, blockNum) }()
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, err
@@ -1084,15 +1084,7 @@ func (d *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context
 	d.justRestored.Store(false)
 
 	if saveState {
-		prevState, err := d.GetBranch(keyCommitmentState)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(prevState) == 0 && prevState != nil {
-			prevState = nil
-		}
-		if err := d.storeCommitmentState(d.sd.aggCtx.commitment, blockNum, rootHash, prevState); err != nil {
+		if err := d.storeCommitmentState(d.sd.aggCtx.commitment, blockNum, rootHash); err != nil {
 			return nil, err
 		}
 	}
@@ -1100,27 +1092,25 @@ func (d *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context
 	return rootHash, err
 }
 
-func (d *SharedDomainsCommitmentContext) storeCommitmentState(dc *DomainContext, blockNum uint64, rh, prevState []byte) error {
-	state, err := d.encodePatriciaState()
+func (d *SharedDomainsCommitmentContext) storeCommitmentState(dc *DomainContext, blockNum uint64, rh []byte) error {
+	encodedState, err := d.encodeCommitmentState(blockNum, dc.hc.ic.txNum)
 	if err != nil {
 		return err
 	}
-	cs := &commitmentState{txNum: dc.hc.ic.txNum, trieState: state, blockNum: blockNum}
-	encoded, err := cs.Encode()
+	prevState, err := d.GetBranch(keyCommitmentState)
 	if err != nil {
 		return err
 	}
-
+	if len(prevState) == 0 && prevState != nil {
+		prevState = nil
+	}
 	if d.trace {
-		fmt.Printf("[commitment] put txn %d block %d rh %x, aaandInDC %d\n", dc.hc.ic.txNum, blockNum, rh, dc.hc.ic.txNum)
+		fmt.Printf("[commitment] put txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
 	}
-	if err := dc.PutWithPrev(keyCommitmentState, nil, encoded, prevState); err != nil {
-		return err
-	}
-	return nil
+	return dc.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
 }
 
-func (d *SharedDomainsCommitmentContext) encodePatriciaState() ([]byte, error) {
+func (d *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
 	var state []byte
 	var err error
 
@@ -1133,69 +1123,86 @@ func (d *SharedDomainsCommitmentContext) encodePatriciaState() ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
 	}
-	return state, nil
+
+	cs := &commitmentState{trieState: state, blockNum: blockNum, txNum: txNum}
+	encoded, err := cs.Encode()
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
 }
 
 // by that key stored latest root hash and tree state
-//var keyCommitmentState = []byte("state")
+var keyCommitmentState = []byte("state")
 
-// SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
-// and if state found, sets it up to current domain
-func (d *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
+	return sd.sdCtx.LatestCommitmentState(tx, sd.aggCtx.commitment, sinceTx, untilTx)
+}
+
+// LatestCommitmentState [sinceTx, untilTx] searches for last encoded state for CommitmentContext.
+// Found value does not become current state.
+func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
 	if dbg.DiscardCommitment() {
-		return 0, 0, false, nil
+		return 0, 0, nil, nil
 	}
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
-		return 0, 0, false, fmt.Errorf("state storing is only supported hex patricia trie")
+		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	//decodeTxBlockNums := func(v []byte) (uint64, uint64, error) {
-	//	if len(v) < 16 {
-	//		return 0, 0, fmt.Errorf("invalid state value size %d [%x]", len(v), v)
-	//	}
-	//	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16]), nil
-	//}
+	decodeTxBlockNums := func(v []byte) (txNum, blockNum uint64, err error) {
+		if len(v) < 16 {
+			return 0, 0, fmt.Errorf("invalid state value size %d [%x]", len(v), v)
+		}
+		return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16]), nil
+	}
 
 	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
 	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
 	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, nil, err
 	}
 	if it.HasNext() {
 		txn, err := it.Next()
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, nil, err
 		}
 		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, nil, err
 		}
-		//blockNum, txNum, err = decodeTxBlockNums(v)
-		blockNum, txNum, err = d.restorePatriciaState(v)
-		return blockNum, txNum, true, err
+		txNum, blockNum, err = decodeTxBlockNums(v)
+		return blockNum, txNum, v, err
 	}
+
 	// corner-case:
 	// it's normal to not have commitment.ef and commitment.v files. They are not determenistic - depend on batchSize, and not very useful.
 	// in this case `IdxRange` will be empty
 	// and can fallback to reading latest commitment from .kv file
-	var latestState []byte
 	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
-		if len(value) < 16 {
-			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
+		txn, bn, err := decodeTxBlockNums(value)
+		if err != nil {
+			return err
 		}
-		txn, bn := binary.BigEndian.Uint64(value), binary.BigEndian.Uint64(value[8:16])
 		_ = bn
 		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
-			latestState = value
+			state = value
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, false, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
+		return 0, 0, nil, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
 	}
-	blockNum, txNum, err = d.restorePatriciaState(latestState)
-	//blockNum, txNum, err = decodeTxBlockNums(latestState)
+
+	txNum, blockNum, err = decodeTxBlockNums(state)
+	return blockNum, txNum, state, err
+}
+
+// SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
+// and if state found, sets it up to current domain
+func (d *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+	_, _, state, err := d.LatestCommitmentState(tx, cd, sinceTx, untilTx)
+	blockNum, txNum, err = d.restorePatriciaState(state)
 	return blockNum, txNum, true, err
 }
 
