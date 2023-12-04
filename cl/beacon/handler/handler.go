@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -51,9 +52,9 @@ func (a *ApiHandler) init() {
 				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", nil)
-					r.Get("/{block_id}", beaconHandlerWrapper(a.getBlock, true))
-					r.Get("/{block_id}/attestations", beaconHandlerWrapper(a.getBlockAttestations, true))
-					r.Get("/{block_id}/root", beaconHandlerWrapper(a.getBlockRoot, false))
+					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
+					r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.getBlockAttestations))
+					r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.getBlockRoot))
 				})
 				r.Get("/genesis", beaconHandlerWrapper(a.getGenesis, false))
 				r.Post("/binded_blocks", nil)
@@ -102,7 +103,7 @@ func (a *ApiHandler) init() {
 				})
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/blocks/{block_id}", beaconHandlerWrapper(a.getBlock, true)) //otterscan
+				r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock)) //otterscan
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", nil)

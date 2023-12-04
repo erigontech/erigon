@@ -1,19 +1,16 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type apiError struct {
@@ -26,8 +23,26 @@ type beaconResponse struct {
 	Finalized           *bool                  `json:"finalized,omitempty"`
 	Version             *clparams.StateVersion `json:"version,omitempty"`
 	ExecutionOptimistic *bool                  `json:"execution_optimistic,omitempty"`
-	apiError            *apiError
-	internalError       error
+}
+
+func (b *beaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {
+	marshaler, ok := b.Data.(ssz.Marshaler)
+	if !ok {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "This endpoint does not support SSZ response")
+	}
+	encoded, err := marshaler.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+func (b *beaconResponse) EncodingSizeSSZ() int {
+	marshaler, ok := b.Data.(ssz.Marshaler)
+	if !ok {
+		return 9
+	}
+	return marshaler.EncodingSizeSSZ()
 }
 
 func newBeaconResponse(data any) *beaconResponse {
@@ -53,65 +68,50 @@ func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beacon
 	return r
 }
 
-func newCriticalErrorResponse(err error) *beaconResponse {
-	return &beaconResponse{
-		internalError: err,
-	}
-}
-
-func newApiErrorResponse(code int, msg string) *beaconResponse {
-	return &beaconResponse{
-		apiError: &apiError{
-			code: code,
-			err:  fmt.Errorf(msg),
-		},
-	}
-}
-
-// In case of it being a json we need to also expose finalization, version, etc...
-type beaconHandlerFn func(r *http.Request) *beaconResponse
-
-func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		accept := r.Header.Get("Accept")
-		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
-		start := time.Now()
-		defer func() {
-			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
-		}()
-
-		resp := fn(r)
-		if resp.internalError != nil {
-			http.Error(w, resp.internalError.Error(), http.StatusInternalServerError)
-			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.internalError.Error(), "ssz", isSSZ)
-			return
-		}
-
-		if resp.apiError != nil {
-			http.Error(w, resp.apiError.err.Error(), resp.apiError.code)
-			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.apiError.err.Error(), "ssz", isSSZ)
-			return
-		}
-
-		if isSSZ && supportSSZ {
-			data := resp.Data
-			// SSZ encoding
-			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				log.Debug("[Beacon API] failed", "method", r.Method, "err", err, "accepted", accept)
-				return
-			}
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(encoded)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
-		}
-	}
-}
+//// In case of it being a json we need to also expose finalization, version, etc...
+//type beaconHandlerFn func(r *http.Request) *beaconResponse
+//
+//func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.ResponseWriter, r *http.Request) {
+//	return func(w http.ResponseWriter, r *http.Request) {
+//		accept := r.Header.Get("Accept")
+//		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
+//		start := time.Now()
+//		defer func() {
+//			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+//		}()
+//
+//		resp := fn(r)
+//		if resp.internalError != nil {
+//			http.Error(w, resp.internalError.Error(), http.StatusInternalServerError)
+//			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.internalError.Error(), "ssz", isSSZ)
+//			return
+//		}
+//
+//		if resp.apiError != nil {
+//			http.Error(w, resp.apiError.err.Error(), resp.apiError.code)
+//			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.apiError.err.Error(), "ssz", isSSZ)
+//			return
+//		}
+//
+//		if isSSZ && supportSSZ {
+//			data := resp.Data
+//			// SSZ encoding
+//			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
+//			if err != nil {
+//				http.Error(w, err.Error(), http.StatusInternalServerError)
+//				log.Debug("[Beacon API] failed", "method", r.Method, "err", err, "accepted", accept)
+//				return
+//			}
+//			w.Header().Set("Content-Type", "application/octet-stream")
+//			w.Write(encoded)
+//			return
+//		}
+//		w.Header().Set("Content-Type", "application/json")
+//		if err := json.NewEncoder(w).Encode(resp); err != nil {
+//			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
+//		}
+//	}
+//}
 
 type chainTag int
 

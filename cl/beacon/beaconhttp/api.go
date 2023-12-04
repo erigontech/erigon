@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -74,7 +75,18 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		contentType := r.Header.Get("Accept")
 		switch contentType {
 		case "application/octet-stream":
-			NewEndpointError(http.StatusNotImplemented, "Not Implemented").WriteTo(w)
+			sszMarshaler, ok := any(ans).(ssz.Marshaler)
+			if !ok {
+				NewEndpointError(http.StatusBadRequest, "This endpoint does not support SSZ response").WriteTo(w)
+				return
+			}
+			// TODO: we should probably figure out some way to stream this in the future :)
+			encoded, err := sszMarshaler.EncodeSSZ(nil)
+			if err != nil {
+				WrapEndpointError(err).WriteTo(w)
+				return
+			}
+			w.Write(encoded)
 		default:
 			fallthrough
 		case "application/json", "":
