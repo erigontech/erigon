@@ -35,7 +35,7 @@ func NewEndpointError(code int, message string) *EndpointError {
 	}
 }
 
-func (e *EndpointError) Error() string {
+func (e EndpointError) Error() string {
 	return fmt.Sprintf("Code %d: %s", e.Code, e.Message)
 }
 
@@ -87,8 +87,6 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				return
 			}
 			w.Write(encoded)
-		default:
-			fallthrough
 		case "application/json", "":
 			w.Header().Add("content-type", "application/json")
 			err := json.NewEncoder(w).Encode(ans)
@@ -96,6 +94,9 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				// this error is fatal, log to console
 				log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
 			}
+		default:
+			http.Error(w, "content type must be application/json or application/octet-stream", http.StatusBadRequest)
+
 		}
 	})
 }
