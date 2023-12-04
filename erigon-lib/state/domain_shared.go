@@ -1149,11 +1149,8 @@ func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *Dom
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	decodeTxBlockNums := func(v []byte) (txNum, blockNum uint64, err error) {
-		if len(v) < 16 {
-			return 0, 0, fmt.Errorf("invalid state value size %d [%x]", len(v), v)
-		}
-		return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16]), nil
+	decodeTxBlockNums := func(v []byte) (txNum, blockNum uint64) {
+		return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 	}
 
 	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
@@ -1171,8 +1168,10 @@ func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *Dom
 		if err != nil {
 			return 0, 0, nil, err
 		}
-		txNum, blockNum, err = decodeTxBlockNums(v)
-		return blockNum, txNum, v, err
+		if len(state) >= 16 {
+			txNum, blockNum = decodeTxBlockNums(v)
+			return blockNum, txNum, v, err
+		}
 	}
 
 	// corner-case:
@@ -1180,11 +1179,11 @@ func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *Dom
 	// in this case `IdxRange` will be empty
 	// and can fallback to reading latest commitment from .kv file
 	if err = cd.IteratePrefix(tx, keyCommitmentState, func(key, value []byte) error {
-		txn, bn, err := decodeTxBlockNums(value)
-		if err != nil {
-			return err
+		if len(value) < 16 {
+			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
-		_ = bn
+
+		txn, _ := decodeTxBlockNums(value)
 		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			state = value
@@ -1194,7 +1193,11 @@ func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *Dom
 		return 0, 0, nil, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
 	}
 
-	txNum, blockNum, err = decodeTxBlockNums(state)
+	if len(state) < 16 {
+		return 0, 0, nil, nil
+	}
+
+	txNum, blockNum = decodeTxBlockNums(state)
 	return blockNum, txNum, state, err
 }
 
