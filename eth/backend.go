@@ -344,8 +344,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
-	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir)
+	if config.SilkwormLibraryPath != "" {
+		backend.silkworm, err = silkworm.New(config.SilkwormLibraryPath, config.Dirs.DataDir)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +386,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			MaxPeers:    p2pConfig.MaxPeers,
 		}
 
-		silkwormSentryService := silkworm.NewSentryService(backend.silkworm, settings)
+		silkwormSentryService := backend.silkworm.NewSentryService(settings)
 		backend.silkwormSentryService = &silkwormSentryService
 
 		sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, apiAddr)
@@ -915,7 +915,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
+		silkwormRPCDaemonService := s.silkworm.NewRpcDaemonService(chainKv)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
@@ -1387,9 +1387,7 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 	if s.silkworm != nil {
-		if err := s.silkworm.Close(); err != nil {
-			s.logger.Error("silkworm.Close error", "err", err)
-		}
+		s.silkworm.Close()
 	}
 
 	return nil
