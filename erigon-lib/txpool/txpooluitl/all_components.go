@@ -107,6 +107,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		WriteMergeThreshold(3 * 8192).
 		PageSize(uint64(16 * datasize.KB)).
 		GrowthStep(16 * datasize.MB).
+		DirtySpace(uint64(128 * datasize.MB)).
 		MapSize(1 * datasize.TB)
 
 	if cfg.MdbxPageSize.Bytes() > 0 {

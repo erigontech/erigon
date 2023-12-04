@@ -51,6 +51,13 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
+	Before: func(context *cli.Context) error {
+		_, _, err := debug.Setup(context, true /* rootLogger */)
+		if err != nil {
+			return err
+		}
+		return nil
+	},
 	Subcommands: []*cli.Command{
 		{
 			Name:   "index",
