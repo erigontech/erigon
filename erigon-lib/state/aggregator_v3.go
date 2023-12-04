@@ -745,8 +745,8 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	domains := NewSharedDomains(tx)
 	defer domains.Close()
 
-	blockNumWithCommitment, _, state, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
-	if err != nil || state == nil {
+	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	if err != nil {
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
 		return _minBlockNum, false, nil //nolint
 	}
