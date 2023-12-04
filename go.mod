@@ -25,7 +25,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/consensys/gnark-crypto v0.12.1
-	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
+	github.com/crate-crypto/go-ipa v0.0.0-20231025140028-3c0104f4b233
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
@@ -35,7 +35,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.6.0
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
+	github.com/gballet/go-verkle v0.1.1-0.20231125115329-d193f0b46e01
 	github.com/go-chi/chi/v5 v5.0.10
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.8.1
@@ -89,7 +89,7 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/net v0.18.0
 	golang.org/x/sync v0.5.0
-	golang.org/x/sys v0.14.0
+	golang.org/x/sys v0.15.0
 	golang.org/x/time v0.4.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
@@ -141,7 +141,7 @@ require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.7.0 // indirect
+	github.com/bits-and-blooms/bitset v1.11.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect

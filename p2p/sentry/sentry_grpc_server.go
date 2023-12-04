@@ -309,6 +309,7 @@ func handShake(
 			errChan <- nil
 		} else {
 			errChan <- p2p.NewPeerError(p2p.PeerErrorStatusSend, p2p.DiscNetworkError, err, "sentry.handShake failed to send eth Status")
+			
 		}
 	}()
 

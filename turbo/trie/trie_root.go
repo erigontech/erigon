@@ -5,10 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -1531,6 +1532,8 @@ func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
 
 	return h, nil
 }
+
+
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string

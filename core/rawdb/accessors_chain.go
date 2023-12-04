@@ -1471,7 +1471,7 @@ func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
 	if len(encoded) == 0 {
 		return verkle.New(), nil
 	}
-	return verkle.ParseNode(encoded, 0, root[:])
+	return verkle.ParseNode(encoded, 0) 	// Todo @somnathb1: put in the correct value of depth of the node
 }
 func WriteDBSchemaVersion(tx kv.RwTx) error {
 	var version [12]byte

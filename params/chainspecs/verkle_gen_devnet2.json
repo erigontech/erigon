@@ -1,0 +1,26 @@
+{
+    "ChainName": "verkle-gen-devnet2",
+    "chainId": 69420,
+    "consensus": "ethash",
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "eip158Block": 0,
+
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "mergeNetsplitBlock": 0,
+
+    "terminalTotalDifficulty": 0,
+    "terminalTotalDifficultyPassed": true,
+    "shanghaiTime": 0,
+    "proofInBlocks": true,
+    "pragueTime": 1700826600,
+    "ethash": {}
+  }
+  

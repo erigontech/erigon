@@ -50,20 +50,22 @@ func readChainSpec(filename string) *chain.Config {
 
 // Genesis hashes to enforce below configs on.
 var (
-	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	HoleskyGenesisHash    = libcommon.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
-	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
-	BorMainnetGenesisHash = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
-	BorDevnetGenesisHash  = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
-	GnosisGenesisHash     = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
-	ChiadoGenesisHash     = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	MainnetGenesisHash          = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	HoleskyGenesisHash          = libcommon.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
+	SepoliaGenesisHash          = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
+	GoerliGenesisHash           = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
+	MumbaiGenesisHash           = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
+	BorMainnetGenesisHash       = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
+	BorDevnetGenesisHash        = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
+	GnosisGenesisHash           = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	ChiadoGenesisHash           = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	VerkleGenDevnet2GenesisHash = libcommon.HexToHash("0x76a519ccb8a2b12d733ad7d88e2d5f4a11d6dc6ca320edccd3b8a3e9081ca1b3")
 )
 
 var (
 	GnosisGenesisStateRoot = libcommon.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 	ChiadoGenesisStateRoot = libcommon.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
+	VerkleGenDevnet2StateRoot = libcommon.HexToHash("0x5e8519756841faf0b2c28951c451b61a4b407b70a5ce5b57992f4bec973173ff")
 )
 
 var (
@@ -130,6 +132,8 @@ var (
 	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
+
+	VerkleGenDevnet2Config = readChainSpec("chainspecs/verkle_gen_devnet2.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
@@ -213,6 +217,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GnosisChainConfig
 	case networkname.ChiadoChainName:
 		return ChiadoChainConfig
+	case networkname.VerkleGenDevnet2:
+		return VerkleGenDevnet2Config
 	default:
 		return nil
 	}
@@ -238,6 +244,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
+	case networkname.VerkleGenDevnet2:
+		return &VerkleGenDevnet2GenesisHash
 	default:
 		return nil
 	}
@@ -263,6 +271,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
+	case genesisHash == VerkleGenDevnet2GenesisHash:
+		return VerkleGenDevnet2Config
 	default:
 		return nil
 	}
@@ -288,6 +298,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,
+		VerkleGenDevnet2Config.ChainID,
 	}
 	for _, id := range ids {
 		if id.Cmp(chainID) == 0 {
