@@ -236,17 +236,17 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 	t.ctx["from"] = t.vm.ToValue(from.Bytes())
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
-	t.ctx["gas"] = t.vm.ToValue(gas)
-	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice.ToBig())
+	t.ctx["gas"] = t.vm.ToValue(t.gasLimit)
+	t.ctx["gasPrice"] = t.vm.ToValue(env.GasPrice.ToBig())
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
 		return
 	}
 	t.ctx["value"] = valueBig
-	t.ctx["block"] = t.vm.ToValue(env.Context().BlockNumber)
+	t.ctx["block"] = t.vm.ToValue(env.Context.BlockNumber)
 	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

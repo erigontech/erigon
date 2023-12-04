@@ -1,15 +1,13 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 Erigon-Lightclient contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//     http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package main
 
@@ -32,14 +30,16 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplincli"
+	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 func main() {
-	app := app.MakeApp("caplin", runCaplinNode, flags.CLDefaultFlags)
+	app := app.MakeApp("caplin", runCaplinNode, append(caplinflags.CliFlags, sentinelflags.CliFlags...))
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -50,20 +50,20 @@ func main() {
 }
 
 func runCaplinNode(cliCtx *cli.Context) error {
-	ctx, cn := context.WithCancel(context.Background())
-	defer cn()
-
-	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
+	cfg, err := caplincli.SetupCaplinCli(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
+		return err
 	}
 	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
-	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
+	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
 	// Either start from genesis or a checkpoint
+	ctx, cn := context.WithCancel(context.Background())
+	defer cn()
 	var state *state.CachingBeaconState
 	if cfg.InitialSync {
 		state = cfg.InitalState

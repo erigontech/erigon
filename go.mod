@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/erigontech/mdbx-go v0.27.21
+	github.com/erigontech/silkworm-go v0.7.0
 	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -13,14 +14,14 @@ replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
-	github.com/99designs/gqlgen v0.17.33
+	github.com/99designs/gqlgen v0.17.40
 	github.com/Giulio2002/bls v0.0.0-20230906201036-c2330c97dc7d
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/alecthomas/kong v0.8.0
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
 	github.com/anacrolix/sync v0.4.0
-	github.com/anacrolix/torrent v1.52.6-0.20230926121951-11833b45cfbe
+	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -83,7 +84,7 @@ require (
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.6
+	github.com/vektah/gqlparser/v2 v2.5.10
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/crypto v0.15.0
@@ -185,7 +186,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231120030929-7bcfed8fdd1a // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231201114238-3b4e78673c4b // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -255,6 +256,7 @@ require (
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
+	github.com/sosodev/duration v1.1.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/supranational/blst v0.3.11 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect

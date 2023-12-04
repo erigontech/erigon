@@ -155,8 +155,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthStatsURLFlag,
 	&utils.OverrideCancunFlag,
 
-	&utils.ConfigFlag,
-
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
 	&utils.LightClientDiscoveryTCPPortFlag,
@@ -165,7 +163,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.OtsSearchMaxCapFlag,
 
-	&utils.SilkwormLibraryPathFlag,
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,
 	&utils.SilkwormSentryFlag,
@@ -182,6 +179,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinArchiveFlag,
 
 	&utils.TrustedSetupFile,
+	&utils.RPCSlowFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 }
