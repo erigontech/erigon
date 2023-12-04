@@ -43,6 +43,8 @@ var (
 	noMerge           = EnvBool("NO_MERGE", false)
 	discardHistory    = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
+
+	SkipExec = EnvBool("SKIP_EXEC", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
