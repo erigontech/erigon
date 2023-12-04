@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -60,6 +61,7 @@ type ConsensusHandlers struct {
 	genesisConfig      *clparams.GenesisConfig
 	ctx                context.Context
 	beaconDB           persistence.RawBeaconBlockChain
+	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
 }
@@ -70,12 +72,13 @@ const (
 	ResourceUnavaiablePrefix = 0x03
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, host host.Host,
 	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		metadata:           metadata,
 		beaconDB:           db,
+		indiciesDB:         indiciesDB,
 		genesisConfig:      genesisConfig,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
