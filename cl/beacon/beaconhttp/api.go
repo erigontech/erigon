@@ -12,6 +12,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var _ error = EndpointError{}
+var _ error = (*EndpointError)(nil)
+
 type EndpointError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
