@@ -9,20 +9,20 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (a *ApiHandler) getSpec(r *http.Request) *beaconResponse {
-	return newBeaconResponse(a.beaconChainCfg)
+func (a *ApiHandler) getSpec(r *http.Request) (*beaconResponse, error) {
+	return newBeaconResponse(a.beaconChainCfg), nil
 }
 
-func (a *ApiHandler) getDepositContract(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getDepositContract(r *http.Request) (*beaconResponse, error) {
 
 	return newBeaconResponse(struct {
 		ChainId         uint64 `json:"chain_id"`
 		DepositContract string `json:"address"`
-	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress})
+	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress}), nil
 
 }
 
-func (a *ApiHandler) getForkSchedule(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getForkSchedule(r *http.Request) (*beaconResponse, error) {
 	response := []cltypes.Fork{}
 	// create first response (unordered and incomplete)
 	for currentVersion, epoch := range a.beaconChainCfg.ForkVersionSchedule {
@@ -43,5 +43,5 @@ func (a *ApiHandler) getForkSchedule(r *http.Request) *beaconResponse {
 		response[i].PreviousVersion = previousVersion
 		previousVersion = response[i].CurrentVersion
 	}
-	return newBeaconResponse(response)
+	return newBeaconResponse(response), nil
 }
