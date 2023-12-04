@@ -1543,7 +1543,7 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name)
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 }
 
