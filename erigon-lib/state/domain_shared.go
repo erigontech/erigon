@@ -1202,6 +1202,9 @@ func (d *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *Dom
 // and if state found, sets it up to current domain
 func (d *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := d.LatestCommitmentState(tx, cd, sinceTx, untilTx)
+	if err != nil {
+		return 0, 0, false, err
+	}
 	blockNum, txNum, err = d.restorePatriciaState(state)
 	return blockNum, txNum, true, err
 }
