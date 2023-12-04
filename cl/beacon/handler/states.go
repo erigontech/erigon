@@ -7,6 +7,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -68,30 +69,30 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (a *ApiHandler) getStateFork(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getStateFork(r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		return newApiErrorResponse(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return newApiErrorResponse(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	if slot == nil {
-		return newApiErrorResponse(http.StatusNotFound, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, err.Error())
 	}
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
@@ -102,78 +103,78 @@ func (a *ApiHandler) getStateFork(r *http.Request) *beaconResponse {
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           epoch,
-	})
+	}), nil
 }
 
-func (a *ApiHandler) getStateRoot(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getStateRoot(r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		return newApiErrorResponse(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return newApiErrorResponse(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
 	stateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, root)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	if stateRoot == (libcommon.Hash{}) {
-		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
 	}
 
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	if slot == nil {
-		return newApiErrorResponse(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block header: %x", root))
 	}
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 
-	return newBeaconResponse(&rootResponse{Root: stateRoot}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot())
+	return newBeaconResponse(&rootResponse{Root: stateRoot}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
-func (a *ApiHandler) getFullState(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockId, err := stateIdFromRequest(r)
 	if err != nil {
-		return newApiErrorResponse(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
 	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return newApiErrorResponse(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
 	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
 	if err != nil {
-		return newCriticalErrorResponse(err)
+		return nil, err
 	}
 
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
 	if err != nil {
-		return newApiErrorResponse(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version())
+	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version()), nil
 }
