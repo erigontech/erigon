@@ -637,7 +637,7 @@ func persistValidatorSets(
 			return fmt.Errorf("snap.Store: %w", err)
 		}
 
-		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
+		logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return nil
@@ -686,7 +686,7 @@ func initValidatorSets(
 		if err := snap.Store(snapDb); err != nil {
 			return nil, fmt.Errorf("snap.Store (0): %w", err)
 		}
-		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
+		logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
 		g := errgroup.Group{}
 		g.SetLimit(estimate.AlmostAllCPUs())
 		defer g.Wait()
