@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -22,11 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
-)
-
-const (
-	subDivisionFolderSize = 10_000
-	slotsPerDumps         = 2048
 )
 
 type HistoricalStatesReader struct {
@@ -379,8 +373,8 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 
 func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint64, diffBucket string, fileSuffix string) ([]byte, error) {
 	// Read the file
-	freshDumpSlot := slot - slot%slotsPerDumps
-	_, filePath := epochToPaths(freshDumpSlot, r.cfg, fileSuffix)
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	_, filePath := clparams.EpochToPaths(freshDumpSlot, r.cfg, fileSuffix)
 	file, err := r.fs.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -434,7 +428,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 }
 
 func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
-	freshDumpSlot := slot - slot%slotsPerDumps
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
 		return nil, err
@@ -486,11 +480,6 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 		}
 	}
 	return out, out.DecodeSSZ(currentList, 0)
-}
-
-func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
 
 func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot, validatorSetLength uint64) (*solid.ValidatorSet, []uint64, []uint64, error) {
@@ -622,7 +611,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 
 func (r *HistoricalStatesReader) readPreviousPartecipation(slot, validatorLength uint64) (*solid.BitList, error) {
 	beginSlot := r.cfg.RoundSlotToEpoch(slot)
-	_, filePath := epochToPaths(beginSlot, r.cfg, "participation")
+	_, filePath := clparams.EpochToPaths(beginSlot, r.cfg, "participation")
 	file, err := r.fs.Open(filePath)
 	if err != nil {
 		return nil, err

@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -50,6 +51,11 @@ const (
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 10 * time.Second
 	RespTimeout    time.Duration = 15 * time.Second
+)
+
+const (
+	SubDivisionFolderSize = 10_000
+	SlotsPerDump          = 2048
 )
 
 var (
@@ -1042,4 +1048,9 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 
 func SupportBackfilling(networkId uint64) bool {
 	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
+}
+
+func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

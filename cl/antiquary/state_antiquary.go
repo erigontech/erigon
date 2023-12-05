@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"sync"
 	"time"
 
@@ -37,8 +36,6 @@ var bufferPool = sync.Pool{
 		return &bytes.Buffer{}
 	},
 }
-
-const slotsPerDumps = 2048 // Dump full balances
 
 func excludeDuplicatesIdentity() etl.LoadFunc {
 	var prevKey, prevValue []byte
@@ -332,7 +329,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		if slot%slotsPerDumps == 0 {
+		if slot%clparams.SlotsPerDump == 0 {
 			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
 			}
@@ -375,7 +372,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		events.Reset()
-		if slot%slotsPerDumps == 0 {
+		if slot%clparams.SlotsPerDump == 0 {
 			continue
 		}
 
@@ -512,7 +509,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 }
 
 func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder, name string) error {
-	folderPath, filePath := epochToPaths(slot, s.cfg, name)
+	folderPath, filePath := clparams.EpochToPaths(slot, s.cfg, name)
 	_ = s.fs.MkdirAll(folderPath, 0o755)
 
 	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
@@ -537,7 +534,7 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 }
 
 func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder) error {
-	folderPath, filePath := epochToPaths(slot, s.cfg, "effective_balances")
+	folderPath, filePath := clparams.EpochToPaths(slot, s.cfg, "effective_balances")
 	_ = s.fs.MkdirAll(folderPath, 0o755)
 
 	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
@@ -623,18 +620,6 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-const subDivisionFolderSize = 10_000
-
-func epochToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
-}
-
-func slotToPaths(slot uint64, config *clparams.BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
-}
-
 func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
@@ -657,7 +642,7 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	if err != nil {
 		return err
 	}
-	roundedSlotToDump := slot - (slot % slotsPerDumps)
+	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
 	if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawBalances(), compressor, "balances"); err != nil {
 		return err
 	}
