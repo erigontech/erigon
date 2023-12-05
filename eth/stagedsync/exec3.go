@@ -248,6 +248,7 @@ func ExecV3(ctx context.Context,
 				_blockNum++
 			}
 		}
+
 		_min, err := rawdbv3.TxNums.Min(applyTx, _blockNum)
 		if err != nil {
 			return err
