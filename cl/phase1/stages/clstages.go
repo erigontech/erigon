@@ -492,7 +492,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 
 					// Increment validator set
-					headState, err := cfg.forkChoice.GetFullState(headRoot, false)
+					headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 					if err != nil {
 						return err
 					}

@@ -330,7 +330,7 @@ func readConfigAsMap(filePath string) (map[string]interface{}, error) {
 
 	fileConfig := make(map[string]interface{})
 
-	if fileExtension == ".yaml" {
+	if fileExtension == ".yaml" || fileExtension == ".yml" {
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return fileConfig, err
@@ -349,7 +349,7 @@ func readConfigAsMap(filePath string) (map[string]interface{}, error) {
 			return fileConfig, err
 		}
 	} else {
-		return fileConfig, errors.New("config files only accepted are .yaml and .toml")
+		return fileConfig, errors.New("config files only accepted are .yaml, .yml, and .toml")
 	}
 
 	return fileConfig, nil

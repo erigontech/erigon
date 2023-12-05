@@ -496,12 +496,12 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	max := s.BlocksAvailable()
+	maxBlockNumInFiles := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -511,7 +511,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -521,7 +521,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.Seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.Seg.FilePath())
