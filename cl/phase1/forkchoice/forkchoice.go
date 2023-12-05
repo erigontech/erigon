@@ -26,6 +26,12 @@ const (
 	allowedCachedStates = 8
 )
 
+type preverifiedAppendListsSizes struct {
+	validatorLength           uint64
+	historicalRootsLength     uint64
+	historicalSummariesLength uint64
+}
+
 type ForkChoiceStore struct {
 	ctx                           context.Context
 	time                          uint64
@@ -50,9 +56,7 @@ type ForkChoiceStore struct {
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
 	// preverifid sizes
-	preverifiedValidators          *lru.Cache[libcommon.Hash, uint64]
-	preverifiedHistoricalRoots     *lru.Cache[libcommon.Hash, uint64]
-	preverifiedHistoricalSummaries *lru.Cache[libcommon.Hash, uint64]
+	preverifiedSizes *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
 
 	mu sync.Mutex
 	// EL
@@ -98,44 +102,37 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
-	preverifiedValidators, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	preverifiedSizes, err := lru.New[libcommon.Hash, preverifiedAppendListsSizes](checkpointsPerCache * 10)
 	if err != nil {
 		return nil, err
 	}
-	preverifiedHistoricalRoots, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
-	if err != nil {
-		return nil, err
-	}
-	preverifiedHistoricalSummaries, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
-	if err != nil {
-		return nil, err
-	}
-	preverifiedHistoricalSummaries.Add(anchorRoot, anchorState.HistoricalSummariesLength())
-	preverifiedHistoricalRoots.Add(anchorRoot, anchorState.HistoricalRootsLength())
-	preverifiedValidators.Add(anchorRoot, uint64(anchorState.ValidatorLength()))
+	preverifiedSizes.Add(anchorRoot, preverifiedAppendListsSizes{
+		validatorLength:           uint64(anchorState.ValidatorLength()),
+		historicalRootsLength:     anchorState.HistoricalRootsLength(),
+		historicalSummariesLength: anchorState.HistoricalSummariesLength(),
+	})
+
 	return &ForkChoiceStore{
-		ctx:                            ctx,
-		highestSeen:                    anchorState.Slot(),
-		time:                           anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
-		justifiedCheckpoint:            anchorCheckpoint.Copy(),
-		finalizedCheckpoint:            anchorCheckpoint.Copy(),
-		unrealizedJustifiedCheckpoint:  anchorCheckpoint.Copy(),
-		unrealizedFinalizedCheckpoint:  anchorCheckpoint.Copy(),
-		forkGraph:                      forkGraph,
-		equivocatingIndicies:           map[uint64]struct{}{},
-		latestMessages:                 map[uint64]*LatestMessage{},
-		checkpointStates:               make(map[checkpointComparable]*checkpointState),
-		eth2Roots:                      eth2Roots,
-		engine:                         engine,
-		recorder:                       recorder,
-		operationsPool:                 operationsPool,
-		anchorPublicKeys:               anchorPublicKeys,
-		genesisTime:                    anchorState.GenesisTime(),
-		beaconCfg:                      anchorState.BeaconConfig(),
-		childrens:                      make(map[libcommon.Hash]childrens),
-		preverifiedValidators:          preverifiedValidators,
-		preverifiedHistoricalRoots:     preverifiedHistoricalRoots,
-		preverifiedHistoricalSummaries: preverifiedHistoricalSummaries,
+		ctx:                           ctx,
+		highestSeen:                   anchorState.Slot(),
+		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
+		justifiedCheckpoint:           anchorCheckpoint.Copy(),
+		finalizedCheckpoint:           anchorCheckpoint.Copy(),
+		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
+		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
+		forkGraph:                     forkGraph,
+		equivocatingIndicies:          map[uint64]struct{}{},
+		latestMessages:                map[uint64]*LatestMessage{},
+		checkpointStates:              make(map[checkpointComparable]*checkpointState),
+		eth2Roots:                     eth2Roots,
+		engine:                        engine,
+		recorder:                      recorder,
+		operationsPool:                operationsPool,
+		anchorPublicKeys:              anchorPublicKeys,
+		genesisTime:                   anchorState.GenesisTime(),
+		beaconCfg:                     anchorState.BeaconConfig(),
+		childrens:                     make(map[libcommon.Hash]childrens),
+		preverifiedSizes:              preverifiedSizes,
 	}, nil
 }
 
@@ -257,22 +254,22 @@ func (f *ForkChoiceStore) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.C
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
-	if ret, ok := f.preverifiedValidators.Get(blockRoot); ok {
-		return ret
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.validatorLength
 	}
 	return 0
 }
 
 func (f *ForkChoiceStore) PreverifiedHistoricalRoots(blockRoot libcommon.Hash) uint64 {
-	if ret, ok := f.preverifiedHistoricalRoots.Get(blockRoot); ok {
-		return ret
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalRootsLength
 	}
 	return 0
 }
 
 func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Hash) uint64 {
-	if ret, ok := f.preverifiedHistoricalSummaries.Get(blockRoot); ok {
-		return ret
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalSummariesLength
 	}
 	return 0
 }
