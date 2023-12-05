@@ -35,16 +35,19 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 		if db != nil {
 			db.Close()
 		}
+		if agg != nil {
+			agg.Close()
+		}
 	}()
 
-	before, after, writer := apply(tx, agg, logger)
+	before, after, writer := apply(tx, logger)
 	blocksTotal := uint64(100_000)
 	generateBlocks2(t, 1, blocksTotal, writer, before, after, staticCodeStaticIncarnations)
 
 	err = stages.SaveStageProgress(tx, stages.Execution, blocksTotal)
 	require.NoError(t, err)
 
-	for i := uint64(0); i < blocksTotal; i++ {
+	for i := uint64(0); i <= blocksTotal; i++ {
 		err = rawdbv3.TxNums.Append(tx, i, i)
 		require.NoError(t, err)
 	}

@@ -312,6 +312,7 @@ var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	domains := libstate.NewSharedDomains(tx)
 	defer domains.Close()
+	fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	//txTo, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	//if err != nil {
 	//      return err

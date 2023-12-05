@@ -134,7 +134,7 @@ func TestExec(t *testing.T) {
 	})
 }
 
-func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	domains := libstate.NewSharedDomains(tx)
 
 	rs := state.NewStateV3(domains, logger)
@@ -157,6 +157,11 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 			if err := rs.ApplyState4(context.Background(), txTask); err != nil {
 				panic(err)
 			}
+			_, err := rs.Domains().ComputeCommitment(context.Background(), true, false, txTask.BlockNum, "")
+			if err != nil {
+				panic(err)
+			}
+
 			if n == from+numberOfBlocks-1 {
 				if err := domains.Flush(context.Background(), tx); err != nil {
 					panic(err)

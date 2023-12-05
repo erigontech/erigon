@@ -104,10 +104,10 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		roTx:        tx,
 		//trace:       true,
 	}
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 
 	sd.StartWrites()
 	sd.SetTxNum(context.Background(), 0)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		panic(err)
 	}
@@ -159,8 +159,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	return sd.Flush(ctx, rwTx)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
+	it, err := sd.aggCtx.AccountHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, rwTx kv.Tx, bloc
 		sd.sdCtx.TouchPlainKey(string(k), nil, sd.sdCtx.TouchAccount)
 	}
 
-	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, rwTx)
+	it, err = sd.aggCtx.StorageHistoryRange(int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1053,8 +1053,7 @@ func (d *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
-	//fmt.Printf("[commitment] ComputeCommitment %d keys (mode=%s)\n", len(touchedKeys), d.mode)
-	//defer func() { fmt.Printf("root hash %x block %d\n", rootHash, blockNum) }()
+	//defer func() { fmt.Printf("[commitment] rootHash %x block %d keys %d mode %s\n", rootHash, blockNum, len(touchedKeys), d.mode) }()
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, err
