@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -197,6 +198,13 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 }
 
 // FinalizedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) JustifiedSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Epoch())
+}
+
+// FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -232,10 +240,20 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 	return f.forkGraph.AnchorSlot()
 }
 
-func (f *ForkChoiceStore) GetFullState(blockRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+}
+func (f *ForkChoiceStore) GetStateAtStateRoot(stateRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetState(stateRoot, alwaysCopy)
+}
+func (f *ForkChoiceStore) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetStateAtSlot(slot, alwaysCopy)
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
