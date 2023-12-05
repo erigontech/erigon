@@ -64,7 +64,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDBWithDefaultV3(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -169,14 +169,14 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDBWithDefaultV3(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		defer db.Close()
 
-		defer func(t time.Time) { logger.Info("stage_exec total", "took", time.Since(t)) }(time.Now())
+		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageExec(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -1735,7 +1735,6 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		consensusConfig = &config.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
-			config.HeimdallURL = HeimdallURL
 			if config.HeimdallgRPCAddress != "" {
 				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
 			} else {

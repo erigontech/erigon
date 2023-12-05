@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	lg "github.com/anacrolix/log"
@@ -456,7 +457,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, 8, log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {

@@ -14,7 +14,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.20.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
-	github.com/anacrolix/torrent v1.53.1
+	github.com/anacrolix/torrent v1.53.2
 	github.com/aws/aws-sdk-go-v2 v1.21.2
 	github.com/aws/aws-sdk-go-v2/config v1.19.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
