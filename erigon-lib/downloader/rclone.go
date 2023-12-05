@@ -72,7 +72,7 @@ func (i *rcloneInfo) Type() snaptype.Type {
 		return i.snapInfo.T
 	}
 
-	return 0
+	return snaptype.Unknown
 }
 
 type RCloneClient struct {

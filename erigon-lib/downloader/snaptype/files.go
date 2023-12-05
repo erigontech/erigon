@@ -35,12 +35,12 @@ import (
 type Type int
 
 const (
+	Unknown Type = -1
 	Headers Type = iota
 	Bodies
 	Transactions
 	BorEvents
 	BorSpans
-	NumberOfTypes
 	BeaconBlocks
 )
 
@@ -78,7 +78,7 @@ func ParseFileType(s string) (Type, bool) {
 	case "beaconblocks":
 		return BeaconBlocks, true
 	default:
-		return NumberOfTypes, false
+		return Unknown, false
 	}
 }
 

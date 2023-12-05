@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,6 +106,12 @@ func StageSnapshotsCfg(db kv.RwDB,
 			}
 
 			if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+				blockLimit := maxSeedable - u.minBlockNumber()
+
+				if u.frozenBlockLimit < blockLimit {
+					blockLimit = u.frozenBlockLimit
+				}
+
 				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
 					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
 				}
@@ -180,8 +186,44 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	if err := snapshotsync.WaitForDownloader(ctx, cfg.version, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
-		return err
+	if cfg.snapshotUploader != nil {
+		u := cfg.snapshotUploader
+
+		u.init(ctx, logger)
+		u.downloadLatestSnapshots(ctx)
+
+		if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+			blockLimit := maxSeedable - u.minBlockNumber()
+
+			if u.frozenBlockLimit < blockLimit {
+				blockLimit = u.frozenBlockLimit
+			}
+
+			if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
+				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
+			}
+
+			if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
+			}
+		}
+
+		if err := cfg.blockReader.Snapshots().ReopenFolder(); err != nil {
+			return err
+		}
+
+		if cfg.chainConfig.Bor != nil {
+			if err := cfg.blockReader.BorSnapshots().ReopenFolder(); err != nil {
+				return err
+			}
+		}
+		if cfg.notifier.Events != nil { // can notify right here, even that write txn is not commit
+			cfg.notifier.Events.OnNewSnapshot()
+		}
+	} else {
+		if err := snapshotsync.WaitForDownloader(ctx, cfg.version, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+			return err
+		}
 	}
 
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -377,8 +419,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		var minBlockNumber uint64
 
 		if cfg.snapshotUploader != nil {
-			cfg.snapshotUploader.init(ctx, s, logger)
-
 			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 		}
 
@@ -426,7 +466,6 @@ type uploadState struct {
 type snapshotUploader struct {
 	version          string
 	cfg              *SnapshotsCfg
-	state            *PruneState
 	files            map[string]*uploadState
 	uploadFs         string
 	rclone           *downloader.RCloneClient
@@ -437,7 +476,7 @@ type snapshotUploader struct {
 	uploading        atomic.Bool
 }
 
-func (u *snapshotUploader) init(ctx context.Context, s *PruneState, logger log.Logger) {
+func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
@@ -446,8 +485,6 @@ func (u *snapshotUploader) init(ctx context.Context, s *PruneState, logger log.L
 			u.start(ctx, logger)
 		}
 	}
-
-	u.state = s
 }
 
 func (u *snapshotUploader) maxUploadedHeader() uint64 {
@@ -479,6 +516,51 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 	return max
 }
 
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context) error {
+	entries, err := u.uploadSession.ReadRemoteDir(ctx, true)
+
+	if err != nil {
+		return err
+	}
+
+	lastSegments := map[snaptype.Type]fs.FileInfo{}
+	torrents := map[string]string{}
+
+	for _, ent := range entries {
+		if info, err := ent.Info(); err == nil {
+			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && snapInfo.Type() != snaptype.Unknown {
+				if last, ok := lastSegments[snapInfo.Type()]; ok {
+					if lastInfo, ok := last.Sys().(downloader.SnapInfo); ok && snapInfo.To() > lastInfo.To() {
+						lastSegments[snapInfo.Type()] = info
+					}
+				} else {
+					lastSegments[snapInfo.Type()] = info
+				}
+			} else {
+				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
+					fileName := strings.TrimSuffix(info.Name(), ".torrent")
+					torrents[fileName] = info.Name()
+				}
+			}
+		}
+	}
+
+	var downloads []string
+
+	for _, info := range lastSegments {
+		downloads = append(downloads, info.Name())
+		if torrent, ok := torrents[info.Name()]; ok {
+			downloads = append(downloads, torrent)
+		}
+	}
+
+	if len(downloads) > 0 {
+		return u.uploadSession.Download(ctx, downloads...)
+	}
+
+	return nil
+}
+
 func (u *snapshotUploader) maxSeedableHeader() uint64 {
 	var max uint64
 
@@ -505,19 +587,6 @@ func (u *snapshotUploader) minBlockNumber() uint64 {
 	}
 
 	return min
-}
-
-func freePort() (port int, err error) {
-	if a, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0"); err != nil {
-		return 0, err
-	} else {
-		if l, err := net.ListenTCP("tcp", a); err != nil {
-			return 0, err
-		} else {
-			defer l.Close()
-			return l.Addr().(*net.TCPAddr).Port, nil
-		}
-	}
 }
 
 func (u *snapshotUploader) hashesFile() string {

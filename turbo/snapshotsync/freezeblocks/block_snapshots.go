@@ -1002,11 +1002,11 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
-	segments, _, err := Segments(dir, 0)
+	segments, _, err := Segments(dir, minIndex)
 	if err != nil {
 		return err
 	}
@@ -1492,7 +1492,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 			// wait for Downloader service to download all expected snapshots
 			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
 				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}

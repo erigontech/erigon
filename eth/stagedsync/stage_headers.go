@@ -172,9 +172,11 @@ func HeadersPOW(
 	if err != nil {
 		return err
 	}
+	/* TEMP TESTING
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
 	}
+	TEMP TESTING */
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
