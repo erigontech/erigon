@@ -44,7 +44,7 @@ var (
 	discardHistory    = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
 
-	SkipExec = EnvBool("SKIP_EXEC", false)
+	OnlyStagesOfBlocks = EnvBool("ONLY_STAGES_OF_BLOCKS", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
