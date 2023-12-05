@@ -264,7 +264,7 @@ of the yaml configuration file and sets the chain to goerli
 Example of setting up TOML config file
 
 ```
-`datadir = 'your datadir'
+datadir = 'your datadir'
 port = 1111
 chain = "mainnet"
 http = true
