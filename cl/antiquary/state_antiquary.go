@@ -495,7 +495,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return true
 		}
 		commonBuffer.Reset()
-		if err = validator.Serialize(commonBuffer); err != nil {
+		if err = validator.WriteTo(commonBuffer); err != nil {
 			return false
 		}
 		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(commonBuffer.Bytes())); err != nil {
@@ -693,7 +693,7 @@ func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBea
 	buffer.Reset()
 	minimalBeaconState := state_accessors.MinimalBeaconStateFromBeaconState(st.BeaconState)
 
-	if err := minimalBeaconState.Serialize(buffer); err != nil {
+	if err := minimalBeaconState.WriteTo(buffer); err != nil {
 		return err
 	}
 	return collector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), buffer.Bytes())

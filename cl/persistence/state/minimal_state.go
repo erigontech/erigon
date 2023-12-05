@@ -54,7 +54,7 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
-func (m *MinimalBeaconState) Serialize(w io.Writer) error {
+func (m *MinimalBeaconState) WriteTo(w io.Writer) error {
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func (m *MinimalBeaconState) Serialize(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *MinimalBeaconState) Deserialize(r io.Reader) error {
+func (m *MinimalBeaconState) ReadFrom(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.JustificationBits = &cltypes.JustificationBits{}
 	m.Fork = &cltypes.Fork{}

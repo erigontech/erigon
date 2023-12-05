@@ -143,7 +143,7 @@ func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) 
 	}
 	buf := bytes.NewBuffer(v)
 
-	return minimalState, minimalState.Deserialize(buf)
+	return minimalState, minimalState.ReadFrom(buf)
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized

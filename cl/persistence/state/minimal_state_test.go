@@ -20,11 +20,11 @@ func TestMinimalState(t *testing.T) {
 		NextWithdrawalValidatorIndex: 0,
 	}
 	var b bytes.Buffer
-	if err := m.Serialize(&b); err != nil {
+	if err := m.WriteTo(&b); err != nil {
 		t.Fatal(err)
 	}
 	m2 := &MinimalBeaconState{}
-	if err := m2.Deserialize(&b); err != nil {
+	if err := m2.ReadFrom(&b); err != nil {
 		t.Fatal(err)
 	}
 
