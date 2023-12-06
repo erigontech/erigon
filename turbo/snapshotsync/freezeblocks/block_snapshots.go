@@ -1352,7 +1352,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		if includeBor {
 			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
 			if ok {
-				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
+				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 				}
 			}
