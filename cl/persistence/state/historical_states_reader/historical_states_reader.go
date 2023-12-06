@@ -454,16 +454,10 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 		return nil, err
 	}
 	defer zstdReader.Close()
-	// Just get rid of the prefixed length
-	lenRaw := uint64(0)
-	if err := binary.Read(&b, binary.LittleEndian, &lenRaw); err != nil {
-		return nil, err
-	}
-
 	currentList := make([]byte, size*8)
 	var n int
 	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to read dump: %w", err)
+		return nil, fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 	if n != size*8 {
 		return nil, err
