@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	blockRootsLength = 8192
-	stateRootsLength = 8192
-	randoMixesLength = 65536
-	slashingsLength  = 8192
+	BlockRootsLength = 8192
+	StateRootsLength = 8192
+	RandoMixesLength = 65536
+	SlashingsLength  = 8192
 )
 
 type BeaconState struct {
@@ -60,6 +60,7 @@ type BeaconState struct {
 	// cl version
 	version      clparams.StateVersion // State version
 	beaconConfig *clparams.BeaconChainConfig
+	events       Events
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
@@ -78,7 +79,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		balances:                    solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:   solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
-		slashings:                   solid.NewUint64VectorSSZ(slashingsLength),
+		slashings:                   solid.NewUint64VectorSSZ(SlashingsLength),
 		currentEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:   solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 		historicalRoots:             solid.NewHashList(int(cfg.HistoricalRootsLimit)),
@@ -150,4 +151,49 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 // Get validators field
 func (b *BeaconState) Validators() *solid.ValidatorSet {
 	return b.validators
+}
+
+func (b *BeaconState) SetEvents(events Events) {
+	b.events = events
+}
+
+func (b *BeaconState) HistoricalSummariesLength() uint64 {
+	return uint64(b.historicalSummaries.Len())
+}
+
+func (b *BeaconState) HistoricalRootsLength() uint64 {
+	return uint64(b.historicalRoots.Length())
+}
+
+// Dangerous
+func (b *BeaconState) RawInactivityScores() []byte {
+	return b.inactivityScores.Bytes()
+}
+
+func (b *BeaconState) RawBalances() []byte {
+	return b.balances.Bytes()
+}
+
+func (b *BeaconState) RawValidatorSet() []byte {
+	return b.validators.Bytes()
+}
+
+func (b *BeaconState) RawPreviousEpochParticipation() []byte {
+	return b.previousEpochParticipation.Bytes()
+}
+
+func (b *BeaconState) RawCurrentEpochParticipation() []byte {
+	return b.currentEpochParticipation.Bytes()
+}
+
+func (b *BeaconState) HistoricalRoot(index int) common.Hash {
+	return b.historicalRoots.Get(index)
+}
+
+func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
+	return b.historicalSummaries.Get(index)
+}
+
+func (b *BeaconState) RawSlashings() []byte {
+	return b.slashings.Bytes()
 }

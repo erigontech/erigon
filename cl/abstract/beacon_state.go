@@ -116,8 +116,6 @@ type BeaconStateMutator interface {
 	AddCurrentEpochAtteastation(attestation *solid.PendingAttestation)
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)
 
-	IncrementSlashingSegmentAt(index int, delta uint64)
-
 	AppendValidator(in solid.Validator)
 
 	ResetEth1DataVotes()

@@ -1,0 +1,167 @@
+package solid
+
+import (
+	"encoding/binary"
+	"encoding/json"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cl/utils"
+)
+
+type RawUint64List struct {
+	u []uint64
+	c int
+
+	hahsBuffer []byte
+	cachedHash libcommon.Hash
+}
+
+func NewRawUint64List(limit int, u []uint64) *RawUint64List {
+	return &RawUint64List{
+		c: limit,
+		u: u,
+	}
+}
+
+func (arr *RawUint64List) Clear() {
+	arr.cachedHash = libcommon.Hash{}
+	arr.u = arr.u[:0]
+}
+
+func (arr *RawUint64List) Append(value uint64) {
+	arr.cachedHash = libcommon.Hash{}
+	arr.u = append(arr.u, value)
+}
+
+func (arr *RawUint64List) Get(index int) uint64 {
+	return arr.u[index]
+}
+
+func (arr *RawUint64List) Set(index int, v uint64) {
+	arr.u[index] = v
+}
+
+func (arr *RawUint64List) CopyTo(target IterableSSZ[uint64]) {
+	if c, ok := target.(*RawUint64List); ok {
+		c.u = append(c.u[:0], arr.u...)
+		c.cachedHash = arr.cachedHash
+		return
+	}
+	panic("incompatible type")
+}
+
+func (arr *RawUint64List) Range(fn func(index int, value uint64, length int) bool) {
+	for i, v := range arr.u {
+		cont := fn(i, v, len(arr.u))
+		if !cont {
+			break
+		}
+	}
+}
+
+func (arr *RawUint64List) Static() bool {
+	return false
+}
+
+func (arr *RawUint64List) Bytes() []byte {
+	out, _ := arr.EncodeSSZ(nil)
+	return out
+}
+
+func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	for _, v := range arr.u {
+		dst = binary.LittleEndian.AppendUint64(dst, v)
+	}
+	return dst, nil
+}
+
+func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {
+	arr.cachedHash = libcommon.Hash{}
+	arr.u = make([]uint64, len(buf)/8)
+	for i := range arr.u {
+		arr.u[i] = binary.LittleEndian.Uint64(buf[i*8:])
+	}
+	return nil
+}
+
+func (arr *RawUint64List) Length() int {
+	return len(arr.u)
+}
+
+func (arr *RawUint64List) Cap() int {
+	return arr.c
+}
+
+func (arr *RawUint64List) Clone() clonable.Clonable {
+	return &RawUint64List{}
+}
+
+func (arr *RawUint64List) EncodingSizeSSZ() int {
+	return len(arr.u) * 8
+}
+
+func (arr *RawUint64List) SetReusableHashBuffer(buf []byte) {
+	arr.hahsBuffer = buf
+}
+
+func (arr *RawUint64List) hashBufLength() int {
+	return (((len(arr.u) * 4) + 3) / 4) * length.Hash
+}
+
+func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
+	if arr.cachedHash != (libcommon.Hash{}) {
+		return arr.cachedHash, nil
+	}
+	if cap(arr.hahsBuffer) < arr.hashBufLength() {
+		arr.hahsBuffer = make([]byte, 0, arr.hashBufLength())
+	}
+	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
+
+	lnRoot := merkle_tree.Uint64Root(uint64(len(arr.u)))
+	if len(arr.u) == 0 {
+		arr.cachedHash = utils.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
+		return arr.cachedHash, nil
+	}
+
+	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
+	for i, v := range arr.u {
+		binary.LittleEndian.PutUint64(arr.hahsBuffer[i*8:], v)
+	}
+
+	elements := arr.hahsBuffer
+	for i := 0; i < int(depth); i++ {
+		layerLen := len(elements)
+		if layerLen%64 == 32 {
+			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
+		}
+		outputLen := len(elements) / 2
+		if err := merkle_tree.HashByteSlice(elements, elements); err != nil {
+			return [32]byte{}, err
+		}
+		elements = elements[:outputLen]
+	}
+
+	arr.cachedHash = utils.Sha256(elements[:32], lnRoot[:])
+	return arr.cachedHash, nil
+}
+
+func (arr *RawUint64List) Pop() uint64 {
+	panic("k")
+}
+
+func (arr *RawUint64List) MarshalJSON() ([]byte, error) {
+	return json.Marshal(arr.u)
+}
+
+func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
+	arr.cachedHash = libcommon.Hash{}
+	if err := json.Unmarshal(data, &arr.u); err != nil {
+		return err
+	}
+	arr.c = len(arr.u)
+	return nil
+}

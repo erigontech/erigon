@@ -830,7 +830,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 
-		rawBeaconBlockChainDb := persistence.AferoRawBeaconBlockChainFromOsPath(beaconCfg, dirs.CaplinHistory)
+		rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconCfg, dirs.CaplinHistory)
 
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
 			IpAddr:        config.LightClientDiscoveryAddr,
@@ -855,7 +855,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()

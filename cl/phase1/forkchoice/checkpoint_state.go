@@ -94,7 +94,8 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies(epoch)
-	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
+	c.shuffledSet = make([]uint64, len(activeIndicies))
+	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
 	return c
 }
 
