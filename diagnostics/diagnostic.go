@@ -2,7 +2,6 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -18,6 +17,7 @@ type DiagnosticClient struct {
 	node       *node.ErigonNode
 
 	snapshotDownload map[string]diaglib.DownloadStatistics
+	fileDownload     map[string]diaglib.TorrentFile
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -71,12 +71,12 @@ func (d *DiagnosticClient) runTorrentListener() {
 				cancel()
 				return
 			case info := <-ch:
-				fmt.Println("INFO", info)
-				//d.snapshotDownload[info.StagePrefix] = info
-				//if info.DownloadFinished {
-				//	return
-				//}
+				d.fileDownload[info.Name] = info
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) TorrentFileDownload() map[string]diaglib.TorrentFile {
+	return d.fileDownload
 }

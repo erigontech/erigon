@@ -362,8 +362,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
-	//fmt.Println("noMetadata", noMetadata)
-	//fmt.Println("zeroProgress", zeroProgress)
 
 	if len(noMetadata) > 0 {
 		amount := len(noMetadata)
