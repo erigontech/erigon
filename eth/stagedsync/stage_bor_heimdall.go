@@ -676,6 +676,11 @@ func initValidatorSets(
 		if err != nil {
 			return nil, err
 		}
+
+		if zeroSpanBytes == nil {
+			return nil, fmt.Errorf("zero span not found")
+		}
+
 		var zeroSpan span.HeimdallSpan
 		if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
 			return nil, err
