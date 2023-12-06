@@ -142,6 +142,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
 		return nil, err
 	}
+	fmt.Println(balancesBytes)
 	b, _ := balances.MarshalJSON()
 	fmt.Println(string(b))
 	ret.SetBalances(balances)
