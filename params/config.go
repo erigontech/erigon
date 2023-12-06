@@ -307,12 +307,13 @@ func isChainIDPoS(chainID *big.Int) bool {
 }
 
 func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+	if chainConfig.TerminalTotalDifficultyPassed {
+		return true
+	}
+
 	terminalTD := chainConfig.TerminalTotalDifficulty
 	if terminalTD == nil {
 		return false
-	}
-	if chainConfig.TerminalTotalDifficultyPassed {
-		return true
 	}
 
 	currentTD := currentTDProvider()
