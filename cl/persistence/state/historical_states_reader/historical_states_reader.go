@@ -517,6 +517,7 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	fmt.Println(bytesEffectiveBalances)
 	for i := 0; i < int(validatorSetLength); i++ {
 		out.Get(i).
 			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
