@@ -470,6 +470,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
 		}
+		if err := br.RetireBorBlocks(ctx, i, i+every, log.LvlInfo, nil); err != nil {
+			panic(err)
+		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
