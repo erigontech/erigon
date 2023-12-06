@@ -811,7 +811,7 @@ func GetLastPersistedStateSyncEventId(tx kv.RwTx, br services.FullBlockReader) (
 		lastEventId = binary.BigEndian.Uint64(k)
 	}
 
-	// TODO tidy this up (add to services.FullBlockReader interface?)
+	// TODO tidy this up (create new interface BorFullBlockReader?)
 	type LastFrozen interface {
 		LastFrozenEventID() uint64
 	}
