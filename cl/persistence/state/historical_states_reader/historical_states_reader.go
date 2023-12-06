@@ -18,6 +18,7 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
@@ -394,7 +395,8 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	}
 	currentList := make([]byte, lenRaw)
 	var n int
-	if n, err = zstdReader.Read(currentList); err != nil {
+
+	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
 	}
 
