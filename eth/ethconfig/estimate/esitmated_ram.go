@@ -22,9 +22,15 @@ func (r estimatedRamPerWorker) WorkersHalf() int    { return cmp.Max(1, r.Worker
 func (r estimatedRamPerWorker) WorkersQuarter() int { return cmp.Max(1, r.Workers()/4) }
 
 const (
-	IndexSnapshot     = estimatedRamPerWorker(3 * datasize.GB)   //elias-fano index building is single-threaded
-	CompressSnapshot  = estimatedRamPerWorker(1 * datasize.GB)   //1-file-compression is multi-threaded
-	ReconstituteState = estimatedRamPerWorker(512 * datasize.MB) //state-reconstitution is multi-threaded
+	//elias-fano index building is single-threaded
+	// when set it to 3GB - observed OOM-kil at server with 128Gb ram and 32CPU
+	IndexSnapshot = estimatedRamPerWorker(4 * datasize.GB)
+
+	//1-file-compression is multi-threaded
+	CompressSnapshot = estimatedRamPerWorker(1 * datasize.GB)
+
+	//state-reconstitution is multi-threaded
+	ReconstituteState = estimatedRamPerWorker(512 * datasize.MB)
 )
 
 // AlmostAllCPUs - return all-but-one cpus. Leaving 1 cpu for "work producer", also cloud-providers do recommend leave 1 CPU for their IO software
