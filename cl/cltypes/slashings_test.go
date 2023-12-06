@@ -48,12 +48,12 @@ func TestProposerSlashing(t *testing.T) {
 func TestAttesterSlashing(t *testing.T) {
 	// Create sample data
 	attestation1 := &IndexedAttestation{
-		AttestingIndices: solid.NewUint64ListSSZ(9192),
+		AttestingIndices: solid.NewRawUint64List(9192, nil),
 		Data:             solid.NewAttestationData(),
 	}
 	// Create an IndexedAttestation object
 	attestation2 := &IndexedAttestation{
-		AttestingIndices: solid.NewUint64ListSSZ(9192),
+		AttestingIndices: solid.NewRawUint64List(9192, nil),
 		Data:             solid.NewAttestationData(),
 	}
 	// Create AttesterSlashing

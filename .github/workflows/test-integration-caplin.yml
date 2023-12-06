@@ -21,8 +21,7 @@ jobs:
     strategy:
       matrix:
 #        disable macos-11 until https://github.com/ledgerwatch/erigon/issues/8789
-#        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
-        os: [ ubuntu-20.04 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-22.04 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:

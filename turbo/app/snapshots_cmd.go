@@ -51,6 +51,13 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
+	Before: func(context *cli.Context) error {
+		_, _, err := debug.Setup(context, true /* rootLogger */)
+		if err != nil {
+			return err
+		}
+		return nil
+	},
 	Subcommands: []*cli.Command{
 		{
 			Name:   "index",
@@ -463,12 +470,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
 		}
+		if err := br.RetireBorBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
+			panic(err)
+		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
+				if err := br.PruneAncientBlocks(tx, 100, true /* includeBor */); err != nil {
 					return err
 				}
 			}

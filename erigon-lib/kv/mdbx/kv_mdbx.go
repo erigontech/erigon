@@ -150,6 +150,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 512 * datasize.MB
+	opts.dirtySpace = uint64(128 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
 	return opts
@@ -304,8 +305,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	opts.pageSize = uint64(in.PageSize)
+	opts.mapSize = datasize.ByteSize(in.MapSize)
 	if opts.label == kv.ChainDB {
-		opts.log.Info("[db] chaindata", "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+		opts.log.Info("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+	} else {
+		opts.log.Debug("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	}
 
 	// erigon using big transactions

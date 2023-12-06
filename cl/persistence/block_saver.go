@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"go.uber.org/zap/buffer"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -172,8 +173,13 @@ func (b beaconChainDatabaseFilesystem) WriteBlock(ctx context.Context, tx kv.RwT
 // SlotToPaths define the file structure to store a block
 //
 // "/signedBeaconBlock/{slot/10_000}/{root}.ssz_snappy"
-func RootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainConfig) (folderPath string, filePath string) {
-	folderPath = path.Clean(fmt.Sprintf("%d", slot/subDivisionFolderSize))
-	filePath = path.Clean(fmt.Sprintf("%s/%x.sz", folderPath, root))
-	return
+func rootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainConfig) (folderPath string, filePath string) {
+	// bufio
+	buffer := bPool.Get().(*buffer.Buffer)
+	defer bPool.Put(buffer)
+	buffer.Reset()
+
+	fmt.Fprintf(buffer, "%d/%x.sz", slot/subDivisionFolderSize, root)
+	split := strings.Split(buffer.String(), "/")
+	return split[0], buffer.String()
 }
