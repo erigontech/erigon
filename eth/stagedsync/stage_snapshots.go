@@ -156,7 +156,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 		if casted, ok := tx.(*temporal.Tx); ok {
 			casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-			log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", s.LogPrefix(), tx.ViewID(), tx.(*temporal.Tx).AggCtx().ViewID()))
 		}
 	}
 
@@ -173,7 +172,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 	if casted, ok := tx.(*temporal.Tx); ok {
 		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-		log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", s.LogPrefix(), tx.ViewID(), tx.(*temporal.Tx).AggCtx().ViewID()))
 	}
 	tx.(state.HasAggCtx).AggCtx().LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)

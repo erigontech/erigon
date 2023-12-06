@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 )
@@ -328,24 +330,45 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		select {
 		case <-t.GotInfo():
 			stats.MetadataReady++
-			for _, peer := range t.PeerConns() {
+			peersOfThisFile := t.PeerConns()
+			weebseedPeersOfThisFile := t.WebseedPeerConns()
+			for _, peer := range peersOfThisFile {
 				stats.ConnectionsTotal++
 				peers[peer.PeerID] = struct{}{}
 			}
 			stats.BytesCompleted += uint64(t.BytesCompleted())
 			stats.BytesTotal += uint64(t.Length())
-			if !t.Complete.Bool() {
-				progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
-				if progress == 0 {
-					zeroProgress = append(zeroProgress, t.Name())
-				} else {
-					peersOfThisFile := make(map[torrent.PeerID]struct{}, 16)
-					for _, peer := range t.PeerConns() {
-						peersOfThisFile[peer.PeerID] = struct{}{}
+			if t.Complete.Bool() {
+				break //of switch
+			}
+
+			progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
+			if progress == 0 {
+				zeroProgress = append(zeroProgress, t.Name())
+				break //of switch
+			}
+
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			if d.verbosity < log.LvlInfo {
+				break //of switch
+			}
+
+			// more detailed statistic: download rate of each peer (for each file)
+			webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
+			for _, peer := range weebseedPeersOfThisFile {
+				urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+				if urlObj, err := url.Parse(urlS); err == nil {
+					if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
+						webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
 					}
-					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 				}
 			}
+			d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
+			rates := make([]interface{}, 0, len(peersOfThisFile)*2)
+			for _, peer := range peersOfThisFile {
+				rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+			}
+			d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
 		default:
 			noMetadata = append(noMetadata, t.Name())
 		}
@@ -471,14 +494,25 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
+	ff, ok := snaptype.ParseFileName("", name)
+	if ok {
+		if !ff.Seedable() {
+			return nil
+		}
+	} else {
+		if !e3seedable(name) {
+			return nil
+		}
+	}
+
 	// if we don't have the torrent file we build it if we have the .seg file
 	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
 	if err != nil {
-		return err
+		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	ts, err := loadTorrent(torrentFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {

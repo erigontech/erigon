@@ -20,8 +20,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 
 	"github.com/holiman/uint256"
 
@@ -979,7 +980,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 			return nil, errBLS12381G2PointSubgroup
 		}
 
-		// Update pairing engine with G1 and G2 ponits
+		// Update pairing engine with G1 and G2 points
 		e.AddPair(p1, p2)
 	}
 	// Prepare 32 byte output

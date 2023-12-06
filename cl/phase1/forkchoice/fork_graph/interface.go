@@ -26,4 +26,8 @@ type ForkGraph interface {
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
 	AnchorSlot() uint64
 	Prune(uint64) error
+
+	// extra methods for validator api
+	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
+	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 }

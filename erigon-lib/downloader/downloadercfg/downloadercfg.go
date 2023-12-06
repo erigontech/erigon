@@ -156,18 +156,33 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
 	webseedS3Providers := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
-		if strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
-			webseedS3Providers = append(webseedS3Providers, webseed)
-			continue
-		}
-		uri, err := url.ParseRequestURI(webseed)
-		if err != nil {
-			if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
-				webseedFileProviders = append(webseedFileProviders, webseed)
+		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
+			uri, err := url.ParseRequestURI(webseed)
+			if err != nil {
+				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+					webseedFileProviders = append(webseedFileProviders, webseed)
+				}
+				continue
 			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
 			continue
 		}
-		webseedHttpProviders = append(webseedHttpProviders, uri)
+
+		if strings.HasPrefix(webseed, "v1:") {
+			withoutVerisonPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+				webseedS3Providers = append(webseedS3Providers, webseed)
+				continue
+			}
+			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			if err != nil {
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				continue
+			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
+		} else {
+			continue
+		}
 	}
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
