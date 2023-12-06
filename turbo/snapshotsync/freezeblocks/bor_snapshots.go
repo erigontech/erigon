@@ -614,8 +614,8 @@ func (s *BorRoSnapshots) LogStat() {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
+func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir, version)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -649,8 +649,8 @@ func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapsh
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
 // removal of intermediate segments after a merge operation
-func removeSpanOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
-	list, err := snaptype.Segments(dir)
+func removeSpanOverlaps(dir string, version uint8, active []snaptype.FileInfo, max uint64) {
+	list, err := snaptype.Segments(dir, version)
 
 	if err != nil {
 		return
@@ -710,7 +710,7 @@ func removeSpanOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := BorSegments(s.dir, s.segmentsMin.Load())
+	existingFiles, missingSnapshots, err := BorSegments(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -983,14 +983,14 @@ func (s *BorRoSnapshots) Ranges() (ranges []Range) {
 func (s *BorRoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *BorRoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := BorSegments(s.dir, s.segmentsMin.Load())
+	files, _, err := BorSegments(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
 
 	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
 	// removal of intermediate segments after a merge operation
-	removeSpanOverlaps(s.dir, files, s.BlocksAvailable())
+	removeSpanOverlaps(s.dir, s.version, files, s.BlocksAvailable())
 
 	list := make([]string, 0, len(files))
 	for _, f := range files {
@@ -1288,14 +1288,14 @@ func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile stri
 	return nil
 }
 
-func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
+func (m *BorMerger) removeOldFiles(toDel []string, snapDir string, version uint8) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
 	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
+	tmpFiles, err := snaptype.TmpFiles(snapDir, version)
 	if err != nil {
 		return
 	}

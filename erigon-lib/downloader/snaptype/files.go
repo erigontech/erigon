@@ -121,8 +121,8 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 	return out
 }
-func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
-	files, err := ParseDir(dir)
+func FilesWithExt(dir string, version uint8, expectExt string) ([]FileInfo, error) {
+	files, err := ParseDir(dir, version)
 	if err != nil {
 		return nil, err
 	}
@@ -198,9 +198,13 @@ func (f FileInfo) Seedable() bool {
 }
 func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 
-func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
-func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
-func TmpFiles(dir string) (res []string, err error) {
+func IdxFiles(dir string, version uint8) (res []FileInfo, err error) {
+	return FilesWithExt(dir, version, ".idx")
+}
+func Segments(dir string, version uint8) (res []FileInfo, err error) {
+	return FilesWithExt(dir, version, ".seg")
+}
+func TmpFiles(dir string, version uint8) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -208,20 +212,24 @@ func TmpFiles(dir string) (res []string, err error) {
 		}
 		return nil, err
 	}
+
+	v := fmt.Sprint("v", version)
+
 	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 {
+		if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".tmp" {
 			continue
 		}
+
 		res = append(res, filepath.Join(dir, f.Name()))
 	}
 	return res, nil
 }
 
 // ParseDir - reading dir (
-func ParseDir(dir string) (res []FileInfo, err error) {
+func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -229,12 +237,15 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+
+	v := fmt.Sprint("v", version)
+
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
 			return nil, err
 		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
 			continue
 		}
 

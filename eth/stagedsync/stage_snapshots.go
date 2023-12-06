@@ -190,7 +190,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		u := cfg.snapshotUploader
 
 		u.init(ctx, logger)
-		u.downloadLatestSnapshots(ctx)
+		u.downloadLatestSnapshots(ctx, cfg.version)
 
 		if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
@@ -516,7 +516,7 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 	return max
 }
 
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context) error {
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version uint8) error {
 	entries, err := u.uploadSession.ReadRemoteDir(ctx, true)
 
 	if err != nil {
@@ -528,7 +528,9 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context) error {
 
 	for _, ent := range entries {
 		if info, err := ent.Info(); err == nil {
-			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && snapInfo.Type() != snaptype.Unknown {
+			snapInfo, ok := info.Sys().(downloader.SnapInfo)
+
+			if ok && snapInfo.Type() != snaptype.Unknown && snapInfo.Version() == version {
 				if last, ok := lastSegments[snapInfo.Type()]; ok {
 					if lastInfo, ok := last.Sys().(downloader.SnapInfo); ok && snapInfo.To() > lastInfo.To() {
 						lastSegments[snapInfo.Type()] = info
@@ -564,7 +566,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context) error {
 func (u *snapshotUploader) maxSeedableHeader() uint64 {
 	var max uint64
 
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
 		for _, info := range list {
 			if info.Seedable() && info.T == snaptype.Headers && info.To > max {
 				max = info.To
@@ -578,7 +580,7 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 func (u *snapshotUploader) minBlockNumber() uint64 {
 	var min uint64
 
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
 		for _, info := range list {
 			if info.Seedable() && min == 0 || info.From < min {
 				min = info.From
@@ -700,7 +702,7 @@ func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger
 }
 
 func (u *snapshotUploader) removeBefore(before uint64) {
-	list, err := snaptype.Segments(u.cfg.dirs.Snap)
+	list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version)
 
 	if err != nil {
 		return

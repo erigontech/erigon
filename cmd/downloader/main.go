@@ -199,6 +199,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
 	cfg.DownloadTorrentFilesFromWebseed = true // enable it only for standalone mode now. feature is not fully ready yet
+	cfg.AddTorrentsFromDisk = true             // always true unless using uploader - which wants control of torrent files
+
 	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err

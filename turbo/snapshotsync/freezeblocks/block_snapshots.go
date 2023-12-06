@@ -391,7 +391,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}, logger: logger}
+	return &RoSnapshots{dir: snapDir, cfg: cfg, version: version, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}, logger: logger}
 }
 
 func (s *RoSnapshots) Version() uint8                { return s.version }
@@ -414,7 +414,7 @@ func (s *RoSnapshots) LogStat(label string) {
 }
 
 func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := Segments(s.dir, s.segmentsMin.Load())
+	existingFiles, missingSnapshots, err := Segments(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -783,7 +783,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	files, _, err := Segments(s.dir, s.segmentsMin.Load())
+	files, _, err := Segments(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
@@ -1002,11 +1002,11 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, version uint8, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
-	segments, _, err := Segments(dir, minIndex)
+	segments, _, err := Segments(dir, version, minIndex)
 	if err != nil {
 		return err
 	}
@@ -1071,7 +1071,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 
-	segments, _, err := BorSegments(dir, 0)
+	segments, _, err := BorSegments(dir, 1, 0)
 	if err != nil {
 		return err
 	}
@@ -1194,8 +1194,8 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return res
 }
 
-func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
+func SegmentsCaplin(dir string, version uint8, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir, version)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -1216,8 +1216,8 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 	return res, missingSnapshots, nil
 }
 
-func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
+func Segments(dir string, version uint8, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir, version)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -1492,7 +1492,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 			// wait for Downloader service to download all expected snapshots
 			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
 				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
+				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.Version(), snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -2548,7 +2548,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
 		for _, t := range snaptype.BlockSnapshotTypes {
-			m.removeOldFiles(toMerge[t], snapDir)
+			m.removeOldFiles(toMerge[t], snapDir, snapshots.Version())
 		}
 	}
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from)
@@ -2601,7 +2601,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	return nil
 }
 
-func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
+func (m *Merger) removeOldFiles(toDel []string, snapDir string, version uint8) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
@@ -2612,7 +2612,7 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 			_ = os.Remove(withoutExt + "-to-block.idx")
 		}
 	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
+	tmpFiles, err := snaptype.TmpFiles(snapDir, version)
 	if err != nil {
 		return
 	}

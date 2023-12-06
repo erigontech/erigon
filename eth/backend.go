@@ -71,8 +71,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	downloader "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -192,7 +193,7 @@ type Ethereum struct {
 	txPoolGrpcServer        txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engine_helpers.ForkValidator
-	downloader              *downloader3.Downloader
+	downloader              *downloader.Downloader
 
 	agg            *libstate.AggregatorV3
 	blockSnapshots *freezeblocks.RoSnapshots
@@ -1191,12 +1192,16 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		// start embedded Downloader
-		s.downloader, err = downloader3.New(ctx, downloaderCfg, s.config.Dirs, s.logger, log.LvlDebug, discover)
+		if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
+			downloaderCfg.AddTorrentsFromDisk = false
+		}
+
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.config.Dirs, s.logger, log.LvlDebug, discover)
 		if err != nil {
 			return err
 		}
 		s.downloader.MainLoopInBackground(true)
-		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
+		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}

@@ -263,13 +263,15 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, uint8(cliCtx.Int(utils.SnapshotVersionFlag.Name)), logger)
+	version := uint8(cliCtx.Int(utils.SnapshotVersionFlag.Name))
+
+	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, version, logger)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	allSnapshots.LogStat("cmd")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, 0, chainConfig, indexWorkers, logger); err != nil {
+	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, version, 0, chainConfig, indexWorkers, logger); err != nil {
 		return err
 	}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)

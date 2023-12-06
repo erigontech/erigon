@@ -374,7 +374,9 @@ func (s *torrentSession) Download(ctx context.Context, files ...string) error {
 				}
 			}
 
+			closed := t.Closed()
 			t.Drop()
+			<-closed
 
 			return nil
 		})

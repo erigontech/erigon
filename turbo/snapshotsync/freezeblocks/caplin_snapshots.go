@@ -269,7 +269,7 @@ func (s *CaplinSnapshots) idxAvailability() uint64 {
 }
 
 func (s *CaplinSnapshots) ReopenFolder() error {
-	files, _, err := SegmentsCaplin(s.dir, s.segmentsMin.Load())
+	files, _, err := SegmentsCaplin(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir, 0)
+	segments, _, err := SegmentsCaplin(s.dir, s.version, 0)
 	if err != nil {
 		return err
 	}
