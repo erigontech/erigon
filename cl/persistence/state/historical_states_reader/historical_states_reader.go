@@ -401,6 +401,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
 	}
+	fmt.Println(currentList)
 
 	if freshDumpSlot == slot {
 		return currentList, nil
