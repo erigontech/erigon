@@ -11,7 +11,7 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices solid.Uint64ListSSZ   `json:"attesting_indicies"`
+	AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
 	Data             solid.AttestationData `json:"data"`
 	Signature        libcommon.Bytes96     `json:"signature"`
 }
@@ -27,7 +27,7 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	i.Data = solid.NewAttestationData()
-	i.AttestingIndices = solid.NewUint64ListSSZ(2048)
+	i.AttestingIndices = solid.NewRawUint64List(2048, nil)
 
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }

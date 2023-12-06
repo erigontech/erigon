@@ -25,6 +25,9 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 }
 
 func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if !I.FullValidation {
+		return nil
+	}
 	valid, err := verifyBlockSignature(s, block)
 	if err != nil {
 		return fmt.Errorf("error validating block signature: %v", err)
