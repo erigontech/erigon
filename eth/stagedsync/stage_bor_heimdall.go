@@ -293,8 +293,8 @@ func BorHeimdallForward(
 		if header != nil {
 			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
 
-			if snap == nil && blockNum <= chain.FrozenBlocks() {
-				snap, err = initValidatorSets(ctx, snap, tx, cfg.blockReader, cfg.chainConfig.Bor,
+			if snap == nil {
+				snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
 					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
 				if err != nil {
@@ -593,9 +593,6 @@ func persistValidatorSets(
 			snap = s
 			break
 		}
-		if chain != nil && blockNum < chain.FrozenBlocks() {
-			break
-		}
 
 		select {
 		case <-logEvery.C:
@@ -640,7 +637,7 @@ func persistValidatorSets(
 			return fmt.Errorf("snap.Store: %w", err)
 		}
 
-		logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
+		logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return nil
@@ -648,7 +645,6 @@ func persistValidatorSets(
 
 func initValidatorSets(
 	ctx context.Context,
-	snap *bor.Snapshot,
 	tx kv.Tx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
@@ -663,74 +659,79 @@ func initValidatorSets(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	if snap == nil {
-		// Special handling of the headers in the snapshot
-		zeroHeader := chain.GetHeaderByNumber(0)
-		if zeroHeader != nil {
-			// get checkpoint data
-			hash := zeroHeader.Hash()
+	var snap *bor.Snapshot
 
-			if zeroSnap := loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); zeroSnap != nil {
-				return nil, nil
-			}
+	// Special handling of the headers in the snapshot
+	zeroHeader := chain.GetHeaderByNumber(0)
+	if zeroHeader != nil {
+		// get checkpoint data
+		hash := zeroHeader.Hash()
 
-			// get validators and current span
-			zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
-			if err != nil {
-				return nil, err
-			}
-			var zeroSpan span.HeimdallSpan
-			if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
-				return nil, err
-			}
+		if zeroSnap := loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); zeroSnap != nil {
+			return nil, nil
+		}
 
-			// new snap shot
-			snap = bor.NewSnapshot(config, signatures, 0, hash, zeroSpan.ValidatorSet.Validators, logger)
-			if err := snap.Store(snapDb); err != nil {
-				return nil, fmt.Errorf("snap.Store (0): %w", err)
-			}
-			logger.Info(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
-			g := errgroup.Group{}
-			g.SetLimit(estimate.AlmostAllCPUs())
-			defer g.Wait()
+		// get validators and current span
+		zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
+		if err != nil {
+			return nil, err
+		}
 
-			batchSize := 128 // must be < inmemorySignatures
-			initialHeaders := make([]*types.Header, 0, batchSize)
-			parentHeader := zeroHeader
-			for i := uint64(1); i <= blockNum; i++ {
-				header := chain.GetHeaderByNumber(i)
-				{
-					// `snap.apply` bottleneck - is recover of signer.
-					// to speedup: recover signer in background goroutines and save in `sigcache`
-					// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
-					g.Go(func() error {
-						if header == nil {
-							return nil
-						}
-						_, _ = bor.Ecrecover(header, signatures, config)
+		if zeroSpanBytes == nil {
+			return nil, fmt.Errorf("zero span not found")
+		}
+
+		var zeroSpan span.HeimdallSpan
+		if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
+			return nil, err
+		}
+
+		// new snap shot
+		snap = bor.NewSnapshot(config, signatures, 0, hash, zeroSpan.ValidatorSet.Validators, logger)
+		if err := snap.Store(snapDb); err != nil {
+			return nil, fmt.Errorf("snap.Store (0): %w", err)
+		}
+		logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
+		g := errgroup.Group{}
+		g.SetLimit(estimate.AlmostAllCPUs())
+		defer g.Wait()
+
+		batchSize := 128 // must be < inmemorySignatures
+		initialHeaders := make([]*types.Header, 0, batchSize)
+		parentHeader := zeroHeader
+		for i := uint64(1); i <= blockNum; i++ {
+			header := chain.GetHeaderByNumber(i)
+			{
+				// `snap.apply` bottleneck - is recover of signer.
+				// to speedup: recover signer in background goroutines and save in `sigcache`
+				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				g.Go(func() error {
+					if header == nil {
 						return nil
-					})
-				}
-				if header == nil {
-					return nil, fmt.Errorf("missing header persisting validator sets: (inside loop at %d)", i)
-				}
-				initialHeaders = append(initialHeaders, header)
-				if len(initialHeaders) == cap(initialHeaders) {
-					if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-						return nil, fmt.Errorf("snap.Apply (inside loop): %w", err)
 					}
-					parentHeader = initialHeaders[len(initialHeaders)-1]
-					initialHeaders = initialHeaders[:0]
-				}
-				select {
-				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] Computing validator proposer prorities (forward)", logPrefix), "blockNum", i)
-				default:
-				}
+					_, _ = bor.Ecrecover(header, signatures, config)
+					return nil
+				})
 			}
-			if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
-				return nil, fmt.Errorf("snap.Apply (outside loop): %w", err)
+			if header == nil {
+				return nil, fmt.Errorf("missing header persisting validator sets: (inside loop at %d)", i)
 			}
+			initialHeaders = append(initialHeaders, header)
+			if len(initialHeaders) == cap(initialHeaders) {
+				if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
+					return nil, fmt.Errorf("snap.Apply (inside loop): %w", err)
+				}
+				parentHeader = initialHeaders[len(initialHeaders)-1]
+				initialHeaders = initialHeaders[:0]
+			}
+			select {
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] Computing validator proposer prorities (forward)", logPrefix), "blockNum", i)
+			default:
+			}
+		}
+		if snap, err = snap.Apply(parentHeader, initialHeaders, logger); err != nil {
+			return nil, fmt.Errorf("snap.Apply (outside loop): %w", err)
 		}
 	}
 
