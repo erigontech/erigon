@@ -339,6 +339,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
 	// there is optimized custom cache to recycle big GC overhead.
 	for ; slot < to; slot++ {
+		isDumpSlot := slot%clparams.SlotsPerDump == 0
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
 			return err
@@ -363,7 +364,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		if slot%clparams.SlotsPerDump == 0 {
+		if isDumpSlot && block == nil {
 			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
 				return err
 			}
@@ -408,6 +409,24 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		events.Reset()
+
+		if isDumpSlot {
+			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
+				return err
+			}
+			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawBalances(), compressedWriter); err != nil {
+				return err
+			}
+			if s.currentState.Version() >= clparams.AltairVersion {
+				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
+					return err
+				}
+			}
+			if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
+				return err
+			}
+			continue
+		}
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)
