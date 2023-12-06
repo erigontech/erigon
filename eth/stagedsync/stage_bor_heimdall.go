@@ -12,6 +12,9 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -32,8 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -169,46 +170,18 @@ func BorHeimdallForward(
 		return nil
 	}
 
-	// Find out the latest event Id
-	cursor, err := tx.Cursor(kv.BorEvents)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-	k, _, err := cursor.Last()
+	// Find out the latest event id
+	lastEventId, err := GetLastPersistedStateSyncEventId(tx, cfg.blockReader)
 	if err != nil {
 		return err
 	}
 
-	var lastEventId uint64
-	if k != nil {
-		lastEventId = binary.BigEndian.Uint64(k)
-	}
-	type LastFrozen interface {
-		LastFrozenEventID() uint64
-		LastFrozenSpanID() uint64
-	}
-	snapshotLastEventId := cfg.blockReader.(LastFrozen).LastFrozenEventID()
-	if snapshotLastEventId > lastEventId {
-		lastEventId = snapshotLastEventId
-	}
-	sCursor, err := tx.Cursor(kv.BorSpans)
+	lastSpanId, err := GetLastPersistedSpanId(tx, cfg.blockReader)
 	if err != nil {
 		return err
 	}
-	defer sCursor.Close()
-	k, _, err = sCursor.Last()
-	if err != nil {
-		return err
-	}
-	var nextSpanId uint64
-	if k != nil {
-		nextSpanId = binary.BigEndian.Uint64(k) + 1
-	}
-	snapshotLastSpanId := cfg.blockReader.(LastFrozen).LastFrozenSpanID()
-	if snapshotLastSpanId+1 > nextSpanId {
-		nextSpanId = snapshotLastSpanId + 1
-	}
+
+	nextSpanId := lastSpanId + 1
 	var endSpanID uint64
 	if headNumber > zerothSpanEnd {
 		endSpanID = 2 + (headNumber-zerothSpanEnd)/spanLength
@@ -231,7 +204,6 @@ func BorHeimdallForward(
 	var blockNum uint64
 	var fetchTime time.Duration
 	var eventRecords int
-	var lastSpanId uint64
 
 	logTimer := time.NewTicker(30 * time.Second)
 	defer logTimer.Stop()
@@ -755,4 +727,65 @@ func BorHeimdallPrune(s *PruneState, ctx context.Context, tx kv.RwTx, cfg BorHei
 		return
 	}
 	return
+}
+
+func GetLastPersistedStateSyncEventId(tx kv.RwTx, br services.FullBlockReader) (uint64, error) {
+	// Find out the latest event Id
+	cursor, err := tx.Cursor(kv.BorEvents)
+	if err != nil {
+		return 0, err
+	}
+
+	defer cursor.Close()
+	k, _, err := cursor.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	var lastEventId uint64
+	if k != nil {
+		lastEventId = binary.BigEndian.Uint64(k)
+	}
+
+	// TODO tidy this up (add to services.FullBlockReader interface?)
+	type LastFrozen interface {
+		LastFrozenEventID() uint64
+	}
+
+	snapshotLastEventId := br.(LastFrozen).LastFrozenEventID()
+	if snapshotLastEventId > lastEventId {
+		lastEventId = snapshotLastEventId
+	}
+
+	return lastEventId, nil
+}
+
+func GetLastPersistedSpanId(tx kv.RwTx, br services.FullBlockReader) (uint64, error) {
+	sCursor, err := tx.Cursor(kv.BorSpans)
+	if err != nil {
+		return 0, err
+	}
+
+	defer sCursor.Close()
+	k, _, err := sCursor.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	var lastSpanId uint64
+	if k != nil {
+		lastSpanId = binary.BigEndian.Uint64(k)
+	}
+
+	// TODO tidy this up (create new interface BorFullBlockReader?)
+	type LastFrozen interface {
+		LastFrozenSpanID() uint64
+	}
+
+	snapshotLastSpanId := br.(LastFrozen).LastFrozenSpanID()
+	if snapshotLastSpanId > lastSpanId {
+		lastSpanId = snapshotLastSpanId
+	}
+
+	return lastSpanId, nil
 }
