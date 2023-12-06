@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -182,6 +183,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateEvents.Close()
 
+	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	if err != nil {
+		return err
+	}
+	// Go back a little bit
+	if progress > s.cfg.SlotsPerEpoch*2 {
+		progress -= s.cfg.SlotsPerEpoch * 2
+	} else {
+		progress = 0
+	}
 	// buffers
 	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
@@ -192,13 +203,23 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
-		s.currentState, err = s.genesisState.Copy()
-		if err != nil {
-			return err
-		}
-		// Collect genesis state if we are at genesis
-		if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
-			return err
+		// progress is 0 when we are at genesis
+		if progress == 0 {
+			s.currentState, err = s.genesisState.Copy()
+			if err != nil {
+				return err
+			}
+			// Collect genesis state if we are at genesis
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+				return err
+			}
+		} else {
+			// progress not 0? we need to load the state from the DB
+			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
+			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	logLvl := log.LvlInfo
