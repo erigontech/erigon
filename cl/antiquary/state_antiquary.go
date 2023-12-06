@@ -221,7 +221,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err != nil {
 				return err
 			}
-			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", time.Since(start))
+			end := time.Since(start)
+			hashRoot, err := s.currentState.HashSSZ()
+			if err != nil {
+				return err
+			}
+			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", hashRoot)
 		}
 	}
 	logLvl := log.LvlInfo
