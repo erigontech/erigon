@@ -391,7 +391,7 @@ func (c *Chain) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
@@ -426,7 +426,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, dirs, nil, nil, nil, nil, nil, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -446,7 +446,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
@@ -477,7 +477,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
@@ -558,7 +558,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
@@ -606,7 +606,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
