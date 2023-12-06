@@ -401,7 +401,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if freshDumpSlot == slot {
 		return currentList, nil
 	}
-	fmt.Println(currentList)
+	fmt.Println(lenRaw)
 	// now start diffing
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
