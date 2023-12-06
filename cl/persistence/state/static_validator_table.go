@@ -226,7 +226,7 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
@@ -239,7 +239,7 @@ func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, s
 func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uint64, withdrawalCredentials libcommon.Hash) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -252,7 +252,7 @@ func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uin
 func (s *StaticValidatorTable) AddSlashed(validatorIndex, slot uint64, slashed bool) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -265,7 +265,7 @@ func (s *StaticValidatorTable) AddSlashed(validatorIndex, slot uint64, slashed b
 func (s *StaticValidatorTable) AddActivationEligibility(validatorIndex, slot uint64, activationEligibility uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -278,7 +278,7 @@ func (s *StaticValidatorTable) AddActivationEligibility(validatorIndex, slot uin
 func (s *StaticValidatorTable) AddActivationEpoch(validatorIndex, slot uint64, activationEpoch uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -291,7 +291,7 @@ func (s *StaticValidatorTable) AddActivationEpoch(validatorIndex, slot uint64, a
 func (s *StaticValidatorTable) AddExitEpoch(validatorIndex, slot uint64, exitEpoch uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -304,7 +304,7 @@ func (s *StaticValidatorTable) AddExitEpoch(validatorIndex, slot uint64, exitEpo
 func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64, withdrawableEpoch uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
@@ -376,7 +376,7 @@ func (s *StaticValidatorTable) GetStaticValidator(validatorIndex uint64) *Static
 func (s *StaticValidatorTable) SetSlot(slot uint64) {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot {
+	if slot <= s.slot && s.slot != 0 {
 		return
 	}
 	s.slot = slot

@@ -1,6 +1,8 @@
 package statechange
 
 import (
+	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
@@ -37,6 +39,10 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && effectivaBalance <= beaconConfig.EjectionBalance {
+			fmt.Println(effectivaBalance)
+			x, _ := json.Marshal(validator)
+			fmt.Println(string(x))
+
 			if err = s.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
 				return false
 			}

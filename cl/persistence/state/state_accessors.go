@@ -2,6 +2,7 @@ package state_accessors
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/klauspost/compress/zstd"
@@ -272,6 +273,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 		return err
 	}
 	defer cursor.Close()
+	fmt.Println("A")
 
 	var buf bytes.Buffer
 	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
@@ -284,6 +286,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 			return err
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)
+		fmt.Println(staticValidator.activationEpoch)
 	}
 	if err != nil {
 		return err
