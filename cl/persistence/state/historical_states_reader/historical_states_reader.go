@@ -459,7 +459,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 
 	currentList := make([]byte, size*8)
 	var n int
-	if n, err = zstdReader.Read(currentList); err != nil && !errors.Is(err, io.EOF) {
+	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	if n != size*8 {
@@ -633,7 +633,7 @@ func (r *HistoricalStatesReader) readPreviousPartecipation(slot, validatorLength
 		return nil, err
 	}
 
-	if _, err = zstdReader.Read(out); err != nil && !errors.Is(err, io.EOF) {
+	if _, err = utils.ReadZSTD(zstdReader, out); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	ret := solid.NewBitList(0, int(r.cfg.ValidatorRegistryLimit))
