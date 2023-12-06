@@ -214,12 +214,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 		} else {
+			start := time.Now()
 			// progress not 0? we need to load the state from the DB
 			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
 				return err
 			}
+			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", time.Since(start))
 		}
 	}
 	logLvl := log.LvlInfo
@@ -323,6 +325,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+	first := true
 	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
 	// there is optimized custom cache to recycle big GC overhead.
 	for ; slot < to; slot++ {
@@ -381,10 +384,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		slashingsBytes = slashingsBytes[:0]
 		slashingsBytes = append(slashingsBytes, s.currentState.RawSlashings()...)
 
+		fullValidation := slot%100_000 == 0 || first
 		// We sanity check the state every 100k slots.
-		if err := transition.TransitionState(s.currentState, block, slot%100_000 == 0); err != nil {
+		if err := transition.TransitionState(s.currentState, block, fullValidation); err != nil {
 			return err
 		}
+		first = false
 
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
