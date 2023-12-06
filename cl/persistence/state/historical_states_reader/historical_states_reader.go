@@ -107,12 +107,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetLatestBlockHeader(blockHeader)
 
 	if err := r.readHistoryHashVector(tx, r.genesisState.BlockRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.BlockRoot, blockRoots); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read block roots: %w", err)
 	}
 	ret.SetBlockRoots(blockRoots)
 
 	if err := r.readHistoryHashVector(tx, r.genesisState.StateRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.StateRoot, stateRoots); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read state roots: %w", err)
 	}
 	ret.SetStateRoots(stateRoots)
 
@@ -121,7 +121,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		historicalRoots.Append(root)
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read historical roots: %w", err)
 	}
 	ret.SetHistoricalRoots(historicalRoots)
 
@@ -136,11 +136,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read validator balances: %w", err)
 	}
 	balances := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
 	fmt.Println(balancesBytes)
 	b, _ := balances.MarshalJSON()
@@ -149,20 +149,20 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
 	ret.SetValidators(validatorSet)
 
 	// Randomness
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
 	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read randao mixes: %w", err)
 	}
 	ret.SetRandaoMixes(randaoMixes)
 	// Slashings
 	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
 	ret.SetSlashings(slashings)
 
@@ -189,14 +189,14 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read pending attestations: %w", err)
 		}
 		ret.SetCurrentEpochAttestations(currentAtts)
 		ret.SetPreviousEpochAttestations(previousAtts)
 	} else {
 		currentIdxs, previousIdxs, err := r.readPartecipations(tx, slot, minimalBeaconState.ValidatorLength, currActiveIdxs, prevActiveIdxs, ret, currentCheckpoint, previousCheckpoint)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read participations: %w", err)
 		}
 		ret.SetCurrentEpochParticipation(currentIdxs)
 		ret.SetPreviousEpochParticipation(previousIdxs)
@@ -208,11 +208,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Inactivity
 	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read inactivity scores: %w", err)
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	if err := inactivityScores.DecodeSSZ(inactivityScoresBytes, 0); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode inactivity scores: %w", err)
 	}
 	ret.SetInactivityScoresRaw(inactivityScores)
 
@@ -220,7 +220,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	syncCommitteeSlot := r.cfg.RoundSlotToSyncCommitteePeriod(slot)
 	currentSyncCommittee, err := state_accessors.ReadCurrentSyncCommittee(tx, syncCommitteeSlot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read current sync committee: %w", err)
 	}
 	if currentSyncCommittee == nil {
 		currentSyncCommittee = r.genesisState.CurrentSyncCommittee()
@@ -228,7 +228,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	nextSyncCommittee, err := state_accessors.ReadNextSyncCommittee(tx, syncCommitteeSlot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read next sync committee: %w", err)
 	}
 	if nextSyncCommittee == nil {
 		nextSyncCommittee = r.genesisState.NextSyncCommittee()
@@ -241,7 +241,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read payload header: %w", err)
 	}
 	ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	if ret.Version() < clparams.CapellaVersion {
@@ -257,7 +257,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		historicalSummaries.Append(historicalSummary)
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
 	return ret, nil

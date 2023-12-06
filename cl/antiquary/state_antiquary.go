@@ -224,7 +224,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to read historical state at slot %d: %w", progress, err)
 			}
 			end := time.Since(start)
 			hashRoot, err := s.currentState.HashSSZ()
