@@ -188,11 +188,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	// Go back a little bit
-	if progress > s.cfg.SlotsPerEpoch*2 {
-		progress -= s.cfg.SlotsPerEpoch * 2
-	} else {
-		progress = 0
-	}
+	// if progress > s.cfg.SlotsPerEpoch*2 {
+	// 	progress -= s.cfg.SlotsPerEpoch * 2
+	// } else {
+	// 	progress = 0
+	// }
+	progress = progress - progress%clparams.SlotsPerDump
 	// buffers
 	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
