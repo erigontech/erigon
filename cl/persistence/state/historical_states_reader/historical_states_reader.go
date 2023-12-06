@@ -393,15 +393,15 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		return nil, err
 	}
 	currentList := make([]byte, lenRaw)
-
-	if _, err := zstdReader.Read(currentList); err != nil {
+	var n int
+	if n, err = zstdReader.Read(currentList); err != nil {
 		return nil, err
 	}
 
 	if freshDumpSlot == slot {
 		return currentList, nil
 	}
-	fmt.Println(lenRaw)
+	fmt.Println(n, lenRaw)
 	// now start diffing
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
