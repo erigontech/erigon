@@ -194,6 +194,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// 	progress = 0
 	// }
 	progress = progress - progress%clparams.SlotsPerDump
+	progress, err = findNearestSlotBackwards(tx, progress) // Maybe the guess was a missed slot.
+	if err != nil {
+		return err
+	}
 	// buffers
 	commonBuffer := &bytes.Buffer{}
 	compressedWriter, err := zstd.NewWriter(commonBuffer, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
@@ -748,4 +752,19 @@ func (s *Antiquary) antiquateFullSlashings(collector *etl.Collector, slot uint64
 		return err
 	}
 	return collector.Collect(base_encoding.Encode64ToBytes4(slot), common.Copy(buffer.Bytes()))
+}
+
+func findNearestSlotBackwards(tx kv.Tx, slot uint64) (uint64, error) {
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return 0, err
+	}
+	for canonicalRoot == (common.Hash{}) {
+		slot--
+		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return slot, nil
 }
