@@ -404,9 +404,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		events.Reset()
-		if slot%clparams.SlotsPerDump == 0 {
-			continue
-		}
 
 		// antiquate fields
 		key := base_encoding.Encode64ToBytes4(slot)

@@ -401,11 +401,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
 	}
-	fmt.Println(currentList)
 
-	if freshDumpSlot == slot {
-		return currentList, nil
-	}
 	// now start diffing
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
@@ -466,10 +462,6 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 	}
 	if n != size*8 {
 		return nil, err
-	}
-
-	if freshDumpSlot == slot {
-		return out, out.DecodeSSZ(currentList, 0)
 	}
 
 	for k, v, err := diffCursor.Next(); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
