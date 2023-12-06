@@ -236,7 +236,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 	t.ctx["from"] = t.vm.ToValue(from.Bytes())
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
-	t.ctx["gas"] = t.vm.ToValue(gas)
+	t.ctx["gas"] = t.vm.ToValue(t.gasLimit)
 	t.ctx["gasPrice"] = t.vm.ToValue(env.GasPrice.ToBig())
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {

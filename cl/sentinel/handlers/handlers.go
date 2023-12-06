@@ -15,10 +15,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"golang.org/x/time/rate"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -29,31 +34,53 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-type ConsensusHandlers struct {
-	handlers      map[protocol.ID]network.StreamHandler
-	host          host.Host
-	metadata      *cltypes.Metadata
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
-	ctx           context.Context
+type RateLimits struct {
+	pingLimit       int
+	goodbyeLimit    int
+	metadataV1Limit int
+	metadataV2Limit int
+	statusLimit     int
+}
 
-	beaconDB persistence.RawBeaconBlockChain
+const punishmentPeriod = time.Minute
+
+var defaultRateLimits = RateLimits{
+	pingLimit:       5000,
+	goodbyeLimit:    5000,
+	metadataV1Limit: 5000,
+	metadataV2Limit: 5000,
+	statusLimit:     5000,
+}
+
+type ConsensusHandlers struct {
+	handlers           map[protocol.ID]network.StreamHandler
+	host               host.Host
+	metadata           *cltypes.Metadata
+	beaconConfig       *clparams.BeaconChainConfig
+	genesisConfig      *clparams.GenesisConfig
+	ctx                context.Context
+	beaconDB           persistence.RawBeaconBlockChain
+	peerRateLimits     sync.Map
+	punishmentEndTimes sync.Map
 }
 
 const (
 	SuccessfulResponsePrefix = 0x00
+	RateLimitedPrefix        = 0x02
 	ResourceUnavaiablePrefix = 0x03
 )
 
 func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
 	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		host:          host,
-		metadata:      metadata,
-		beaconDB:      db,
-		genesisConfig: genesisConfig,
-		beaconConfig:  beaconConfig,
-		ctx:           ctx,
+		host:               host,
+		metadata:           metadata,
+		beaconDB:           db,
+		genesisConfig:      genesisConfig,
+		beaconConfig:       beaconConfig,
+		ctx:                ctx,
+		peerRateLimits:     sync.Map{},
+		punishmentEndTimes: sync.Map{},
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -71,6 +98,29 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		c.handlers[protocol.ID(k)] = c.wrapStreamHandler(k, v)
 	}
 	return c
+}
+
+func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit int) error {
+	keyHash := utils.Sha256([]byte(peerId), []byte(method))
+
+	if punishmentEndTime, ok := c.punishmentEndTimes.Load(keyHash); ok {
+		if time.Now().Before(punishmentEndTime.(time.Time)) {
+			return errors.New("rate limit exceeded, punishment period in effect")
+		} else {
+			c.punishmentEndTimes.Delete(keyHash)
+		}
+	}
+
+	value, _ := c.peerRateLimits.LoadOrStore(keyHash, rate.NewLimiter(rate.Every(time.Minute), limit))
+	limiter := value.(*rate.Limiter)
+
+	if !limiter.Allow() {
+		c.punishmentEndTimes.Store(keyHash, time.Now().Add(punishmentPeriod))
+		c.peerRateLimits.Delete(keyHash)
+		return errors.New("rate limit exceeded")
+	}
+
+	return nil
 }
 
 func (c *ConsensusHandlers) Start() {

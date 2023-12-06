@@ -120,7 +120,9 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	cancel()
 
 	if err != nil {
-		config.logger.Warn(fmt.Sprintf("[bor] unable to start the %s service - first run", fnName), "err", err)
+		if !errors.Is(err, errMissingBlocks) {
+			config.logger.Warn(fmt.Sprintf("[bor] unable to start the %s service - first run", fnName), "err", err)
+		}
 	}
 
 	ticker := time.NewTicker(tickerDuration)
@@ -142,7 +144,11 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 			cancel()
 
 			if err != nil {
-				config.logger.Warn(fmt.Sprintf("[bor] unable to handle %s", fnName), "err", err)
+				if errors.Is(err, errMissingBlocks) {
+					config.logger.Debug(fmt.Sprintf("[bor] unable to handle %s", fnName), "err", err)
+				} else {
+					config.logger.Warn(fmt.Sprintf("[bor] unable to handle %s", fnName), "err", err)
+				}
 			}
 		case <-config.closeCh:
 			return
