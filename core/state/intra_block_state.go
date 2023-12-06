@@ -142,15 +142,15 @@ func (sdb *IntraBlockState) Reset() {
 		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	*/
 
-	//sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	clear(sdb.nilAccounts)
-	//sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	clear(sdb.stateObjects)
-	//sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-	clear(sdb.stateObjectsDirty)
+	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	//clear(sdb.nilAccounts)
+	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	//clear(sdb.stateObjects)
+	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	//clear(sdb.stateObjectsDirty)
 	sdb.logs = make(map[libcommon.Hash][]*types.Log)
-	//sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
-	clear(sdb.balanceInc)
+	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
@@ -804,10 +804,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		//al := newAccessList()
-		//sdb.accessList = al
-		sdb.accessList.Reset()
-		al := sdb.accessList
+		al := newAccessList()
+		sdb.accessList = al
+		//sdb.accessList.Reset()
+		//al := sdb.accessList
 
 		al.AddAddress(sender)
 		if dst != nil {
