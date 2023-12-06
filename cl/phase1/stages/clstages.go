@@ -458,9 +458,10 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					// Fix canonical chain in the indexed datatabase.
-					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, headSlot); err != nil {
-						return err
+
+					type canonicalEntry struct {
+						slot uint64
+						root common.Hash
 					}
 
 					currentRoot := headRoot
@@ -469,12 +470,11 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					reconnectionRoots := make([]canonicalEntry, 0, 1)
 
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
-						if err := beacon_indicies.MarkRootCanonical(ctx, tx, currentSlot, currentRoot); err != nil {
-							return err
-						}
+
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 							return err
 						}
@@ -489,10 +489,22 @@ func ConsensusClStages(ctx context.Context,
 						if err != nil {
 							return err
 						}
+						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
+					}
+					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
+						return err
+					}
+					for i := len(reconnectionRoots) - 1; i >= 0; i-- {
+						if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
+							return err
+						}
+					}
+					if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
+						return err
 					}
 
 					// Increment validator set
-					headState, err := cfg.forkChoice.GetFullState(headRoot, false)
+					headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 					if err != nil {
 						return err
 					}
@@ -500,8 +512,17 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					start := time.Now()
+					// Incement some stuff here
 					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
+					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
+					preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().BlockRoot())
 					if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
+						return err
+					}
+					if err := state_accessors.IncrementHistoricalSummariesTable(tx, headState, preverifiedHistoricalSummary); err != nil {
+						return err
+					}
+					if err := state_accessors.IncrementHistoricalRootsTable(tx, headState, preverifiedHistoricalRoots); err != nil {
 						return err
 					}
 					log.Debug("Incremented state history", "elapsed", time.Since(start), "preverifiedValidators", preverifiedValidators)
