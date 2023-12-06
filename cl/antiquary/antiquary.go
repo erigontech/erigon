@@ -175,9 +175,9 @@ func (a *Antiquary) Loop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			// if !a.backfilled.Load() {
-			// 	continue
-			// }
+			if !a.backfilled.Load() {
+				continue
+			}
 			var (
 				from uint64
 				to   uint64
