@@ -142,6 +142,8 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
 		return nil, err
 	}
+	b, _ := balances.MarshalJSON()
+	fmt.Println(string(b))
 	ret.SetBalances(balances)
 
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
@@ -394,17 +396,14 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		return nil, err
 	}
 	currentList := make([]byte, lenRaw)
-	var n int
 
-	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
+	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
 	}
 
 	if freshDumpSlot == slot {
 		return currentList, nil
 	}
-	fmt.Println(n, lenRaw)
-	fmt.Println(currentList)
 	// now start diffing
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
