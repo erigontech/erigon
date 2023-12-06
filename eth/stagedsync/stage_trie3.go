@@ -37,7 +37,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
-	domains.SetTxNum(ctx, toTxNum)
+	domains.SetTxNum(toTxNum)
 
 	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger.Info("Collecting account/storage keys")
@@ -68,7 +68,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if sdCtx.KeysCount() >= batchSize {
-			rh, err := sdCtx.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+			rh, err := sdCtx.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			if err != nil {
 				return err
 			}
@@ -87,7 +87,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := sdCtx.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+	rh, err := sdCtx.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}

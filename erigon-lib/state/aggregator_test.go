@@ -29,7 +29,6 @@ import (
 
 func TestAggregatorV3_Merge(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 1000)
-	ctx := context.Background()
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -54,7 +53,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(ctx, txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
@@ -190,7 +189,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	var maxWrite uint64
 	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(ctx, txNum)
+		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(addr)
@@ -213,7 +212,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -301,7 +300,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(ctx, txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -439,7 +438,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	var prev1, prev2 []byte
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
-		domains.SetTxNum(ctx, txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -466,7 +465,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 	half := txs / 2
 	for txNum = txNum + 1; txNum <= txs; txNum++ {
-		domains.SetTxNum(ctx, txNum)
+		domains.SetTxNum(txNum)
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
@@ -696,7 +695,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer mc.Close()
 
 	for i = 0; i < len(vals); i++ {
-		domains.SetTxNum(ctx, uint64(i))
+		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -707,7 +706,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -725,7 +724,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
-		domains.SetTxNum(ctx, uint64(i))
+		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -738,7 +737,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.EqualValues(t, roots[i], rh)
@@ -759,7 +758,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
-		domains.SetTxNum(ctx, uint64(i))
+		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -772,7 +771,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.EqualValues(t, roots[i], rh)

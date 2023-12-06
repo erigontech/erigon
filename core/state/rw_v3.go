@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,7 +19,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
@@ -191,7 +192,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(ctx, txTask.TxNum)
+	rs.domains.SetTxNum(txTask.TxNum)
 	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
@@ -208,7 +209,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, false, txTask.BlockNum, "")
+		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, "")
 		if err != nil {
 			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
 		}
@@ -371,7 +372,7 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 }
 
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(ctx, txNum)
+	w.rs.domains.SetTxNum(txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 

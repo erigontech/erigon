@@ -1304,7 +1304,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			return nil, ctx.Err()
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
-			log.Info("[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			log.Info(logPrefix+"[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		default:
 		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
@@ -1368,6 +1368,9 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	rootHash, err = hph.RootHash()
 	if err != nil {
 		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	if hph.trace {
+		fmt.Printf("root hash %x updates %d\n", rootHash, len(plainKeys))
 	}
 
 	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())

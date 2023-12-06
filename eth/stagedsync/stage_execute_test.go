@@ -157,7 +157,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			if err := rs.ApplyState4(context.Background(), txTask); err != nil {
 				panic(err)
 			}
-			_, err := rs.Domains().ComputeCommitment(context.Background(), true, false, txTask.BlockNum, "")
+			_, err := rs.Domains().ComputeCommitment(context.Background(), true, txTask.BlockNum, "")
 			if err != nil {
 				panic(err)
 			}

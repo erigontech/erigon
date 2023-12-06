@@ -158,7 +158,7 @@ func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateW
 		if err != nil {
 			panic(err)
 		}
-		domains.SetTxNum(context.Background(), uint64(int(minTxNum)+ /* 1 system txNum in begining of block */ 1))
+		domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in begining of block */ 1))
 		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
