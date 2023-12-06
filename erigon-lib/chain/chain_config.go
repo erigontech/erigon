@@ -484,6 +484,14 @@ func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.ProducerDelay, number)
 }
 
+func (c *BorConfig) IsSprintStart(blockNumber uint64) bool {
+	return blockNumber%c.CalculateSprint(blockNumber) == 0
+}
+
+func (c *BorConfig) IsSprintEnd(blockNumber uint64) bool {
+	return c.IsSprintStart(blockNumber + 1)
+}
+
 func (c *BorConfig) CalculateSprint(number uint64) uint64 {
 	if c.sprints == nil {
 		c.sprints = asSprints(c.Sprint)
