@@ -38,13 +38,10 @@ import (
 )
 
 const (
-	spanLength              = 6400 // Number of blocks in a span
-	zerothSpanEnd           = 255  // End block of 0th span
-	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
-	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
-	extraVanity             = 32   // Fixed number of extra-data prefix bytes reserved for signer vanity
-	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
+	spanLength         = 6400 // Number of blocks in a span
+	zerothSpanEnd      = 255  // End block of 0th span
+	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
+	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 )
 
 type BorHeimdallCfg struct {
