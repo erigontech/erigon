@@ -1511,9 +1511,9 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnwindFrom uint64) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo uint64) error {
 	d := dc.d
-	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d\n", d.filenameBase, txNumUnindTo, txNumUnwindFrom, step)
+	//fmt.Printf("[domain][%s] unwinding to txNum=%d, step %d\n", d.filenameBase, txNumUnindTo, step)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
@@ -1602,8 +1602,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnwindFrom, limit, true, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnwindFrom, err)
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", txNumUnindTo, step, err)
 	}
 	return restored.flush(ctx, rwTx)
 }
