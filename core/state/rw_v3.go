@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -432,6 +433,9 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	}
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
+	if bytes.Equal(key.Bytes(), common.FromHex("f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
+		fmt.Printf("put: %x,%x, blockNum=%d, txNum=%d\n", *key, value.Bytes(), w.rs.domains.BlockNum(), w.rs.domains.TxNum())
+	}
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
