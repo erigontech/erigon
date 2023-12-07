@@ -315,12 +315,12 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 
 var (
 	// if non empty, will skip downloading any non-v1 snapshots
-	envUseOnlyBlockSnapshotsV1 = dbg.EnvString("DOWNLOADER_ONLY_BLOCKS", "")
+	envUseOnlyBlockSnapshots = dbg.EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 )
 
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
-	if envUseOnlyBlockSnapshotsV1 == "" {
+	if envUseOnlyBlockSnapshots {
 		return true
 	}
 	prefixes := []string{"domain", "history", "idx"}
@@ -329,7 +329,7 @@ func IsSnapNameAllowed(name string) bool {
 			return false
 		}
 	}
-	return strings.HasPrefix(name, "v1")
+	return true
 }
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
