@@ -14,6 +14,8 @@ import (
 
 type ctxKey int
 
+var MetricsEnabled = false
+
 const (
 	ckChan ctxKey = iota
 )

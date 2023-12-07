@@ -349,6 +349,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				break //of switch
 			}
 
+			if diagnostics.MetricsEnabled {
+				diagnostics.Send(diagnostics.TorrentFile{
+					Name:            t.Name(),
+					TotalBytes:      uint64(t.Length()),
+					DownloadedBytes: uint64(t.BytesCompleted()),
+					SeedsCount:      len(t.Metainfo().UrlList),
+					PeersCount:      len(peersOfThisFile),
+				})
+			}
+
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			if d.verbosity < log.LvlInfo {
 				break //of switch
@@ -362,14 +372,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
 						webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
 					}
-
-					diagnostics.Send(diagnostics.TorrentFile{
-						Name:            t.Name(),
-						TotalBytes:      uint64(t.Length()),
-						DownloadedBytes: uint64(t.BytesCompleted()),
-						SeedsCount:      len(t.Metainfo().UrlList),
-						PeersCount:      len(peersOfThisFile),
-					})
 
 					d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 				}
