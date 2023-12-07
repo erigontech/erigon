@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -1488,6 +1489,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err1)
 	}
 
+	fmt.Printf("---\n")
 	// BLOCKS 1 and 2
 	if err = m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatal(err)
@@ -1509,6 +1511,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	fmt.Printf("---\n")
 	// Block 3 and 4
 	if err = m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatal(err)
@@ -1528,6 +1531,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	fmt.Printf("---\n")
 	// Reorg
 	if err = m.InsertChain(longerChain); err != nil {
 		t.Fatal(err)

@@ -1528,25 +1528,25 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			return err
 		}
 
-		//ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
-		//if err != nil {
-		//	return err
-		//}
-		//if ic.HasNext() {
-		//	nextTxn, err := ic.Next()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
-		//	if dc.d.filenameBase == "storage" {
-		//		fmt.Printf("[%s]unwinding1 %x ->'%x' {%v, %v}\n", dc.d.filenameBase, k, v, nextTxn, dc.d.aggregationStep)
-		//	}
-		//} else {
-		dc.SetTxNum(txNumUnindTo - 1)
-		//if dc.d.filenameBase == "storage" {
-		//	fmt.Printf("[%s]unwinding2 %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, txNumUnindTo-1)
-		//}
-		//}
+		ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
+		if err != nil {
+			return err
+		}
+		if ic.HasNext() {
+			nextTxn, err := ic.Next()
+			if err != nil {
+				return err
+			}
+			dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
+			if dc.d.filenameBase == "storage" {
+				fmt.Printf("[%s]unwinding1 %x ->'%x' {%v, %v}\n", dc.d.filenameBase, k, v, nextTxn, dc.d.aggregationStep)
+			}
+		} else {
+			dc.SetTxNum(txNumUnindTo - 1)
+			if dc.d.filenameBase == "storage" {
+				fmt.Printf("[%s]unwinding2 %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, txNumUnindTo-1)
+			}
+		}
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
@@ -1830,11 +1830,11 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	}
 
 	var foundInvStep []byte
-	if traceGetLatest == dc.d.filenameBase {
-		defer func() {
-			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
-		}()
-	}
+	//if traceGetLatest == dc.d.filenameBase {
+	//	defer func() {
+	//		fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
+	//	}()
+	//}
 
 	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
@@ -1852,9 +1852,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		//if traceGetLatest == dc.d.filenameBase {
-		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		//}
+		if traceGetLatest == dc.d.filenameBase {
+			fmt.Printf("GetLatest1(%s, %x) -> %x (from db=true), %s\n", dc.d.filenameBase, key, v, dbg.Stack())
+		}
 		//LatestStateReadDB.ObserveDuration(t)
 		return v, true, nil
 		//} else {
@@ -1877,6 +1877,10 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		//}
 	}
 	//LatestStateReadDBNotFound.ObserveDuration(t)
+
+	if traceGetLatest == dc.d.filenameBase {
+		fmt.Printf("GetLatest(%s, %x) -> (from db=false), %s\n", dc.d.filenameBase, key, dbg.Stack())
+	}
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {

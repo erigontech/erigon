@@ -435,9 +435,10 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 
 func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
-		//fmt.Printf("storage1: %x,%x,%x, orig=%x, %d\n", address, *key, value.Bytes(), original.Bytes(), w.rs.domains.TxNum())
+		fmt.Printf("storage1: %x,%x,%x, orig=%x, %d\n", address, *key, value.Bytes(), original.Bytes(), w.rs.domains.TxNum())
 		return nil
 	}
+	fmt.Printf("storage2: %x,%x,%x, orig=%x, %d\n", address, *key, value.Bytes(), original.Bytes(), w.rs.domains.TxNum())
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
 	if w.trace {
@@ -450,6 +451,7 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
+	fmt.Printf("create contract: %x\n", address)
 
 	//seems don't need delete code here - tests starting fail
 	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)

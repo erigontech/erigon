@@ -574,6 +574,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	if len(value) == 0 {
 		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
 	}
+	fmt.Printf("putWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
 	return sd.aggCtx.storage.PutWithPrev(composite, nil, value, preVal)
 }
 
@@ -951,6 +952,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte) error {
 	if prevVal == nil {
+		if domain == "storage" {
+			fmt.Printf("DomainDel prev: %x\n", prevVal)
+		}
 		var err error
 		prevVal, err = sd.DomainGet(domain, k1, k2)
 		if err != nil {
