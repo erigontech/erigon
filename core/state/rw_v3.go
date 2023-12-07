@@ -493,6 +493,7 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 		//trace:     true,
 		rs:        rs,
 		readLists: newReadList(),
+		composite: make([]byte, 20+32),
 	}
 }
 
@@ -530,21 +531,22 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var composite [20 + 32]byte
-	copy(composite[:], address[:])
-	copy(composite[20:], key.Bytes())
-	enc, err := r.rs.domains.LatestStorage(composite[:])
+	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	//var composite [20 + 32]byte
+	//copy(composite[:], address[:])
+	//copy(composite[20:], key.Bytes())
+	enc, err := r.rs.domains.LatestStorage(r.composite)
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
-		r.readLists[string(kv.StorageDomain)].Push(string(composite[:]), enc)
+		r.readLists[string(kv.StorageDomain)].Push(string(r.composite), enc)
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite, enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
 	return enc, nil
