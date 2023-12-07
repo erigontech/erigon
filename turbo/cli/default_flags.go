@@ -175,6 +175,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
+	&utils.CaplinBackfillingFlag,
+	&utils.CaplinArchiveFlag,
+
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
 
