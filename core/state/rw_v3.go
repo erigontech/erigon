@@ -423,6 +423,13 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		fmt.Printf("del acc: %x\n", address)
 	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
+	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
