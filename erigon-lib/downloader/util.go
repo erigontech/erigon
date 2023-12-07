@@ -270,6 +270,9 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if envUseOnlyBlockSnapshots {
+		return files, nil
+	}
 	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
 	if err != nil {
 		return nil, err
