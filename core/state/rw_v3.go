@@ -482,14 +482,13 @@ func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace 
 func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestAccount(addr)
+	enc, err := r.rs.domains.LatestAccount(address[:])
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[string(kv.AccountsDomain)].Push(string(addr), enc)
+		r.readLists[string(kv.AccountsDomain)].Push(string(address[:]), enc)
 	}
 	if len(enc) == 0 {
 		if r.trace {
@@ -530,14 +529,13 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestCode(addr)
+	enc, err := r.rs.domains.LatestCode(address[:])
 	if err != nil {
 		return nil, err
 	}
 
 	if !r.discardReadList {
-		r.readLists[string(kv.CodeDomain)].Push(string(addr), enc)
+		r.readLists[string(kv.CodeDomain)].Push(string(address[:]), enc)
 	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
@@ -546,15 +544,14 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestCode(addr)
+	enc, err := r.rs.domains.LatestCode(address[:])
 	if err != nil {
 		return 0, err
 	}
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[libstate.CodeSizeTableFake].Push(string(addr), sizebuf[:])
+		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {
