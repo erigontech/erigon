@@ -1528,20 +1528,25 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			return err
 		}
 
-		ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
-		if err != nil {
-			return err
-		}
-		if ic.HasNext() {
-			nextTxn, err := ic.Next()
-			if err != nil {
-				return err
-			}
-			dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
-		} else {
-			dc.SetTxNum(txNumUnindTo - 1)
-		}
-		//fmt.Printf("[%s]unwinding %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, dc.TxNum())
+		//ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
+		//if err != nil {
+		//	return err
+		//}
+		//if ic.HasNext() {
+		//	nextTxn, err := ic.Next()
+		//	if err != nil {
+		//		return err
+		//	}
+		//	dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
+		//	if dc.d.filenameBase == "storage" {
+		//		fmt.Printf("[%s]unwinding1 %x ->'%x' {%v, %v}\n", dc.d.filenameBase, k, v, nextTxn, dc.d.aggregationStep)
+		//	}
+		//} else {
+		dc.SetTxNum(txNumUnindTo - 1)
+		//if dc.d.filenameBase == "storage" {
+		//	fmt.Printf("[%s]unwinding2 %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, txNumUnindTo-1)
+		//}
+		//}
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}

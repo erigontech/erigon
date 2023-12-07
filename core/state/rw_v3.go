@@ -423,11 +423,11 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		fmt.Printf("del acc: %x\n", address)
 	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
-	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+	//w.rs.domains.Flush(context.Background(), w.tx.(kv.RwTx))
+	if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -435,12 +435,13 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 
 func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
+		//fmt.Printf("storage1: %x,%x,%x, orig=%x, %d\n", address, *key, value.Bytes(), original.Bytes(), w.rs.domains.TxNum())
 		return nil
 	}
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x, %d\n", address, *key, value.Bytes(), w.rs.domains.TxNum())
 	}
 	return nil
 }
