@@ -1603,7 +1603,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
-		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", txNumUnindTo, step, err)
+		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
 	return restored.flush(ctx, rwTx)
 }
