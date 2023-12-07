@@ -338,7 +338,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
-	first := true
+	first := false
 	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
 	// there is optimized custom cache to recycle big GC overhead.
 	for ; slot < to; slot++ {
