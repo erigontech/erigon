@@ -400,17 +400,20 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
+
+	if original.Incarnation > account.Incarnation {
+		w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), nil)
+		//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+		//if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		//	w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
+		//	return nil
+		//}); err != nil {
+		//	return err
+		//}
+	}
+
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
-	if original.Incarnation > account.Incarnation {
-		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-			w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
 
 	return nil
 }
@@ -429,12 +432,12 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	//w.rs.domains.Flush(context.Background(), w.tx.(kv.RwTx))
-	if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
-		return nil
-	}); err != nil {
-		return err
-	}
+	//if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+	//	w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
+	//	return nil
+	//}); err != nil {
+	//	return err
+	//}
 	return nil
 }
 
