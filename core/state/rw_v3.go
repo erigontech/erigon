@@ -400,7 +400,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if original.Incarnation > account.Incarnation {
 		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+			w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
 			return nil
 		}); err != nil {
 			return err
@@ -425,7 +425,7 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	//w.rs.domains.Flush(context.Background(), w.tx.(kv.RwTx))
 	if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
 		return nil
 	}); err != nil {
 		return err
@@ -456,7 +456,7 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	//seems don't need delete code here - tests starting fail
 	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		w.writeLists[string(kv.StorageDomain)].Push(string(common.Copy(k)), nil)
 		return nil
 	}); err != nil {
 		return err

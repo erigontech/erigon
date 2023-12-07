@@ -543,7 +543,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
-		tombs = append(tombs, pair{k, v})
+		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	})
 	if err != nil {
@@ -572,9 +572,10 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	sd.Commitment.TouchPlainKey(compositeS, value, sd.Commitment.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
 	if len(value) == 0 {
+		fmt.Printf("DeleteWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
 		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
 	}
-	fmt.Printf("putWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
+	fmt.Printf("PutWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
 	return sd.aggCtx.storage.PutWithPrev(composite, nil, value, preVal)
 }
 
@@ -952,13 +953,17 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte) error {
 	if prevVal == nil {
-		if domain == "storage" {
-			fmt.Printf("DomainDel prev: %x\n", prevVal)
-		}
 		var err error
 		prevVal, err = sd.DomainGet(domain, k1, k2)
+		if domain == "storage" {
+			fmt.Printf("DomainDel1 prev: %x\n", prevVal)
+		}
 		if err != nil {
 			return err
+		}
+	} else {
+		if domain == "storage" {
+			fmt.Printf("DomainDel2 prev: %x\n", prevVal)
 		}
 	}
 	switch domain {
@@ -983,7 +988,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		return fmt.Errorf("DomainDelPrefix: not supported")
 	}
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		return sd.DomainDel(kv.StorageDomain, k, nil, v)
+		return sd.DomainDel(kv.StorageDomain, common.Copy(k), nil, common.Copy(v))
 	}); err != nil {
 		return err
 	}
