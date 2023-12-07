@@ -1533,8 +1533,6 @@ func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
 	return h, nil
 }
 
-
-
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
 	if k == nil {

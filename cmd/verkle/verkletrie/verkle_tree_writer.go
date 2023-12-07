@@ -46,8 +46,8 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 	// 		logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
 	// 	default:
 	// 	}
-	// })	
-	
+	// })
+
 	node.(*verkle.InternalNode).Flush(func(path []byte, node verkle.VerkleNode) {
 		node.Commit()
 		s, err := node.Serialize()
@@ -82,8 +82,8 @@ func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInte
 	// 		logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
 	// 	default:
 	// 	}
-	// })	
-	
+	// })
+
 	node.(*verkle.InternalNode).Flush(func(path []byte, node verkle.VerkleNode) {
 		node.Commit()
 		s, err := node.Serialize()
@@ -94,7 +94,6 @@ func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInte
 			panic(err)
 		}
 	})
-
 
 	return err
 }
@@ -222,27 +221,27 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 	// 	if len(val) == 0 {
 	// 		return next(k, nil, nil)
 	// 	}
-		// if err := root.Insert(libcommon.CopyBytes(k), libcommon.CopyBytes(val), 
-		// func(node verkle.VerkleNode) {
-		// 	rootHash := node.Commitment().Bytes()
-		// 	encodedNode, err := node.Serialize()
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
-		// 	if err := verkleCollector.Collect(rootHash[:], encodedNode); err != nil {
-		// 		panic(err)
-		// 	}
-		// 	select {
-		// 	case <-logInterval.C:
-		// 		v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
-		// 	default:
-		// 	}
-		// }); err != nil {
-		// 	return err
-		// }
-		// return next(k, nil, nil)
+	// if err := root.Insert(libcommon.CopyBytes(k), libcommon.CopyBytes(val),
+	// func(node verkle.VerkleNode) {
+	// 	rootHash := node.Commitment().Bytes()
+	// 	encodedNode, err := node.Serialize()
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	if err := verkleCollector.Collect(rootHash[:], encodedNode); err != nil {
+	// 		panic(err)
+	// 	}
+	// 	select {
+	// 	case <-logInterval.C:
+	// 		v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
+	// 	default:
+	// 	}
+	// }); err != nil {
+	// 	return err
+	// }
+	// return next(k, nil, nil)
 	// }, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		// return libcommon.Hash{}, err
+	// return libcommon.Hash{}, err
 	// }
 
 	// Flush the rest all at once
