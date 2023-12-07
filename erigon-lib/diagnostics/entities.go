@@ -50,6 +50,8 @@ type TorrentFile struct {
 	DownloadedBytes uint64 `json:"downloadedBytes"`
 	SeedsCount      int    `json:"seedsCount"`
 	PeersCount      int    `json:"peersCount"`
+	SeedsRate       uint64 `json:"seedsRate"`
+	PeersRate       uint64 `json:"peersRate"`
 }
 
 func (ti DownloadStatistics) Type() Type {

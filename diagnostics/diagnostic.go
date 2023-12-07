@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -71,6 +72,9 @@ func (d *DiagnosticClient) runTorrentListener() {
 				cancel()
 				return
 			case info := <-ch:
+				fmt.Println("info.Name", info.Name)
+				fmt.Println("info.peers", info.PeersCount, "speed", info.PeersRate)
+				fmt.Println("info.seeds", info.SeedsCount, "speed", info.SeedsRate)
 				d.fileDownload[info.Name] = info
 			}
 		}

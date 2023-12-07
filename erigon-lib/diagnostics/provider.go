@@ -14,8 +14,6 @@ import (
 
 type ctxKey int
 
-var MetricsEnabled = false
-
 const (
 	ckChan ctxKey = iota
 )
@@ -24,6 +22,7 @@ type Type interface {
 	reflect.Type
 	Context() context.Context
 	Err() error
+	Enabled() bool
 }
 
 type diagType struct {
@@ -48,6 +47,10 @@ func (t diagType) Context() context.Context {
 
 func (t diagType) Err() error {
 	return t.Context().Err()
+}
+
+func (t diagType) Enabled() bool {
+	return t.Err() == nil
 }
 
 type Info interface {

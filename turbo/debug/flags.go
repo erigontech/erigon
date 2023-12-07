@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/log/v3"
@@ -204,8 +203,6 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 
 	var metricsMux *http.ServeMux
 	var metricsAddress string
-
-	diagnostics.MetricsEnabled = metricsEnabled
 
 	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
