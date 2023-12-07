@@ -1511,7 +1511,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnwindFrom, limit uint64) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnwindFrom uint64) error {
 	d := dc.d
 	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d\n", d.filenameBase, txNumUnindTo, txNumUnwindFrom, step)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)

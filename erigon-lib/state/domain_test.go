@@ -1662,7 +1662,7 @@ func TestDomain_Unwind(t *testing.T) {
 		dc.StartWrites()
 		defer dc.FinishWrites()
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, math.MaxUint64, math.MaxUint64)
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, math.MaxUint64)
 		require.NoError(t, err)
 		dc.Close()
 		tx.Commit()
