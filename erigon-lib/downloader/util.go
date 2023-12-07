@@ -324,7 +324,6 @@ var (
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
 	if envOnlyBlockSnaps {
-		fmt.Printf("dbg: name %s\n", name)
 		for _, p := range []string{"domain", "history", "idx"} {
 			if strings.HasPrefix(name, p) {
 				return false
