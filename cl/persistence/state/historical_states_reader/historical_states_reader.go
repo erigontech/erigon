@@ -456,7 +456,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot ui
 	defer zstdReader.Close()
 	currentList := make([]byte, size*8)
 	var n int
-	fmt.Println(k)
+
 	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}

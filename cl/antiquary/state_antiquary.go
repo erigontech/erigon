@@ -289,8 +289,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			v := append(s.currentState.CurrentJustifiedCheckpoint(), append(s.currentState.PreviousJustifiedCheckpoint(), s.currentState.FinalizedCheckpoint()...)...)
 			k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
+			v := make([]byte, solid.CheckpointSize*3)
+			copy(v, s.currentState.CurrentJustifiedCheckpoint())
+			copy(v[solid.CheckpointSize:], s.currentState.PreviousJustifiedCheckpoint())
+			copy(v[solid.CheckpointSize*2:], s.currentState.FinalizedCheckpoint())
 			if err := checkpoints.Collect(k, v); err != nil {
 				return err
 			}
