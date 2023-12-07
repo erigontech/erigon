@@ -441,7 +441,20 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
+	if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+		fmt.Printf("del acc: %x\n", address)
+	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
+	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+			fmt.Printf("del acc, st: %x\n", k)
+		}
+		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
