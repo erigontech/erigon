@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/erigontech/mdbx-go v0.27.21
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231130092351-fc8d6b8c7b27
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231205014527-32e0d130578e
 	github.com/ledgerwatch/interfaces v0.0.0-20231031050643-c86352e41520
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -15,7 +15,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.20.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
-	github.com/anacrolix/torrent v1.52.6-0.20230926121951-11833b45cfbe
+	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
 	github.com/aws/aws-sdk-go-v2 v1.21.2
 	github.com/aws/aws-sdk-go-v2/config v1.19.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
@@ -40,11 +40,11 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
-	golang.org/x/crypto v0.15.0
+	golang.org/x/crypto v0.16.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/sync v0.5.0
-	golang.org/x/sys v0.14.0
-	golang.org/x/time v0.4.0
+	golang.org/x/sys v0.15.0
+	golang.org/x/time v0.5.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.31.0
@@ -135,10 +135,10 @@ require (
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
-	golang.org/x/mod v0.13.0 // indirect
-	golang.org/x/net v0.17.0 // indirect
+	golang.org/x/mod v0.14.0 // indirect
+	golang.org/x/net v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/tools v0.14.0 // indirect
+	golang.org/x/tools v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.24.1 // indirect

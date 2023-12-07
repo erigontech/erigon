@@ -75,7 +75,11 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			return err
 		}
 	}
-	f.preverifiedValidators.Add(blockRoot, uint64(lastProcessedState.ValidatorLength()))
+	f.preverifiedSizes.Add(blockRoot, preverifiedAppendListsSizes{
+		validatorLength:           uint64(lastProcessedState.ValidatorLength()),
+		historicalRootsLength:     lastProcessedState.HistoricalRootsLength(),
+		historicalSummariesLength: lastProcessedState.HistoricalSummariesLength(),
+	})
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)

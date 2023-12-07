@@ -554,12 +554,12 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	max := s.BlocksAvailable()
+	maxBlockNumInFiles := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -569,7 +569,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -579,7 +579,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.Seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.Seg.FilePath())
@@ -1462,7 +1462,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 			}
 
 			if borOk {
-				if err := br.RetireBorBlocks(ctx, borBlockFrom, borBlockTo, lvl, seedNewSnapshots); err != nil {
+				if err := br.RetireBorBlocks(ctx, borBlockFrom, borBlockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 				}
 			}

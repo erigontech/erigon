@@ -44,6 +44,10 @@ func (arr *uint64VectorSSZ) CopyTo(target IterableSSZ[uint64]) {
 	arr.u.CopyTo(c.u)
 }
 
+func (arr *uint64VectorSSZ) Bytes() []byte {
+	return arr.u.u[:arr.u.l*8]
+}
+
 func (arr *uint64VectorSSZ) Range(fn func(index int, value uint64, length int) bool) {
 	arr.u.Range(fn)
 }

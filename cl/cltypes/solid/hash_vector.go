@@ -24,6 +24,10 @@ func NewHashVector(s int) HashVectorSSZ {
 	}
 }
 
+func (arr *hashVector) Bytes() []byte {
+	return arr.u.u[:arr.u.l*length.Hash]
+}
+
 func (h *hashVector) Append(val libcommon.Hash) {
 	panic("not implmented")
 }
