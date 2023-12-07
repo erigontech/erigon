@@ -270,7 +270,7 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if envUseOnlyBlockSnapshots {
+	if envOnlyBlockSnaps {
 		return files, nil
 	}
 	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
@@ -317,13 +317,13 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 }
 
 var (
-	// if non empty, will skip downloading any non-v1 snapshots
-	envUseOnlyBlockSnapshots = dbg.EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+	// force skipping of any non-Erigon2 .torrent files
+	envOnlyBlockSnaps = dbg.EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 )
 
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
-	if envUseOnlyBlockSnapshots {
+	if envOnlyBlockSnaps {
 		fmt.Printf("dbg: name %s\n", name)
 		for _, p := range []string{"domain", "history", "idx"} {
 			if strings.HasPrefix(name, p) {
