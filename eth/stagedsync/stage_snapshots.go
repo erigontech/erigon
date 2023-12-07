@@ -549,6 +549,34 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version 
 
 	var downloads []string
 
+	var min uint64
+
+	for _, info := range lastSegments {
+		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
+			if min == 0 || lastInfo.From() < min {
+				min = lastInfo.From()
+			}
+		}
+	}
+
+	for segType, info := range lastSegments {
+		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
+			if lastInfo.From() > min {
+				for _, ent := range entries {
+					if info, err := ent.Info(); err == nil {
+						snapInfo, ok := info.Sys().(downloader.SnapInfo)
+
+						if ok && snapInfo.Type() == segType &&
+							snapInfo.Version() == version &&
+							snapInfo.From() == min {
+							lastSegments[segType] = info
+						}
+					}
+				}
+			}
+		}
+	}
+
 	for _, info := range lastSegments {
 		downloads = append(downloads, info.Name())
 		if torrent, ok := torrents[info.Name()]; ok {

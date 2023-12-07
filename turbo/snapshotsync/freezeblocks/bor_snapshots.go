@@ -877,7 +877,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BorEventSegment{ranges: Range{f.From, f.To}}
+				sn = &BorEventSegment{version: f.Version, ranges: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -917,7 +917,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BorSpanSegment{ranges: Range{f.From, f.To}}
+				sn = &BorSpanSegment{version: f.Version, ranges: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {

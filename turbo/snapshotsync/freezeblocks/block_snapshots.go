@@ -1068,10 +1068,10 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 
 }
 
-func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, version uint8, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 
-	segments, _, err := BorSegments(dir, 1, 0)
+	segments, _, err := BorSegments(dir, version, minIndex)
 	if err != nil {
 		return err
 	}
@@ -1524,7 +1524,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				// wait for Downloader service to download all expected snapshots
 				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
 					indexWorkers := estimate.IndexSnapshot.Workers()
-					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, borSnapshots.Version(), borSnapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
 						return fmt.Errorf("BuildBorMissedIndices: %w", err)
 					}
 				}
