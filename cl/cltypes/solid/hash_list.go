@@ -25,6 +25,10 @@ func NewHashList(c int) HashListSSZ {
 	}
 }
 
+func (arr *hashList) Bytes() []byte {
+	return arr.u[:arr.l*length.Hash]
+}
+
 func (arr *hashList) MarshalJSON() ([]byte, error) {
 	list := make([]libcommon.Hash, arr.l)
 	for i := 0; i < arr.l; i++ {

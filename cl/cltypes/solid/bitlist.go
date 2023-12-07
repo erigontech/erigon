@@ -42,6 +42,10 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 	}
 }
 
+func (u *BitList) Bytes() []byte {
+	return u.u[:u.l]
+}
+
 // Clear wipes the BitList clean, just like the memory wipe spell from a particularly forgetful wizard.
 func (u *BitList) Clear() {
 	u.u = u.u[:0]

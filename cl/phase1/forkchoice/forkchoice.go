@@ -26,6 +26,12 @@ const (
 	allowedCachedStates = 8
 )
 
+type preverifiedAppendListsSizes struct {
+	validatorLength           uint64
+	historicalRootsLength     uint64
+	historicalSummariesLength uint64
+}
+
 type ForkChoiceStore struct {
 	ctx                           context.Context
 	time                          uint64
@@ -48,9 +54,11 @@ type ForkChoiceStore struct {
 	latestMessages   map[uint64]*LatestMessage
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
-	eth2Roots             *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	preverifiedValidators *lru.Cache[libcommon.Hash, uint64]
-	mu                    sync.Mutex
+	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
+	// preverifid sizes
+	preverifiedSizes *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
+
+	mu sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 	// freezer
@@ -94,11 +102,16 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
-	preverifiedValidators, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	preverifiedSizes, err := lru.New[libcommon.Hash, preverifiedAppendListsSizes](checkpointsPerCache * 10)
 	if err != nil {
 		return nil, err
 	}
-	preverifiedValidators.Add(anchorRoot, uint64(anchorState.ValidatorLength()))
+	preverifiedSizes.Add(anchorRoot, preverifiedAppendListsSizes{
+		validatorLength:           uint64(anchorState.ValidatorLength()),
+		historicalRootsLength:     anchorState.HistoricalRootsLength(),
+		historicalSummariesLength: anchorState.HistoricalSummariesLength(),
+	})
+
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -119,7 +132,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		genesisTime:                   anchorState.GenesisTime(),
 		beaconCfg:                     anchorState.BeaconConfig(),
 		childrens:                     make(map[libcommon.Hash]childrens),
-		preverifiedValidators:         preverifiedValidators,
+		preverifiedSizes:              preverifiedSizes,
 	}, nil
 }
 
@@ -240,10 +253,23 @@ func (f *ForkChoiceStore) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.C
 	return f.forkGraph.GetStateAtSlot(slot, alwaysCopy)
 }
 
-// Highest seen returns highest seen slot
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
-	if ret, ok := f.preverifiedValidators.Get(blockRoot); ok {
-		return ret
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.validatorLength
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalRoots(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalRootsLength
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalSummariesLength
 	}
 	return 0
 }

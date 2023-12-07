@@ -270,6 +270,9 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if dbg.DownloaderOnlyBlocks {
+		return files, nil
+	}
 	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
 	if err != nil {
 		return nil, err
@@ -313,23 +316,16 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
 
-var (
-	// if non empty, will skip downloading any non-v1 snapshots
-	envUseOnlyBlockSnapshotsV1 = dbg.EnvString("DOWNLOADER_ONLY_BLOCKS", "")
-)
-
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
-	if envUseOnlyBlockSnapshotsV1 == "" {
-		return true
-	}
-	prefixes := []string{"domain", "history", "idx"}
-	for _, p := range prefixes {
-		if strings.HasPrefix(name, p) {
-			return false
+	if dbg.DownloaderOnlyBlocks {
+		for _, p := range []string{"domain", "history", "idx"} {
+			if strings.HasPrefix(name, p) {
+				return false
+			}
 		}
 	}
-	return strings.HasPrefix(name, "v1")
+	return true
 }
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
