@@ -115,10 +115,16 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
+					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+						fmt.Printf("DelAcc: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
+					}
 					if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
 						return err
 					}
 				} else {
+					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+						fmt.Printf("UpdateAcc: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
+					}
 					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 						return err
 					}
@@ -139,10 +145,16 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		case kv.StorageDomain:
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
+					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
+						fmt.Printf("DelSt: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
+					}
 					if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
 						return err
 					}
 				} else {
+					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
+						fmt.Printf("UpdateSt: %x, %x, blockNum=%d, txNum=%d\n", key, list.Vals[i], rs.domains.BlockNum(), rs.domains.TxNum())
+					}
 					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
 						return err
 					}
