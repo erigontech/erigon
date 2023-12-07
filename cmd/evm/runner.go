@@ -119,10 +119,12 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 }
 
 func runCmd(ctx *cli.Context) error {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
-	//log.Root().SetHandler(glogger)
+	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
+	if machineFriendlyOutput {
+		log.Root().SetHandler(log.DiscardHandler())
+	} else {
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
