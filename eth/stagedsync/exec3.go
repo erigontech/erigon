@@ -1048,9 +1048,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
+		//if err := doms.Flush(ctx, applyTx); err != nil {
+		//	return false, err
+		//}
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
