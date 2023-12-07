@@ -412,7 +412,13 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 	if original.Incarnation > account.Incarnation {
 		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+		if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+			fmt.Printf("changeAccInc: %x, %d -> %d\n", original.Incarnation, account.Incarnation)
+		}
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+			if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
+				fmt.Printf("changeAccInc, del storage: %x\n", k)
+			}
 			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 			return nil
 		}); err != nil {
