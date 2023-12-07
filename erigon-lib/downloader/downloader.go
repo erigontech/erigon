@@ -396,8 +396,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						DownloadedBytes: uint64(t.BytesCompleted()),
 						SeedsCount:      len(t.Metainfo().UrlList),
 						PeersCount:      len(peersOfThisFile),
-						SeedsRate:       uint64(seedsRates),
-						PeersRate:       uint64(peersRates),
+						SeedsRate:       seedsRates,
+						PeersRate:       peersRates,
 					})
 				}
 			}
