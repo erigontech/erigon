@@ -1547,7 +1547,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 				fmt.Printf("[%s]unwinding2 %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, txNumUnindTo-1)
 			}
 		}
-		if err := restored.addValue(k, nil, v); err != nil {
+		if err := restored.addValue(common.Copy(k), nil, common.Copy(v)); err != nil {
 			return err
 		}
 		seen[string(k)] = struct{}{}
@@ -1841,14 +1841,16 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		return nil, false, err
 	}
 	if foundInvStep != nil {
-		copy(dc.valKeyBuf[:], key)
-		copy(dc.valKeyBuf[len(key):], foundInvStep)
+		//copy(dc.valKeyBuf[:], key)
+		//copy(dc.valKeyBuf[len(key):], foundInvStep)
+		//seek := dc.valKeyBuf[:len(key)+8]
+		seek := append(common.Copy(key), foundInvStep...)
 
 		valsC, err := dc.valsCursor(roTx)
 		if err != nil {
 			return nil, false, err
 		}
-		_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
+		_, v, err = valsC.SeekExact(seek)
 		if err != nil {
 			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
@@ -1856,7 +1858,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 			fmt.Printf("GetLatest1(%s, %x) -> %x (from db=true), %s\n", dc.d.filenameBase, key, v, dbg.Stack())
 		}
 		//LatestStateReadDB.ObserveDuration(t)
-		return v, true, nil
+		return common.Copy(v), true, nil
 		//} else {
 		//if traceGetLatest == dc.d.filenameBase {
 		//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
@@ -1879,7 +1881,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	//LatestStateReadDBNotFound.ObserveDuration(t)
 
 	if traceGetLatest == dc.d.filenameBase {
-		fmt.Printf("GetLatest(%s, %x) -> (from db=false), %s\n", dc.d.filenameBase, key, dbg.Stack())
+		fmt.Printf("GetLatest2(%s, %x) -> (from db=false), %s\n", dc.d.filenameBase, key, dbg.Stack())
 	}
 
 	v, found, err := dc.getLatestFromFiles(key)

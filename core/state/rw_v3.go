@@ -142,7 +142,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, common.Copy(list.Vals[i]), nil); err != nil {
 						return err
 					}
 				}

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -316,7 +317,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	default:
 		panic(table)
 	}
-	return v, ok
+	return common.Copy(v), ok
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -572,7 +573,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	sd.Commitment.TouchPlainKey(compositeS, value, sd.Commitment.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
 	if len(value) == 0 {
-		fmt.Printf("DeleteWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
+		fmt.Printf("DeleteWithPrev st: %x, %x, %x, %d, %x, %s\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum, dbg.Stack())
 		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
 	}
 	fmt.Printf("PutWithPrev st: %x, %x, %x, %d, %x\n", composite, value, preVal, sd.txNum, sd.aggCtx.storage.hc.ic.txNum)
@@ -901,7 +902,7 @@ func (sd *SharedDomains) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err 
 		return sd.LatestAccount(k)
 	case kv.StorageDomain:
 		if k2 != nil {
-			k = append(k, k2...)
+			k = append(common.Copy(k), k2...) //
 		}
 		return sd.LatestStorage(k)
 	case kv.CodeDomain:
@@ -934,6 +935,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	case kv.AccountsDomain:
 		return sd.updateAccountData(k1, val, prevVal)
 	case kv.StorageDomain:
+		if bytes.Equal(prevVal, val) {
+			fmt.Printf("[dbg] why equal?\n")
+		}
 		return sd.writeAccountStorage(k1, k2, val, prevVal)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, val) {
@@ -956,16 +960,12 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	if prevVal == nil {
 		var err error
 		prevVal, err = sd.DomainGet(domain, k1, k2)
-		if domain == "storage" {
-			fmt.Printf("DomainDel1 prev: %x\n", prevVal)
-		}
 		if err != nil {
 			return err
 		}
+		fmt.Printf("DomainDel1(%s) prev: %x\n", domain, prevVal)
 	} else {
-		if domain == "storage" {
-			fmt.Printf("DomainDel2 prev: %x\n", prevVal)
-		}
+		fmt.Printf("DomainDel2(%s) prev: %x\n", domain, prevVal)
 	}
 	switch domain {
 	case kv.AccountsDomain:
