@@ -109,7 +109,9 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
-	for table, list := range txTask.WriteLists {
+	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+		list := txTask.WriteLists[table]
+
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
