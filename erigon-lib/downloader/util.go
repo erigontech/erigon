@@ -320,7 +320,7 @@ var (
 
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
-	if envUseOnlyBlockSnapshots {
+	if !envUseOnlyBlockSnapshots {
 		return true
 	}
 	prefixes := []string{"domain", "history", "idx"}
