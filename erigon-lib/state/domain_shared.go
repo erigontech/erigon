@@ -326,9 +326,8 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.CommitmentDomain, prefix)
-	if ok {
-		return v0, nil
+	if v, ok := sd.Get(kv.CommitmentDomain, prefix); ok {
+		return v, nil
 	}
 	v, _, err := sd.aggCtx.GetLatest(kv.CommitmentDomain, prefix, nil, sd.roTx)
 	if err != nil {
@@ -338,9 +337,8 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.CodeDomain, addr)
-	if ok {
-		return v0, nil
+	if v, ok := sd.Get(kv.CodeDomain, addr); ok {
+		return v, nil
 	}
 	v, _, err := sd.aggCtx.GetLatest(kv.CodeDomain, addr, nil, sd.roTx)
 	if err != nil {
@@ -350,21 +348,10 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
-	var v0, v []byte
-	var err error
-	var ok bool
-
-	//defer func() {
-	//	curious := "0da27ef618846cfa981516da2891fe0693a54f8418b85c91c384d2c0f4e14727"
-	//	if bytes.Equal(hexutility.MustDecodeString(curious), addr) {
-	//		fmt.Printf("found %s vDB/File %x vCache %x step %d\n", curious, v, v0, sd.txNum.Load()/sd.Account.aggregationStep)
-	//	}
-	//}()
-	v0, ok = sd.Get(kv.AccountsDomain, addr)
-	if ok {
-		return v0, nil
+	if v, ok := sd.Get(kv.AccountsDomain, addr); ok {
+		return v, nil
 	}
-	v, _, err = sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("account %x read error: %w", addr, err)
 	}
@@ -424,10 +411,8 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 }
 
 func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
-	//a := make([]byte, 0, len(addr)+len(loc))
-	v0, ok := sd.Get(kv.StorageDomain, addrLoc)
-	if ok {
-		return v0, nil
+	if v, ok := sd.Get(kv.StorageDomain, addrLoc); ok {
+		return v, nil
 	}
 	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addrLoc, nil, sd.roTx)
 	if err != nil {
