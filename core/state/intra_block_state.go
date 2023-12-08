@@ -19,7 +19,6 @@ package state
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -720,18 +719,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
-
-	keys := make([]string, len(sdb.stateObjects))
-	i := 0
-	for k := range sdb.stateObjects {
-		keys[i] = k.Hex()
-		i++
-	}
-	slices.Sort(keys)
-
-	for _, addrHex := range keys {
-		addr := libcommon.HexToAddress(addrHex)
-		stateObject := sdb.stateObjects[addr]
+	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err

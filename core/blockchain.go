@@ -146,10 +146,6 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	if state.TraceLog {
-		fmt.Printf("XXX all transactions executed\n")
-	}
-
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
