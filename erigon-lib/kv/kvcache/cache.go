@@ -404,8 +404,9 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	if c.cfg.StateV3 {
 		if len(k) == 20 {
 			v, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		} else {
+			v, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
 		}
-		v, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
 	} else {
 		v, err = tx.GetOne(kv.PlainState, k)
 	}
