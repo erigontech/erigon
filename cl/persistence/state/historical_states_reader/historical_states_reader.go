@@ -149,7 +149,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
 	ret.SetValidators(validatorSet)
-
 	// Randomness
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
 	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
@@ -200,7 +199,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 
 	if ret.Version() < clparams.AltairVersion {
-		return ret, nil
+		return ret, ret.InitBeaconState()
 	}
 	// Inactivity
 	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
@@ -234,7 +233,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetNextSyncCommittee(nextSyncCommittee)
 	// Execution
 	if ret.Version() < clparams.BellatrixVersion {
-		return ret, nil
+		return ret, ret.InitBeaconState()
 	}
 	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
 	if err != nil {
@@ -242,7 +241,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	if ret.Version() < clparams.CapellaVersion {
-		return ret, nil
+		return ret, ret.InitBeaconState()
 	}
 
 	// Withdrawals
@@ -257,7 +256,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
-	return ret, nil
+	return ret, ret.InitBeaconState()
 }
 
 func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {

@@ -25,7 +25,7 @@ func (b *CachingBeaconState) DecodeSSZ(buf []byte, version int) error {
 	sz := metrics.NewHistTimer("decode_ssz_beacon_state_size")
 	sz.Observe(float64(len(buf)))
 	h.PutSince()
-	return b.initBeaconState()
+	return b.InitBeaconState()
 }
 
 // SSZ size of the Beacon State
