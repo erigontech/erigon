@@ -354,7 +354,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			if d.verbosity < log.LvlInfo || isDiagEnabled {
 
 				// more detailed statistic: download rate of each peer (for each file)
-				seedsRates := uint64(0)
+				websRates := uint64(0)
 				webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 				for _, peer := range weebseedPeersOfThisFile {
 					urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
@@ -362,7 +362,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
 							dr := uint64(peer.DownloadRate())
 							webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(dr)))
-							seedsRates += dr
+							websRates += dr
 						}
 
 						d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
@@ -371,22 +371,22 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 				lenght := uint64(len(weebseedPeersOfThisFile))
 				if lenght > 0 {
-					seedsRates = seedsRates / lenght
+					websRates = websRates / lenght
 				}
 
 				d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
 				rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-				peersRates := uint64(0)
+				seedsRates := uint64(0)
 				for _, peer := range peersOfThisFile {
 					dr := uint64(peer.DownloadRate())
 					rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
-					peersRates += dr
+					seedsRates += dr
 				}
 				d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
 
 				lenght = uint64(len(peersOfThisFile))
 				if lenght > 0 {
-					peersRates = peersRates / uint64(len(peersOfThisFile))
+					seedsRates = seedsRates / uint64(len(peersOfThisFile))
 				}
 
 				if isDiagEnabled {
@@ -396,8 +396,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						DownloadedBytes: uint64(t.BytesCompleted()),
 						SeedsCount:      len(t.Metainfo().UrlList),
 						PeersCount:      len(peersOfThisFile),
+						WebseedsRate:    websRates,
 						SeedsRate:       seedsRates,
-						PeersRate:       peersRates,
 					})
 				}
 			}
