@@ -43,6 +43,7 @@ type HttpCfg struct {
 	API                  []string
 	Gascap               uint64
 	MaxTraces            uint64
+	WebsocketPort        int
 	WebsocketEnabled     bool
 	WebsocketCompression bool
 	RpcAllowListFilePath string
