@@ -142,9 +142,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
-	fmt.Println(balancesBytes)
-	b, _ := balances.MarshalJSON()
-	fmt.Println(string(b))
 	ret.SetBalances(balances)
 
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
@@ -498,6 +495,8 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		if currValidator.Active(epoch) {
 			activeIds = append(activeIds, validatorIndex)
 		}
+		fmt.Println(validatorIndex)
+		fmt.Println(currValidator.MarshalJSON())
 		if epoch == 0 {
 			return true
 		}
@@ -510,7 +509,6 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	fmt.Println(bytesEffectiveBalances)
 	for i := 0; i < int(validatorSetLength); i++ {
 		out.Get(i).
 			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
