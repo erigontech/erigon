@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -24,6 +25,12 @@ const (
 	checkpointsPerCache = 1024
 	allowedCachedStates = 8
 )
+
+type preverifiedAppendListsSizes struct {
+	validatorLength           uint64
+	historicalRootsLength     uint64
+	historicalSummariesLength uint64
+}
 
 type ForkChoiceStore struct {
 	ctx                           context.Context
@@ -48,7 +55,10 @@ type ForkChoiceStore struct {
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	mu        sync.Mutex
+	// preverifid sizes
+	preverifiedSizes *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
+
+	mu sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 	// freezer
@@ -92,6 +102,16 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
 	}
 
+	preverifiedSizes, err := lru.New[libcommon.Hash, preverifiedAppendListsSizes](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+	preverifiedSizes.Add(anchorRoot, preverifiedAppendListsSizes{
+		validatorLength:           uint64(anchorState.ValidatorLength()),
+		historicalRootsLength:     anchorState.HistoricalRootsLength(),
+		historicalSummariesLength: anchorState.HistoricalSummariesLength(),
+	})
+
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -112,6 +132,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		genesisTime:                   anchorState.GenesisTime(),
 		beaconCfg:                     anchorState.BeaconConfig(),
 		childrens:                     make(map[libcommon.Hash]childrens),
+		preverifiedSizes:              preverifiedSizes,
 	}, nil
 }
 
@@ -174,6 +195,13 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 }
 
 // FinalizedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) JustifiedSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Epoch())
+}
+
+// FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -207,4 +235,41 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.forkGraph.AnchorSlot()
+}
+
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+}
+func (f *ForkChoiceStore) GetStateAtStateRoot(stateRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetState(stateRoot, alwaysCopy)
+}
+func (f *ForkChoiceStore) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetStateAtSlot(slot, alwaysCopy)
+}
+
+func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.validatorLength
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalRoots(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalRootsLength
+	}
+	return 0
+}
+
+func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Hash) uint64 {
+	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
+		return ret.historicalSummariesLength
+	}
+	return 0
 }

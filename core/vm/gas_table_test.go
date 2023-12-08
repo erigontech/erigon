@@ -19,10 +19,11 @@ package vm
 import (
 	"context"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -37,6 +38,7 @@ import (
 )
 
 func TestMemoryGasCost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		size     uint64
 		cost     uint64
@@ -92,6 +94,7 @@ func TestEIP2200(t *testing.T) {
 		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
 			address := libcommon.BytesToAddress([]byte("contract"))
 			_, tx := memdb.NewTestTx(t)
 
@@ -137,6 +140,7 @@ var createGasTests = []struct {
 }
 
 func TestCreateGas(t *testing.T) {
+	t.Parallel()
 	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))

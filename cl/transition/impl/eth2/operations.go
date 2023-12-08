@@ -165,7 +165,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 		if err != nil {
 			return err
 		}
-		signedRoot := utils.Keccak256(depositMessageRoot[:], domain)
+		signedRoot := utils.Sha256(depositMessageRoot[:], domain)
 		// Perform BLS verification and if successful noice.
 		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
 		// Literally you can input it trash.
@@ -320,7 +320,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 		if err != nil {
 			return err
 		}
-		msg := utils.Keccak256(blockRoot[:], domain)
+		msg := utils.Sha256(blockRoot[:], domain)
 		isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
 		if err != nil {
 			return err
@@ -404,7 +404,7 @@ func (I *impl) ProcessBlsToExecutionChange(s abstract.BeaconState, signedChange 
 		}
 
 		// Check the validator's withdrawal credentials against the provided message.
-		hashedFrom := utils.Keccak256(change.From[:])
+		hashedFrom := utils.Sha256(change.From[:])
 		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 			return fmt.Errorf("invalid withdrawal credentials")
 		}
@@ -514,7 +514,7 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
 
 	c := h.Tag("step", "get_participation_flag")
-	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(attestation.AttestantionData(), stateSlot-data.Slot())
+	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(data, stateSlot-data.Slot())
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +522,7 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 
 	c = h.Tag("step", "get_attesting_indices")
 
-	attestingIndicies, err := s.GetAttestingIndicies(attestation.AttestantionData(), attestation.AggregationBits(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -700,8 +700,12 @@ func processAttestation(s abstract.BeaconState, attestation *solid.Attestation, 
 
 func verifyAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {
 	indexedAttestations := make([]*cltypes.IndexedAttestation, 0, attestations.Len())
+	commonBuffer := make([]byte, 8*2048)
 	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
-		indexedAttestations = append(indexedAttestations, state.GetIndexedAttestation(a, attestingIndicies[idx]))
+		idxAttestations := state.GetIndexedAttestation(a, attestingIndicies[idx])
+		idxAttestations.AttestingIndices.SetReusableHashBuffer(commonBuffer)
+		idxAttestations.HashSSZ()
+		indexedAttestations = append(indexedAttestations, idxAttestations)
 		return true
 	})
 
@@ -810,7 +814,7 @@ func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIn
 	}
 
 	randaoMixes := s.GetRandaoMixes(epoch)
-	randaoHash := utils.Keccak256(randao[:])
+	randaoHash := utils.Sha256(randao[:])
 	mix := [32]byte{}
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
@@ -856,7 +860,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 			if err := statechange.ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(s), "process_epoch_elpsed", time.Since(start))
+			log.Trace("Processed new epoch successfully", "epoch", state.Epoch(s), "process_epoch_elpsed", time.Since(start))
 		}
 
 		sSlot += 1

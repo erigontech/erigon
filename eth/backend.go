@@ -36,11 +36,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/cl/beacon"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
@@ -344,8 +344,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
-	if config.SilkwormPath != "" {
-		backend.silkworm, err = silkworm.New(config.SilkwormPath, config.Dirs.DataDir)
+	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +386,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			MaxPeers:    p2pConfig.MaxPeers,
 		}
 
-		silkwormSentryService := backend.silkworm.NewSentryService(settings)
+		silkwormSentryService := silkworm.NewSentryService(backend.silkworm, settings)
 		backend.silkwormSentryService = &silkwormSentryService
 
 		sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, apiAddr)
@@ -589,6 +589,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	config.TxPool.NoGossip = config.DisableTxPoolGossip
 	var miningRPC txpool_proto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {
@@ -829,7 +830,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 
-		rawBeaconBlockChainDb := persistence.AferoRawBeaconBlockChainFromOsPath(beaconCfg, dirs.CaplinHistory)
+		rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconCfg, dirs.CaplinHistory)
 
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
 			IpAddr:        config.LightClientDiscoveryAddr,
@@ -853,7 +854,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentinel = client
 
 		go func() {
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, beacon.RouterConfiguration{Active: false}, backend.downloaderClient, true); err != nil {
+			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
@@ -910,20 +912,20 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		return err
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		silkwormRPCDaemonService := s.silkworm.NewRpcDaemonService(chainKv)
+		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
-			if err := cli.StartRpcServer(ctx, httpRpcCfg, s.apiList, s.logger); err != nil {
+			if err := cli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
 			}
 		}()
 	}
 
-	go s.engineBackendRPC.Start(httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
@@ -1385,7 +1387,9 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 	if s.silkworm != nil {
-		s.silkworm.Close()
+		if err := s.silkworm.Close(); err != nil {
+			s.logger.Error("silkworm.Close error", "err", err)
+		}
 	}
 
 	return nil

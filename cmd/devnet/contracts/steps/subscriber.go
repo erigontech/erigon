@@ -62,7 +62,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	blockNum := txToBlockMap[eventHash]
 
-	block, err := node.GetBlockByNumber(rpc.AsBlockNumber(blockNum), true)
+	block, err := node.GetBlockByNumber(ctx, rpc.AsBlockNumber(blockNum), true)
 
 	if err != nil {
 		return nil, err

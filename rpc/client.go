@@ -113,7 +113,7 @@ type clientConn struct {
 
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50, false /* traceRequests */, c.logger)
+	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -496,7 +496,7 @@ func (c *Client) write(ctx context.Context, msg interface{}, retry bool) error {
 			return err
 		}
 	}
-	err := c.writeConn.writeJSON(ctx, msg)
+	err := c.writeConn.WriteJSON(ctx, msg)
 	if err != nil {
 		c.writeConn = nil
 		if !retry {
@@ -629,7 +629,7 @@ func (c *Client) read(codec ServerCodec) {
 	for {
 		msgs, batch, err := codec.ReadBatch()
 		if _, ok := err.(*json.SyntaxError); ok {
-			codec.writeJSON(context.Background(), errorMessage(&parseError{err.Error()}))
+			codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
 		}
 		if err != nil {
 			c.readErr <- err

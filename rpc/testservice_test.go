@@ -28,7 +28,7 @@ import (
 )
 
 func newTestServer(logger log.Logger) *Server {
-	server := NewServer(50, false /* traceRequests */, true, logger)
+	server := NewServer(50, false /* traceRequests */, true, logger, 100)
 	server.idgen = sequentialIDGenerator()
 	if err := server.RegisterName("test", new(testService)); err != nil {
 		panic(err)

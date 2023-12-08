@@ -2,6 +2,7 @@ package solid
 
 import (
 	"bytes"
+	"encoding/json"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -49,6 +50,19 @@ func NewValidatorSet(c int) *ValidatorSet {
 	return &ValidatorSet{
 		c: c,
 	}
+}
+
+func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
+	return &ValidatorSet{
+		c:               c,
+		l:               l,
+		buffer:          make([]byte, l*validatorSize),
+		treeCacheBuffer: make([]byte, getTreeCacheSize(l, validatorTreeCacheGroupLayer)*length.Hash),
+	}
+}
+
+func (v *ValidatorSet) Bytes() []byte {
+	return v.buffer[:v.l*validatorSize]
 }
 
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
@@ -163,7 +177,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 
 	if v.l == 0 {
-		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
+		return utils.Sha256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
 	}
 
 	emptyHashBytes := make([]byte, length.Hash)
@@ -210,7 +224,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 
-	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
+	return utils.Sha256(elements[:length.Hash], lengthRoot[:]), nil
 }
 
 func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
@@ -373,4 +387,24 @@ func (v *ValidatorSet) SetActivationEligibilityEpochForValidatorAtIndex(index in
 func (v *ValidatorSet) SetValidatorSlashed(index int, slashed bool) {
 	v.zeroTreeHash(index)
 	v.Get(index).SetSlashed(slashed)
+}
+
+func (v *ValidatorSet) MarshalJSON() ([]byte, error) {
+	validators := make([]Validator, v.l)
+	for i := 0; i < v.l; i++ {
+		validators[i] = v.Get(i)
+	}
+	return json.Marshal(validators)
+}
+
+func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
+	var validators []Validator
+	if err := json.Unmarshal(data, &validators); err != nil {
+		return err
+	}
+	v.Clear()
+	for _, val := range validators {
+		v.Append(val)
+	}
+	return nil
 }

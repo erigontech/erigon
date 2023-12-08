@@ -2,6 +2,7 @@ package solid
 
 import (
 	"encoding/binary"
+	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -153,6 +154,11 @@ func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 func (v Validator) SetEffectiveBalance(i uint64) {
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
+
+func (v Validator) SetEffectiveBalanceFromBytes(b []byte) {
+	copy(v[80:88], b)
+}
+
 func (v Validator) SetSlashed(b bool) {
 	if b {
 		v[88] = 1
@@ -183,4 +189,45 @@ func (v Validator) Active(epoch uint64) bool {
 
 func (v Validator) IsSlashable(epoch uint64) bool {
 	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
+}
+
+func (v Validator) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		PublicKey                  common.Bytes48 `json:"public_key"`
+		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
+		EffectiveBalance           uint64         `json:"effective_balance"`
+		Slashed                    bool           `json:"slashed"`
+		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch"`
+		ActivationEpoch            uint64         `json:"activation_epoch"`
+		ExitEpoch                  uint64         `json:"exit_epoch"`
+		WithdrawableEpoch          uint64         `json:"withdrawable_epoch"`
+	}{
+		PublicKey:                  v.PublicKey(),
+		WithdrawalCredentials:      v.WithdrawalCredentials(),
+		EffectiveBalance:           v.EffectiveBalance(),
+		Slashed:                    v.Slashed(),
+		ActivationEligibilityEpoch: v.ActivationEligibilityEpoch(),
+		ActivationEpoch:            v.ActivationEpoch(),
+		ExitEpoch:                  v.ExitEpoch(),
+		WithdrawableEpoch:          v.WithdrawableEpoch(),
+	})
+}
+
+func (v *Validator) UnmarshalJSON(input []byte) error {
+	var err error
+	var tmp struct {
+		PublicKey                  common.Bytes48 `json:"public_key"`
+		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
+		EffectiveBalance           uint64         `json:"effective_balance"`
+		Slashed                    bool           `json:"slashed"`
+		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch"`
+		ActivationEpoch            uint64         `json:"activation_epoch"`
+		ExitEpoch                  uint64         `json:"exit_epoch"`
+		WithdrawableEpoch          uint64         `json:"withdrawable_epoch"`
+	}
+	if err = json.Unmarshal(input, &tmp); err != nil {
+		return err
+	}
+	*v = NewValidatorFromParameters(tmp.PublicKey, tmp.WithdrawalCredentials, tmp.EffectiveBalance, tmp.Slashed, tmp.ActivationEligibilityEpoch, tmp.ActivationEpoch, tmp.ExitEpoch, tmp.WithdrawableEpoch)
+	return nil
 }

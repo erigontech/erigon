@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	jsoniter "github.com/json-iterator/go"
@@ -50,17 +51,18 @@ type Server struct {
 	run             int32
 	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
 
-	batchConcurrency uint
-	disableStreaming bool
-	traceRequests    bool // Whether to print requests at INFO level
-	batchLimit       int  // Maximum number of requests in a batch
-	logger           log.Logger
+	batchConcurrency    uint
+	disableStreaming    bool
+	traceRequests       bool // Whether to print requests at INFO level
+	batchLimit          int  // Maximum number of requests in a batch
+	logger              log.Logger
+	rpcSlowLogThreshold time.Duration
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger) *Server {
+func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
-		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger}
+		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -117,20 +119,20 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
 		if err != io.EOF {
-			codec.writeJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
+			codec.WriteJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
 		}
 		return
 	}
 	if batch {
 		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
-			codec.writeJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs))))
+			codec.WriteJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs))))
 		} else {
 			h.handleBatch(reqs)
 		}

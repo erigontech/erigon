@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"math/big"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -75,7 +76,7 @@ func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Confi
 	}
 }
 
-func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg, db kv.RoDB, blockReader services.FullBlockReader,
+func (e *EngineServer) Start(httpConfig *httpcfg.HttpCfg, db kv.RoDB, blockReader services.FullBlockReader,
 	filters *rpchelper.Filters, stateCache kvcache.Cache, agg *libstate.AggregatorV3, engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) {
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
@@ -533,13 +534,15 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := s.chainRW.GetBodiesByHases(request)
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
-	for idx := range request {
-		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
+	bodies, err := s.chainRW.GetBodiesByHashes(request)
+	if err != nil {
+		return nil, err
 	}
 
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
+	}
 	return resp, nil
 }
 
@@ -557,13 +560,15 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 }
 
 func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := s.chainRW.GetBodiesByRange(start, count)
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
-	for idx := range bodies {
-		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
+	bodies, err := s.chainRW.GetBodiesByRange(start, count)
+	if err != nil {
+		return nil, err
 	}
 
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
+	}
 	return resp, nil
 }
 

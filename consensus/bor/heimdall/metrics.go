@@ -2,8 +2,9 @@ package heimdall
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 type (
@@ -11,7 +12,7 @@ type (
 	requestType    string
 
 	meter struct {
-		request map[bool]metrics.Counter // map[isSuccessful]metrics.Meter
+		request map[bool]metrics.Gauge
 		timer   metrics.Summary
 	}
 )
@@ -40,30 +41,30 @@ func getRequestType(ctx context.Context) (requestType, bool) {
 var (
 	requestMeters = map[requestType]meter{
 		stateSyncRequest: {
-			request: map[bool]metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client_requests_statesync_valid"),
-				false: metrics.GetOrCreateCounter("client_requests_statesync_invalid"),
+			request: map[bool]metrics.Gauge{
+				true:  metrics.GetOrCreateGauge("client_requests_statesync_valid"),
+				false: metrics.GetOrCreateGauge("client_requests_statesync_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_statesync_duration"),
 		},
 		spanRequest: {
-			request: map[bool]metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client_requests_span_valid"),
-				false: metrics.GetOrCreateCounter("client_requests_span_invalid"),
+			request: map[bool]metrics.Gauge{
+				true:  metrics.GetOrCreateGauge("client_requests_span_valid"),
+				false: metrics.GetOrCreateGauge("client_requests_span_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_span_duration"),
 		},
 		checkpointRequest: {
-			request: map[bool]metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client_requests_checkpoint_valid"),
-				false: metrics.GetOrCreateCounter("client_requests_checkpoint_invalid"),
+			request: map[bool]metrics.Gauge{
+				true:  metrics.GetOrCreateGauge("client_requests_checkpoint_valid"),
+				false: metrics.GetOrCreateGauge("client_requests_checkpoint_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
 		checkpointCountRequest: {
-			request: map[bool]metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client_requests_checkpointcount_valid"),
-				false: metrics.GetOrCreateCounter("client_requests_checkpointcount_invalid"),
+			request: map[bool]metrics.Gauge{
+				true:  metrics.GetOrCreateGauge("client_requests_checkpointcount_valid"),
+				false: metrics.GetOrCreateGauge("client_requests_checkpointcount_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_checkpointcount_duration"),
 		},
@@ -82,5 +83,5 @@ func sendMetrics(ctx context.Context, start time.Time, isSuccessful bool) {
 	}
 
 	meters.request[isSuccessful].Set(1)
-	meters.timer.UpdateDuration(start)
+	meters.timer.ObserveDuration(start)
 }

@@ -6,10 +6,10 @@ import (
 	"math"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -18,19 +18,24 @@ import (
 // these are view functions for the beacon state cache
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
-func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
+func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
+	var indicies []uint64
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
+
+	size := 0
 	b.ForEachValidator(func(v solid.Validator, i, total int) bool {
 		if !v.Active(epoch) {
 			return true
 		}
+		size++
 		indicies = append(indicies, uint64(i))
 		return true
 	})
 	b.activeValidatorsCache.Add(epoch, indicies)
-	return
+
+	return indicies[:size]
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
@@ -55,12 +60,15 @@ func (b *CachingBeaconState) ComputeCommittee(indicies []uint64, slot uint64, in
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconAttester)
+
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, indicies, slot)
+		shuffledIndicies = make([]uint64, lenIndicies)
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
+
 	return shuffledIndicies[start:end], nil
 }
 
@@ -128,6 +136,7 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 }
 
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error) {
+
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target().Epoch() == Epoch(b) {
@@ -164,14 +173,15 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 
 // GetBeaconCommitee grabs beacon committee using cache first
 func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	var cacheKey [16]byte
-	binary.BigEndian.PutUint64(cacheKey[:], slot)
-	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
+	// var cacheKey [16]byte
+	// binary.BigEndian.PutUint64(cacheKey[:], slot)
+	// binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
 
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
+	indicies := b.GetActiveValidatorsIndices(epoch)
 	committee, err := b.ComputeCommittee(
-		b.GetActiveValidatorsIndices(epoch),
+		indicies,
 		slot,
 		(slot%b.BeaconConfig().SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.BeaconConfig().SlotsPerEpoch,
@@ -184,7 +194,7 @@ func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]u
 
 func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
 	beaconConfig := b.BeaconConfig()
-	optimizedHashFunc := utils.OptimizedKeccak256NotThreadSafe()
+	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
@@ -195,7 +205,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
-	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
+	syncCommitteePubKeys := make([]libcommon.Bytes48, 0, cltypes.SyncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
@@ -214,7 +224,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		buf := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buf, i/32)
 		input := append(seed[:], buf...)
-		randomByte := uint64(utils.Keccak256(input)[i%32])
+		randomByte := uint64(utils.Sha256(input)[i%32])
 		// retrieve validator.
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
@@ -235,7 +245,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	if err != nil {
 		return nil, err
 	}
-	var aggregate [48]byte
+	var aggregate libcommon.Bytes48
 	copy(aggregate[:], aggregatePublicKeyBytes)
 
 	return solid.NewSyncCommitteeFromParameters(syncCommitteePubKeys, aggregate), nil
@@ -244,9 +254,9 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
-	if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
-		return cached, nil
-	}
+	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
+	// 	return cached, nil
+	// }
 	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
 	if err != nil {
 		return nil, err
@@ -267,7 +277,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
-	cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
+	// cache.StoreAttestation(&attestation, aggregationBits, attestingIndices)
 	return attestingIndices, nil
 }
 

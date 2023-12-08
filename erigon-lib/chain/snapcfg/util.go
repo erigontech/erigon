@@ -19,6 +19,7 @@ var (
 	Sepolia    = fromToml(snapshothashes.Sepolia)
 	Goerli     = fromToml(snapshothashes.Goerli)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
+	Amoy       = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
 	Chiado     = fromToml(snapshothashes.Chiado)
@@ -53,6 +54,7 @@ var (
 	SepoliaChainSnapshotCfg    = newCfg(Sepolia)
 	GoerliChainSnapshotCfg     = newCfg(Goerli)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai)
+	AmoyChainSnapshotCfg       = newCfg(Amoy)
 	BorMainnetChainSnapshotCfg = newCfg(BorMainnet)
 	GnosisChainSnapshotCfg     = newCfg(Gnosis)
 	ChiadoChainSnapshotCfg     = newCfg(Chiado)
@@ -100,6 +102,7 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.SepoliaChainName:    SepoliaChainSnapshotCfg,
 	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
+	networkname.AmoyChainName:       AmoyChainSnapshotCfg,
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
 	networkname.GnosisChainName:     GnosisChainSnapshotCfg,
 	networkname.ChiadoChainName:     ChiadoChainSnapshotCfg,
@@ -138,6 +141,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
 	networkname.GoerliChainName:     webseedsParse(webseed.Goerli),
 	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
+	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
 	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),

@@ -386,8 +386,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
-		EvmCallTimeout: ctx.Duration(EvmCallTimeoutFlag.Name),
-
+		EvmCallTimeout:              ctx.Duration(EvmCallTimeoutFlag.Name),
+		WebsocketPort:               ctx.Int(utils.WSPortFlag.Name),
 		WebsocketEnabled:            ctx.IsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:         ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:         ctx.Bool(utils.RpcStreamingDisableFlag.Name),
@@ -405,7 +405,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
-		StateCache: kvcache.DefaultCoherentConfig,
+		StateCache:          kvcache.DefaultCoherentConfig,
+		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
 	}
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)

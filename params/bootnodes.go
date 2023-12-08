@@ -109,18 +109,7 @@ var V5Bootnodes = []string{
 	"enr:-Ku4QEWzdnVtXc2Q0ZVigfCGggOVB2Vc1ZCPEc6j21NIFLODSJbvNaef1g4PxhPwl_3kax86YPheFUSLXPRs98vvYsoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDZBrP2Jc2VjcDI1NmsxoQM6jr8Rb1ktLEsVcKAPa08wCsKUmvoQ8khiOl_SLozf9IN1ZHCCIyg",
 }
 
-var MumbaiBootnodes = []string{
-	"enode://320553cda00dfc003f499a3ce9598029f364fbb3ed1222fdc20a94d97dcc4d8ba0cd0bfa996579dcc6d17a534741fb0a5da303a90579431259150de66b597251@54.147.31.250:30303",
-	"enode://f0f48a8781629f95ff02606081e6e43e4aebd503f3d07fc931fad7dd5ca1ba52bd849a6f6c3be0e375cf13c9ae04d859c4a9ae3546dc8ed4f10aa5dbb47d4998@34.226.134.117:30303",
-	// third-party bootnodes
-	"enode://f2350443d7530526dbd3f8558ffc6a1ec4b4db0c4c5be283c982dac8b69398e5a02f8be4328564275113bb0f45d30e4754e2881c59776d441de59bc15ec3d2cf@63.251.232.124:18210",
-	"enode://112d12ef76915b34aa74fa9b70b99eb6db035a396f9542c7226756ad7d70ef0d24abda3d8e4292a002c4bb70e6a5ed4dd7b9ef43f35f885dfa1a4bbcab13574c@63.251.232.124:18220",
-	"enode://00dabd34427ff2ae51f6d1349091fc12f1173edaee5018cceb3726ea76b11653b969175957e58c4efe97d7d87d28ee30642990c23d5ae0a350365b4a62e6a27c@63.251.232.124:18231",
-	"enode://a2189ff7947b5425cf917fc3d343197bfb8f17c62fd9c40e226e887088414eb7ae0d89556acade07257c5f1330c76bc3ef2623e7dd05efdeebdd7dd1eec3325f@216.155.53.69:18210",
-	"enode://876f55213382819bf5e1feb5594bb93f62fe0b8fb66afd11c51cc76b40c7232ac3a21247cb2560ed29d74d7324380508428814031266dc078c58908308f6bb8e@216.155.53.69:18220",
-	"enode://1b7738443552055eaae1a6b9df14b1dccc856fcd61473475bd94553c8b9840a0bd060eb9f9151f7a9915306b7dde0b59fada68bd76c6fb86d9ad9a6619b61816@216.155.53.69:18230",
-	"enode://36105c59723cfa879b19524f964517fb0a468c0a6e9477a7d0512e5e09532c7088ac7366b8da450a572c9e4328c511c83f8d97402c88f0518d828d734c107fd6@162.55.4.38:30303",
-}
+var AmoyBootnodes = []string{} // Todo: Add BorAmoy bootnodes
 
 var BorMainnetBootnodes = []string{
 	"enode://b8f1cc9c5d4403703fbf377116469667d2b1823c0daf16b7250aa576bacf399e42c3930ccfcb02c5df6879565a2b8931335565f0e8d3f8e72385ecf4a4bf160a@3.36.224.80:30303",
@@ -141,6 +130,7 @@ var GnosisBootnodes = []string{
 	"enode://9e50857aa48a7a31bc7b46957e8ced0ef69a7165d3199bea924cb6d02b81f1f35bd8e29d21a54f4a331316bf09bb92716772ea76d3ef75ce027699eccfa14fad@141.94.97.22:30303",
 	"enode://96dc133ce3aeb5d9430f1dce1d77a36418c8789b443ae0445f06f73c6b363f5b35c019086700a098c3e6e54974d64f37e97d72a5c711d1eae34dc06e3e00eed5@141.94.97.74:30303",
 	"enode://516cbfbe9bbf26b6395ed68b24e383401fc33e7fe96b9d235ebca86c9f812fde8d33a7dbebc0fb5595459d2c5cc6381595d96507af89e6b48b5bdd0ebf8af0c0@141.94.97.84:30303",
+	"enode://fc86a93545c56322dd861180b76632b9baeb65af8f304269b489b4623ae060847569c3c3c10c4b39baf221a2cdefea66efabce061a542cdcda374cbba45aa3d4@51.68.39.206:30303",
 }
 
 var ChiadoBootnodes = []string{
@@ -185,6 +175,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GoerliBootnodes
 	case networkname.MumbaiChainName:
 		return MumbaiBootnodes
+	case networkname.AmoyChainName:
+		return AmoyBootnodes
 	case networkname.BorMainnetChainName:
 		return BorMainnetBootnodes
 	case networkname.GnosisChainName:

@@ -33,6 +33,7 @@ import (
 // Forks before Shanghai are triggered by the block number,
 // while Shanghai and later forks are triggered by the block time.
 func TestCreation(t *testing.T) {
+	t.Parallel()
 	type testcase struct {
 		head uint64
 		time uint64
@@ -153,6 +154,15 @@ func TestCreation(t *testing.T) {
 				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 0}},        // First Agra block
 			},
 		},
+		// Amoy test cases
+		{
+			params.AmoyChainConfig,
+			params.AmoyGenesisHash,
+			[]testcase{
+				{0, 0, ID{Hash: checksumToBytes(0xbe06a477), Next: 73100}},
+				{73100, 0, ID{Hash: checksumToBytes(0x135d2cd5), Next: 0}}, // First London, Jaipur, Delhi, Indore, Agra
+			},
+		},
 		// Bor mainnet test cases
 		{
 			params.BorMainnetChainConfig,
@@ -179,6 +189,7 @@ func TestCreation(t *testing.T) {
 // TestValidation tests that a local peer correctly validates and accepts a remote
 // fork ID.
 func TestValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		head uint64
 		id   ID
@@ -258,6 +269,7 @@ func TestValidation(t *testing.T) {
 // Tests that IDs are properly RLP encoded (specifically important because we
 // use uint32 to store the hash, but we need to encode it as [4]byte).
 func TestEncoding(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		id   ID
 		want []byte
