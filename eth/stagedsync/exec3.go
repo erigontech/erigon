@@ -159,9 +159,9 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
-		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1024)
+		agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 		defer agg.SetCollateAndBuildWorkers(1)
 
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {

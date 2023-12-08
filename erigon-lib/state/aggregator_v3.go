@@ -496,7 +496,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
-	log.Warn("[dbg] collate and build", "step", step, "workers", a.collateAndBuildWorkers)
+
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment} {
 		d := d
 
@@ -1273,6 +1273,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
+	log.Info("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.accounts.compressWorkers)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
