@@ -495,9 +495,6 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		if currValidator.Active(epoch) {
 			activeIds = append(activeIds, validatorIndex)
 		}
-		fmt.Println(validatorIndex)
-		s, _ := currValidator.MarshalJSON()
-		fmt.Println(string(s))
 		if epoch == 0 {
 			return true
 		}
@@ -514,6 +511,8 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		out.Get(i).
 			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
 	}
+	s, _ := out.MarshalJSON()
+	fmt.Println(string(s))
 	return out, activeIds, prevActiveIds, nil
 }
 
