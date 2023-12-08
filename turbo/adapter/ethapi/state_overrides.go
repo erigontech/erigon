@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 type StateOverrides map[libcommon.Address]Account
@@ -29,7 +30,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			if overflow {
 				return fmt.Errorf("account.Balance higher than 2^256-1")
 			}
-			state.SetBalance(addr, balance, 0x0)
+			state.SetBalance(addr, balance, evmtypes.BalanceChangeUnspecified)
 		}
 		if account.State != nil && account.StateDiff != nil {
 			return fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
