@@ -61,7 +61,3 @@ func (ti SnapshotDownloadStatistics) Type() Type {
 func (ti SegmentDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
-
-func (ti TorrentFile) Type() Type {
-	return TypeOf(ti)
-}
