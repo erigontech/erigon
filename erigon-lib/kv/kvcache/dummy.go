@@ -24,13 +24,13 @@ import (
 
 // DummyCache - doesn't remember anything - can be used when service is not remote
 type DummyCache struct {
-	histV3 bool
+	stateV3 bool
 }
 
 var _ Cache = (*DummyCache)(nil)    // compile-time interface check
 var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
-func NewDummy(histV3 bool) *DummyCache { return &DummyCache{histV3: histV3} }
+func NewDummy(stateV3 bool) *DummyCache { return &DummyCache{stateV3: stateV3} }
 func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
 	return &DummyView{cache: c, tx: tx}, nil
 }
@@ -38,7 +38,7 @@ func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
 func (c *DummyCache) Evict() int                             { return 0 }
 func (c *DummyCache) Len() int                               { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
-	if c.histV3 {
+	if c.stateV3 {
 		if len(k) == 20 {
 			return tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
 		}
@@ -47,7 +47,7 @@ func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return tx.GetOne(kv.PlainState, k)
 }
 func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
-	if c.histV3 {
+	if c.stateV3 {
 		return tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
 	}
 	return tx.GetOne(kv.Code, k)
@@ -61,5 +61,6 @@ type DummyView struct {
 	tx    kv.Tx
 }
 
+func (c *DummyView) StateV3() bool                    { return c.cache.stateV3 }
 func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
 func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
