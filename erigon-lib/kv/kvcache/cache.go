@@ -118,8 +118,6 @@ type Coherent struct {
 	latestStateVersionID uint64
 	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
-
-	stateV3 bool
 }
 
 type CoherentRoot struct {
@@ -164,8 +162,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
-
-	StateV3 bool
+	StateV3         bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -404,16 +401,16 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	}
 	c.miss.Inc()
 
-	if c.stateV3 {
-		v, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
-		if err != nil {
-			return nil, err
+	if c.cfg.StateV3 {
+		if len(k) == 20 {
+			v, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
 		}
+		v, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
 	} else {
 		v, err = tx.GetOne(kv.PlainState, k)
-		if err != nil {
-			return nil, err
-		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
@@ -436,16 +433,13 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) 
 	}
 	c.codeMiss.Inc()
 
-	if c.stateV3 {
+	if c.cfg.StateV3 {
 		v, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
-		if err != nil {
-			return nil, err
-		}
 	} else {
 		v, err = tx.GetOne(kv.Code, k)
-		if err != nil {
-			return nil, err
-		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
