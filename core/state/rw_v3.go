@@ -110,7 +110,13 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
-	for table, list := range txTask.WriteLists {
+	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
+	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+		list, ok := txTask.WriteLists[table]
+		if !ok {
+			continue
+		}
+
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
@@ -408,23 +414,12 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), nil)
+	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
-	if original.Incarnation > account.Incarnation {
-		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-		if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
-			fmt.Printf("changeAccInc: %x, %d -> %d\n", original.Incarnation, account.Incarnation)
-		}
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-			if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
-				fmt.Printf("changeAccInc, del storage: %x\n", k)
-			}
-			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
 
 	return nil
 }

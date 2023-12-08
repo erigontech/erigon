@@ -44,7 +44,9 @@ var (
 	discardHistory    = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
 
-	OnlyStagesOfBlocks = EnvBool("ONLY_STAGES_OF_BLOCKS", false)
+	// force skipping of any non-Erigon2 .torrent files
+	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

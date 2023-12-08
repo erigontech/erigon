@@ -126,16 +126,16 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 		return err
 	}
 
-	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
+	if err := sd.aggCtx.account.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
+	if err := sd.aggCtx.storage.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
+	if err := sd.aggCtx.code.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo, math.MaxUint64, math.MaxUint64); err != nil {
+	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
 	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery); err != nil {
@@ -695,7 +695,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
