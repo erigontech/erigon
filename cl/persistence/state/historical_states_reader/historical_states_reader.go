@@ -496,7 +496,8 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 			activeIds = append(activeIds, validatorIndex)
 		}
 		fmt.Println(validatorIndex)
-		fmt.Println(currValidator.MarshalJSON())
+		s, _ := currValidator.MarshalJSON()
+		fmt.Println(string(s))
 		if epoch == 0 {
 			return true
 		}
