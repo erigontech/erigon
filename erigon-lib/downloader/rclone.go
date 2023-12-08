@@ -306,9 +306,9 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 
 				c.files[file] = info
 			}
+		} else {
+			reqInfo[file] = info
 		}
-
-		reqInfo[file] = info
 	}
 
 	cerr := make(chan error, 1)

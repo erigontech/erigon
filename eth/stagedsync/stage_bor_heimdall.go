@@ -294,19 +294,21 @@ func BorHeimdallForward(
 		var snap *bor.Snapshot
 
 		if header != nil {
-			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+			if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
+				snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
 
-			if snap == nil {
-				snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
-					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+				if snap == nil {
+					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
+						chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
-				if err != nil {
-					return fmt.Errorf("can't initialise validator sets: %w", err)
+					if err != nil {
+						return fmt.Errorf("can't initialise validator sets: %w", err)
+					}
 				}
-			}
 
-			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
-				return fmt.Errorf("can't persist validator sets: %w", err)
+				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+					return fmt.Errorf("can't persist validator sets: %w", err)
+				}
 			}
 
 			if !mine {

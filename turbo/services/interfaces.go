@@ -92,6 +92,7 @@ type FullBlockReader interface {
 type BlockSnapshots interface {
 	ReopenFolder() error
 	SegmentsMax() uint64
+	SegmentsMin() uint64
 	ScanDir() (map[string]struct{}, []*Range, error)
 }
 

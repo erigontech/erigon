@@ -464,7 +464,6 @@ type uploadState struct {
 }
 
 type snapshotUploader struct {
-	version          string
 	cfg              *SnapshotsCfg
 	files            map[string]*uploadState
 	uploadFs         string
@@ -528,6 +527,11 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version 
 
 	for _, ent := range entries {
 		if info, err := ent.Info(); err == nil {
+
+			if info.Size() <= 32 {
+				continue
+			}
+
 			snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
 			if ok && snapInfo.Type() != snaptype.Unknown && snapInfo.Version() == version {
@@ -620,7 +624,7 @@ func (u *snapshotUploader) minBlockNumber() uint64 {
 }
 
 func (u *snapshotUploader) hashesFile() string {
-	return "." + u.version + "-torrent-hashes.toml"
+	return ".v" + fmt.Sprint(u.cfg.version) + "-torrent-hashes.toml"
 }
 
 func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
