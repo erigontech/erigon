@@ -180,6 +180,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
+	s, _ := previousCheckpoint.MarshalJSON()
+	fmt.Println(string(s))
+	s, _ = currentCheckpoint.MarshalJSON()
+	fmt.Println(string(s))
+	s, _ = finalizedCheckpoint.MarshalJSON()
+	fmt.Println(string(s))
 
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
@@ -510,8 +516,6 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		out.Get(i).
 			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
 	}
-	s, _ := out.MarshalJSON()
-	fmt.Println(string(s))
 	return out, activeIds, prevActiveIds, nil
 }
 
