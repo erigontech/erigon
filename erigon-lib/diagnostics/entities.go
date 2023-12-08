@@ -29,35 +29,35 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
-type DownloadStatistics struct {
-	Downloaded       uint64  `json:"downloaded"`
-	Total            uint64  `json:"total"`
-	TotalTime        float64 `json:"totalTime"`
-	DownloadRate     uint64  `json:"downloadRate"`
-	UploadRate       uint64  `json:"uploadRate"`
-	Peers            int32   `json:"peers"`
-	Files            int32   `json:"files"`
-	Connections      uint64  `json:"connections"`
-	Alloc            uint64  `json:"alloc"`
-	Sys              uint64  `json:"sys"`
-	DownloadFinished bool    `json:"downloadFinished"`
-	StagePrefix      string  `json:"stagePrefix"`
+type SnapshotDownloadStatistics struct {
+	Downloaded       uint64                               `json:"downloaded"`
+	Total            uint64                               `json:"total"`
+	TotalTime        float64                              `json:"totalTime"`
+	DownloadRate     uint64                               `json:"downloadRate"`
+	UploadRate       uint64                               `json:"uploadRate"`
+	Peers            int32                                `json:"peers"`
+	Files            int32                                `json:"files"`
+	Connections      uint64                               `json:"connections"`
+	Alloc            uint64                               `json:"alloc"`
+	Sys              uint64                               `json:"sys"`
+	DownloadFinished bool                                 `json:"downloadFinished"`
+	Segments         map[string]SegmentDownloadStatistics `json:"segments"`
 }
 
-type TorrentFile struct {
+type SegmentDownloadStatistics struct {
 	Name            string `json:"name"`
 	TotalBytes      uint64 `json:"totalBytes"`
 	DownloadedBytes uint64 `json:"downloadedBytes"`
-	SeedsCount      int    `json:"seedsCount"`
+	WebseedsCount   int    `json:"webseedsCount"`
 	PeersCount      int    `json:"peersCount"`
 	WebseedsRate    uint64 `json:"webseedsRate"`
-	SeedsRate       uint64 `json:"seedsRate"`
+	PeersRate       uint64 `json:"peersRate"`
 }
 
-func (ti DownloadStatistics) Type() Type {
+func (ti SnapshotDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
 
-func (ti TorrentFile) Type() Type {
+func (ti SegmentDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
