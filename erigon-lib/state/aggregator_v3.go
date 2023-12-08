@@ -498,7 +498,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
-	log.Warn("[dbg] collate and build", "step", step, "workers", a.collateAndBuildWorkers)
+	log.Warn("[dbg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.accounts.compressWorkers)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 
