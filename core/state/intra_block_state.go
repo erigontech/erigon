@@ -368,9 +368,6 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash, value uint256.Int) {
-	if sdb.trace {
-		fmt.Printf("SetState %x, %x, %s\n", addr, key, value.String())
-	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
@@ -388,9 +385,6 @@ func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) 
 
 // SetIncarnation sets incarnation for account if account exists
 func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation uint64) {
-	if sdb.trace {
-		fmt.Printf("SetIncarnation %x, %d\n", addr, incarnation)
-	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.setIncarnation(incarnation)
