@@ -164,6 +164,8 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+
+	StateV3 bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -174,6 +176,7 @@ var DefaultCoherentConfig = CoherentConfig{
 	MetricsLabel:    "default",
 	WithStorage:     true,
 	WaitForNewBlock: true,
+	StateV3:         false,
 }
 
 func New(cfg CoherentConfig) *Coherent {

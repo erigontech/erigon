@@ -599,11 +599,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
+		//cacheConfig.StateV3 = config.HistoryV3w
 
 		backend.newTxs = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, logger,
+			ctx, config.TxPool, kvcache.NewDummy(config.HistoryV3), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, logger,
 		)
 		if err != nil {
 			return nil, err
