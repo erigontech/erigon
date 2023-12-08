@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -16,12 +17,11 @@ type DiagnosticClient struct {
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
 
-	snapshotDownload map[string]diaglib.DownloadStatistics
-	fileDownload     map[string]diaglib.TorrentFile
+	snapshotDownload diaglib.SnapshotDownloadStatistics
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, snapshotDownload: map[string]diaglib.DownloadStatistics{}, fileDownload: map[string]diaglib.TorrentFile{}}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, snapshotDownload: diaglib.SnapshotDownloadStatistics{}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -31,19 +31,32 @@ func (d *DiagnosticClient) Setup() {
 
 func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.DownloadStatistics](context.Background(), 1)
+		ctx, ch, cancel := diaglib.Context[diaglib.SnapshotDownloadStatistics](context.Background(), 1)
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.DownloadStatistics{}), log.Root())
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SnapshotDownloadStatistics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				cancel()
 				return
 			case info := <-ch:
-				d.snapshotDownload[info.StagePrefix] = info
+				d.snapshotDownload.Downloaded = info.Downloaded
+				d.snapshotDownload.Total = info.Total
+				d.snapshotDownload.TotalTime = info.TotalTime
+				d.snapshotDownload.DownloadRate = info.DownloadRate
+				d.snapshotDownload.UploadRate = info.UploadRate
+				d.snapshotDownload.Peers = info.Peers
+				d.snapshotDownload.Files = info.Files
+				d.snapshotDownload.Connections = info.Connections
+				d.snapshotDownload.Alloc = info.Alloc
+				d.snapshotDownload.Sys = info.Sys
+				d.snapshotDownload.DownloadFinished = info.DownloadFinished
+
+				fmt.Println("snapshotDownload", d.snapshotDownload)
+
 				if info.DownloadFinished {
 					return
 				}
@@ -53,30 +66,30 @@ func (d *DiagnosticClient) runSnapshotListener() {
 	}()
 }
 
-func (d *DiagnosticClient) SnapshotDownload() map[string]diaglib.DownloadStatistics {
+func (d *DiagnosticClient) SnapshotDownload() diaglib.SnapshotDownloadStatistics {
 	return d.snapshotDownload
 }
 
 func (d *DiagnosticClient) runTorrentListener() {
 	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.TorrentFile](context.Background(), 1)
+		ctx, ch, cancel := diaglib.Context[diaglib.SegmentDownloadStatistics](context.Background(), 1)
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.TorrentFile{}), log.Root())
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SegmentDownloadStatistics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				cancel()
 				return
 			case info := <-ch:
-				d.fileDownload[info.Name] = info
+				if d.snapshotDownload.Segments == nil {
+					d.snapshotDownload.Segments = map[string]diaglib.SegmentDownloadStatistics{}
+				}
+
+				d.snapshotDownload.Segments[info.Name] = info
 			}
 		}
 	}()
-}
-
-func (d *DiagnosticClient) TorrentFileDownload() map[string]diaglib.TorrentFile {
-	return d.fileDownload
 }
