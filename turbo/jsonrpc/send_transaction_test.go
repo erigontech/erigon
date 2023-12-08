@@ -80,9 +80,9 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 }
 
 func TestSendRawTransaction(t *testing.T) {
-	//if ethconfig.EnableHistoryV4InTest {
-	//	t.Skip("TODO: [e4] implement me")
-	//}
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
