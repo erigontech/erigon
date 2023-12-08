@@ -28,7 +28,6 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	f := afero.NewMemMapFs()
 	a := antiquary.NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
-
 	// Now lets test it against the reader
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)

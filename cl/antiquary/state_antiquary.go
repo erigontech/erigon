@@ -135,6 +135,7 @@ func uint64BalancesList(s *state.CachingBeaconState, out []uint64) []uint64 {
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
+
 	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -205,7 +206,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer compressedWriter.Close()
-
 	// TODO(Giulio2002): also store genesis information and resume from state.
 	if s.currentState == nil {
 		// progress is 0 when we are at genesis
@@ -234,6 +234,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
 		}
 	}
+
 	logLvl := log.LvlInfo
 	if to-s.currentState.Slot() < 96 {
 		logLvl = log.LvlDebug
@@ -781,7 +782,7 @@ func findNearestSlotBackwards(tx kv.Tx, slot uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for canonicalRoot == (common.Hash{}) {
+	for canonicalRoot == (common.Hash{}) && slot > 0 {
 		slot--
 		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
