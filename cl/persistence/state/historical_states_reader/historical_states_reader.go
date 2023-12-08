@@ -308,15 +308,13 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, slot uint64, out *s
 	if err != nil {
 		return err
 	}
-	for initialSlot > base_encoding.Decode64FromBytes4(k) {
-		k, v, err = cursor.Next()
-		if err != nil {
-			return err
-		}
-		if k == nil {
-			return fmt.Errorf("eth1 data votes not found for slot %d", slot)
+	if initialSlot <= r.genesisState.Slot() {
+		// We need to prepend the genesis votes
+		for i := 0; i < r.genesisState.Eth1DataVotes().Len(); i++ {
+			out.Append(r.genesisState.Eth1DataVotes().Get(i))
 		}
 	}
+
 	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
 	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
 		eth1Data := &cltypes.Eth1Data{}

@@ -2,6 +2,7 @@ package historical_states_reader_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -40,6 +41,10 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
 	require.NoError(t, err)
 
+	fmt.Println(preState.Eth1DataVotes().Len())
+	fmt.Println(s.Eth1DataVotes().Len())
+	fmt.Println(postState.Eth1DataVotes().Len())
+
 	postHash, err := s.HashSSZ()
 	require.NoError(t, err)
 	postHash2, err := postState.HashSSZ()
@@ -56,5 +61,11 @@ func TestStateAntiquaryCapella(t *testing.T) {
 func TestStateAntiquaryPhase0(t *testing.T) {
 	// t.Skip()
 	blocks, preState, postState := tests.GetPhase0Random()
+	runTest(t, blocks, preState, postState)
+}
+
+func TestStateAntiquaryBellatrix(t *testing.T) {
+	// t.Skip()
+	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }
