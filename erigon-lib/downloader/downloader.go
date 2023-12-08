@@ -350,11 +350,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-<<<<<<< HEAD
 			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
-=======
-			isDiagEnabled := diagnostics.TypeOf(diagnostics.TorrentFile{}).Enabled()
->>>>>>> devel
 			if d.verbosity < log.LvlInfo || isDiagEnabled {
 
 				// more detailed statistic: download rate of each peer (for each file)
@@ -380,25 +376,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 				d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
 				rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-<<<<<<< HEAD
 				peersRates := uint64(0)
 				for _, peer := range peersOfThisFile {
 					dr := uint64(peer.DownloadRate())
 					rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
 					peersRates += dr
-=======
-				seedsRates := uint64(0)
-				for _, peer := range peersOfThisFile {
-					dr := uint64(peer.DownloadRate())
-					rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
-					seedsRates += dr
->>>>>>> devel
 				}
 				d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
 
 				lenght = uint64(len(peersOfThisFile))
 				if lenght > 0 {
-<<<<<<< HEAD
 					peersRates = peersRates / uint64(len(peersOfThisFile))
 				}
 
@@ -411,20 +398,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 						PeersCount:      len(peersOfThisFile),
 						WebseedsRate:    websRates,
 						PeersRate:       peersRates,
-=======
-					seedsRates = seedsRates / uint64(len(peersOfThisFile))
-				}
-
-				if isDiagEnabled {
-					diagnostics.Send(diagnostics.TorrentFile{
-						Name:            t.Name(),
-						TotalBytes:      uint64(t.Length()),
-						DownloadedBytes: uint64(t.BytesCompleted()),
-						SeedsCount:      len(t.Metainfo().UrlList),
-						PeersCount:      len(peersOfThisFile),
-						WebseedsRate:    websRates,
-						SeedsRate:       seedsRates,
->>>>>>> devel
 					})
 				}
 			}

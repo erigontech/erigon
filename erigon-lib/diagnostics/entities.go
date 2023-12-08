@@ -44,7 +44,6 @@ type SnapshotDownloadStatistics struct {
 	Segments         map[string]SegmentDownloadStatistics `json:"segments"`
 }
 
-<<<<<<< HEAD
 type SegmentDownloadStatistics struct {
 	Name            string `json:"name"`
 	TotalBytes      uint64 `json:"totalBytes"`
@@ -60,19 +59,6 @@ func (ti SnapshotDownloadStatistics) Type() Type {
 }
 
 func (ti SegmentDownloadStatistics) Type() Type {
-=======
-type TorrentFile struct {
-	Name            string `json:"name"`
-	TotalBytes      uint64 `json:"totalBytes"`
-	DownloadedBytes uint64 `json:"downloadedBytes"`
-	SeedsCount      int    `json:"seedsCount"`
-	PeersCount      int    `json:"peersCount"`
-	WebseedsRate    uint64 `json:"webseedsRate"`
-	SeedsRate       uint64 `json:"seedsRate"`
-}
-
-func (ti DownloadStatistics) Type() Type {
->>>>>>> devel
 	return TypeOf(ti)
 }
 
