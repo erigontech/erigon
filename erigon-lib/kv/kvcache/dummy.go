@@ -23,12 +23,16 @@ import (
 )
 
 // DummyCache - doesn't remember anything - can be used when service is not remote
-type DummyCache struct{}
+type DummyCache struct {
+	histV3 bool
+}
 
 var _ Cache = (*DummyCache)(nil)    // compile-time interface check
 var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
-func NewDummy() *DummyCache { return &DummyCache{} }
+func NewDummy(histV3 bool) *DummyCache {
+	return &DummyCache{}
+}
 func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
 	return &DummyView{cache: c, tx: tx}, nil
 }
@@ -36,9 +40,18 @@ func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
 func (c *DummyCache) Evict() int                             { return 0 }
 func (c *DummyCache) Len() int                               { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+	if c.histV3 {
+		if len(k) == 20 {
+			return tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		}
+		return tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+	}
 	return tx.GetOne(kv.PlainState, k)
 }
 func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+	if c.histV3 {
+		return tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+	}
 	return tx.GetOne(kv.Code, k)
 }
 func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheValidationResult, error) {

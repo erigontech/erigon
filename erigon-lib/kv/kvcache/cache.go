@@ -118,6 +118,8 @@ type Coherent struct {
 	latestStateVersionID uint64
 	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
+
+	stateV3 bool
 }
 
 type CoherentRoot struct {
@@ -386,7 +388,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -399,9 +401,16 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.miss.Inc()
 
-	v, err := tx.GetOne(kv.PlainState, k)
-	if err != nil {
-		return nil, err
+	if c.stateV3 {
+		v, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		v, err = tx.GetOne(kv.PlainState, k)
+		if err != nil {
+			return nil, err
+		}
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
@@ -411,7 +420,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -424,9 +433,16 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	}
 	c.codeMiss.Inc()
 
-	v, err := tx.GetOne(kv.Code, k)
-	if err != nil {
-		return nil, err
+	if c.stateV3 {
+		v, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		v, err = tx.GetOne(kv.Code, k)
+		if err != nil {
+			return nil, err
+		}
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
