@@ -17,11 +17,20 @@ type DiagnosticClient struct {
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
 
+<<<<<<< HEAD
 	snapshotDownload diaglib.SnapshotDownloadStatistics
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
 	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, snapshotDownload: diaglib.SnapshotDownloadStatistics{}}
+=======
+	snapshotDownload map[string]diaglib.DownloadStatistics
+	fileDownload     map[string]diaglib.TorrentFile
+}
+
+func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, snapshotDownload: map[string]diaglib.DownloadStatistics{}, fileDownload: map[string]diaglib.TorrentFile{}}
+>>>>>>> devel
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -72,24 +81,43 @@ func (d *DiagnosticClient) SnapshotDownload() diaglib.SnapshotDownloadStatistics
 
 func (d *DiagnosticClient) runTorrentListener() {
 	go func() {
+<<<<<<< HEAD
 		ctx, ch, cancel := diaglib.Context[diaglib.SegmentDownloadStatistics](context.Background(), 1)
+=======
+		ctx, ch, cancel := diaglib.Context[diaglib.TorrentFile](context.Background(), 1)
+>>>>>>> devel
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
+<<<<<<< HEAD
 		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SegmentDownloadStatistics{}), log.Root())
+=======
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.TorrentFile{}), log.Root())
+>>>>>>> devel
 		for {
 			select {
 			case <-rootCtx.Done():
 				cancel()
 				return
 			case info := <-ch:
+<<<<<<< HEAD
 				if d.snapshotDownload.Segments == nil {
 					d.snapshotDownload.Segments = map[string]diaglib.SegmentDownloadStatistics{}
 				}
 
 				d.snapshotDownload.Segments[info.Name] = info
+=======
+				d.fileDownload[info.Name] = info
+>>>>>>> devel
 			}
 		}
 	}()
 }
+<<<<<<< HEAD
+=======
+
+func (d *DiagnosticClient) TorrentFileDownload() map[string]diaglib.TorrentFile {
+	return d.fileDownload
+}
+>>>>>>> devel
