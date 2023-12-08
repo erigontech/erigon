@@ -2,7 +2,9 @@ package state_accessors
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"math"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -274,6 +276,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	defer cursor.Close()
 
 	var buf bytes.Buffer
+	i := 0
 	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
 		staticValidator := &StaticValidator{}
 		buf.Reset()
@@ -284,6 +287,8 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 			return err
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)
+		fmt.Println(i, staticValidator.PublicKey(math.MaxUint64))
+		i++
 	}
 	if err != nil {
 		return err
