@@ -109,7 +109,13 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
-	for table, list := range txTask.WriteLists {
+	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
+	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+		list, ok := txTask.WriteLists[table]
+		if !ok {
+			continue
+		}
+
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {

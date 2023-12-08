@@ -630,6 +630,27 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return err
 	}
 
+	// Separate Websocket handler if websocket port flag specified
+	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
+		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isWebsocket(r) {
+				wsHandler.ServeHTTP(w, r)
+			}
+		})
+		wsListener, wsAddr, err := node.StartHTTPEndpoint(wsEndpoint, &node.HttpEndpointConfig{Timeouts: cfg.HTTPTimeouts}, wsApiHandler)
+		if err != nil {
+			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
+		}
+		info = append(info, "websocket.url", wsAddr)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = wsListener.Shutdown(shutdownCtx)
+			logger.Info("HTTP endpoint closed", "url", wsAddr)
+		}()
+	}
+
 	if cfg.HttpServerEnabled {
 		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
