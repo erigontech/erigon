@@ -115,7 +115,7 @@ func (e *VMError) Error() string {
 }
 
 func (e *VMError) Unwrap() error {
-	return errors.Unwrap(e.error)
+	return e.error
 }
 
 func (e *VMError) ErrorCode() int {
