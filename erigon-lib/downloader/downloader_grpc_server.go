@@ -81,8 +81,6 @@ func (s *GrpcServer) torrentNames() map[string]struct{} {
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	newDownloadsAreProhibited := dir.FileExist(filepath.Join(s.d.SnapDir(), fName))
 
-	tNames := s.torrentNames()
-
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -104,12 +102,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
-			continue
-		}
-
-		//Corner case:
-		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
-		if _, ok := tNames[it.Path]; ok {
 			continue
 		}
 
