@@ -555,7 +555,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	return nil
 }
 
-func (d *Downloader) exists(name string) bool {
+func (d *Downloader) alreadyHaveThisName(name string) bool {
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
@@ -571,7 +571,7 @@ func (d *Downloader) exists(name string) bool {
 	return false
 }
 func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	if d.exists(name) {
+	if d.alreadyHaveThisName(name) {
 		return nil
 	}
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
