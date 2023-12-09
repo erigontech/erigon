@@ -61,20 +61,6 @@ func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.Pro
 	return nil, nil
 }
 
-func (s *GrpcServer) torrentNames() map[string]struct{} {
-
-	tl := s.d.TorrentClient().Torrents()
-	tNames := make(map[string]struct{}, len(tl))
-	for _, t := range tl {
-		select {
-		case <-t.GotInfo():
-			tNames[t.Name()] = struct{}{}
-		default:
-		}
-	}
-	return tNames
-}
-
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
