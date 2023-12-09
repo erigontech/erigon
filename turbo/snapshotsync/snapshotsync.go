@@ -102,6 +102,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 		return nil
 	}
 
+	//Corner cases:
+	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+
 	// Original intent of blockSnInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
 	// Then, we would insist to only download such files, and no others (whitelist)
 	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
