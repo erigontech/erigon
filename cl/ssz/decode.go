@@ -101,7 +101,9 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			panic(fmt.Errorf("RTFM, bad schema component %d", i))
 		}
 	}
-
+	if x {
+		fmt.Println("offsets", offsets)
+	}
 	// Iterate over the dynamic objects and decode them using the stored offsets
 	for i, obj := range dynamicObjs {
 		endOffset := len(buf)
