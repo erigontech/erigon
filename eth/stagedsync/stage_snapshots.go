@@ -1,17 +1,19 @@
 package stagedsync
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,10 +21,10 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -470,7 +472,6 @@ type snapshotUploader struct {
 	rclone           *downloader.RCloneClient
 	uploadSession    *downloader.RCloneSession
 	frozenBlockLimit uint64
-	remoteHashes     map[string]interface{}
 	uploadScheduled  atomic.Bool
 	uploading        atomic.Bool
 }
@@ -515,8 +516,134 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 	return max
 }
 
+type fileInfo struct {
+	name string
+}
+
+func (fi *fileInfo) Name() string {
+	return fi.name
+}
+
+type dirEntry struct {
+	name string
+}
+
+func (e dirEntry) Name() string {
+	return e.name
+}
+
+func (e dirEntry) IsDir() bool {
+	return false
+}
+
+func (e dirEntry) Type() fs.FileMode {
+	return e.Mode()
+}
+
+func (e dirEntry) Size() int64 {
+	return -1
+}
+
+func (e dirEntry) Mode() fs.FileMode {
+	return fs.ModeIrregular
+}
+
+func (e dirEntry) ModTime() time.Time {
+	return time.Time{}
+}
+
+func (e dirEntry) Sys() any {
+	return nil
+}
+
+func (e dirEntry) Info() (fs.FileInfo, error) {
+	return e, nil
+}
+
+func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
+	if !fi.Seedable() {
+		return false
+	}
+
+	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, nil, nil).Preverified {
+		info, _ := snaptype.ParseFileName("", it.Name)
+
+		if fi.From == info.From {
+			return fi.To == info.To
+		}
+
+		if fi.From < info.From {
+			return info.To-info.From == fi.To-fi.From
+		}
+
+		if fi.From < info.To {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry, error) {
+	reader, err := u.uploadSession.Cat(ctx, "manifest.txt")
+
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []fs.DirEntry
+
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		entries = append(entries, dirEntry{scanner.Text()})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+func (u *snapshotUploader) uploadManifest(ctx context.Context) error {
+	manifestFile := "manifest.txt"
+
+	fileMap := map[string]string{}
+
+	for file, state := range u.files {
+		if len(state.localHash) > 0 && state.remote {
+			fileMap[file] = file + ".torrent"
+		}
+	}
+
+	var files []string
+
+	for torrent, file := range fileMap {
+		files = append(files, file, torrent)
+	}
+
+	sort.Strings(files)
+
+	manifestEntries := bytes.Buffer{}
+
+	for _, file := range files {
+		fmt.Fprintln(&manifestEntries, file)
+	}
+
+	_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, manifestFile), manifestEntries.Bytes(), 0644)
+	defer os.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
+
+	return u.uploadSession.Upload(ctx, manifestFile)
+}
+
 func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version uint8) error {
-	entries, err := u.uploadSession.ReadRemoteDir(ctx, true)
+
+	entries, err := u.downloadManifest(ctx)
+
+	if err != nil {
+		entries, err = u.uploadSession.ReadRemoteDir(ctx, true)
+	}
 
 	if err != nil {
 		return err
@@ -528,7 +655,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version 
 	for _, ent := range entries {
 		if info, err := ent.Info(); err == nil {
 
-			if info.Size() <= 32 {
+			if info.Size() > -1 && info.Size() <= 32 {
 				continue
 			}
 
@@ -600,7 +727,7 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
 		for _, info := range list {
-			if info.Seedable() && info.T == snaptype.Headers && info.To > max {
+			if u.seedable(info) && info.T == snaptype.Headers && info.To > max {
 				max = info.To
 			}
 		}
@@ -614,17 +741,13 @@ func (u *snapshotUploader) minBlockNumber() uint64 {
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
 		for _, info := range list {
-			if info.Seedable() && min == 0 || info.From < min {
+			if u.seedable(info) && min == 0 || info.From < min {
 				min = info.From
 			}
 		}
 	}
 
 	return min
-}
-
-func (u *snapshotUploader) hashesFile() string {
-	return ".v" + fmt.Sprint(u.cfg.version) + "-torrent-hashes.toml"
 }
 
 func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
@@ -645,21 +768,17 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 	}
 
 	go func() {
-		remoteFiles, err := u.uploadSession.ReadRemoteDir(ctx, true)
+
+		remoteFiles, err := u.downloadManifest(ctx)
+
+		hasManifest := len(remoteFiles) > 0
+
+		if err != nil {
+			remoteFiles, err = u.uploadSession.ReadRemoteDir(ctx, true)
+		}
 
 		for _, fi := range remoteFiles {
 			var file string
-
-			if hashesFile := u.hashesFile(); fi.Name() == hashesFile {
-				var hashes map[string]interface{}
-
-				if hashesReader, err := u.uploadSession.Cat(ctx, hashesFile); err == nil {
-					hashesData, _ := io.ReadAll(hashesReader)
-					if err = toml.Unmarshal(hashesData, &hashes); err == nil {
-						u.remoteHashes = hashes
-					}
-				}
-			}
 
 			if filepath.Ext(fi.Name()) != ".torrent" {
 				file = fi.Name()
@@ -686,9 +805,13 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 			}
 		}
 
+		if !hasManifest {
+			go u.uploadManifest(ctx)
+		}
+
 		logger.Debug("[snapshot uploader] starting snapshot subscription...")
-		newSnCh, newSnClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
-		defer newSnClean()
+		snapshotSubCh, snapshotSubClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
+		defer snapshotSubClean()
 
 		logger.Info("[snapshot uploader] subscription established")
 
@@ -709,7 +832,7 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 			case <-ctx.Done():
 				err = ctx.Err()
 				return
-			case <-newSnCh:
+			case <-snapshotSubCh:
 				logger.Info("[snapshot uploader] new snapshot received")
 				u.scheduleUpload(ctx, logger)
 			}
@@ -803,7 +926,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 		for _, f := range u.cfg.blockReader.FrozenFiles() {
 			if state, ok := u.files[f]; !ok {
 				if fi, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, f); ok {
-					if fi.Seedable() {
+					if u.seedable(fi) {
 						state := &uploadState{
 							file:  f,
 							info:  &fi,
@@ -1009,39 +1132,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 	var err error
 
 	if uploadCount > 0 {
-		hashesFile := u.hashesFile()
-
-		var hashes map[string]interface{}
-		var hashesData []byte
-
-		hashesData, err = os.ReadFile(filepath.Join(u.cfg.dirs.Snap, hashesFile))
-
-		if err == nil {
-			err = toml.Unmarshal(hashesData, &hashes)
-		}
-
-		if err != nil {
-			hashes = map[string]interface{}{}
-		}
-
-		for file, hash := range u.remoteHashes {
-			hashes[file] = hash
-		}
-
-		for file, state := range u.files {
-			if len(state.localHash) > 0 && state.remote {
-				hashes[file] = state.localHash
-			}
-		}
-
-		hashesData, err = toml.Marshal(hashes)
-
-		if err == nil {
-			_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, hashesFile), hashesData, 0644)
-		}
-
-		u.uploadSession.Upload(ctx, hashesFile)
-		u.remoteHashes = hashes
+		err = u.uploadManifest(ctx)
 	}
 
 	if err == nil {

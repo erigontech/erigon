@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshot/flags"
-	"github.com/ledgerwatch/erigon/cmd/snapshot/sync"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -217,7 +217,11 @@ func cmp(cliCtx *cli.Context) error {
 	logger.Info(fmt.Sprintf("Starting compare: %s==%s", loc1.String(), loc2.String()), "first", firstBlock, "last", lastBlock, "types", snapTypes)
 
 	logger.Info("Reading s1 dir", "remoteFs", session1.RemoteFsRoot(), "label", session1.Label())
-	files, err := session1.ReadRemoteDir(cliCtx.Context, true)
+	files, err := sync.DownloadManifest(cliCtx.Context, session1)
+
+	if err != nil {
+		files, err = session1.ReadRemoteDir(cliCtx.Context, true)
+	}
 
 	if err != nil {
 		return err
@@ -226,7 +230,11 @@ func cmp(cliCtx *cli.Context) error {
 	h1ents, b1ents := splitEntries(files, loc1.Version, firstBlock, lastBlock)
 
 	logger.Info("Reading s2 dir", "remoteFs", session2.RemoteFsRoot(), "label", session2.Label())
-	files, err = session2.ReadRemoteDir(cliCtx.Context, true)
+	files, err = sync.DownloadManifest(cliCtx.Context, session2)
+
+	if err != nil {
+		files, err = session2.ReadRemoteDir(cliCtx.Context, true)
+	}
 
 	if err != nil {
 		return err
@@ -617,13 +625,13 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					body1, err := blockReader1.BodyWithTransactions(ctx, nil, common.Hash{}, i)
 
 					if err != nil {
-						return fmt.Errorf("%d: can't get body 1: %w", err)
+						return fmt.Errorf("%d: can't get body 1: %w", i, err)
 					}
 
 					body2, err := blockReader2.BodyWithTransactions(ctx, nil, common.Hash{}, i)
 
 					if err != nil {
-						return fmt.Errorf("%d: can't get body 2: %w", err)
+						return fmt.Errorf("%d: can't get body 2: %w", i, err)
 					}
 
 					var b1buf, b2buf bytes.Buffer

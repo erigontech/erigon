@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io/fs"
@@ -396,6 +397,32 @@ func NewTorrentSession(cli *TorrentClient, chain string) *torrentSession {
 	}
 
 	return session
+}
+
+func DownloadManifest(ctx context.Context, session DownloadSession) ([]fs.DirEntry, error) {
+	if session, ok := session.(*downloader.RCloneSession); ok {
+		reader, err := session.Cat(ctx, "manifest.txt")
+
+		if err != nil {
+			return nil, err
+		}
+
+		var entries []fs.DirEntry
+
+		scanner := bufio.NewScanner(reader)
+
+		for scanner.Scan() {
+			entries = append(entries, dirEntry{&fileInfo{snapcfg.PreverifiedItem{Name: scanner.Text()}}})
+		}
+
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+
+		return entries, nil
+	}
+
+	return nil, fmt.Errorf("not implemented for %T", session)
 }
 
 type DownloadSession interface {

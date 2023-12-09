@@ -61,13 +61,13 @@ func TestDownload(t *testing.T) {
 		//fmt.Println(entry.Name())
 	}
 
-	err = rcc.Download(ctx, ".-torrent-hashes.toml")
+	err = rcc.Download(ctx, "manifest.txt")
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	h0, err := os.ReadFile(".-torrent-hashes.toml")
+	h0, err := os.ReadFile("manifest.txt")
 
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,11 @@ func TestDownload(t *testing.T) {
 	}
 	//fmt.Print(string(h0))
 
-	reader, err := rcc.Cat(ctx, ".-torrent-hashes.toml")
+	reader, err := rcc.Cat(ctx, "manifest.txt")
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	h1, err := io.ReadAll(reader)
 
