@@ -18,6 +18,7 @@ package ssz
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -129,6 +130,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	elementsNum := uint64(len(buf)) / uint64(bytesPerElement)
 	// Check for errors
 	if uint32(len(buf))%bytesPerElement != 0 {
+		fmt.Println(bytesPerElement)
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > max {
