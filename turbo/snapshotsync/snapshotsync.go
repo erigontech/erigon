@@ -107,18 +107,10 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 	// - After "download once" - Erigon will produce and seed new files
 
-	// Original intent of blockSnInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
-	// Then, we would insist to only download such files, and no others (whitelist)
-	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
-	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
-	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
-
-	// send all hashes to the Downloader service
 	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	// build all download requests
-	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
 		if !histV3 {
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
