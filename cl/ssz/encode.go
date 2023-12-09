@@ -60,9 +60,10 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		}
 	}()
 	var x = false
-	if !f {
+	if !f && len(schema) > 20 {
 		f = true
 		x = true
+		fmt.Println("MarshalSSZ")
 	}
 
 	dst = buf
@@ -111,13 +112,12 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		startSize := len(dst)
 		binary.LittleEndian.PutUint32(dst[offsetsStarts[i]:], uint32(currentOffset))
 		if x {
-			fmt.Println(currentOffset)
+			fmt.Println(offsetsStarts[i], currentOffset)
 		}
 		if dst, err = dynamicComponent.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
 		currentOffset += len(dst) - startSize
-
 	}
 
 	return dst, nil

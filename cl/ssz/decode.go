@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
 
+var f2 = false
+
 /*
 The function takes the input byte slice buf, the SSZ version, and the schema as variadic arguments.
 It initializes a position pointer position to keep track of the current position in the buf.
@@ -42,7 +44,12 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	// 		err = fmt.Errorf("panic while decoding: %v", err2)
 	// 	}
 	// }()
-
+	x := false
+	if !f2 && len(schema) > 20 {
+		x = true
+		f2 = true
+		fmt.Println("UnmarshalSSZ")
+	}
 	position := 0
 	offsets := []int{}
 	dynamicObjs := []SizedObjectSSZ{}
@@ -79,8 +86,12 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				if len(buf) < position+4 {
 					return ssz.ErrLowBufferSize
 				}
+
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
+				if x {
+					fmt.Println(position, binary.LittleEndian.Uint32(buf[position:]))
+				}
 				dynamicObjs = append(dynamicObjs, obj)
 				position += 4
 			}
