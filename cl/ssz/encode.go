@@ -60,7 +60,7 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		}
 	}()
 	var x = false
-	if !f && len(schema) > 20 {
+	if len(schema) > 20 {
 		f = true
 		x = true
 		fmt.Println("MarshalSSZ")

@@ -45,7 +45,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	// 	}
 	// }()
 	x := false
-	if !f2 && len(schema) > 20 {
+	if len(schema) > 20 {
 		x = true
 		f2 = true
 		fmt.Println("UnmarshalSSZ")
