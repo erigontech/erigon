@@ -131,6 +131,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	// Check for errors
 	if uint32(len(buf))%bytesPerElement != 0 {
 		fmt.Println(bytesPerElement)
+		fmt.Println(len(buf))
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > max {
