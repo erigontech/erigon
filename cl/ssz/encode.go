@@ -59,7 +59,6 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
-	var c = 0
 	var x = false
 	if !f {
 		f = true
