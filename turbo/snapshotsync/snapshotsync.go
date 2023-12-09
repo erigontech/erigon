@@ -112,15 +112,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
 	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
 	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
-	blockSnInDB, stateSnInDB, err := rawdb.ReadSnapshots(tx)
-	if err != nil {
-		return err
-	}
-
-	blockSnInDB = append(blockSnInDB)
 
 	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, blockSnInDB, stateSnInDB).Preverified
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	// build all download requests
