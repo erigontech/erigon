@@ -991,7 +991,7 @@ func DecodeAccountBytesV3(enc []byte) (nonce uint64, balance *uint256.Int, hash 
 	}
 	pos := 0
 	nonceBytes := int(enc[pos])
-	balance = uint256.NewInt(0)
+	balance = &uint256.Int{}
 	pos++
 	if nonceBytes > 0 {
 		nonce = bytesToUint64(enc[pos : pos+nonceBytes])
