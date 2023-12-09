@@ -127,7 +127,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// Eth1
 	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
-	if err := r.readEth1DataVotes(tx, slot, eth1DataVotes); err != nil {
+	if err := r.readEth1DataVotes(tx, minimalBeaconState.Eth1DataLength, slot, eth1DataVotes); err != nil {
 		return nil, err
 	}
 	ret.SetEth1DataVotes(eth1DataVotes)
