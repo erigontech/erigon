@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -735,7 +736,6 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("version", haveState.Version())
 	// Decode the []byte into a state
 	wantState := state.New(beaconConfig)
 	if err := wantState.DecodeSSZ(rawBytes, int(haveState.Version())); err != nil {
@@ -746,6 +746,14 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		p := haveState.LatestExecutionPayloadHeader()
+		b, _ := json.Marshal(p)
+		fmt.Println(string(b))
+		p2 := wantState.LatestExecutionPayloadHeader()
+		b, _ = json.Marshal(p2)
+		fmt.Println(string(b))
+
+		fmt.Println("Execution Payload Header expected")
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
