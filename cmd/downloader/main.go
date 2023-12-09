@@ -435,7 +435,7 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 // Add pre-configured
 func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
 	for _, it := range snapcfg.KnownCfg(chain).Preverified {
-		if err := d.AddInfoHashAsMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+		if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 			return err
 		}
 	}

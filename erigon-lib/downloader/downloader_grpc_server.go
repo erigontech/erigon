@@ -94,7 +94,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		//Corner cases:
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 		if !newDownloadsAreProhibited {
-			if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+			if err := s.d.AddMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 				return nil, err
 			}
 		}
