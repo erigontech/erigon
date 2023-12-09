@@ -126,7 +126,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetHistoricalRoots(historicalRoots)
 
 	// Eth1
-	eth1DataVotes := solid.NewDynamicListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()))
+	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
 	if err := r.readEth1DataVotes(tx, slot, eth1DataVotes); err != nil {
 		return nil, err
 	}
