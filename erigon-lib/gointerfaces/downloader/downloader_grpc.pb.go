@@ -31,13 +31,15 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DownloaderClient interface {
-	// Erigon's invariant: download new files only at first sync cycle. All other files erigon produce by self and seed.
-	// after this request: downloader will skip all download requests - if corresponding file doesn't exists on FS yet.
-	// But next things will work: add new file for seeding, download some uncomplete parts of existing files (because of Verify found some bad parts)
+	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
+	// After "download once" - Erigon will produce and seed new files
+	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 	ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// Adding new file to downloader: non-existing files it will download, existing - seed.
+	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// Trigger verification of files
+	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 }
@@ -99,13 +101,15 @@ func (c *downloaderClient) Stats(ctx context.Context, in *StatsRequest, opts ...
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
 type DownloaderServer interface {
-	// Erigon's invariant: download new files only at first sync cycle. All other files erigon produce by self and seed.
-	// after this request: downloader will skip all download requests - if corresponding file doesn't exists on FS yet.
-	// But next things will work: add new file for seeding, download some uncomplete parts of existing files (because of Verify found some bad parts)
+	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
+	// After "download once" - Erigon will produce and seed new files
+	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 	ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)
-	// Adding new file to downloader: non-existing files it will download, existing - seed.
+	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(context.Context, *AddRequest) (*emptypb.Empty, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
+	// Trigger verification of files
+	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	mustEmbedUnimplementedDownloaderServer()
