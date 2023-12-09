@@ -152,7 +152,6 @@ func (d *Downloader) prohibitNewDownloads() error {
 	if err := f.Sync(); err != nil {
 		return err
 	}
-
 	return nil
 }
 
