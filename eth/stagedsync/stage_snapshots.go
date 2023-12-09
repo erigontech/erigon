@@ -110,6 +110,9 @@ func SpawnStageSnapshots(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		if cfg.dbEventNotifier != nil { //notify after commit
+			cfg.dbEventNotifier.OnNewSnapshot()
+		}
 	}
 
 	return nil
@@ -127,7 +130,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
 

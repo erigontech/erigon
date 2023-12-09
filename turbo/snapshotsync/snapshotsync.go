@@ -84,7 +84,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -95,9 +95,6 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 			if err := borSnapshots.ReopenFolder(); err != nil {
 				return err
 			}
-		}
-		if notifier != nil { // can notify right here, even that write txn is not commit
-			notifier.OnNewSnapshot()
 		}
 		return nil
 	}
@@ -255,9 +252,6 @@ Finish:
 
 	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 		return err
-	}
-	if notifier != nil { // can notify right here, even that write txn is not commit
-		notifier.OnNewSnapshot()
 	}
 
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
