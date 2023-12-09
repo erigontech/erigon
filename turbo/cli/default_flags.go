@@ -63,6 +63,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HTTPVirtualHostsFlag,
 	&utils.AuthRpcVirtualHostsFlag,
 	&utils.HTTPApiFlag,
+	&utils.WSPortFlag,
 	&utils.WSEnabledFlag,
 	&utils.WsCompressionFlag,
 	&utils.HTTPTraceFlag,
@@ -174,6 +175,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiWriteTimeoutFlag,
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
+
+	&utils.CaplinBackfillingFlag,
+	&utils.CaplinArchiveFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,

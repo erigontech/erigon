@@ -154,6 +154,11 @@ func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 func (v Validator) SetEffectiveBalance(i uint64) {
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
+
+func (v Validator) SetEffectiveBalanceFromBytes(b []byte) {
+	copy(v[80:88], b)
+}
+
 func (v Validator) SetSlashed(b bool) {
 	if b {
 		v[88] = 1

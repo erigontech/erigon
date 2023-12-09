@@ -44,7 +44,8 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	if err != nil {
 		return err
 	}
-	b.IncrementSlashingSegmentAt(slashingsIndex, currentEffectiveBalance)
+
+	b.SetSlashingSegmentAt(slashingsIndex, b.SlashingSegmentAt(slashingsIndex)+currentEffectiveBalance)
 	newEffectiveBalance, err := b.ValidatorEffectiveBalance(int(slashedInd))
 	if err != nil {
 		return err
