@@ -1492,6 +1492,39 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 	}
 }
 
+// search key in all files of all domains and print file names
+func (ac *AggregatorV3Context) DebugKey(k []byte) error {
+	l, err := ac.account.DebugKVFilesWithKey(k)
+	if err != nil {
+		return err
+	}
+	if len(l) > 0 {
+		log.Info("[dbg] found in", "files", l)
+	}
+	l, err = ac.code.DebugKVFilesWithKey(k)
+	if err != nil {
+		return err
+	}
+	if len(l) > 0 {
+		log.Info("[dbg] found in", "files", l)
+	}
+	l, err = ac.storage.DebugKVFilesWithKey(k)
+	if err != nil {
+		return err
+	}
+	if len(l) > 0 {
+		log.Info("[dbg] found in", "files", l)
+	}
+	l, err = ac.commitment.DebugKVFilesWithKey(k)
+	if err != nil {
+		return err
+	}
+	if len(l) > 0 {
+		log.Info("[dbg] found in", "files", l)
+	}
+	return nil
+}
+
 // --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
