@@ -142,6 +142,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 
 const prohibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (d *Downloader) prohibitNewDownloads() error {
 	fPath := filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName)
 	f, err := os.Create(fPath)
@@ -154,10 +157,6 @@ func (d *Downloader) prohibitNewDownloads() error {
 	}
 	return nil
 }
-
-// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-// After "download once" - Erigon will produce and seed new files
-// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (d *Downloader) newDownloadsAreProhibited() bool {
 	return dir.FileExist(filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName))
 }
