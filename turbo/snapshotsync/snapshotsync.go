@@ -163,14 +163,6 @@ Loop:
 			if stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				/*
-					if !blockReader.FreezingCfg().Verify { // will verify after loop
-						if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-							return err
-						}
-					}
-				*/
-
 				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:       stats.BytesCompleted,
 					Total:            stats.BytesTotal,
