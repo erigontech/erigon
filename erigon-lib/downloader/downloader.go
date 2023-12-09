@@ -599,6 +599,10 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) {
 		return nil
 	}
+	if d.newDownloadsAreProhibited() {
+		return nil
+	}
+
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
