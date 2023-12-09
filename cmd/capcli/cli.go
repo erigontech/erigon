@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -748,11 +747,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 	if hRoot != wRoot {
 		p := haveState.Eth1DataVotes()
-		b, _ := json.Marshal(p)
-		fmt.Println(string(b))
+		fmt.Println(p.Len())
 		p2 := wantState.Eth1DataVotes()
-		b, _ = json.Marshal(p2)
-		fmt.Println(string(b))
+		fmt.Println(p2.Len())
 
 		fmt.Println("Execution Payload Header expected")
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
