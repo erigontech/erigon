@@ -8,8 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
 
-var f2 = false
-
 /*
 The function takes the input byte slice buf, the SSZ version, and the schema as variadic arguments.
 It initializes a position pointer position to keep track of the current position in the buf.
@@ -44,12 +42,6 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	// 		err = fmt.Errorf("panic while decoding: %v", err2)
 	// 	}
 	// }()
-	x := false
-	if len(schema) > 20 {
-		x = true
-		f2 = true
-		fmt.Println("UnmarshalSSZ")
-	}
 	position := 0
 	offsets := []int{}
 	dynamicObjs := []SizedObjectSSZ{}
@@ -89,9 +81,6 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
-				if x {
-					fmt.Println(position, int(binary.LittleEndian.Uint32(buf[position:])))
-				}
 				dynamicObjs = append(dynamicObjs, obj)
 				position += 4
 			}
@@ -101,9 +90,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			panic(fmt.Errorf("RTFM, bad schema component %d", i))
 		}
 	}
-	if x {
-		fmt.Println("offsets", offsets)
-	}
+
 	// Iterate over the dynamic objects and decode them using the stored offsets
 	for i, obj := range dynamicObjs {
 		endOffset := len(buf)
@@ -115,9 +102,6 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 		}
 		if len(buf) < endOffset {
 			return ssz.ErrLowBufferSize
-		}
-		if x {
-			fmt.Println(offsets[i], endOffset)
 		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
 			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)
