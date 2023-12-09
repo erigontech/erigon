@@ -686,6 +686,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
+		return err
+	}
+
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
