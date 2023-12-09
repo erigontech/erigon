@@ -160,7 +160,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "debug-key",
+			Name:   "debug",
 			Action: doDebugKey,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
