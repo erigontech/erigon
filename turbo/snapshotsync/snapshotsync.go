@@ -296,6 +296,10 @@ Finish:
 		return err
 	}
 
+	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err != nil {
+		return err
+	}
+
 	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 		return err
 	}
