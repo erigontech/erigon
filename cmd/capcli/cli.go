@@ -676,6 +676,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
