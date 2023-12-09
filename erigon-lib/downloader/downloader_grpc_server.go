@@ -45,7 +45,7 @@ type GrpcServer struct {
 }
 
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
-func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
