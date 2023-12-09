@@ -316,6 +316,8 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, slot uint64, out *s
 	}
 
 	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
+	fmt.Println("initialSlot", initialSlot, "endSlot", endSlot)
+
 	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
 		eth1Data := &cltypes.Eth1Data{}
 		if err := eth1Data.DecodeSSZ(v, 0); err != nil {
