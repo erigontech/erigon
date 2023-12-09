@@ -97,8 +97,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 				return nil, err
 			}
-		} else {
-			fmt.Printf("[dbg] skipped: %s\n", it.Path)
 		}
 	}
 	return &emptypb.Empty{}, nil
