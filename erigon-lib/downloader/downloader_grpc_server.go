@@ -79,9 +79,6 @@ func (s *GrpcServer) torrentNames() map[string]struct{} {
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
-	//Corner cases:
-	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
-	// - After "download once" - Erigon will produce and seed new files
 	newDownloadsAreProhibited := dir.FileExist(filepath.Join(s.d.SnapDir(), fName))
 
 	tNames := s.torrentNames()
@@ -116,10 +113,15 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			continue
 		}
 
-		if !newDownloadsAreProhibited {
-			if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
-				return nil, err
-			}
+		//Corner cases:
+		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+		if newDownloadsAreProhibited {
+			continue
+		}
+
+		// Download this file
+		if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+			return nil, err
 		}
 	}
 	return &emptypb.Empty{}, nil
