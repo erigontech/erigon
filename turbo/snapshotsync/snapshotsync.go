@@ -296,7 +296,7 @@ Finish:
 		return err
 	}
 
-	//Erigon expects "download once" and other files - produce and seed
+	//Erigon "download once" and other files - produce and seed by self
 	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err != nil {
 		return err
 	}
