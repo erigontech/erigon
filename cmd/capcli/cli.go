@@ -711,6 +711,16 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	v := haveState.Version()
+	// encode and decode the state
+	enc, err := haveState.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	haveState = state.New(beaconConfig)
+	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
+		return err
+	}
 	endTime := time.Since(start)
 	hRoot, err := haveState.HashSSZ()
 	if err != nil {
