@@ -92,7 +92,6 @@ type FullBlockReader interface {
 type BlockSnapshots interface {
 	ReopenFolder() error
 	SegmentsMax() uint64
-	ScanDir() (map[string]struct{}, []*Range, error)
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files

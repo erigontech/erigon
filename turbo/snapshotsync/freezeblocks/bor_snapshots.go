@@ -635,23 +635,6 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 	return res, missingSnapshots, nil
 }
 
-func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := BorSegments(s.dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
-	}
-
-	res := make([]*services.Range, 0, len(missingSnapshots))
-	for _, sn := range missingSnapshots {
-		res = append(res, &services.Range{From: sn.from, To: sn.to})
-	}
-	return existingFilesMap, res, nil
-}
 func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected bor snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
