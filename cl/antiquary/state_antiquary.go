@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"sync"
 	"time"
@@ -405,7 +406,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		first = false
-
+		if s.currentState.Slot() == 20_000 {
+			s.dumpFullBeaconState()
+		}
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
@@ -754,6 +757,19 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 		return err
 	}
 	return c.Collect(k, common.Copy(b.Bytes()))
+}
+
+func (s *Antiquary) dumpFullBeaconState() {
+	b, err := s.currentState.EncodeSSZ(nil)
+	if err != nil {
+		s.logger.Error("Failed to encode full beacon state", "err", err)
+		return
+	}
+	// just dump it in a.txt like an idiot without afero
+	if err := ioutil.WriteFile("a.txt", b, 0644); err != nil {
+		s.logger.Error("Failed to write full beacon state", "err", err)
+	}
+
 }
 
 func flattenRandaoMixes(hashes []libcommon.Hash) []byte {
