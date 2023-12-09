@@ -21,6 +21,8 @@ type SizedObjectSSZ interface {
 	Sized
 }
 
+var f = false
+
 /*
 The function takes the initial byte slice buf and the schema as variadic arguments.
 
@@ -57,6 +59,13 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
+	var c = 0
+	var x = false
+	if !f {
+		f = true
+		x = true
+	}
+
 	dst = buf
 	currentOffset := 0
 	dynamicComponents := []SizedObjectSSZ{}
@@ -102,11 +111,14 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	for i, dynamicComponent := range dynamicComponents {
 		startSize := len(dst)
 		binary.LittleEndian.PutUint32(dst[offsetsStarts[i]:], uint32(currentOffset))
-
+		if x {
+			fmt.Println(currentOffset)
+		}
 		if dst, err = dynamicComponent.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
 		currentOffset += len(dst) - startSize
+
 	}
 
 	return dst, nil
