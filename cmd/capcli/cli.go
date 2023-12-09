@@ -747,10 +747,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		p := haveState.LatestExecutionPayloadHeader()
+		p := haveState.Eth1DataVotes()
 		b, _ := json.Marshal(p)
 		fmt.Println(string(b))
-		p2 := wantState.LatestExecutionPayloadHeader()
+		p2 := wantState.Eth1DataVotes()
 		b, _ = json.Marshal(p2)
 		fmt.Println(string(b))
 
