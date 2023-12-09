@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -45,19 +44,10 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-const fName = "prohibit_new_downloads.lock"
-
 func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	fPath := filepath.Join(s.d.SnapDir(), fName)
-	f, err := os.Create(fPath)
-	if err != nil {
+	if err := s.d.prohibitNewDownloads(); err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return nil, err
-	}
-
 	return nil, nil
 }
 
@@ -65,7 +55,7 @@ func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.Pro
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
-	newDownloadsAreProhibited := dir.FileExist(filepath.Join(s.d.SnapDir(), fName))
+	newDownloadsAreProhibited := s.d.newDownloadsAreProhibited()
 
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 

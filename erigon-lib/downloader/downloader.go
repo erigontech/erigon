@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -34,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -305,6 +308,29 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 		}
 	}
+}
+
+const fName = "prohibit_new_downloads.lock"
+
+func (d *Downloader) prohibitNewDownloads() error {
+	fPath := filepath.Join(d.SnapDir(), fName)
+	f, err := os.Create(fPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+func (d *Downloader) newDownloadsAreProhibited() bool {
+	return dir.FileExist(filepath.Join(d.SnapDir(), fName))
 }
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
