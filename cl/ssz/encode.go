@@ -3,7 +3,6 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
-	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
@@ -21,8 +20,6 @@ type SizedObjectSSZ interface {
 	ObjectSSZ
 	Sized
 }
-
-var f = false
 
 /*
 The function takes the initial byte slice buf and the schema as variadic arguments.
@@ -60,12 +57,6 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
-	var x = false
-	if len(schema) > 20 {
-		f = true
-		x = true
-		fmt.Println("MarshalSSZ")
-	}
 
 	dst = buf
 	currentOffset := 0
@@ -112,17 +103,10 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	for i, dynamicComponent := range dynamicComponents {
 		startSize := len(dst)
 		binary.LittleEndian.PutUint32(dst[offsetsStarts[i]:], uint32(currentOffset))
-		if x {
-			fmt.Println(offsetsStarts[i], currentOffset)
-		}
 		if dst, err = dynamicComponent.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
-		if x {
-			fmt.Println("sizes", len(dst)-startSize, dynamicComponent.EncodingSizeSSZ())
-			// print type of dynamicComponent with reflect
-			fmt.Println(reflect.TypeOf(dynamicComponent).String())
-		}
+
 		currentOffset += len(dst) - startSize
 	}
 
