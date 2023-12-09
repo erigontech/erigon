@@ -3,6 +3,7 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
@@ -119,6 +120,8 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		}
 		if x {
 			fmt.Println("sizes", len(dst)-startSize, dynamicComponent.EncodingSizeSSZ())
+			// print type of dynamicComponent with reflect
+			fmt.Println(reflect.TypeOf(dynamicComponent).String())
 		}
 		currentOffset += len(dst) - startSize
 	}
