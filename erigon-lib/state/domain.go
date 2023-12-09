@@ -1050,6 +1050,18 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
+func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error) {
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		_, ok, err := dc.getFromFile(i, k)
+		if err != nil {
+			return res, err
+		}
+		if ok {
+			res = append(res, dc.files[i].src.decompressor.FileName())
+		}
+	}
+	return res, nil
+}
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.files.Walk(func(items []*filesItem) bool {
