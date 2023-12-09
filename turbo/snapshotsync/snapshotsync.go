@@ -35,17 +35,17 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.DownloadRequest {
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.BlockSnapshotTypes))}
+func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path != "" {
 			if r.TorrentHash != "" {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				req.Items = append(req.Items, &proto_downloader.AddItem{
 					TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
 					Path:        r.Path,
 				})
 			} else {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				req.Items = append(req.Items, &proto_downloader.AddItem{
 					Path: r.Path,
 				})
 			}
@@ -56,13 +56,13 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 			if r.Bor {
 				for _, t := range snaptype.BorSnapshotTypes {
 
-					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					req.Items = append(req.Items, &proto_downloader.AddItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
 				}
 			} else {
 				for _, t := range snaptype.BlockSnapshotTypes {
-					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					req.Items = append(req.Items, &proto_downloader.AddItem{
 						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
 					})
 				}
@@ -76,7 +76,7 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Download(ctx, req); err != nil {
+	if _, err := downloader.Add(ctx, req); err != nil {
 		return err
 	}
 	return nil
