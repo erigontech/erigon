@@ -686,7 +686,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+	var bor *freezeblocks.BorRoSnapshots
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
