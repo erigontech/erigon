@@ -123,7 +123,7 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 		if err != nil {
 			return nil, err
 		}
-		return state.NewCachedReader2(cacheView, tx), nil
+		return CreateLatestCachedStateReader(cacheView, tx, historyV3), nil
 	}
 	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, historyV3, chainName)
 }
@@ -162,4 +162,11 @@ func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateW
 		return state.NewWriterV4(domains)
 	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
+}
+
+func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx, histV3 bool) state.StateReader {
+	if histV3 {
+		return state.NewCachedReader3(cache, tx.(kv.TemporalTx))
+	}
+	return state.NewCachedReader2(cache, tx)
 }
