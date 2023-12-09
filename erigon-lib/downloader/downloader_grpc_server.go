@@ -23,11 +23,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -44,9 +45,28 @@ type GrpcServer struct {
 	d *Downloader
 }
 
+const fName = "prohibit_new_downloads.lock"
+
+func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+	fPath := filepath.Join(s.d.SnapDir(), fName)
+	f, err := os.Create(fPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
-func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+	newDownloadsAreProhibited := dir.FileExist(filepath.Join(s.d.SnapDir(), fName))
+
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -69,8 +89,10 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Add
 			continue
 		}
 
-		if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
-			return nil, err
+		if !newDownloadsAreProhibited {
+			if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return &emptypb.Empty{}, nil

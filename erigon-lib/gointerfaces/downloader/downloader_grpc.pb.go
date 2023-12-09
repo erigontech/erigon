@@ -35,6 +35,7 @@ type DownloaderClient interface {
 	// after this request: downloader will skip all download requests - if corresponding file doesn't exists on FS yet.
 	// But next things will work: add new file for seeding, download some uncomplete parts of existing files (because of Verify found some bad parts)
 	ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// Adding new file to downloader: non-existing files it will download, existing - seed.
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -102,6 +103,7 @@ type DownloaderServer interface {
 	// after this request: downloader will skip all download requests - if corresponding file doesn't exists on FS yet.
 	// But next things will work: add new file for seeding, download some uncomplete parts of existing files (because of Verify found some bad parts)
 	ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)
+	// Adding new file to downloader: non-existing files it will download, existing - seed.
 	Add(context.Context, *AddRequest) (*emptypb.Empty, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
 	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
