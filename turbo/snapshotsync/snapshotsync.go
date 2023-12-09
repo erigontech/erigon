@@ -102,16 +102,17 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 		return nil
 	}
 
-	// Original intent of snInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
+	// Original intent of blockSnInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
 	// Then, we would insist to only download such files, and no others (whitelist)
 	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
 	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
 	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
-	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
+	blockSnInDB, stateSnInDB, err := rawdb.ReadSnapshots(tx)
 	if err != nil {
 		return err
 	}
-	dbEmpty := len(snInDB) == 0
+
+	dbEmpty := len(blockSnInDB) == 0
 	var existingFilesMap, borExistingFilesMap map[string]struct{}
 	var missingSnapshots, borMissingSnapshots []*services.Range
 	if !dbEmpty {
@@ -133,7 +134,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	}
 
 	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB).Preverified
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, blockSnInDB, stateSnInDB).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
 
 	// build all download requests
