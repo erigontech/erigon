@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	lg "github.com/anacrolix/log"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -715,7 +716,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", hRoot, "elapsed", endTime)
+	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 	if r.CompareFile == "" {
 		return nil
 	}
@@ -734,7 +735,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		return fmt.Errorf("state mismatch: got %s, want %s", hRoot, wRoot)
+		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
 }
