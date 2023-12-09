@@ -757,6 +757,7 @@ Loop:
 				if txTask.Error != nil {
 					break Loop
 				}
+				fmt.Printf("------- txIdx %d ----\n", txTask.TxIndex)
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if errors.Is(txTask.Error, context.Canceled) {
@@ -769,6 +770,7 @@ Loop:
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
+					fmt.Printf("[dbg] gasUsed: %d, txNum=%d, txIdx=%d\n", txTask.UsedGas, txTask.TxNum, txTask.TxIndex)
 					if txTask.Final {
 						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							if err := core.BlockPostValidation(gasUsed, blobGasUsed, txTask.Header); err != nil {
