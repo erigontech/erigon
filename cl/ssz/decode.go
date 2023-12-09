@@ -114,6 +114,9 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 		if len(buf) < endOffset {
 			return ssz.ErrLowBufferSize
 		}
+		if x {
+			fmt.Println(offsets[i], endOffset)
+		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
 			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)
 		}
