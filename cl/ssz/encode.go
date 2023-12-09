@@ -117,6 +117,9 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		if dst, err = dynamicComponent.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
+		if x {
+			fmt.Println("sizes", len(dst)-startSize, dynamicComponent.EncodingSizeSSZ())
+		}
 		currentOffset += len(dst) - startSize
 	}
 
