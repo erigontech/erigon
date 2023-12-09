@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -111,63 +110,53 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
-	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
-		list, ok := txTask.WriteLists[table]
-		if !ok {
-			continue
-		}
+	if txTask.WriteLists != nil {
+		for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+			list, ok := txTask.WriteLists[table]
+			if !ok {
+				continue
+			}
 
-		switch kv.Domain(table) {
-		case kv.AccountsDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
-						fmt.Printf("DelAcc: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
-					}
-					if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
-						fmt.Printf("UpdateAcc: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
-					}
-					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
+			switch kv.Domain(table) {
+			case kv.AccountsDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
 					}
 				}
-			}
-		case kv.CodeDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
-					}
-				}
-			}
-		case kv.StorageDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
-						fmt.Printf("DelSt: %x, blockNum=%d, txNum=%d\n", key, rs.domains.BlockNum(), rs.domains.TxNum())
-					}
-					if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if bytes.Equal([]byte(key), common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
-						fmt.Printf("UpdateSt: %x, %x, blockNum=%d, txNum=%d\n", key, list.Vals[i], rs.domains.BlockNum(), rs.domains.TxNum())
-					}
-					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
+			case kv.CodeDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
 					}
 				}
+			case kv.StorageDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
+					}
+				}
+			default:
+				continue
 			}
-		default:
-			continue
 		}
 	}
 
@@ -436,9 +425,6 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	if bytes.Equal(address[:], common.FromHex("1337a43dc134a437fa24d26decc6f4f3cba7cad3")) {
-		fmt.Printf("del acc: %x\n", address)
-	}
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	return nil
 }
@@ -449,9 +435,6 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	}
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
-	if bytes.Equal(key.Bytes(), common.FromHex("f0abd848370e3d4cea8d8c5d8fba8cbe8c70f60428e4aeb9f053bf9811da075a")) {
-		fmt.Printf("put: %x,%x, blockNum=%d, txNum=%d\n", *key, value.Bytes(), w.rs.domains.BlockNum(), w.rs.domains.TxNum())
-	}
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
@@ -467,6 +450,106 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
 	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
 		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type StateWriterV3 struct {
+	rs    *StateV3
+	trace bool
+
+	tx kv.Tx
+}
+
+func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
+	return &StateWriterV3{
+		rs: rs,
+		//trace:      true,
+	}
+}
+
+func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
+	w.rs.domains.SetTxNum(ctx, txNum)
+}
+func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
+
+func (w *StateWriterV3) ResetWriteSet() {}
+
+func (w *StateWriterV3) WriteSet() map[string]*libstate.KvList {
+	return nil
+}
+
+func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+	return nil, nil, nil, nil
+}
+
+func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if w.trace {
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	}
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil); err != nil {
+			return err
+		}
+	}
+	value := accounts.SerialiseV3(account)
+	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if w.trace {
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
+	}
+	if err := w.rs.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
+	if w.trace {
+		fmt.Printf("del acc: %x\n", address)
+	}
+	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if *original == *value {
+		return nil
+	}
+	composite := append(address.Bytes(), key.Bytes()...)
+	if err := w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, value.Bytes(), original.Bytes()); err != nil {
+		return err
+	}
+	if w.trace {
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+	}
+	return nil
+}
+
+func (w *StateWriterV3) CreateContract(address common.Address) error {
+	if w.trace {
+		fmt.Printf("create contract: %x\n", address)
+	}
+
+	//seems don't need delete code here - tests starting fail
+	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
+	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+		if err := w.rs.domains.DomainDel(kv.StorageDomain, k, nil, v); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
