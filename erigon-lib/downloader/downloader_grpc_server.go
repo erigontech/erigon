@@ -61,9 +61,30 @@ func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.Pro
 	return nil, nil
 }
 
-// Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
+func (s *GrpcServer) torrentNames() map[string]struct{} {
+
+	tl := s.d.TorrentClient().Torrents()
+	tNames := make(map[string]struct{}, len(tl))
+	for _, t := range tl {
+		select {
+		case <-t.GotInfo():
+			tNames[t.Name()] = struct{}{}
+		default:
+		}
+	}
+	return tNames
+}
+
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+	//Corner cases:
+	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+	// - After "download once" - Erigon will produce and seed new files
 	newDownloadsAreProhibited := dir.FileExist(filepath.Join(s.d.SnapDir(), fName))
+
+	tNames := s.torrentNames()
 
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
@@ -86,6 +107,12 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
+			continue
+		}
+
+		//Corner case:
+		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+		if _, ok := tNames[it.Path]; ok {
 			continue
 		}
 

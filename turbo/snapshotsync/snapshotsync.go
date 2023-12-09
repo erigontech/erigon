@@ -104,6 +104,8 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 
 	//Corner cases:
 	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+	// - After "download once" - Erigon will produce and seed new files
 
 	// Original intent of blockSnInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
 	// Then, we would insist to only download such files, and no others (whitelist)
@@ -115,30 +117,11 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 		return err
 	}
 
-	dbEmpty := len(blockSnInDB) == 0
-	var existingFilesMap, borExistingFilesMap map[string]struct{}
-	var missingSnapshots, borMissingSnapshots []*services.Range
-	if !dbEmpty {
-		existingFilesMap, missingSnapshots, err = snapshots.ScanDir()
-		if err != nil {
-			return err
-		}
-		if cc.Bor == nil {
-			borExistingFilesMap = map[string]struct{}{}
-		} else {
-			borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if len(missingSnapshots) > 0 {
-		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", logPrefix))
-	}
+	blockSnInDB = append(blockSnInDB)
 
 	// send all hashes to the Downloader service
 	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, blockSnInDB, stateSnInDB).Preverified
-	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
+	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	// build all download requests
 	// builds preverified snapshots request
@@ -155,21 +138,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 			continue
 		}
 
-		_, exists := existingFilesMap[p.Name]
-		_, borExists := borExistingFilesMap[p.Name]
-		if !exists && !borExists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
-		}
-	}
-
-	// builds missing snapshots request
-	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
-	}
-	if cc.Bor != nil {
-		for _, r := range borMissingSnapshots {
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
-		}
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))
