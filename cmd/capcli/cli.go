@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
@@ -40,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
@@ -66,11 +69,12 @@ var CLI struct {
 	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
 	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 
-	Chain             Chain             `cmd:"" help:"download the entire chain from reqresp network"`
-	DumpSnapshots     DumpSnapshots     `cmd:"" help:"generate caplin snapshots"`
-	CheckSnapshots    CheckSnapshots    `cmd:"" help:"check snapshot folder against content of chain data"`
-	DownloadSnapshots DownloadSnapshots `cmd:"" help:"download snapshots from webseed"`
-	LoopSnapshots     LoopSnapshots     `cmd:"" help:"loop over snapshots"`
+	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
+	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
+	CheckSnapshots          CheckSnapshots          `cmd:"" help:"check snapshot folder against content of chain data"`
+	DownloadSnapshots       DownloadSnapshots       `cmd:"" help:"download snapshots from webseed"`
+	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
+	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
 }
 
 type chainCfg struct {
@@ -656,11 +660,13 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 type RetrieveHistoricalState struct {
 	chainCfg
 	outputFolder
+	CompareFile string `help:"compare file" default:""`
+	CompareSlot uint64 `help:"compare slot" default:"0"`
 }
 
 func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	vt := state_accessors.NewStaticValidatorTable()
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(r.Chain)
+	_, _, beaconConfig, t, err := clparams.GetConfigsByNetworkName(r.Chain)
 	if err != nil {
 		return err
 	}
@@ -676,6 +682,53 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return err
+	}
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconDB, beaconConfig)
+	gSpot, err := initial_state.GetGenesisState(t)
+	if err != nil {
+		return err
+	}
 
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rawDB, vt, fs, nil)
+	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, fs, gSpot)
+	start := time.Now()
+	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
+	if err != nil {
+		return err
+	}
+	endTime := time.Since(start)
+	hRoot, err := haveState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	log.Info("Got state", "slot", haveState.Slot(), "root", hRoot, "elapsed", endTime)
+	if r.CompareFile == "" {
+		return nil
+	}
+	// Read the content of CompareFile in a []byte  without afero
+	rawBytes, err := os.ReadFile(r.CompareFile)
+	if err != nil {
+		return err
+	}
+	// Decode the []byte into a state
+	wantState := state.New(beaconConfig)
+	if err := wantState.DecodeSSZ(rawBytes, int(beaconConfig.GetCurrentStateVersion(r.CompareSlot/beaconConfig.SlotsPerEpoch))); err != nil {
+		return err
+	}
+	wRoot, err := wantState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if hRoot != wRoot {
+		return fmt.Errorf("state mismatch: got %s, want %s", hRoot, wRoot)
+	}
+	return nil
 }
