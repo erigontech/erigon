@@ -107,13 +107,13 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 		//Corner cases:
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
-		if newDownloadsAreProhibited {
-			continue
-		}
+		if !newDownloadsAreProhibited {
 
-		// Download this file
-		if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
-			return nil, err
+			if err := s.d.AddInfoHashAsMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+				return nil, err
+			}
+		} else {
+			fmt.Printf("[dbg] skipped: %s\n", it.Path)
 		}
 	}
 	return &emptypb.Empty{}, nil
