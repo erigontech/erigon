@@ -90,7 +90,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
 				if x {
-					fmt.Println(position, binary.LittleEndian.Uint32(buf[position:]))
+					fmt.Println(position, int(binary.LittleEndian.Uint32(buf[position:])))
 				}
 				dynamicObjs = append(dynamicObjs, obj)
 				position += 4
