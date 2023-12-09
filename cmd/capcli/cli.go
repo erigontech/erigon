@@ -725,6 +725,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println(rawBytes[0:400])
 	// Decode the []byte into a state
 	wantState := state.New(beaconConfig)
 	if err := wantState.DecodeSSZ(rawBytes, int(beaconConfig.GetCurrentStateVersion(r.CompareSlot/beaconConfig.SlotsPerEpoch))); err != nil {

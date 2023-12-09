@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sync"
 	"time"
@@ -766,7 +765,7 @@ func (s *Antiquary) dumpFullBeaconState() {
 		return
 	}
 	// just dump it in a.txt like an idiot without afero
-	if err := ioutil.WriteFile("a.txt", b, 0644); err != nil {
+	if err := os.WriteFile("a.txt", b, 0644); err != nil {
 		s.logger.Error("Failed to write full beacon state", "err", err)
 	}
 
