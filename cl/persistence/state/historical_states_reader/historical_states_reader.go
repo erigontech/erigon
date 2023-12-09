@@ -296,7 +296,7 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 	return nil
 }
 
-func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
+func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
 	initialSlot := r.cfg.RoundSlotToVotePeriod(slot)
 	initialKey := base_encoding.Encode64ToBytes4(initialSlot)
 	cursor, err := tx.Cursor(kv.Eth1DataVotes)
@@ -319,6 +319,9 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, slot uint64, out *s
 	fmt.Println("initialSlot", initialSlot, "endSlot", endSlot)
 
 	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
+		if out.Len() >= int(eth1DataVotesLength) {
+			break
+		}
 		eth1Data := &cltypes.Eth1Data{}
 		if err := eth1Data.DecodeSSZ(v, 0); err != nil {
 			return err
