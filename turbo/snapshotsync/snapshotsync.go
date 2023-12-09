@@ -38,35 +38,18 @@ const (
 func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
 	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
-		if r.Path != "" {
-			if r.TorrentHash != "" {
-				req.Items = append(req.Items, &proto_downloader.AddItem{
-					TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
-					Path:        r.Path,
-				})
-			} else {
-				req.Items = append(req.Items, &proto_downloader.AddItem{
-					Path: r.Path,
-				})
-			}
+		if r.Path == "" {
+			continue
+		}
+		if r.TorrentHash != "" {
+			req.Items = append(req.Items, &proto_downloader.AddItem{
+				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
+				Path:        r.Path,
+			})
 		} else {
-			if r.Ranges.To-r.Ranges.From < snaptype.Erigon2RecentMergeLimit {
-				continue
-			}
-			if r.Bor {
-				for _, t := range snaptype.BorSnapshotTypes {
-
-					req.Items = append(req.Items, &proto_downloader.AddItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-					})
-				}
-			} else {
-				for _, t := range snaptype.BlockSnapshotTypes {
-					req.Items = append(req.Items, &proto_downloader.AddItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-					})
-				}
-			}
+			req.Items = append(req.Items, &proto_downloader.AddItem{
+				Path: r.Path,
+			})
 		}
 	}
 	return req
@@ -121,7 +104,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))

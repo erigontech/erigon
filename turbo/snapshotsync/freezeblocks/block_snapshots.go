@@ -1296,7 +1296,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 
 		if seedNewSnapshots != nil {
 			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */),
+				services.NewDownloadRequest("", ""),
 			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
