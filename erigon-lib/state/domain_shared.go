@@ -516,10 +516,12 @@ func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte) 
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
-	sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
-	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.aggCtx.account.DeleteWithPrev(addr, nil, prev); err != nil {
-		return err
+	if len(prev) > 0 {
+		sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchAccount)
+		sd.put(kv.AccountsDomain, addrS, nil)
+		if err := sd.aggCtx.account.DeleteWithPrev(addr, nil, prev); err != nil {
+			return err
+		}
 	}
 
 	// commitment delete already has been applied via account
