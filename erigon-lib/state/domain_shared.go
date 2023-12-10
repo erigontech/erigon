@@ -537,11 +537,10 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
-	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
+	if err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
 		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
