@@ -564,8 +564,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := rwTx.Commit(); err != nil {
 		return err
 	}
+	endTime := time.Since(start)
 	stateRoot, err := s.currentState.HashSSZ()
-	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", time.Since(start))
+	if err != nil {
+		return err
+	}
+	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
 	return nil
 }
 
