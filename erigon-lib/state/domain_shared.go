@@ -535,11 +535,6 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 		}
 	}
 
-	// bb, _ := hex.DecodeString("d96d1b15d6bec8e7d37038237b1e913ad99f7dee")
-	// if bytes.Equal(bb, addr) {
-	// 	fmt.Printf("delete account %x \n", addr)
-	// }
-
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
