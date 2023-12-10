@@ -746,12 +746,6 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		p := haveState.Eth1DataVotes()
-		fmt.Println(p.Len())
-		p2 := wantState.Eth1DataVotes()
-		fmt.Println(p2.Len())
-
-		fmt.Println("Execution Payload Header expected")
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
