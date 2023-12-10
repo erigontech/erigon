@@ -216,7 +216,7 @@ Loop:
 					}
 				*/
 
-				diagnostics.Send(diagnostics.DownloadStatistics{
+				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:       stats.BytesCompleted,
 					Total:            stats.BytesTotal,
 					TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
@@ -228,7 +228,6 @@ Loop:
 					Alloc:            m.Alloc,
 					Sys:              m.Sys,
 					DownloadFinished: stats.Completed,
-					StagePrefix:      logPrefix,
 				})
 
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
@@ -245,7 +244,7 @@ Loop:
 					suffix += " (or verifying)"
 				}
 
-				diagnostics.Send(diagnostics.DownloadStatistics{
+				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:       stats.BytesCompleted,
 					Total:            stats.BytesTotal,
 					TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
@@ -257,7 +256,6 @@ Loop:
 					Alloc:            m.Alloc,
 					Sys:              m.Sys,
 					DownloadFinished: stats.Completed,
-					StagePrefix:      logPrefix,
 				})
 
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
