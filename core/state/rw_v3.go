@@ -544,15 +544,8 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 		fmt.Printf("create contract: %x\n", address)
 	}
 
-	//seems don't need delete code here - tests starting fail
-	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		if err := w.rs.domains.DomainDel(kv.StorageDomain, k, nil, v); err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
+	//seems don't need delete code here. IntraBlockState take care of it.
+	if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 		return err
 	}
 	return nil

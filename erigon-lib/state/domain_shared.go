@@ -537,12 +537,18 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 		}
 	}
 
+	// bb, _ := hex.DecodeString("d96d1b15d6bec8e7d37038237b1e913ad99f7dee")
+	// if bytes.Equal(bb, addr) {
+	// 	fmt.Printf("delete account %x \n", addr)
+	// }
+
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
-	if err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
-		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
+	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
+		tombs = append(tombs, pair{k, v})
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
@@ -974,10 +980,18 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	if domain != kv.StorageDomain {
 		return fmt.Errorf("DomainDelPrefix: not supported")
 	}
+	type pair struct{ k, v []byte }
+	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		return sd.DomainDel(kv.StorageDomain, k, nil, v)
+		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
+		return nil
 	}); err != nil {
 		return err
+	}
+	for _, tomb := range tombs {
+		if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
