@@ -405,7 +405,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		first = false
-		if s.currentState.Slot() == 20_000 {
+		if s.currentState.Slot() == 7_000_000 {
 			s.dumpFullBeaconState()
 		}
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
