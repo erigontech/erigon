@@ -724,6 +724,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
+		if blk == nil {
+			currSlot++
+			continue
+		}
 		if err := transition.TransitionState(haveState2, blk, true); err != nil {
 			return err
 		}
