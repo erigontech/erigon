@@ -189,12 +189,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	// Go back a little bit
-	// if progress > s.cfg.SlotsPerEpoch*2 {
-	// 	progress -= s.cfg.SlotsPerEpoch * 2
-	// } else {
-	// 	progress = 0
-	// }
-	progress = progress - (progress % clparams.SlotsPerDump) - 1
+	if progress > s.cfg.SlotsPerEpoch*2 {
+		progress = progress - (progress % clparams.SlotsPerDump) - 1
+		//progress -= s.cfg.SlotsPerEpoch * 2
+	} else {
+		progress = 0
+	}
 	progress, err = findNearestSlotBackwards(tx, progress) // Maybe the guess was a missed slot.
 	if err != nil {
 		return err
