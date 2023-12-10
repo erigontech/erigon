@@ -546,7 +546,6 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	}
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
-		fmt.Println(i)
 		// Read the block
 		block, err := r.blockReader.ReadBlockBySlot(context.Background(), tx, i)
 		if err != nil {
@@ -555,6 +554,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 		if block == nil {
 			continue
 		}
+		ret.SetSlot(i)
 		currentEpoch := slot / r.cfg.SlotsPerEpoch
 		// Read the participation flags
 		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
