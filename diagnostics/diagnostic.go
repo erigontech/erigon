@@ -2,7 +2,6 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -54,8 +53,6 @@ func (d *DiagnosticClient) runSnapshotListener() {
 				d.snapshotDownload.Alloc = info.Alloc
 				d.snapshotDownload.Sys = info.Sys
 				d.snapshotDownload.DownloadFinished = info.DownloadFinished
-
-				fmt.Println("snapshotDownload", d.snapshotDownload)
 
 				if info.DownloadFinished {
 					return
