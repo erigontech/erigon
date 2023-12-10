@@ -741,21 +741,12 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := wantState.DecodeSSZ(rawBytes, int(haveState.Version())); err != nil {
 		return err
 	}
+	fmt.Println(wantState.GetActiveValidatorsIndices(r.CompareSlot / 32))
 	wRoot, err := wantState.HashSSZ()
 	if err != nil {
 		return err
 	}
 	if hRoot != wRoot {
-		hC := haveState.RawCurrentEpochParticipation()
-		hW := wantState.RawCurrentEpochParticipation()
-		for i := 0; i < len(hC); i++ {
-			if hC[i] != hW[i] {
-				fmt.Println(i, hC[i], hW[i])
-			}
-		}
-		fmt.Println("==============")
-		fmt.Println(len(hC), len(hW))
-
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
