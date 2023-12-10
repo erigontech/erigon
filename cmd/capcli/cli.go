@@ -718,7 +718,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	currSlot := haveState2.Slot()
+	currSlot := haveState2.Slot() + 1
 	for haveState2.Slot() != haveState.Slot() {
 		blk, err := snr.ReadBlockBySlot(ctx, tx, currSlot)
 		if err != nil {
@@ -727,6 +727,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		if err := transition.TransitionState(haveState2, blk, true); err != nil {
 			return err
 		}
+		currSlot++
 	}
 	h, _ := haveState2.HashSSZ()
 	fmt.Println("have state", haveState2.Slot(), libcommon.Hash(h))
