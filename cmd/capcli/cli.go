@@ -728,6 +728,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 			return err
 		}
 	}
+	fmt.Println(haveState2.HashSSZ())
 
 	v := haveState.Version()
 	// encode and decode the state
