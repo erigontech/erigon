@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	shuffledSetsCacheSize     = 3
-	activeValidatorsCacheSize = 3
+	shuffledSetsCacheSize     = 5
+	activeValidatorsCacheSize = 5
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -32,8 +32,9 @@ type CachingBeaconState struct {
 	// Internals
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru.Cache[uint64, []uint64]
-	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
+	activeValidatorsCache *lru.Cache[uint64, []uint64]
+	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
+
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
@@ -81,7 +82,6 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	seed := hash.Sum(nil)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
-
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
@@ -212,6 +212,7 @@ func (b *CachingBeaconState) initCaches() error {
 	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize); err != nil {
 		return err
 	}
+
 	return nil
 }
 
