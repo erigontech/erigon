@@ -180,13 +180,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
-	s, _ := previousCheckpoint.MarshalJSON()
-	fmt.Println(string(s))
-	s, _ = currentCheckpoint.MarshalJSON()
-	fmt.Println(string(s))
-	s, _ = finalizedCheckpoint.MarshalJSON()
-	fmt.Println(string(s))
-
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
@@ -316,7 +309,6 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength
 	}
 
 	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
-	fmt.Println("initialSlot", initialSlot, "endSlot", endSlot)
 
 	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
 		if out.Len() >= int(eth1DataVotesLength) {
