@@ -900,9 +900,10 @@ const (
 )
 
 const (
-	AccountsHistoryIdx InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx  InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx     InvertedIdx = "CodeHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
+	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
