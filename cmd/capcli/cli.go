@@ -746,6 +746,16 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		for i := 0; i < wantState.CurrentEpochAttestations().Len(); i++ {
+			if wantState.CurrentEpochAttestations().Get(i) != haveState.CurrentEpochAttestations().Get(i) {
+				fmt.Println("==============")
+				fmt.Println(i, wantState.CurrentEpochAttestations().Get(i))
+				fmt.Println(i, haveState.CurrentEpochAttestations().Get(i))
+			}
+		}
+		fmt.Println("==============")
+		fmt.Println(wantState.CurrentEpochAttestations().Len(), haveState.CurrentEpochAttestations().Len())
+
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
