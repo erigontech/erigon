@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
@@ -712,6 +713,22 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	// JUST FOR NOW. TODO: RMEOVE
+	haveState2, err := hr.ReadHistoricalState(ctx, tx, (r.CompareSlot/32)*32)
+	if err != nil {
+		return err
+	}
+	currSlot := haveState2.Slot()
+	for haveState2.Slot() != haveState.Slot() {
+		blk, err := snr.ReadBlockBySlot(ctx, tx, currSlot)
+		if err != nil {
+			return err
+		}
+		if err := transition.TransitionState(haveState2, blk, true); err != nil {
+			return err
+		}
+	}
+
 	v := haveState.Version()
 	// encode and decode the state
 	enc, err := haveState.EncodeSSZ(nil)
