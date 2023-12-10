@@ -142,6 +142,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.MaxGetProofRewindBlockCount, utils.RpcMaxGetProofRewindBlockCount.Name, utils.RpcMaxGetProofRewindBlockCount.Value, utils.RpcMaxGetProofRewindBlockCount.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&cfg.StateCache.StateV3, utils.HistoryV3Flag.Name, utils.HistoryV3Flag.Value, utils.HistoryV3Flag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -275,7 +276,7 @@ func EmbeddedServices(ctx context.Context,
 		// ... adding back in place to see about the above statement
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewDummy()
+		stateCache = kvcache.NewDummy(stateCacheCfg.StateV3)
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -435,6 +436,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
 			return nil
 		})
+		cfg.StateCache.StateV3 = histV3Enabled
 		if histV3Enabled {
 			logger.Info("HistoryV3", "enable", histV3Enabled)
 			db, err = temporal.New(rwKv, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
@@ -442,7 +444,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 			}
 		}
-		stateCache = kvcache.NewDummy()
+		stateCache = kvcache.NewDummy(cfg.StateCache.StateV3)
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
@@ -453,7 +455,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cfg.StateCache.CacheSize > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
-			stateCache = kvcache.NewDummy()
+			stateCache = kvcache.NewDummy(cfg.StateCache.StateV3)
 		}
 		logger.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}

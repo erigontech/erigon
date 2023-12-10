@@ -106,14 +106,8 @@ var snapshotCommand = cli.Command{
 			Name:   "bt-search",
 			Action: doBtSearch,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{
-					Name:     "src",
-					Required: true,
-				},
-				&cli.StringFlag{
-					Name:     "key",
-					Required: true,
-				},
+				&cli.PathFlag{Name: "src", Required: true},
+				&cli.StringFlag{Name: "key", Required: true},
 			}),
 		},
 		{
@@ -161,14 +155,16 @@ var snapshotCommand = cli.Command{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{
-					Name:     "src",
-					Required: true,
-				},
-				&cli.PathFlag{
-					Name:     "dst",
-					Required: true,
-				},
+				&cli.PathFlag{Name: "src", Required: true},
+				&cli.PathFlag{Name: "dst", Required: true},
+			}),
+		},
+		{
+			Name:   "debug",
+			Action: doDebugKey,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "key", Required: true},
 			}),
 		},
 	},
@@ -229,6 +225,50 @@ func doBtSearch(cliCtx *cli.Context) error {
 		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
 	} else {
 		fmt.Printf("seek: %x, -> nil\n", seek)
+	}
+
+	return nil
+}
+
+func doDebugKey(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+	key := common.FromHex(cliCtx.String("key"))
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	if err = agg.OpenFolder(false); err != nil {
+		return err
+	}
+
+	view := agg.MakeContext()
+	defer view.Close()
+	if err := view.DebugKey(key); err != nil {
+		return err
+	}
+	tx, err := chainDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, _, err := view.GetLatest(kv.AccountsDomain, key, nil, tx); err != nil {
+		return err
+	}
+	if _, _, err := view.GetLatest(kv.CodeDomain, key, nil, tx); err != nil {
+		return err
+	}
+	if _, _, err := view.GetLatest(kv.StorageDomain, key, nil, tx); err != nil {
+		return err
+	}
+	if _, _, err := view.GetLatest(kv.CommitmentDomain, key, nil, tx); err != nil {
+		return err
 	}
 
 	return nil
@@ -498,7 +538,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(estimate.AlmostAllCPUs())
+	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
