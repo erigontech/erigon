@@ -66,7 +66,7 @@ type MiningClient interface {
 	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
 	// HashRate returns the current hashrate for local CPU miner and remote miner.
 	HashRate(ctx context.Context, in *HashRateRequest, opts ...grpc.CallOption) (*HashRateReply, error)
-	// Mining returns an indication if this node is currently mining and it's mining configuration
+	// Mining returns an indication if this node is currently mining and its mining configuration
 	Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error)
 }
 
@@ -262,7 +262,7 @@ type MiningServer interface {
 	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
 	// HashRate returns the current hashrate for local CPU miner and remote miner.
 	HashRate(context.Context, *HashRateRequest) (*HashRateReply, error)
-	// Mining returns an indication if this node is currently mining and it's mining configuration
+	// Mining returns an indication if this node is currently mining and its mining configuration
 	Mining(context.Context, *MiningRequest) (*MiningReply, error)
 	mustEmbedUnimplementedMiningServer()
 }

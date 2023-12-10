@@ -35,38 +35,21 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.DownloadRequest {
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.BlockSnapshotTypes))}
+func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
-		if r.Path != "" {
-			if r.TorrentHash != "" {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
-					Path:        r.Path,
-				})
-			} else {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: r.Path,
-				})
-			}
+		if r.Path == "" {
+			continue
+		}
+		if r.TorrentHash != "" {
+			req.Items = append(req.Items, &proto_downloader.AddItem{
+				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
+				Path:        r.Path,
+			})
 		} else {
-			if r.Ranges.To-r.Ranges.From < snaptype.Erigon2RecentMergeLimit {
-				continue
-			}
-			if r.Bor {
-				for _, t := range snaptype.BorSnapshotTypes {
-
-					req.Items = append(req.Items, &proto_downloader.DownloadItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-					})
-				}
-			} else {
-				for _, t := range snaptype.BlockSnapshotTypes {
-					req.Items = append(req.Items, &proto_downloader.DownloadItem{
-						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-					})
-				}
-			}
+			req.Items = append(req.Items, &proto_downloader.AddItem{
+				Path: r.Path,
+			})
 		}
 	}
 	return req
@@ -76,7 +59,7 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Download(ctx, req); err != nil {
+	if _, err := downloader.Add(ctx, req); err != nil {
 		return err
 	}
 	return nil
@@ -84,7 +67,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -96,48 +79,18 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 				return err
 			}
 		}
-		if notifier != nil { // can notify right here, even that write txn is not commit
-			notifier.OnNewSnapshot()
-		}
 		return nil
 	}
 
-	// Original intent of snInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
-	// Then, we would insist to only download such files, and no others (whitelist)
-	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
-	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
-	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
-	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
-	if err != nil {
-		return err
-	}
-	dbEmpty := len(snInDB) == 0
-	var existingFilesMap, borExistingFilesMap map[string]struct{}
-	var missingSnapshots, borMissingSnapshots []*services.Range
-	if !dbEmpty {
-		existingFilesMap, missingSnapshots, err = snapshots.ScanDir()
-		if err != nil {
-			return err
-		}
-		if cc.Bor == nil {
-			borExistingFilesMap = map[string]struct{}{}
-		} else {
-			borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if len(missingSnapshots) > 0 {
-		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", logPrefix))
-	}
+	//Corner cases:
+	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+	// - After "download once" - Erigon will produce and seed new files
 
-	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB).Preverified
-	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName).Preverified
+	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	// build all download requests
-	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
 		if !histV3 {
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
@@ -151,21 +104,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 			continue
 		}
 
-		_, exists := existingFilesMap[p.Name]
-		_, borExists := borExistingFilesMap[p.Name]
-		if !exists && !borExists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
-		}
-	}
-
-	// builds missing snapshots request
-	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
-	}
-	if cc.Bor != nil {
-		for _, r := range borMissingSnapshots {
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
-		}
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))
@@ -208,14 +147,6 @@ Loop:
 			if stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				/*
-					if !blockReader.FreezingCfg().Verify { // will verify after loop
-						if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-							return err
-						}
-					}
-				*/
-
 				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:       stats.BytesCompleted,
 					Total:            stats.BytesTotal,
@@ -299,13 +230,17 @@ Finish:
 		return err
 	}
 
+	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+	// After "download once" - Erigon will produce and seed new files
+	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err != nil {
+		return err
+	}
+
 	ac := agg.MakeContext()
 	defer ac.Close()
 	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 		return err
-	}
-	if notifier != nil { // can notify right here, even that write txn is not commit
-		notifier.OnNewSnapshot()
 	}
 
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)

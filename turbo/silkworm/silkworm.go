@@ -71,3 +71,7 @@ func ExecuteBlocks(s *Silkworm, txn kv.Tx, chainID *big.Int, startBlock uint64, 
 	}
 	return lastExecutedBlock, err
 }
+
+type CanAddSnapshotsToSilkwarm interface {
+	AddSnapshotsToSilkworm(*Silkworm) error
+}
