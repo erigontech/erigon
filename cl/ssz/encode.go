@@ -103,10 +103,10 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	for i, dynamicComponent := range dynamicComponents {
 		startSize := len(dst)
 		binary.LittleEndian.PutUint32(dst[offsetsStarts[i]:], uint32(currentOffset))
+
 		if dst, err = dynamicComponent.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
-
 		currentOffset += len(dst) - startSize
 	}
 

@@ -78,7 +78,6 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				if len(buf) < position+4 {
 					return ssz.ErrLowBufferSize
 				}
-
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
 				dynamicObjs = append(dynamicObjs, obj)
