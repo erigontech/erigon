@@ -447,12 +447,7 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	}
 
 	//seems don't need delete code here - tests starting fail
-	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
-		return nil
-	})
-	if err != nil {
+	if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 		return err
 	}
 	return nil
