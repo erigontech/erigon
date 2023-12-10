@@ -544,7 +544,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println(currentActiveIndicies)
+	fmt.Println(currentActiveIndicies, slot)
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		fmt.Println(i)
