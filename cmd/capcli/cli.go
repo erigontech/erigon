@@ -741,7 +741,6 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := wantState.DecodeSSZ(rawBytes, int(haveState.Version())); err != nil {
 		return err
 	}
-	fmt.Println(wantState.GetActiveValidatorsIndices(r.CompareSlot / 32))
 	wRoot, err := wantState.HashSSZ()
 	if err != nil {
 		return err
