@@ -555,7 +555,6 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, bcLogger BlockchainLogger) 
 
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
-		statedb.SetLogger(bcLogger)
 
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {
@@ -578,6 +577,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, bcLogger BlockchainLogger) 
 			if overflow {
 				panic("overflow at genesis allocs")
 			}
+			// This is not actually logged via tracer because OnGenesisBlock
+			// already captures the allocations.
 			statedb.AddBalance(addr, balance, evmtypes.BalanceChangeGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
