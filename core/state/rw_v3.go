@@ -470,7 +470,7 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 }
 
 func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(ctx, txNum)
+	w.rs.domains.SetTxNum(txNum)
 }
 func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
 
