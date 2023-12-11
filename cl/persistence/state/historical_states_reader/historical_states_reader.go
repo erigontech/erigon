@@ -134,7 +134,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
-	s := time.Start()
+	s := time.Now()
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
