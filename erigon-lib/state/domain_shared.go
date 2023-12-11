@@ -537,23 +537,8 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 		}
 	}
 
-	type pair struct{ k, v []byte }
-	tombs := make([]pair, 0, 8)
-	if err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
-		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
-		return nil
-	}); err != nil {
+	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
 		return err
-	}
-
-	for _, tomb := range tombs {
-		ks := string(tomb.k)
-		sd.put(kv.StorageDomain, ks, nil)
-		sd.Commitment.TouchPlainKey(ks, nil, sd.Commitment.TouchStorage)
-		err = sd.aggCtx.storage.DeleteWithPrev(tomb.k, nil, tomb.v)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -927,6 +912,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	case kv.AccountsDomain:
 		return sd.updateAccountData(k1, val, prevVal)
 	case kv.StorageDomain:
+		if bytes.Equal(prevVal, val) {
+			return nil
+		}
 		return sd.writeAccountStorage(k1, k2, val, prevVal)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, val) {
@@ -957,9 +945,12 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k1, prevVal)
 	case kv.StorageDomain:
+		if prevVal == nil {
+			return nil
+		}
 		return sd.writeAccountStorage(k1, k2, nil, prevVal)
 	case kv.CodeDomain:
-		if bytes.Equal(prevVal, nil) {
+		if prevVal == nil {
 			return nil
 		}
 		return sd.updateAccountCode(k1, nil, prevVal)
@@ -977,7 +968,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		tombs = append(tombs, pair{k, v})
+		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	}); err != nil {
 		return err
