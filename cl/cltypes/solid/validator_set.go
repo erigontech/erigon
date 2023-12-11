@@ -58,6 +58,8 @@ func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
 		l:               l,
 		buffer:          make([]byte, l*validatorSize),
 		treeCacheBuffer: make([]byte, getTreeCacheSize(l, validatorTreeCacheGroupLayer)*length.Hash),
+		phase0Data:      make([]Phase0Data, l),
+		attesterBits:    make([]byte, l),
 	}
 }
 

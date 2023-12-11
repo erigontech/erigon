@@ -90,6 +90,7 @@ type FullBlockReader interface {
 }
 
 type BlockSnapshots interface {
+	LogStat()
 	ReopenFolder() error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
