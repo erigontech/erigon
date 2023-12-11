@@ -332,6 +332,22 @@ func SnapshotUploadFs() string {
 }
 
 var (
+	uploadAllSnapshotsFlag bool
+	uploadAllSnapshots     sync.Once
+)
+
+func UploadAllSnapshots() bool {
+	uploadAllSnapshots.Do(func() {
+		v, _ := os.LookupEnv("SNAPSHOT_UPLOAD_ALL")
+		if v == "true" {
+			uploadAllSnapshotsFlag = true
+			log.Info("[Experiment]", "SNAPSHOT_UPLOAD_ALL", uploadAllSnapshotsFlag)
+		}
+	})
+	return uploadAllSnapshotsFlag
+}
+
+var (
 	frozenBlockLimit     uint64
 	frozenBlockLimitOnce sync.Once
 )

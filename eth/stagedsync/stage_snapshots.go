@@ -192,7 +192,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		u := cfg.snapshotUploader
 
 		u.init(ctx, logger)
-		u.downloadLatestSnapshots(ctx, cfg.version)
+
+		if !dbg.UploadAllSnapshots() {
+			u.downloadLatestSnapshots(ctx, cfg.version)
+		}
 
 		if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
