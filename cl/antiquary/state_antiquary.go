@@ -421,11 +421,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 				return err
 			}
-			if s.currentState.Version() >= clparams.AltairVersion {
-				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
-					return err
-				}
-			}
 			continue
 		}
 
