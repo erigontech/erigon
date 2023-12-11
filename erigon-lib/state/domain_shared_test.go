@@ -126,7 +126,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	defer domains.Close()
 
 	for i := uint64(0); i < stepSize*2; i++ {
-		domains.SetTxNum(ctx, i)
+		domains.SetTxNum(i)
 		if err = domains.DomainPut(kv.AccountsDomain, hexutility.EncodeTs(i), nil, hexutility.EncodeTs(i), nil); err != nil {
 			panic(err)
 		}
@@ -150,7 +150,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
-		domains.SetTxNum(ctx, stepSize*2+1)
+		domains.SetTxNum(stepSize*2 + 1)
 		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(1), nil, nil); err != nil {
 			panic(err)
 		}
@@ -192,7 +192,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
-		domains.SetTxNum(ctx, stepSize*2+2)
+		domains.SetTxNum(stepSize*2 + 2)
 		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(4), nil, nil); err != nil {
 			panic(err)
 		}
