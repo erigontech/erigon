@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -133,11 +134,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
+	s := time.Start()
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validator balances: %w", err)
 	}
+	fmt.Println("reconstructDiffedUint64List", time.Since(s))
 	balances := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)

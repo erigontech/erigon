@@ -399,14 +399,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		slashingsBytes = append(slashingsBytes, s.currentState.RawSlashings()...)
 
 		fullValidation := slot%100_000 == 0 || first
-		// We sanity check the state every 100k slots.
+		// We sanity check the state every 100k slots or when we start.
 		if err := transition.TransitionState(s.currentState, block, fullValidation); err != nil {
 			return err
 		}
 		first = false
-		if s.currentState.Slot() == 3868670 {
-			s.dumpFullBeaconState()
-		}
+		// if s.currentState.Slot() == 3868670 {
+		// 	s.dumpFullBeaconState()
+		// }
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
@@ -764,18 +764,18 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 	return c.Collect(k, common.Copy(b.Bytes()))
 }
 
-func (s *Antiquary) dumpFullBeaconState() {
-	b, err := s.currentState.EncodeSSZ(nil)
-	if err != nil {
-		s.logger.Error("Failed to encode full beacon state", "err", err)
-		return
-	}
-	// just dump it in a.txt like an idiot without afero
-	if err := os.WriteFile("b.txt", b, 0644); err != nil {
-		s.logger.Error("Failed to write full beacon state", "err", err)
-	}
+// func (s *Antiquary) dumpFullBeaconState() {
+// 	b, err := s.currentState.EncodeSSZ(nil)
+// 	if err != nil {
+// 		s.logger.Error("Failed to encode full beacon state", "err", err)
+// 		return
+// 	}
+// 	// just dump it in a.txt like an idiot without afero
+// 	if err := os.WriteFile("b.txt", b, 0644); err != nil {
+// 		s.logger.Error("Failed to write full beacon state", "err", err)
+// 	}
 
-}
+// }
 
 func flattenRandaoMixes(hashes []libcommon.Hash) []byte {
 	out := make([]byte, len(hashes)*32)
