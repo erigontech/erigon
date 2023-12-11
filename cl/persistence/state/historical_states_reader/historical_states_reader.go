@@ -156,12 +156,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read randao mixes: %w", err)
 	}
 	ret.SetRandaoMixes(randaoMixes)
+	slashingsVector := solid.NewUint64VectorSSZ(int(r.cfg.EpochsPerSlashingsVector))
 	// Slashings
-	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
+	err = r.reconstructUint64ListDump(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
-	ret.SetSlashings(slashings)
+	ret.SetSlashings(slashingsVector)
 
 	// Finality
 	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(slot))
@@ -201,15 +202,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if ret.Version() < clparams.AltairVersion {
 		return ret, ret.InitBeaconState()
 	}
+	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	// Inactivity
-	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
+	err = r.reconstructUint64ListDump(tx, slot, kv.InactivityScores, int(minimalBeaconState.ValidatorLength), inactivityScores)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read inactivity scores: %w", err)
 	}
-	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
-	if err := inactivityScores.DecodeSSZ(inactivityScoresBytes, 0); err != nil {
-		return nil, fmt.Errorf("failed to decode inactivity scores: %w", err)
-	}
+
 	ret.SetInactivityScoresRaw(inactivityScores)
 	// Sync
 	syncCommitteeSlot := r.cfg.RoundSlotToSyncCommitteePeriod(slot)
@@ -425,55 +424,44 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	return currentList, err
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64Vector(tx kv.Tx, slot uint64, diffBucket string, size int) (solid.Uint64ListSSZ, error) {
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	diffCursor, err := tx.Cursor(diffBucket)
+func (r *HistoricalStatesReader) reconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
+	diffCursor, err := tx.Cursor(bkt)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer diffCursor.Close()
-	out := solid.NewUint64VectorSSZ(size)
 
-	k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot))
+	k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if k == nil {
-		return nil, fmt.Errorf("diff not found for slot %d", slot)
+		return fmt.Errorf("diff not found for slot %d", slot)
+	}
+	keySlot := base_encoding.Decode64FromBytes4(k)
+	if keySlot > slot {
+		_, v, err = diffCursor.Prev()
+		if err != nil {
+			return err
+		}
 	}
 	var b bytes.Buffer
 	if _, err := b.Write(v); err != nil {
-		return nil, err
+		return err
 	}
 	// Read the diff file
 	zstdReader, err := zstd.NewReader(&b)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer zstdReader.Close()
 	currentList := make([]byte, size*8)
-	var n int
 
-	if n, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
-	}
-	if n != size*8 {
-		return nil, err
+	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 
-	for k, v, err := diffCursor.Next(); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
-		if len(k) != 4 {
-			return nil, fmt.Errorf("invalid key %x", k)
-		}
-		if base_encoding.Decode64FromBytes4(k) > slot {
-			return nil, fmt.Errorf("diff not found for slot %d", slot)
-		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, out.DecodeSSZ(currentList, 0)
+	return out.DecodeSSZ(currentList, 0)
 }
 
 func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot, validatorSetLength uint64) (*solid.ValidatorSet, []uint64, []uint64, error) {
