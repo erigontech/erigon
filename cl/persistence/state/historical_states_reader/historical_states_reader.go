@@ -183,6 +183,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
+	s = time.Now()
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
@@ -199,6 +200,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochParticipation(currentIdxs)
 		ret.SetPreviousEpochParticipation(previousIdxs)
 	}
+	fmt.Println("participation", time.Since(s))
 
 	if ret.Version() < clparams.AltairVersion {
 		return ret, ret.InitBeaconState()
