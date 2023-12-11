@@ -525,18 +525,9 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	}
 
 	// commitment delete already has been applied via account
-	pc, err := sd.LatestCode(addr)
-	if err != nil {
+	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil); err != nil {
 		return err
 	}
-	if len(pc) > 0 {
-		sd.Commitment.TouchPlainKey(addrS, nil, sd.Commitment.TouchCode)
-		sd.put(kv.CodeDomain, addrS, nil)
-		if err := sd.aggCtx.code.DeleteWithPrev(addr, nil, pc); err != nil {
-			return err
-		}
-	}
-
 	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
 		return err
 	}
