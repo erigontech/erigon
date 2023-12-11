@@ -913,7 +913,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if min > 0 {
 		min-- //[startTxNum, endTxNum)
 	}
-	a.minimaxTxNumInFiles.Store(min - 1)
+	a.minimaxTxNumInFiles.Store(min)
 }
 
 type RangesV3 struct {
