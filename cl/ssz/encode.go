@@ -57,6 +57,7 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
+
 	dst = buf
 	currentOffset := 0
 	dynamicComponents := []SizedObjectSSZ{}

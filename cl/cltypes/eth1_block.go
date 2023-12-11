@@ -94,8 +94,11 @@ func (*Eth1Block) Static() bool {
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
 	var transactionsRoot, withdrawalsRoot libcommon.Hash
-	if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
-		return nil, err
+	// Corner case: before TTD this is 0, since all fields are 0, a 0 hash check will suffice.
+	if b.BlockHash != (libcommon.Hash{}) {
+		if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
+			return nil, err
+		}
 	}
 	if b.version >= clparams.CapellaVersion {
 		withdrawalsRoot, err = b.Withdrawals.HashSSZ()

@@ -13,7 +13,7 @@ import (
 )
 
 // Constants to represent the size and layout of a Checkpoint
-const checkpointSize = 32 + 8 // BlockRoot(32 bytes) + Epoch(8 bytes)
+const CheckpointSize = 32 + 8 // BlockRoot(32 bytes) + Epoch(8 bytes)
 
 type Checkpoint []byte // Define Checkpoint as a byte slice
 
@@ -22,7 +22,7 @@ func NewCheckpointFromParameters(
 	blockRoot libcommon.Hash, // A hash representing the block root
 	epoch uint64, // An unsigned 64-bit integer representing the epoch
 ) Checkpoint {
-	var c Checkpoint = make([]byte, checkpointSize)
+	var c Checkpoint = make([]byte, CheckpointSize)
 	c.SetBlockRoot(blockRoot)
 	c.SetEpoch(epoch)
 	return c
@@ -30,7 +30,7 @@ func NewCheckpointFromParameters(
 
 // NewCheckpoint returns a new Checkpoint with the underlying byte slice initialized to zeros
 func NewCheckpoint() Checkpoint {
-	return make([]byte, checkpointSize)
+	return make([]byte, CheckpointSize)
 }
 
 func (c Checkpoint) MarshalJSON() ([]byte, error) {
@@ -92,7 +92,7 @@ func (c Checkpoint) BlockRoot() (o libcommon.Hash) {
 
 // EncodingSizeSSZ returns the size of the Checkpoint object when encoded as SSZ.
 func (Checkpoint) EncodingSizeSSZ() int {
-	return checkpointSize
+	return CheckpointSize
 }
 
 // DecodeSSZ decodes the Checkpoint object from SSZ-encoded data.
