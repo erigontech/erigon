@@ -489,9 +489,6 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		//if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
-		//	return err
-		//}
 		if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 			return err
 		}
