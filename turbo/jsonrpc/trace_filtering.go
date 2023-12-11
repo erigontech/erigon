@@ -557,7 +557,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	it := MapTxNum2BlockNum(dbtx, allTxs)
+	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
 
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
