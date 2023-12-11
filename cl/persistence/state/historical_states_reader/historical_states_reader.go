@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -549,6 +550,22 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	if err != nil {
 		return nil, nil, err
 	}
+	// trigger the cache for shuffled sets in parallel
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = r.computeCommittee(ret.RandaoMixes(), currentActiveIndicies, slot, r.cfg.TargetCommitteeSize, 0)
+	}()
+	if slot > r.cfg.SlotsPerEpoch {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = r.computeCommittee(ret.RandaoMixes(), previousActiveIndicies, slot-r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
+		}()
+	}
+	wg.Wait()
+
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
