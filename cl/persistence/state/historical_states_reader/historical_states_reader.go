@@ -160,11 +160,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetRandaoMixes(randaoMixes)
 	// Slashings
+	s = time.Now()
 	slashings, err := r.reconstructDiffedUint64Vector(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
 	ret.SetSlashings(slashings)
+	fmt.Println("reconstructDiffedUint64Vector", time.Since(s))
 
 	// Finality
 	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(slot))
@@ -206,6 +208,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if ret.Version() < clparams.AltairVersion {
 		return ret, ret.InitBeaconState()
 	}
+	s = time.Now()
 	// Inactivity
 	inactivityScoresBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.InactivityScores, "inactivity_scores")
 	if err != nil {
@@ -216,7 +219,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to decode inactivity scores: %w", err)
 	}
 	ret.SetInactivityScoresRaw(inactivityScores)
-
+	fmt.Println("inactivity", time.Since(s))
 	// Sync
 	syncCommitteeSlot := r.cfg.RoundSlotToSyncCommitteePeriod(slot)
 	currentSyncCommittee, err := state_accessors.ReadCurrentSyncCommittee(tx, syncCommitteeSlot)
@@ -492,6 +495,7 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 	if epoch == 0 {
 		prevActiveIds = activeIds
 	}
+	s := time.Now()
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if validatorIndex >= validatorSetLength {
 			return false
@@ -509,6 +513,9 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		}
 		return true
 	})
+	// Read the balances
+	fmt.Println("readValidatorsForHistoricalState", time.Since(s))
+	s = time.Now()
 	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorEffectiveBalance, "effective_balances")
 	if err != nil {
 		return nil, nil, nil, err
@@ -517,6 +524,7 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		out.Get(i).
 			SetEffectiveBalanceFromBytes(bytesEffectiveBalances[(i * 8) : (i*8)+8])
 	}
+	fmt.Println("reconstructDiffedUint64List", time.Since(s))
 	return out, activeIds, prevActiveIds, nil
 }
 
