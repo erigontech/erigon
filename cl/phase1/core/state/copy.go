@@ -22,7 +22,7 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 
 func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	if b.Version() == clparams.Phase0Version {
-		return bs.initBeaconState()
+		return bs.InitBeaconState()
 	}
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)

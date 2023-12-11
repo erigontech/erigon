@@ -28,12 +28,14 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	f := afero.NewMemMapFs()
 	a := antiquary.NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, f)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
-
 	// Now lets test it against the reader
-	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
+
+	vt = state_accessors.NewStaticValidatorTable()
+	require.NoError(t, state_accessors.ReadValidatorsTable(tx, vt))
+	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
 
 	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
 	require.NoError(t, err)
@@ -43,17 +45,22 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	postHash2, err := postState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(postHash2), libcommon.Hash(postHash))
-
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	t.Skip()
+	// t.Skip()
 	blocks, preState, postState := tests.GetPhase0Random()
+	runTest(t, blocks, preState, postState)
+}
+
+func TestStateAntiquaryBellatrix(t *testing.T) {
+	// t.Skip()
+	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }
