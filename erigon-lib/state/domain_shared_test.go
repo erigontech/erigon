@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
@@ -96,4 +97,80 @@ Loop:
 	}
 
 	goto Loop
+}
+
+func TestSharedDomain_IteratePrefix(t *testing.T) {
+	stepSize := uint64(8)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	ac := agg.MakeContext()
+	defer ac.Close()
+	ctx := context.Background()
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	ac = agg.MakeContext()
+	defer ac.Close()
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
+
+	for i := uint64(0); i < stepSize*2; i++ {
+		if err = domains.DomainPut(kv.StorageDomain, hexutility.EncodeTs(i), nil, hexutility.EncodeTs(i), nil); err != nil {
+			panic(err)
+		}
+	}
+
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+	domains.Close()
+
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
+	{ // no deletes
+		var list [][]byte
+		require.NoError(t, domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+			list = append(list, k)
+			return nil
+		}))
+		require.Equal(t, int(stepSize*2), len(list))
+	}
+	{ // delete marker is in RAM
+		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(1), nil, nil); err != nil {
+			panic(err)
+		}
+		var list [][]byte
+		require.NoError(t, domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+			list = append(list, k)
+			return nil
+		}))
+		require.Equal(t, int(stepSize*2-1), len(list))
+	}
+	{ // delete marker is in DB
+		require.NoError(t, domains.Flush(ctx, rwTx))
+		var list [][]byte
+		require.NoError(t, domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+			list = append(list, k)
+			return nil
+		}))
+		require.Equal(t, int(stepSize*2-1), len(list))
+	}
+	domains.Close()
+	ac.Close()
+	require.NoError(t, agg.BuildFiles(stepSize*2))
+	ac = agg.MakeContext()
+	defer ac.Close()
+	require.NoError(t, ac.Prune(ctx, rwTx))
+
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	defer domains.Close()
+	{ //delete marker is in Files
+		var list [][]byte
+		require.NoError(t, domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+			list = append(list, k)
+			return nil
+		}))
+		require.Equal(t, int(stepSize*2-1), len(list))
+	}
 }
