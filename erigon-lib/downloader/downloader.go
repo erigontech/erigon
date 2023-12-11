@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -39,6 +41,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -118,6 +122,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	if err := d.addTorrentFilesFromDisk(false); err != nil {
 		return nil, err
 	}
+
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
 	// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
 	d.wg.Add(1)
@@ -134,6 +139,27 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 	}()
 	return d, nil
+}
+
+const prohibitNewDownloadsFileName = "prohibit_new_downloads.lock"
+
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+func (d *Downloader) prohibitNewDownloads() error {
+	fPath := filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName)
+	f, err := os.Create(fPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}
+func (d *Downloader) newDownloadsAreProhibited() bool {
+	return dir.FileExist(filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName))
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -349,32 +375,65 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			if d.verbosity < log.LvlInfo {
-				break //of switch
-			}
+			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
+			if d.verbosity < log.LvlInfo || isDiagEnabled {
 
-			// more detailed statistic: download rate of each peer (for each file)
-			webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
-			for _, peer := range weebseedPeersOfThisFile {
-				urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
-				if urlObj, err := url.Parse(urlS); err == nil {
-					if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
-						webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
+				// more detailed statistic: download rate of each peer (for each file)
+				websRates := uint64(0)
+				webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
+				for _, peer := range weebseedPeersOfThisFile {
+					urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+					if urlObj, err := url.Parse(urlS); err == nil {
+						if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
+							dr := uint64(peer.DownloadRate())
+							webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(dr)))
+							websRates += dr
+						}
+
+						d.logger.Log(d.verbosity, "[snapshots] progress", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "webseeds", len(t.Metainfo().UrlList), "peers", len(peersOfThisFile))
 					}
 				}
+
+				lenght := uint64(len(weebseedPeersOfThisFile))
+				if lenght > 0 {
+					websRates = websRates / lenght
+				}
+
+				d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
+				rates := make([]interface{}, 0, len(peersOfThisFile)*2)
+				peersRates := uint64(0)
+				for _, peer := range peersOfThisFile {
+					dr := uint64(peer.DownloadRate())
+					rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
+					peersRates += dr
+				}
+				d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
+
+				lenght = uint64(len(peersOfThisFile))
+				if lenght > 0 {
+					peersRates = peersRates / uint64(len(peersOfThisFile))
+				}
+
+				if isDiagEnabled {
+					diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+						Name:            t.Name(),
+						TotalBytes:      uint64(t.Length()),
+						DownloadedBytes: uint64(t.BytesCompleted()),
+						WebseedsCount:   len(weebseedPeersOfThisFile),
+						PeersCount:      len(peersOfThisFile),
+						WebseedsRate:    websRates,
+						PeersRate:       peersRates,
+					})
+				}
 			}
-			d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
-			rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-			for _, peer := range peersOfThisFile {
-				rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(uint64(peer.DownloadRate()))))
-			}
-			d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
+
 		default:
 			noMetadata = append(noMetadata, t.Name())
 		}
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
+
 	if len(noMetadata) > 0 {
 		amount := len(noMetadata)
 		if len(noMetadata) > 5 {
@@ -521,21 +580,27 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	return nil
 }
 
-func (d *Downloader) exists(name string) bool {
-	// Paranoic Mode on: if same file changed infoHash - skip it
-	// use-cases:
-	//	- release of re-compressed version of same file,
-	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
-	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
+func (d *Downloader) alreadyHaveThisName(name string) bool {
 	for _, t := range d.torrentClient.Torrents() {
-		if t.Name() == name {
-			return true
+		select {
+		case <-t.GotInfo():
+			if t.Name() == name {
+				return true
+			}
+		default:
 		}
 	}
 	return false
 }
-func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	if d.exists(name) || !IsSnapNameAllowed(name) {
+
+func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	// Paranoic Mode on: if same file changed infoHash - skip it
+	// Example:
+	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
+		return nil
+	}
+	if d.newDownloadsAreProhibited() {
 		return nil
 	}
 
