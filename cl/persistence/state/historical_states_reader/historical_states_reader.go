@@ -64,10 +64,6 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	ret := state.New(r.cfg)
-	s := time.Now()
-	defer func() {
-		fmt.Println("read state", time.Since(s))
-	}()
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
@@ -249,6 +245,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Withdrawals
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
+	start := time.Now()
 	// Deep history valid from Capella onwards
 	historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit), 64)
 	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
@@ -257,6 +254,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}); err != nil {
 		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
+	fmt.Println("historical summaries", time.Since(start))
 	ret.SetHistoricalSummaries(historicalSummaries)
 	return ret, ret.InitBeaconState()
 }
