@@ -541,11 +541,13 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	fmt.Println("parallel", time.Since(s))
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
+		s := time.Now()
 		// Read the block
 		block, err := r.blockReader.ReadBlockBySlot(context.Background(), tx, i)
 		if err != nil {
 			return nil, nil, err
 		}
+		fmt.Println("block", time.Since(s))
 		if block == nil {
 			continue
 		}
