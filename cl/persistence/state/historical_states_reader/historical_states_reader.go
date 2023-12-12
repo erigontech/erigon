@@ -531,7 +531,6 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
-	fmt.Println(epoch, prevEpoch, beginSlot)
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
@@ -576,7 +575,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = ret.GetAttestationParticipationFlagIndicies(data, ret.Slot()-data.Slot())
+			participationFlagsIndicies, err = ret.GetAttestationParticipationFlagIndicies(data, ret.Slot()-data.Slot(), true)
 			if err != nil {
 				return false
 			}
