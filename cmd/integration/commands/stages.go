@@ -1425,7 +1425,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 			if err := _allBorSnapshotsSingleton.ReopenFolder(); err != nil {
 				panic(err)
 			}
-			_allBorSnapshotsSingleton.LogStat()
+			_allBorSnapshotsSingleton.LogStat("all")
 			db.View(context.Background(), func(tx kv.Tx) error {
 				_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)

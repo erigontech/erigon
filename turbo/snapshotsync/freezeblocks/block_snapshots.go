@@ -1508,7 +1508,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	}
 	if cc.Bor != nil {
 		borSnapshots := br.borSnapshots()
-		borSnapshots.LogStat()
+		borSnapshots.LogStat("missed-idx:index")
 
 		// Create .idx files
 		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
@@ -1532,7 +1532,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				if err := borSnapshots.ReopenFolder(); err != nil {
 					return err
 				}
-				borSnapshots.LogStat()
+				borSnapshots.LogStat("missed-idx:notify")
 				if notifier != nil {
 					notifier.OnNewSnapshot()
 				}

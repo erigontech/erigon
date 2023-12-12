@@ -299,7 +299,7 @@ func BorHeimdallForward(
 
 				if snap == nil {
 					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
-						chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+						cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
 					if err != nil {
 						return fmt.Errorf("can't initialise validator sets: %w", err)
@@ -655,9 +655,10 @@ func persistValidatorSets(
 
 func initValidatorSets(
 	ctx context.Context,
-	tx kv.Tx,
+	tx kv.RwTx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
+	heimdallClient heimdall.IHeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
@@ -683,8 +684,17 @@ func initValidatorSets(
 
 		// get validators and current span
 		zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
+
 		if err != nil {
-			return nil, err
+			if _, err := fetchAndWriteSpans(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
+				return nil, err
+			}
+
+			zeroSpanBytes, err = blockReader.Span(ctx, tx, 0)
+
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if zeroSpanBytes == nil {

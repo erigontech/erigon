@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -54,7 +53,7 @@ func (sn *BeaconBlockSegment) close() {
 func (sn *BeaconBlockSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
 	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks)
-	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
+	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -83,7 +82,7 @@ func (sn *BeaconBlockSegment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 	fileName := snaptype.IdxFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks.String())
-	sn.idxSlot, err = recsplit.OpenIndex(path.Join(dir, fileName))
+	sn.idxSlot, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -398,7 +397,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return BeaconBlocksIdx(ctx, f, path.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
+	return BeaconBlocksIdx(ctx, f, filepath.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, version uint8, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {

@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -256,6 +257,14 @@ Loop:
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
 				break
+			}
+		}
+
+		if dbg.StageSyncLimit() > 0 {
+			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
+				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(dbg.StageSyncLimit()*2) {
+					break
+				}
 			}
 		}
 

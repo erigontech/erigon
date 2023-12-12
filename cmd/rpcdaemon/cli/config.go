@@ -381,7 +381,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots.OptimisticReopenWithDB(db)
 		allBorSnapshots.OptimisticalyReopenWithDB(db)
 		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat()
+		allBorSnapshots.LogStat("remote")
 
 		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
@@ -410,7 +410,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
-					allBorSnapshots.LogStat()
+					allBorSnapshots.LogStat("reopen")
 				}
 
 				_ = reply.HistoryFiles

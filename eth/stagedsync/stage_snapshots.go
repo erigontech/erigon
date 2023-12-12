@@ -231,7 +231,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	cfg.blockReader.Snapshots().LogStat()
+	cfg.blockReader.Snapshots().LogStat("download")
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
@@ -435,16 +435,43 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				}
 			}
 
-			return snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader)
+			return nil
 		}, func(l []string) error {
-			if cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				return nil
+			if cfg.snapshotUploader != nil {
+				// TODO - we need to also remove files from the uploader (100k->500K transition)
 			}
-			_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
-			return err
+
+			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+				_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
+				return err
+			}
+
+			return nil
 		})
 
 		//cfg.agg.BuildFilesInBackground()
+	}
+
+	if cfg.snapshotUploader != nil {
+		// if we're uploading make sure that the DB does not get too far
+		// ahead of the snapshot production process - otherwise DB will
+		// grow larger than necessary - we may also want to increase the
+		// workers
+		if s.ForwardProgress > cfg.blockReader.FrozenBlocks()+200_000 {
+			func() {
+				checkEvery := time.NewTicker(logInterval)
+				defer checkEvery.Stop()
+
+				for s.ForwardProgress > cfg.blockReader.FrozenBlocks()+300_000 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-checkEvery.C:
+						log.Info(fmt.Sprintf("[%s] Awaiting snapshots", s.LogPrefix()), "progress", s.ForwardProgress, "frozen", cfg.blockReader.FrozenBlocks(), "gap", s.ForwardProgress-cfg.blockReader.FrozenBlocks())
+					}
+				}
+			}()
+		}
 	}
 
 	if !useExternalTx {

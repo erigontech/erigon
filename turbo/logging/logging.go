@@ -3,7 +3,6 @@ package logging
 import (
 	"flag"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 
@@ -202,7 +201,7 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   path.Join(dirPath, filePrefix+".log"),
+		Filename:   filepath.Join(dirPath, filePrefix+".log"),
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days

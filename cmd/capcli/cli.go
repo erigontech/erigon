@@ -685,7 +685,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, r.SnapshotVersion, log.Root())
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
@@ -697,7 +697,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, r.SnapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
