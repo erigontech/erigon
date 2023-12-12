@@ -757,6 +757,7 @@ Loop:
 				if txTask.Error != nil {
 					break Loop
 				}
+				fmt.Printf("------- txIdx %d ----\n", txTask.TxIndex)
 				applyWorker.RunTxTaskNoLock(txTask)
 				if err := func() error {
 					if errors.Is(txTask.Error, context.Canceled) {
@@ -765,6 +766,7 @@ Loop:
 					if txTask.Error != nil {
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
+					fmt.Printf("------- GasUsed %d, %d ----\n", txTask.UsedGas, txTask.TxIndex)
 					gasUsed += txTask.UsedGas
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
