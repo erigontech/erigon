@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -64,7 +63,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	ret := state.New(r.cfg)
-	s := time.Now()
+
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
@@ -104,7 +103,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
 	ret.SetSlot(slot)
 	ret.SetFork(minimalBeaconState.Fork)
-
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
@@ -127,8 +125,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read historical roots: %w", err)
 	}
 	ret.SetHistoricalRoots(historicalRoots)
-	fmt.Println(time.Since(s), "after read partial state")
-	s = time.Now()
 
 	// Eth1
 	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
@@ -138,8 +134,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
-	fmt.Println(time.Since(s), "after read eth1")
-	s = time.Now()
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
@@ -150,25 +144,18 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
 	ret.SetBalances(balances)
-	fmt.Println(time.Since(s), "after read balances")
 
-	s = time.Now()
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
 	ret.SetValidators(validatorSet)
-	fmt.Println(time.Since(s), "after read validators")
 	// Randomness
-	s = time.Now()
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
 	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
 		return nil, fmt.Errorf("failed to read randao mixes: %w", err)
 	}
 	ret.SetRandaoMixes(randaoMixes)
-	fmt.Println(time.Since(s), "after read randao mixes")
-
-	s = time.Now()
 	slashingsVector := solid.NewUint64VectorSSZ(int(r.cfg.EpochsPerSlashingsVector))
 	// Slashings
 	err = r.reconstructUint64ListDump(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
@@ -176,7 +163,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
 	ret.SetSlashings(slashingsVector)
-	fmt.Println(time.Since(s), "after read slashings")
 
 	// Finality
 	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(slot))
@@ -196,8 +182,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
-
-	s = time.Now()
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
@@ -214,7 +198,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochParticipation(currentIdxs)
 		ret.SetPreviousEpochParticipation(previousIdxs)
 	}
-	fmt.Println(time.Since(s), "after read participations")
 
 	if ret.Version() < clparams.AltairVersion {
 		return ret, ret.InitBeaconState()
