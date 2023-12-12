@@ -1141,9 +1141,9 @@ func (m *BorMerger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		isRecent := r.IsRecent(maxBlockNum)
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2RecentMergeLimit), MergeSteps
+		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
 		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2MergeLimit, RecentMergeSteps
+			mergeLimit, mergeSteps = snaptype.Erigon2RecentMergeLimit, RecentMergeSteps
 		}
 
 		if r.to-r.from >= mergeLimit {

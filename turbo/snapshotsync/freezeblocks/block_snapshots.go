@@ -2551,7 +2551,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			m.removeOldFiles(toMerge[t], snapDir, snapshots.Version())
 		}
 	}
-	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from)
+	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
 	return nil
 }
 
