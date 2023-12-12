@@ -109,22 +109,6 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}
 	}
 
-	vTables := state_accessors.NewStaticValidatorTable()
-	// get the initial state
-	genesisState, err := initial_state.GetGenesisState(clparams.NetworkType(beaconConfig.DepositNetworkID))
-	if err != nil {
-		return err
-	}
-	antiq := antiquary.NewAntiquary(ctx, genesisState, vTables, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states, af)
-	// Create the antiquary
-	if backfilling {
-		go func() {
-			if err := antiq.Loop(); err != nil {
-				logger.Error("Antiquary failed", "err", err)
-			}
-		}()
-	}
-
 	pool := pool.NewOperationsPool(beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
@@ -217,6 +201,26 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	if err := beacon_indicies.WriteHighestFinalized(tx, 0); err != nil {
 		return err
 	}
+
+	vTables := state_accessors.NewStaticValidatorTable()
+	// Read the the current table
+	if states {
+		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
+			return err
+		}
+	}
+	// get the initial state
+	genesisState, err := initial_state.GetGenesisState(clparams.NetworkType(beaconConfig.DepositNetworkID))
+	if err != nil {
+		return err
+	}
+	antiq := antiquary.NewAntiquary(ctx, genesisState, vTables, beaconConfig, dirs, snDownloader, db, csn, rcsn, beaconDB, logger, states, af)
+	// Create the antiquary
+	go func() {
+		if err := antiq.Loop(); err != nil {
+			logger.Error("Antiquary failed", "err", err)
+		}
+	}()
 
 	if err := tx.Commit(); err != nil {
 		return err

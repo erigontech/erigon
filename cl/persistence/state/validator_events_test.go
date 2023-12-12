@@ -1,7 +1,6 @@
 package state_accessors
 
 import (
-	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -28,7 +27,6 @@ func TestStateEvents(t *testing.T) {
 	events.ChangeSlashed(2, true)
 	// Ok now lets replay it.
 	ReplayEvents(func(validatorIndex uint64, validator solid.Validator) error {
-		fmt.Println(validator)
 		require.Equal(t, validator, solid.NewValidator())
 		return nil
 	}, func(validatorIndex, exitEpoch uint64) error {
