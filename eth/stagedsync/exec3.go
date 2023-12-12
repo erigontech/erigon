@@ -766,7 +766,6 @@ Loop:
 					if txTask.Error != nil {
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
-					fmt.Printf("------- GasUsed %d, %d ----\n", txTask.UsedGas, txTask.TxIndex)
 					gasUsed += txTask.UsedGas
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
@@ -808,6 +807,7 @@ Loop:
 					return err
 				}
 
+				fmt.Printf("------- GasUsed %d ----\n", txTask.UsedGas)
 				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 			}
