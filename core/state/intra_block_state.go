@@ -584,8 +584,8 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
 	newObj.data.Initialised = true
+	fmt.Printf("[dbg] prevInc4 = %d -> %d, %x\n", newObj.data.PrevIncarnation, prevInc, addr)
 	newObj.data.PrevIncarnation = prevInc
-	fmt.Printf("[dbg] prevInc4 = %d, %x\n", prevInc, addr)
 
 	if contractCreation {
 		newObj.createdContract = true
