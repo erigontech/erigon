@@ -401,10 +401,14 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
-	if original.Incarnation > account.Incarnation {
+	if account.Incarnation == 0 && original.Incarnation > 0 {
 		//del, before create: to clanup code/storage
-		w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), nil)
+		w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+			return nil
+		})
 	}
+
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 
