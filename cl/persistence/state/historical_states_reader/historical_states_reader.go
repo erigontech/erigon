@@ -144,11 +144,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
 	ret.SetBalances(balances)
+	s := time.Now()
 
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
+	fmt.Println("read validators", time.Since(s))
 	ret.SetValidators(validatorSet)
 	// Randomness
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
