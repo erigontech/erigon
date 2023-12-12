@@ -64,7 +64,10 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	ret := state.New(r.cfg)
-
+	s := time.Now()
+	defer func() {
+		fmt.Println("read state", time.Since(s))
+	}()
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
