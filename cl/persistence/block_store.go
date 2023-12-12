@@ -114,6 +114,10 @@ func (b *GossipSource) grabOrCreate(ctx context.Context, id uint64) chan *peers.
 		ch = make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 3)
 		b.blocks.Set(id, ch)
 	}
+	// if there are ever more than 512 blocks, clear the last 256 blocks
+	if b.blocks.Len() > 512 {
+		b.purgeRange(ctx, nil, 0, id-256)
+	}
 	return ch
 }
 func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
@@ -131,9 +135,13 @@ func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count
 	return out, nil
 }
 
-func (b *GossipSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
+func (b *GossipSource) PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.purgeRange(ctx, tx, from, count)
+}
+
+func (b *GossipSource) purgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
 	initSize := count
 	if initSize > 256 {
 		initSize = 256

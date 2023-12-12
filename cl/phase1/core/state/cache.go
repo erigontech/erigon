@@ -45,7 +45,7 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.initBeaconState()
+	state.InitBeaconState()
 	return state
 }
 
@@ -53,7 +53,7 @@ func NewFromRaw(r *raw.BeaconState) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: r,
 	}
-	state.initBeaconState()
+	state.InitBeaconState()
 	return state
 }
 
@@ -216,7 +216,7 @@ func (b *CachingBeaconState) initCaches() error {
 	return nil
 }
 
-func (b *CachingBeaconState) initBeaconState() error {
+func (b *CachingBeaconState) InitBeaconState() error {
 	b._refreshActiveBalances()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
