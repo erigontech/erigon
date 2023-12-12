@@ -134,7 +134,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
-	s := time.Now()
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
 	if err != nil {
@@ -145,14 +144,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
 	ret.SetBalances(balances)
-	fmt.Println("balances", time.Since(s))
-	s = time.Now()
 
 	validatorSet, currActiveIdxs, prevActiveIdxs, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
-	fmt.Println("read validators", time.Since(s))
 	ret.SetValidators(validatorSet)
 	// Randomness
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
@@ -186,7 +182,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
-	s = time.Now()
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
 		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
@@ -203,7 +198,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochParticipation(currentIdxs)
 		ret.SetPreviousEpochParticipation(previousIdxs)
 	}
-	fmt.Println("participations", time.Since(s))
 
 	if ret.Version() < clparams.AltairVersion {
 		return ret, ret.InitBeaconState()
@@ -251,7 +245,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Withdrawals
 	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
 	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
-	start := time.Now()
 	// Deep history valid from Capella onwards
 	historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit), 64)
 	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
@@ -260,7 +253,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}); err != nil {
 		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
-	fmt.Println("historical summaries", time.Since(start))
 	ret.SetHistoricalSummaries(historicalSummaries)
 	return ret, ret.InitBeaconState()
 }
