@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -535,8 +536,9 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	// trigger the cache for shuffled sets in parallel
+	s := time.Now()
 	r.tryCachingEpochsInParallell(randaoMixes, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch})
-
+	fmt.Println("parallel", time.Since(s))
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
