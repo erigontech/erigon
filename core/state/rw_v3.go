@@ -657,6 +657,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 }
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, 0)
 	return 0, nil
 }
 
