@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -34,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -135,6 +138,27 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 	}()
 	return d, nil
+}
+
+const prohibitNewDownloadsFileName = "prohibit_new_downloads.lock"
+
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+func (d *Downloader) prohibitNewDownloads() error {
+	fPath := filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName)
+	f, err := os.Create(fPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}
+func (d *Downloader) newDownloadsAreProhibited() bool {
+	return dir.FileExist(filepath.Join(d.SnapDir(), prohibitNewDownloadsFileName))
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -555,23 +579,30 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	return nil
 }
 
-func (d *Downloader) exists(name string) bool {
-	// Paranoic Mode on: if same file changed infoHash - skip it
-	// use-cases:
-	//	- release of re-compressed version of same file,
-	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
-	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
+func (d *Downloader) alreadyHaveThisName(name string) bool {
 	for _, t := range d.torrentClient.Torrents() {
-		if t.Name() == name {
-			return true
+		select {
+		case <-t.GotInfo():
+			if t.Name() == name {
+				return true
+			}
+		default:
 		}
 	}
 	return false
 }
-func (d *Downloader) AddInfoHashAsMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	if d.exists(name) {
+
+func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	// Paranoic Mode on: if same file changed infoHash - skip it
+	// Example:
+	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+	if d.alreadyHaveThisName(name) {
 		return nil
 	}
+	if d.newDownloadsAreProhibited() {
+		return nil
+	}
+
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
