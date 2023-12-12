@@ -691,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
 		return err
 	}
-	fmt.Println(allSnapshots.BlocksAvailable(), allSnapshots.Dir())
+	fmt.Println(allSnapshots.IndicesMax(), allSnapshots.Dir())
 
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
