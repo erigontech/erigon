@@ -1331,6 +1331,8 @@ func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs,
 		return ac.storage.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CodeHistoryIdx:
 		return ac.code.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.CommitmentHistoryIdx:
+		return ac.commitment.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
 		return ac.logTopics.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogAddrIdx:
@@ -1493,34 +1495,42 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 }
 
 // search key in all files of all domains and print file names
-func (ac *AggregatorV3Context) DebugKey(k []byte) error {
-	l, err := ac.account.DebugKVFilesWithKey(k)
-	if err != nil {
-		return err
-	}
-	if len(l) > 0 {
-		log.Info("[dbg] found in", "files", l)
-	}
-	l, err = ac.code.DebugKVFilesWithKey(k)
-	if err != nil {
-		return err
-	}
-	if len(l) > 0 {
-		log.Info("[dbg] found in", "files", l)
-	}
-	l, err = ac.storage.DebugKVFilesWithKey(k)
-	if err != nil {
-		return err
-	}
-	if len(l) > 0 {
-		log.Info("[dbg] found in", "files", l)
-	}
-	l, err = ac.commitment.DebugKVFilesWithKey(k)
-	if err != nil {
-		return err
-	}
-	if len(l) > 0 {
-		log.Info("[dbg] found in", "files", l)
+func (ac *AggregatorV3Context) DebugKey(domain kv.Domain, k []byte) error {
+	switch domain {
+	case kv.AccountsDomain:
+		l, err := ac.account.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.StorageDomain:
+		l, err := ac.code.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CodeDomain:
+		l, err := ac.storage.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CommitmentDomain:
+		l, err := ac.commitment.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
 	}
 	return nil
 }

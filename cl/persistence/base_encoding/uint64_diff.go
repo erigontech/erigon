@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // make a sync.pool of compressors (zstd)
@@ -211,7 +212,7 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 	temp := make([]byte, 8)
 	currIndex := 0
 	for i := 0; i < int(length); i++ {
-		n, err := decompressor.Read(temp[:4])
+		n, err := utils.ReadZSTD(decompressor, temp[:4])
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
@@ -219,7 +220,8 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 			return nil, io.EOF
 		}
 		entry.count = binary.BigEndian.Uint32(temp[:4])
-		n, err = decompressor.Read(temp)
+
+		n, err = utils.ReadZSTD(decompressor, temp)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}

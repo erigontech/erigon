@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -165,6 +166,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "key", Required: true},
+				&cli.StringFlag{Name: "domain", Required: true},
 			}),
 		},
 	},
@@ -236,6 +238,22 @@ func doDebugKey(cliCtx *cli.Context) error {
 		return err
 	}
 	key := common.FromHex(cliCtx.String("key"))
+	var domain kv.Domain
+	var idx kv.InvertedIdx
+	ds := cliCtx.String("domain")
+	switch ds {
+	case "accounts":
+		domain, idx = kv.AccountsDomain, kv.AccountsHistoryIdx
+	case "storage":
+		domain, idx = kv.StorageDomain, kv.StorageHistoryIdx
+	case "code":
+		domain, idx = kv.CodeDomain, kv.CodeHistoryIdx
+	case "commitment":
+		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
+	default:
+		panic(ds)
+	}
+
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
@@ -250,7 +268,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	view := agg.MakeContext()
 	defer view.Close()
-	if err := view.DebugKey(key); err != nil {
+	if err := view.DebugKey(domain, key); err != nil {
 		return err
 	}
 	tx, err := chainDB.BeginRo(ctx)
@@ -258,17 +276,22 @@ func doDebugKey(cliCtx *cli.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, _, err := view.GetLatest(kv.AccountsDomain, key, nil, tx); err != nil {
+	if _, _, err := view.GetLatest(domain, key, nil, tx); err != nil {
 		return err
 	}
-	if _, _, err := view.GetLatest(kv.CodeDomain, key, nil, tx); err != nil {
-		return err
-	}
-	if _, _, err := view.GetLatest(kv.StorageDomain, key, nil, tx); err != nil {
-		return err
-	}
-	if _, _, err := view.GetLatest(kv.CommitmentDomain, key, nil, tx); err != nil {
-		return err
+	{
+		it, err := view.IndexRange(idx, key, -1, -1, order.Asc, -1, tx)
+		if err != nil {
+			return err
+		}
+		blockNumsIt := rawdbv3.TxNums2BlockNums(tx, it, order.Asc)
+		var blockNums, txNums []uint64
+		for blockNumsIt.HasNext() {
+			txNum, blockNum, _, _, _, _ := blockNumsIt.Next()
+			blockNums = append(blockNums, blockNum)
+			txNums = append(txNums, txNum)
+		}
+		log.Info("HistoryIdx", "blockNums", blockNums, "txNums", txNums)
 	}
 
 	return nil
