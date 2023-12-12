@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
-type genesisReponse struct {
+type genesisResponse struct {
 	GenesisTime          uint64           `json:"genesis_time,omitempty"`
 	GenesisValidatorRoot common.Hash      `json:"genesis_validator_root,omitempty"`
 	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
@@ -25,7 +25,7 @@ func (a *ApiHandler) getGenesis(r *http.Request) (*beaconResponse, error) {
 		return nil, err
 	}
 
-	return newBeaconResponse(&genesisReponse{
+	return newBeaconResponse(&genesisResponse{
 		GenesisTime:          a.genesisCfg.GenesisTime,
 		GenesisValidatorRoot: a.genesisCfg.GenesisValidatorRoot,
 		GenesisForkVersion:   digest,
