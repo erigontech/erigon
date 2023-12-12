@@ -54,14 +54,6 @@ func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader free
 	}
 }
 
-// previousVersion returns the previous version of the state.
-func previousVersion(v clparams.StateVersion) clparams.StateVersion {
-	if v == clparams.Phase0Version {
-		return clparams.Phase0Version
-	}
-	return v - 1
-}
-
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	ret := state.New(r.cfg)
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
