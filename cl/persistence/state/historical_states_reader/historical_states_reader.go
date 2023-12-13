@@ -127,7 +127,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1Data(minimalBeaconState.Eth1Data)
 	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
 	// Registry (Validators + Balances)
-	balancesBytes, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorBalance, "balances")
+	balancesBytes, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validator balances: %w", err)
 	}
@@ -398,6 +398,77 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	defer diffCursor.Close()
 
 	for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
+		if err != nil {
+			return nil, err
+		}
+		if len(k) != 4 {
+			return nil, fmt.Errorf("invalid key %x", k)
+		}
+		if base_encoding.Decode64FromBytes4(k) > slot {
+			return nil, fmt.Errorf("diff not found for slot %d", slot)
+		}
+		s := time.Now()
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("diffing", time.Since(s))
+	}
+
+	return currentList, err
+}
+
+func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diffBucket string) ([]byte, error) {
+	// Read the file
+	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	_, filePath := clparams.EpochToPaths(freshDumpSlot, r.cfg, "balances")
+	file, err := r.fs.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the diff file
+	zstdReader, err := zstd.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer zstdReader.Close()
+
+	lenRaw := uint64(0)
+	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
+		return nil, err
+	}
+	currentList := make([]byte, lenRaw)
+
+	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
+		return nil, err
+	}
+	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
+	fmt.Println(roundedSlot, freshDumpSlot)
+	for i := freshDumpSlot; i < roundedSlot; i += r.cfg.SlotsPerEpoch {
+		diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
+		if err != nil {
+			return nil, err
+		}
+		if len(diff) == 0 {
+			continue
+		}
+		fmt.Println(i)
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// now start diffing
+	diffCursor, err := tx.Cursor(diffBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer diffCursor.Close()
+
+	for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(roundedSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
 		if err != nil {
 			return nil, err
 		}

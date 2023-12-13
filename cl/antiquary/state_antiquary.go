@@ -383,6 +383,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
 				}
+				s.balances32 = s.balances32[:0]
+				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			}
 
 			continue
@@ -431,7 +433,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 				return err
 			}
-		} else if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+			s.balances32 = s.balances32[:0]
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+		} else if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
