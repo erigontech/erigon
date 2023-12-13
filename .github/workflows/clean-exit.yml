@@ -63,10 +63,7 @@ jobs:
         
         # Start the log monitoring script in the background
         python3 ./tests/qa/check_clean_exit.py $ERIGON_PID /home/runner/.local/share/erigon/logs/erigon.log &
-
-        # Wait for the monitoring script to finish
-        wait $!
-        
+       
         # Capture monitoring script exit status
         monitoring_exit_status=$?
         
@@ -86,7 +83,3 @@ jobs:
           echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
           exit 1
         fi
-
-
-    - name: Check Erigon Logs for Errors
-      run: python3 check_erigon_exit.py

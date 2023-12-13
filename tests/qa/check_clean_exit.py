@@ -56,7 +56,7 @@ def check_log_for_exit_status(log_file):
 
 def send_ctrl_c_and_check_log(pid, log_file):
     try:
-        time.sleep(1)  # Wait 60 seconds before sending SIGINT, please increment this delay as necessary
+        time.sleep(120)  # Wait before sending SIGINT, please increment this delay as necessary
 
         # Send SIGINT (equivalent to Ctrl-C) to the process
         os.kill(pid, signal.SIGINT)
@@ -80,10 +80,12 @@ def send_ctrl_c_and_check_log(pid, log_file):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python script.py <PID> <log_file>")
+        print("Usage: <PID> <log_file>")
         sys.exit(1)
 
     pid = int(sys.argv[1])
     log_file = sys.argv[2]
+
+    print(f"Checking pid={pid} log={log_file}")
 
     send_ctrl_c_and_check_log(pid, log_file)
