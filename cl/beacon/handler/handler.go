@@ -75,6 +75,7 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", http.NotFound) // otterscan
 					r.Get("/head/committees", http.NotFound)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
