@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -254,7 +255,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
-		chainReader := stagedsync.NewChainReaderImpl(e.config, tx, e.blockReader, e.logger)
+		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
 
 		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
 		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
