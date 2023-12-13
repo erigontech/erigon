@@ -55,9 +55,11 @@ jobs:
     #  run: |
     #    curl -o check_erigon_exit.py 'https://gist.githubusercontent.com/mriccobene/8db4030a745de34d527f136f2caa104f/raw/3c1a860cb87d61075e78ce399e17f0ab157cacc6/check_erigon_exit.py'
 
-    - name: Run Erigon and Monitor Logs
+    - name: Run Erigon, send ctrl-c and check for clean exiting
       run: |
-        # Run Erigon in background 
+        # Run Erigon in background, send ctrl-c and check logs
+        
+        # Run Erigon in background
         ./build/bin/erigon & 
         ERIGON_PID=$!
         

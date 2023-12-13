@@ -2,6 +2,7 @@ import os
 import signal
 import time
 import sys
+from datetime import datetime
 
 
 def check_if_process_exists(pid):
@@ -49,14 +50,15 @@ def check_log_for_exit_status(log_file):
         log_lines = read_incrementally(file)
         for line in log_lines:
             if "SIGSEGV" in line:  # Adjust this condition based on how seg fault is logged
-                return False  # Indicates a segmentation fault
+                print("e")
+                return False, "segmentation fault"
             print(".", end="")  # Print a dot for each line in the log file (to indicate "progress
-    return True  # Default to False if neither condition is found
-
+    print("e")
+    return True, "clean exit"  # Default to False if neither condition is found
 
 def send_ctrl_c_and_check_log(pid, log_file):
     try:
-        time.sleep(120)  # Wait before sending SIGINT, please increment this delay as necessary
+        time.sleep(1)  # Wait 60 seconds before sending SIGINT, please increment this delay as necessary
 
         # Send SIGINT (equivalent to Ctrl-C) to the process
         os.kill(pid, signal.SIGINT)
@@ -64,14 +66,17 @@ def send_ctrl_c_and_check_log(pid, log_file):
         # Wait for process to exit in a reasonable amount of time
         exited = wait_for_process_to_exit(pid, timeout=600)
         if not exited:
-            print("Process did not exit within timeout period")
+            print("Check failed: process did not exit within timeout period")
             sys.exit(1)
 
         # Check the log file for exit status
-        clean_exit_status = check_log_for_exit_status(log_file)
-        if clean_exit_status:
+        clean_exit, reason = check_log_for_exit_status(log_file)
+
+        if clean_exit:
+            print("Check passed: {}".format(reason))
             sys.exit(0)  # Clean exit
         else:
+            print("Check completed with error: {}".format(reason))
             sys.exit(1)  # Segmentation fault or error
     except Exception as e:
         print("Check error: {}".format(e))
@@ -85,7 +90,8 @@ if __name__ == "__main__":
 
     pid = int(sys.argv[1])
     log_file = sys.argv[2]
+    current_utc_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-    print(f"Checking pid={pid} log={log_file}")
+    print(f"Checking pid={pid} log={log_file} start-time={current_utc_time}")
 
     send_ctrl_c_and_check_log(pid, log_file)
