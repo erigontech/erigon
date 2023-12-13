@@ -31,10 +31,12 @@ func ProgressPrinter(logPrefix string, total uint64) (chan uint64, func()) {
 					pct = (pc * 100) / total
 				}
 			case <-ticker.C:
-				if total > 0 {
-					log.Info(fmt.Sprintf("[%s] Progress: %d/%d (%d%%)", logPrefix, pc, total, pct))
-				} else {
-					log.Info(fmt.Sprintf("[%s] Progress: %d / unknown", logPrefix, pc))
+				if pc > 0 {
+					if total > 0 {
+						log.Info(fmt.Sprintf("[%s] Progress: %d/%d (%d%%)", logPrefix, pc, total, pct))
+					} else {
+						log.Info(fmt.Sprintf("[%s] Progress: %d / unknown", logPrefix, pc))
+					}
 				}
 			case <-ctDone:
 				return

@@ -86,7 +86,6 @@ func SpawnStageBatches(
 		return fmt.Errorf("failed to create hermezDb: %v", err)
 	}
 
-	log.Info(fmt.Sprintf("[%s] Getting stage progress...", logPrefix))
 	batchesProgress, err := sync_stages.GetStageProgress(tx, sync_stages.Batches)
 	if err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
