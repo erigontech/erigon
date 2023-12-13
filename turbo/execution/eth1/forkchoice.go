@@ -212,6 +212,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
 			isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
+			log.Warn("[dbg] forkChoice2", "currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash, "isCanonicalHash", isCanonicalHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
