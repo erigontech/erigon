@@ -460,41 +460,11 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	}
 
 	// commitment delete already has been applied via account
-	pc, err := sd.LatestCode(addr)
-	if err != nil {
+	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil); err != nil {
 		return err
 	}
-	if len(pc) > 0 {
-		sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchCode)
-		sd.put(kv.CodeDomain, addrS, nil)
-		if err := sd.aggCtx.code.DeleteWithPrev(addr, nil, pc); err != nil {
-			return err
-		}
-	}
-
-	// bb, _ := hex.DecodeString("d96d1b15d6bec8e7d37038237b1e913ad99f7dee")
-	// if bytes.Equal(bb, addr) {
-	// 	fmt.Printf("delete account %x \n", addr)
-	// }
-
-	type pair struct{ k, v []byte }
-	tombs := make([]pair, 0, 8)
-	err = sd.IterateStoragePrefix(addr, func(k, v []byte) error {
-		tombs = append(tombs, pair{k, v})
-		return nil
-	})
-	if err != nil {
+	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
 		return err
-	}
-
-	for _, tomb := range tombs {
-		ks := string(tomb.k)
-		sd.put(kv.StorageDomain, ks, nil)
-		sd.sdCtx.TouchPlainKey(ks, nil, sd.sdCtx.TouchStorage)
-		err = sd.aggCtx.storage.DeleteWithPrev(tomb.k, nil, tomb.v)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
