@@ -68,7 +68,6 @@ func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
 
 func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("A")
 		ans, err := h.Handle(r)
 		if err != nil {
 			log.Error("beacon api request error", "err", err)
@@ -94,8 +93,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				return
 			}
 			w.Write(encoded)
-			break
-		case contentType == "", slices.Contains(contentTypes, "text/html"), slices.Contains(contentTypes, "application/json"):
+		case contentType == "*/*", contentType == "", slices.Contains(contentTypes, "text/html"), slices.Contains(contentTypes, "application/json"):
 			w.Header().Add("content-type", "application/json")
 			err := json.NewEncoder(w).Encode(ans)
 			if err != nil {
