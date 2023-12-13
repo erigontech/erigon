@@ -271,19 +271,29 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		// Internal search code considers blockNum [including], so adjust the value
 		fromBlockNum--
 	}
-	fromTxNum, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
+	fromTxNum := -1
+	if fromBlockNum != 0 {
+		// from == 0 == magic number which means last; reproduce bug-compatibility for == 1
+		// with e2 for now
+		_txNum, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
+		if err != nil {
+			return nil, err
+		}
+		fromTxNum = int(_txNum)
+	}
+
+	// ensure result union will always have at least pageSize+1 results in order to determine
+	// there is more results or this is the last page, at the same time avoiding unbounded
+	lookupSize := int(pageSize) + 1
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, lookupSize)
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, lookupSize)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, lookupSize)
 	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
@@ -330,11 +340,21 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
-			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
-			TransactionIndex: uint(txIndex),
-			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
+			Type:              txn.Type(),
+			GasUsed:           res.UsedGas,
+			CumulativeGasUsed: res.UsedGas, // TODO: cumulative gas is wrong, wait for cumulative gas index fix
+			TransactionIndex:  uint(txIndex),
+			BlockNumber:       header.Number,
+			BlockHash:         blockHash,
+			Logs:              rawLogs,
 		}
-		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		if res.Failed() {
+			receipt.Status = types.ReceiptStatusFailed
+		} else {
+			receipt.Status = types.ReceiptStatusSuccessful
+		}
+
+		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
 
