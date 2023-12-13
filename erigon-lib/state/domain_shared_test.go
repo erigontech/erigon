@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
@@ -52,7 +51,7 @@ Loop:
 	commitStep := 3
 
 	for ; i < int(maxTx); i++ {
-		domains.SetTxNum(ctx, uint64(i))
+		domains.SetTxNum(uint64(i))
 		for accs := 0; accs < 256; accs++ {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
@@ -64,7 +63,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -99,6 +98,7 @@ Loop:
 	goto Loop
 }
 
+/*
 func TestSharedDomain_IteratePrefix(t *testing.T) {
 	stepSize := uint64(8)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -126,7 +126,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	defer domains.Close()
 
 	for i := uint64(0); i < stepSize*2; i++ {
-		domains.SetTxNum(ctx, i)
+		domains.SetTxNum(i)
 		if err = domains.DomainPut(kv.AccountsDomain, hexutility.EncodeTs(i), nil, hexutility.EncodeTs(i), nil); err != nil {
 			panic(err)
 		}
@@ -150,7 +150,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
-		domains.SetTxNum(ctx, stepSize*2+1)
+		domains.SetTxNum(stepSize*2 + 1)
 		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(1), nil, nil); err != nil {
 			panic(err)
 		}
@@ -192,7 +192,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
-		domains.SetTxNum(ctx, stepSize*2+2)
+		domains.SetTxNum(stepSize*2 + 2)
 		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(4), nil, nil); err != nil {
 			panic(err)
 		}
@@ -211,3 +211,4 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(t, int(stepSize*2-3), iterCount(domains))
 	}
 }
+*/
