@@ -54,7 +54,7 @@ jobs:
     - name: Run and Test Erigon
       run: |
         # Run Erigon in the background and redirect output to a log file
-        ./erigon > erigon.log 2>&1 & ERIGON_PID=$!        
+        ./erigon & ERIGON_PID=$!        
         echo "Erigon PID: $ERIGON_PID"
         
         # Wait for Erigon to initialize (adjust the sleep time as necessary)
