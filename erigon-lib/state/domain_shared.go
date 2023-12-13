@@ -265,7 +265,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
-	// disable mutex - becuse work on parallel execution postponed after E3 release.
+	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
 	switch table {
 	case kv.AccountsDomain:
@@ -538,6 +538,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
+//
+// k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()

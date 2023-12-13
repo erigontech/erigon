@@ -202,19 +202,20 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	stageProgress := execStage.BlockNumber
-	var blockNum uint64
-	var maxTxNum uint64
-	outputTxNum := atomic.Uint64{}
-	blockComplete := atomic.Bool{}
-	blockComplete.Store(true)
-
 	// MA setio
 	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
 
-	var inputTxNum = doms.TxNum()
-	var offsetFromBlockBeginning uint64
+	var (
+		inputTxNum    = doms.TxNum()
+		stageProgress = execStage.BlockNumber
+		outputTxNum   = atomic.Uint64{}
+		blockComplete = atomic.Bool{}
+
+		offsetFromBlockBeginning uint64
+		blockNum, maxTxNum       uint64
+	)
+	blockComplete.Store(true)
 
 	nothingToExec := func(applyTx kv.Tx) (bool, error) {
 		_, lastTxNum, err := rawdbv3.TxNums.Last(applyTx)
