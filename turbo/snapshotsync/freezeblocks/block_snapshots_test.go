@@ -189,7 +189,7 @@ func TestCanRetire(t *testing.T) {
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil, nil)
+	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.BlocksFreezing{Enabled: true}
 	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, logger) }

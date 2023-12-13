@@ -239,14 +239,14 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 
 	paths := a.sn.SegFilePaths(from, to)
-	downloadItems := make([]*proto_downloader.DownloadItem, len(paths))
+	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
-		downloadItems[i] = &proto_downloader.DownloadItem{
+		downloadItems[i] = &proto_downloader.AddItem{
 			Path: path,
 		}
 	}
 	// Notify bittorent to seed the new snapshots
-	if _, err := a.downloader.Download(a.ctx, &proto_downloader.DownloadRequest{Items: downloadItems}); err != nil {
+	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
 		return err
 	}
 
