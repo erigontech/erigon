@@ -110,9 +110,9 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if reason.Block != nil {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
-		s.logger.Debug("UnwindTo", "block", unwindPoint)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
 	}
 
 	s.unwindPoint = &unwindPoint
