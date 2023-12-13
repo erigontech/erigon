@@ -25,9 +25,9 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // API describes the set of methods offered over the RPC interface
@@ -54,15 +54,15 @@ type DataError interface {
 // a RPC session. Implementations must be go-routine safe since the codec can be called in
 // multiple go-routines concurrently.
 type ServerCodec interface {
-	readBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
-	close()
+	ReadBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
+	Close()
 	jsonWriter
 }
 
 // jsonWriter can write JSON messages to its underlying connection.
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
-	writeJSON(context.Context, interface{}) error
+	WriteJSON(context.Context, interface{}) error
 	// Closed returns a channel which is closed when the connection is closed.
 	closed() <-chan interface{}
 	// RemoteAddr returns the peer address of the connection.
@@ -199,6 +199,8 @@ func AsBlockNumber(no interface{}) BlockNumber {
 		return no
 	case *BlockNumber:
 		return *no
+	case int:
+		return BlockNumber(no)
 	case int64:
 		return BlockNumber(no)
 	case uint64:

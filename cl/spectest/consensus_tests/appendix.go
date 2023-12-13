@@ -105,7 +105,7 @@ func addSszTests() {
 		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
 		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).
 		With("HistoricalSummary", getSSZStaticConsensusTest(&cltypes.HistoricalSummary{})).
-		//	With("IndexedAttestation", getSSZStaticConsensusTest(&cltypes.IndexedAttestation{})).
+		With("IndexedAttestation", getSSZStaticConsensusTest(&cltypes.IndexedAttestation{})).
 		//	With("LightClientBootstrap", getSSZStaticConsensusTest(&cltypes.LightClientBootstrap{})). Unimplemented
 		//	With("LightClientFinalityUpdate", getSSZStaticConsensusTest(&cltypes.LightClientFinalityUpdate{})). Unimplemented
 		//	With("LightClientHeader", getSSZStaticConsensusTest(&cltypes.LightClientHeader{})). Unimplemented
@@ -114,7 +114,7 @@ func addSszTests() {
 		With("PendingAttestation", getSSZStaticConsensusTest(&solid.PendingAttestation{})).
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
-		//		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
+		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
 		With("SignedBeaconBlock", getSSZStaticConsensusTest(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig))).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
 		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).

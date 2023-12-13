@@ -1,18 +1,21 @@
 package solid
 
 import (
+	"encoding/json"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
 	// agg bits offset: 4 bytes
 	// attestationData: 128
 	// Signature: 96 bytes
-	attestationStaticBufferSize = 4 + attestationDataBufferSize + 96
+	attestationStaticBufferSize = 4 + AttestationDataBufferSize + 96
 
 	// offset is usually always the same
 	aggregationBitsOffset = 228
@@ -42,6 +45,33 @@ func NewAttestionFromParameters(
 	a.SetSignature(signature)
 	a.SetAggregationBits(aggregationBits)
 	return a
+}
+
+func (a Attestation) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
+		Signature       libcommon.Bytes96 `json:"signature"`
+		Data            AttestationData   `json:"data"`
+	}{
+		AggregationBits: a.aggregationBitsBuffer,
+		Signature:       a.Signature(),
+		Data:            a.AttestantionData(),
+	})
+}
+
+func (a *Attestation) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		AggregationBits hexutility.Bytes  `json:"aggregation_bits"`
+		Signature       libcommon.Bytes96 `json:"signature"`
+		Data            AttestationData   `json:"data"`
+	}
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	a.SetAggregationBits(tmp.AggregationBits)
+	a.SetSignature(tmp.Signature)
+	a.SetAttestationData(tmp.Data)
+	return nil
 }
 
 // AggregationBits returns the aggregation bits buffer of the Attestation instance.
@@ -90,7 +120,7 @@ func (a *Attestation) DecodeSSZ(buf []byte, _ int) error {
 		return ssz.ErrLowBufferSize
 	}
 	copy(a.staticBuffer[:], buf)
-	a.aggregationBitsBuffer = common.CopyBytes(buf[aggregationBitsOffset:])
+	a.aggregationBitsBuffer = libcommon.CopyBytes(buf[aggregationBitsOffset:])
 	return nil
 }
 

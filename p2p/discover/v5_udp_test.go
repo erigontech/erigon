@@ -41,7 +41,7 @@ import (
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +67,7 @@ func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	ln.SetFallbackUDP(realaddr.Port)
 	ctx := context.Background()
 	ctx = disableLookupSlowdown(ctx)
-	udp, err := ListenV5(ctx, socket, ln, cfg)
+	udp, err := ListenV5(ctx, "test", socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 
 // This test checks that incoming PING calls are handled correctly.
 func TestUDPv5_pingHandling(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -97,7 +97,7 @@ func TestUDPv5_pingHandling(t *testing.T) {
 
 // This test checks that incoming 'unknown' packets trigger the handshake.
 func TestUDPv5_unknownPacket(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -137,7 +137,7 @@ func TestUDPv5_unknownPacket(t *testing.T) {
 
 // This test checks that incoming FINDNODE calls are handled correctly.
 func TestUDPv5_findnodeHandling(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -225,7 +225,7 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 
 // This test checks that outgoing PING calls work.
 func TestUDPv5_pingCall(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -275,7 +275,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 // This test checks that outgoing FINDNODE calls work and multiple NODES
 // replies are aggregated.
 func TestUDPv5_findnodeCall(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -328,7 +328,7 @@ func TestUDPv5_findnodeCall(t *testing.T) {
 
 // This test ensures we don't allow multiple rounds of WHOAREYOU for a single call.
 func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -358,7 +358,7 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 
 // This test checks that TALKREQ calls the registered handler function.
 func TestUDPv5_talkHandling(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -412,7 +412,7 @@ func TestUDPv5_talkHandling(t *testing.T) {
 
 // This test checks that outgoing TALKREQ calls work.
 func TestUDPv5_talkRequest(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -457,7 +457,7 @@ func TestUDPv5_talkRequest(t *testing.T) {
 
 // This test checks the local node can be utilised to set key-values.
 func TestUDPv5_LocalNode(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -573,7 +573,7 @@ func newUDPV5TestContext(ctx context.Context, t *testing.T, logger log.Logger) *
 	t.Cleanup(test.close)
 	var err error
 	tmpDir := t.TempDir()
-	test.db, err = enode.OpenDB("", tmpDir)
+	test.db, err = enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -581,7 +581,7 @@ func newUDPV5TestContext(ctx context.Context, t *testing.T, logger log.Logger) *
 	ln := enode.NewLocalNode(test.db, test.localkey, logger)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
-	test.udp, err = ListenV5(ctx, test.pipe, ln, Config{
+	test.udp, err = ListenV5(ctx, "test", test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlError),
 		ValidSchemes: enode.ValidSchemesForTesting,
@@ -627,7 +627,7 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr, logger 
 	ln := test.nodesByID[id]
 	if ln == nil {
 		tmpDir := test.t.TempDir()
-		db, err := enode.OpenDB("", tmpDir)
+		db, err := enode.OpenDB(context.Background(), "", tmpDir)
 		if err != nil {
 			panic(err)
 		}

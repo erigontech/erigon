@@ -55,6 +55,9 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
+
+	// Byte string representation of a bor span with given ID
+	BorSpan(spanId uint64) []byte
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -119,6 +122,9 @@ type EngineReader interface {
 
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
 	) ([]Reward, error)
+
+	// Close terminates any background threads, DB's etc maintained by the consensus engine.
+	Close() error
 }
 
 // EngineReader are write methods of the consensus engine
@@ -138,7 +144,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, syscall SysCallCustom)
+		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
@@ -179,9 +185,6 @@ type EngineWriter interface {
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
-
-	// Close terminates any background threads maintained by the consensus engine.
-	Close() error
 }
 
 // PoW is a consensus engine based on proof-of-work.

@@ -9,7 +9,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 )
@@ -112,7 +111,7 @@ func withdrawalAbi() abi.ABI {
 }
 
 func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
+	hashedKey, err := libcommon.HashData([]byte("service_transaction_checker"))
 	if err != nil {
 		panic(err)
 	}

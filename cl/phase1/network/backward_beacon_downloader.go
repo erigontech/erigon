@@ -2,12 +2,16 @@ package network
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -21,15 +25,28 @@ type BackwardBeaconDownloader struct {
 	rpc            *rpc.BeaconRpcP2P
 	onNewBlock     OnNewBlock
 	finished       bool
+	reqInterval    *time.Ticker
+	db             kv.RwDB
+	neverSkip      bool
 
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, db kv.RwDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
-		ctx: ctx,
-		rpc: rpc,
+		ctx:         ctx,
+		rpc:         rpc,
+		db:          db,
+		reqInterval: time.NewTicker(300 * time.Millisecond),
+		neverSkip:   true,
 	}
+}
+
+// SetThrottle sets the throttle.
+func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reqInterval.Reset(throttle)
 }
 
 // SetSlotToDownload sets slot to download.
@@ -44,6 +61,13 @@ func (b *BackwardBeaconDownloader) SetExpectedRoot(root libcommon.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.expectedRoot = root
+}
+
+// SetExpectedRoot sets the expected root we expect to download.
+func (b *BackwardBeaconDownloader) SetNeverSkip(neverSkip bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.neverSkip = neverSkip
 }
 
 // SetShouldStopAtFn sets the stop condition.
@@ -78,21 +102,51 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
-func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(64)
+func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
+	count := uint64(32)
 	start := b.slotToDownload - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload {
 		start = 0
 	}
-	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-	if err != nil {
-		return
+	var atomicResp atomic.Value
+	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+
+Loop:
+	for {
+		select {
+		case <-b.reqInterval.C:
+			go func() {
+				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+					return
+				}
+				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+				if err != nil {
+					return
+				}
+				if responses == nil {
+					return
+				}
+				if len(responses) == 0 {
+					b.rpc.BanPeer(peerId)
+					return
+				}
+				atomicResp.Store(responses)
+			}()
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+				break Loop
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
+	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished {
-			return
+			return nil
 		}
 		segment := responses[i]
 		// is this new block root equal to the expected root?
@@ -103,6 +157,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
+			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.
@@ -115,4 +170,35 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 		b.expectedRoot = segment.Block.ParentRoot
 		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 	}
+	if b.neverSkip {
+		return nil
+	}
+	// try skipping if the next slot is in db
+	tx, err := b.db.BeginRw(b.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// it will stop if we end finding a gap or if we reach the maxIterations
+	for {
+		// check if the expected root is in db
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		if err != nil {
+			return err
+		}
+		if slot == nil || *slot == 0 {
+			break
+		}
+		b.slotToDownload = *slot - 1
+		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
+			return err
+		}
+		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

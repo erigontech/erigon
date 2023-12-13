@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -17,12 +18,13 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised bool
-	Nonce       uint64
-	Balance     uint256.Int
-	Root        libcommon.Hash // merkle root of the storage trie
-	CodeHash    libcommon.Hash // hash of the bytecode
-	Incarnation uint64
+	Initialised     bool
+	Nonce           uint64
+	Balance         uint256.Int
+	Root            libcommon.Hash // merkle root of the storage trie
+	CodeHash        libcommon.Hash // hash of the bytecode
+	Incarnation     uint64
+	PrevIncarnation uint64
 }
 
 const (
@@ -77,8 +79,6 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
-	var structLength uint
-
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {
 		balanceBytes = a.Balance.ByteLen()
@@ -86,17 +86,11 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
-	structLength += uint(balanceBytes + nonceBytes + 2)
+	structLength := balanceBytes + nonceBytes + 2
 
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
-	if structLength < 56 {
-		return 1 + structLength
-	}
-
-	lengthBytes := libcommon.BitLenToByteLen(bits.Len(structLength))
-
-	return uint(1+lengthBytes) + structLength
+	return uint(rlp2.ListPrefixLen(structLength) + structLength)
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {

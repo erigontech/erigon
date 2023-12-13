@@ -2,10 +2,13 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
+	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -66,6 +69,16 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
+		if whitelist.GetWhitelistingService() != nil {
+			num := borfinality.GetFinalizedBlockNumber(tx)
+			if num == 0 {
+				return 0, errors.New("no finalized block")
+			}
+
+			blockNum = borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
+			return hexutil.Uint64(blockNum), nil
+		}
+
 		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {
 			return 0, err

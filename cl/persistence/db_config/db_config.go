@@ -1,45 +1,36 @@
 package db_config
 
 import (
+	"bytes"
 	"context"
-	"database/sql"
+	"math"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 )
 
-type DatabaseConfiguration struct {
-	PruneDepth uint64
-	FullBlocks bool
-}
+type DatabaseConfiguration struct{ PruneDepth uint64 }
 
-var DefaultDatabaseConfiguration = DatabaseConfiguration{
-	PruneDepth: 10, // should be 1_000_000
-	FullBlocks: false,
-}
+var DefaultDatabaseConfiguration = DatabaseConfiguration{PruneDepth: math.MaxUint64}
 
-func WriteConfigurationIfNotExist(ctx context.Context, tx *sql.Tx, cfg DatabaseConfiguration) error {
-	var count int
-	err := tx.QueryRow("SELECT COUNT(*) FROM data_config;").Scan(&count)
-	if err != nil {
+func WriteConfigurationIfNotExist(ctx context.Context, tx kv.RwTx, cfg DatabaseConfiguration) error {
+	var b bytes.Buffer
+	if err := cbor.Encoder(&b).Encode(cfg); err != nil {
 		return err
 	}
-	if count > 0 {
-		return nil
-	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO data_config (prune_depth, full_blocks) VALUES (?, ?);", cfg.PruneDepth, cfg.FullBlocks)
-	if err != nil {
-		return err
-	}
-	return nil
+
+	return tx.Put(kv.DatabaseInfo, []byte("config"), b.Bytes())
 }
 
-func ReadConfiguration(ctx context.Context, tx *sql.Tx) (DatabaseConfiguration, error) {
-	var (
-		pruneDepth uint64
-		fullBlocks bool
-	)
+func ReadConfiguration(ctx context.Context, tx kv.Tx) (DatabaseConfiguration, error) {
+	var cfg DatabaseConfiguration
 
-	err := tx.QueryRowContext(ctx, "SELECT prune_depth, full_blocks FROM data_config").Scan(&pruneDepth, &fullBlocks)
+	cfgEncoded, err := tx.GetOne(kv.DatabaseInfo, []byte("config"))
 	if err != nil {
-		return DatabaseConfiguration{}, err
+		return cfg, err
 	}
-	return DatabaseConfiguration{PruneDepth: pruneDepth, FullBlocks: fullBlocks}, nil
+	if err := cbor.Decoder(bytes.NewReader(cfgEncoded)).Decode(&cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, err
 }

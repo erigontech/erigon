@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 
@@ -83,12 +82,12 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(path string, tmpDir string) (*DB, error) {
+func OpenDB(ctx context.Context, path string, tmpDir string) (*DB, error) {
 	logger := log.New() //TODO: move higher
 	if path == "" {
 		return newMemoryDB(logger, tmpDir)
 	}
-	return newPersistentDB(logger, path)
+	return newPersistentDB(ctx, logger, path)
 }
 
 func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
@@ -102,7 +101,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 func newMemoryDB(logger log.Logger, tmpDir string) (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = mdbx.NewMDBX(logger).InMem(tmpDir).Label(kv.SentryDB).WithTableCfg(bucketsConfig).MapSize(1 * datasize.GB).Open()
+	db.kv, err = mdbx.NewMDBX(logger).InMem(tmpDir).Label(kv.SentryDB).WithTableCfg(bucketsConfig).MapSize(1 * datasize.GB).Open(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -111,18 +110,19 @@ func newMemoryDB(logger log.Logger, tmpDir string) (*DB, error) {
 
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
-func newPersistentDB(logger log.Logger, path string) (*DB, error) {
+func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
 	db, err = mdbx.NewMDBX(logger).
 		Path(path).
 		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
-		MapSize(1024 * datasize.MB).
+		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
+		DirtySpace(uint64(128 * datasize.MB)).
 		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
 		SyncPeriod(2 * time.Second).
-		Open()
+		Open(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 		if err := os.RemoveAll(path); err != nil {
 			return nil, err
 		}
-		return newPersistentDB(logger, path)
+		return newPersistentDB(ctx, logger, path)
 	}
 	return &DB{kv: db, quit: make(chan struct{})}, nil
 }
@@ -251,7 +251,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
+		return tx.Put(kv.Inodes, libcommon.CopyBytes(key), blob)
 	})
 }
 
@@ -278,7 +278,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
 	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
+		return tx.Put(kv.Inodes, libcommon.CopyBytes(key), blob)
 	})
 }
 

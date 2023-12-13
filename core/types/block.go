@@ -24,9 +24,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 	"reflect"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/gballet/go-verkle"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,13 +35,15 @@ import (
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
 	EmptyRootHash  = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyUncleHash = rlpHash([]*Header(nil))
+
+	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -128,25 +131,11 @@ func (h *Header) EncodingSize() int {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(h.Time)
 	// size of Extra
-	encodingSize++
-	switch len(h.Extra) {
-	case 0:
-	case 1:
-		if h.Extra[0] >= 128 {
-			encodingSize++
-		}
-	default:
-		if len(h.Extra) >= 56 {
-			encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.Extra))))
-		}
-		encodingSize += len(h.Extra)
-	}
+	encodingSize += rlp2.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
-		if len(h.AuRaSeal) >= 56 {
-			encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.AuRaSeal))))
-		}
+		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
+		encodingSize += rlp2.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -175,26 +164,12 @@ func (h *Header) EncodingSize() int {
 
 	if h.Verkle {
 		// Encoding of Verkle Proof
-		encodingSize++
-		switch len(h.VerkleProof) {
-		case 0:
-		case 1:
-			if h.VerkleProof[0] >= 128 {
-				encodingSize++
-			}
-		default:
-			if len(h.VerkleProof) >= 56 {
-				encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.VerkleProof))))
-			}
-			encodingSize += len(h.VerkleProof)
-		}
-		encodingSize++
-
+		encodingSize += rlp2.StringLen(h.VerkleProof)
 		var tmpBuffer bytes.Buffer
 		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
 			panic(err)
 		}
-		encodingSize += tmpBuffer.Len()
+		encodingSize += rlp2.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
 	}
 
 	return encodingSize
@@ -641,6 +616,23 @@ type RawBlock struct {
 	Body   *RawBody
 }
 
+func (r RawBlock) AsBlock() (*Block, error) {
+	b := &Block{header: r.Header}
+	b.uncles = r.Body.Uncles
+	b.withdrawals = r.Body.Withdrawals
+
+	txs := make([]Transaction, len(r.Body.Transactions))
+	for i, tx := range r.Body.Transactions {
+		var err error
+		if txs[i], err = DecodeTransaction(tx); err != nil {
+			return nil, err
+		}
+	}
+	b.transactions = txs
+
+	return b, nil
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
@@ -681,45 +673,25 @@ func (rb RawBody) EncodingSize() int {
 
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
-	payloadSize++
 	for _, tx := range rb.Transactions {
 		txsLen += len(tx)
 	}
-	if txsLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
-	}
-	payloadSize += txsLen
+	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	payloadSize++
 	for _, uncle := range rb.Uncles {
-		unclesLen++
 		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
-		}
-		unclesLen += uncleLen
+		unclesLen += rlp2.ListPrefixLen(uncleLen) + uncleLen
 	}
-	if unclesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
-	}
-	payloadSize += unclesLen
+	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if rb.Withdrawals != nil {
-		payloadSize++
 		for _, withdrawal := range rb.Withdrawals {
-			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
-			if withdrawalLen >= 56 {
-				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
-			}
-			withdrawalsLen += withdrawalLen
+			withdrawalsLen += rlp2.ListPrefixLen(withdrawalLen) + withdrawalLen
 		}
-		if withdrawalsLen >= 56 {
-			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
-		}
-		payloadSize += withdrawalsLen
+		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -836,9 +808,6 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
-
-	payloadSize++
-
 	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
 	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
 
@@ -847,33 +816,18 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 	// size of Uncles
 	for _, uncle := range bfs.Uncles {
-		unclesLen++
 		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
-		}
-		unclesLen += uncleLen
+		unclesLen += rlp2.ListPrefixLen(uncleLen) + uncleLen
 	}
-	if unclesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
-	}
-	payloadSize += unclesLen
+	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bfs.Withdrawals != nil {
-		payloadSize++
 		for _, withdrawal := range bfs.Withdrawals {
-			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
-			if withdrawalLen >= 56 {
-				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
-			}
-			withdrawalsLen += withdrawalLen
+			withdrawalsLen += rlp2.ListPrefixLen(withdrawalLen) + withdrawalLen
 		}
-		if withdrawalsLen >= 56 {
-			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
-		}
-		payloadSize += withdrawalsLen
+		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, unclesLen, withdrawalsLen
@@ -995,50 +949,26 @@ func (bb Body) EncodingSize() int {
 
 func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
-	payloadSize++
 	for _, tx := range bb.Transactions {
-		txsLen++
 		txLen := tx.EncodingSize()
-		if txLen >= 56 {
-			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
+		txsLen += rlp2.ListPrefixLen(txLen) + txLen
 	}
-	if txsLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
-	}
-	payloadSize += txsLen
+	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	payloadSize++
 	for _, uncle := range bb.Uncles {
-		unclesLen++
 		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
-		}
-		unclesLen += uncleLen
+		unclesLen += rlp2.ListPrefixLen(uncleLen) + uncleLen
 	}
-	if unclesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
-	}
-	payloadSize += unclesLen
+	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.Withdrawals != nil {
-		payloadSize++
 		for _, withdrawal := range bb.Withdrawals {
-			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
-			if withdrawalLen >= 56 {
-				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
-			}
-			withdrawalsLen += withdrawalLen
+			withdrawalsLen += rlp2.ListPrefixLen(withdrawalLen) + withdrawalLen
 		}
-		if withdrawalsLen >= 56 {
-			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
-		}
-		payloadSize += withdrawalsLen
+		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -1342,58 +1272,30 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
-	payloadSize++
 	headerLen := bb.header.EncodingSize()
-	if headerLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(headerLen)))
-	}
-	payloadSize += headerLen
+	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
 
 	// size of Transactions
-	payloadSize++
 	for _, tx := range bb.transactions {
-		txsLen++
 		txLen := tx.EncodingSize()
-		if txLen >= 56 {
-			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
+		txsLen += rlp2.ListPrefixLen(txLen) + txLen
 	}
-	if txsLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
-	}
-	payloadSize += txsLen
+	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	payloadSize++
 	for _, uncle := range bb.uncles {
-		unclesLen++
 		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
-		}
-		unclesLen += uncleLen
+		unclesLen += rlp2.ListPrefixLen(uncleLen) + uncleLen
 	}
-	if unclesLen >= 56 {
-		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
-	}
-	payloadSize += unclesLen
+	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.withdrawals != nil {
-		payloadSize++
 		for _, withdrawal := range bb.withdrawals {
-			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
-			if withdrawalLen >= 56 {
-				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
-			}
-			withdrawalsLen += withdrawalLen
+			withdrawalsLen += rlp2.ListPrefixLen(withdrawalLen) + withdrawalLen
 		}
-		if withdrawalsLen >= 56 {
-			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
-		}
-		payloadSize += withdrawalsLen
+		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -1477,7 +1379,7 @@ func (b *Block) ParentHash() libcommon.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() libcommon.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() libcommon.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() libcommon.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte               { return common.CopyBytes(b.header.Extra) }
+func (b *Block) Extra() []byte               { return libcommon.CopyBytes(b.header.Extra) }
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
 		return nil
@@ -1552,14 +1454,24 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
+
+	if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
+	}
+
+	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
+	}
+
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+
 	if b.WithdrawalsHash() == nil {
 		if b.Withdrawals() != nil {
 			return errors.New("header missing WithdrawalsHash")

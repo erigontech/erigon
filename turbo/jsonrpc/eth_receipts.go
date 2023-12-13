@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -38,6 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+const PendingBlockNumber int64 = -2
+
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
@@ -51,7 +52,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	noopWriter := state.NewNoopWriter()
 
@@ -90,16 +91,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		num := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
-		//header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		//if err != nil {
-		//	return nil, err
-		//}
-		if num == nil {
+		block, err := api._blockReader.BlockByHash(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return nil, err
+		}
+
+		if block == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = *num
-		end = *num
+
+		num := block.NumberU64()
+		begin = num
+		end = num
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
@@ -109,21 +112,41 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 		begin = latest
 		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+			if !getLogsIsValidBlockNumber(crit.FromBlock) {
+				return nil, fmt.Errorf("invalid value for FromBlock: %v", crit.FromBlock)
 			}
+
+			fromBlock := crit.FromBlock.Int64()
+			if fromBlock > 0 {
+				begin = uint64(fromBlock)
+			} else {
+				blockNum := rpc.BlockNumber(fromBlock)
+				begin, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				if err != nil {
+					return nil, err
+				}
+			}
+
 		}
 		end = latest
 		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+			if !getLogsIsValidBlockNumber(crit.ToBlock) {
+				return nil, fmt.Errorf("invalid value for ToBlock: %v", crit.ToBlock)
+			}
+
+			toBlock := crit.ToBlock.Int64()
+			if toBlock > 0 {
+				end = uint64(toBlock)
+			} else {
+				blockNum := rpc.BlockNumber(toBlock)
+				end, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
+
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
@@ -223,6 +246,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	return logs, nil
+}
+
+// getLogsIsValidBlockNumber checks if block number is valid integer or "latest", "pending", "earliest" block number
+func getLogsIsValidBlockNumber(blockNum *big.Int) bool {
+	return blockNum.IsInt64() && blockNum.Int64() >= PendingBlockNumber
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -590,7 +618,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	blockNum, ok, err = api.txnLookup(tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -599,26 +627,19 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-
-	if !ok && cc.Bor == nil {
-		return nil, nil
-	}
-
-	// if not ok and cc.Bor != nil then we might have a bor transaction.
-	// Note that Private API returns 0 if transaction is not found.
-	if !ok || blockNum == 0 {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && cc.Bor != nil {
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
-			return nil, nil
-		}
-
-		blockNum = *blockNumPtr
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	if !ok {
+		return nil, nil
+	}
+
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -637,19 +658,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var borTx types.Transaction
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
-			return nil, nil
+			borTx = types.NewBorTransaction()
 		}
 	}
-
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	if txn == nil {
+	if txn == nil && cc.Bor != nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
 			return nil, err
@@ -679,7 +699,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -770,7 +790,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if header.ExcessBlobGas == nil {
 			log.Warn("excess blob gas not set when trying to marshal blob tx")
 		} else {
-			blobGasPrice, err := misc.GetBlobGasPrice(*header.ExcessBlobGas)
+			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
 			if err != nil {
 				log.Error(err.Error())
 			}

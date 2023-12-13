@@ -1,0 +1,7 @@
+go test fuzz v1
+[]byte("\xec\xec\x01\x00")
+[]byte("\xec")
+[]byte("\x01")
+[]byte("\xff")
+[]byte("\xec\xec\x01")
+byte('\x01')

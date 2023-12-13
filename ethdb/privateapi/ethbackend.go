@@ -53,6 +53,7 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 	Peers(ctx context.Context) (*remote.PeersReply, error)
+	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
@@ -95,10 +96,19 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.Ver
 	return EthBackendAPIVersion, nil
 }
 
-func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
 	pendingBlock := s.latestBlockBuiltStore.BlockBuilt()
 	if pendingBlock == nil {
-		return nil, nil
+		tx, err := s.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		// use latest
+		pendingBlock, err = s.blockReader.CurrentBlock(tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	blockRlp, err := rlp.EncodeToBytes(pendingBlock)
@@ -235,6 +245,10 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 
 func (s *EthBackendServer) Peers(ctx context.Context, _ *emptypb.Empty) (*remote.PeersReply, error) {
 	return s.eth.Peers(ctx)
+}
+
+func (s *EthBackendServer) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
+	return s.eth.AddPeer(ctx, req)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {

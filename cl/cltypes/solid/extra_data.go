@@ -2,8 +2,10 @@ package solid
 
 import (
 	"encoding/binary"
+	"encoding/json"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -20,6 +22,18 @@ func NewExtraData() *ExtraData {
 	return &ExtraData{
 		data: make([]byte, 32),
 	}
+}
+
+func (e *ExtraData) UnmarshalJSON(buf []byte) error {
+	if err := json.Unmarshal(buf, (*hexutility.Bytes)(&e.data)); err != nil {
+		return err
+	}
+	e.l = len(e.data)
+	return nil
+}
+
+func (e ExtraData) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hexutility.Bytes(e.data[:e.l]))
 }
 
 // Clone creates a new instance of ExtraData.

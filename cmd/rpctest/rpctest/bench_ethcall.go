@@ -16,7 +16,7 @@ import (
 //			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	                 recordFile stores all eth_call returned with success
 //	                 errorFile stores information when erigon and geth doesn't return same data
-func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFile string, errorFile string) {
+func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -27,22 +27,20 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 	var resultsCh chan CallResult = nil
 	var nTransactions = 0
 
-	if errorFile != "" {
-		f, err := os.Create(errorFile)
+	if errorFileName != "" {
+		f, err := os.Create(errorFileName)
 		if err != nil {
-			fmt.Printf("Cannot create file %s for errorFile: %v\n", errorFile, err)
-			return
+			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", errorFileName, err)
 		}
 		defer f.Close()
 		errs = bufio.NewWriter(f)
 		defer errs.Flush()
 	}
 
-	if recordFile != "" {
-		frec, errRec := os.Create(recordFile)
+	if recordFileName != "" {
+		frec, errRec := os.Create(recordFileName)
 		if errRec != nil {
-			fmt.Printf("Cannot create file %s for errorFile: %v\n", recordFile, errRec)
-			return
+			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, errRec)
 		}
 		defer frec.Close()
 		rec = bufio.NewWriter(frec)
@@ -67,34 +65,29 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-			return
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-			return
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-				return
+				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 			}
 			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-				return
+				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
-				fmt.Printf("Block difference for %d\n", bn)
 				if rec != nil {
 					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
 					rec.Flush()
 					continue
 				} else {
-					return
+					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
 				}
 			}
 		}
@@ -105,19 +98,23 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			nTransactions = nTransactions + 1
 
 			var request string
+			var insertedOnlyIfSuccess bool
 			if latest {
 				request = reqGen.ethCallLatest(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input)
+				insertedOnlyIfSuccess = true
 			} else {
 				request = reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+				insertedOnlyIfSuccess = false
 			}
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
 
-			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
-				fmt.Println(err)
-				return
+			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+				insertedOnlyIfSuccess); err != nil {
+				return err
 			}
 		}
 
 		fmt.Println("\nProcessed Transactions: ", nTransactions)
 	}
+	return nil
 }

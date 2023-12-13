@@ -73,6 +73,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 // TestRlpIterator tests that individual transactions can be picked out
 // from blocks without full unmarshalling/marshalling
 func TestRlpIterator(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		txs      int
 		uncles   int

@@ -21,8 +21,8 @@ func TestSignedVoluntaryExit(t *testing.T) {
 	signature := [96]byte{1, 2, 3}
 
 	signedExit := &cltypes.SignedVoluntaryExit{
-		VolunaryExit: voluntaryExit,
-		Signature:    signature,
+		VoluntaryExit: voluntaryExit,
+		Signature:     signature,
 	}
 
 	// Encode SignedVoluntaryExit to SSZ
@@ -35,8 +35,8 @@ func TestSignedVoluntaryExit(t *testing.T) {
 	assert.NoError(t, err, "Failed to decode SSZ to SignedVoluntaryExit")
 
 	// Compare the original and decoded SignedVoluntaryExit
-	assert.Equal(t, signedExit.VolunaryExit.Epoch, decodedExit.VolunaryExit.Epoch, "Decoded SignedVoluntaryExit has incorrect epoch")
-	assert.Equal(t, signedExit.VolunaryExit.ValidatorIndex, decodedExit.VolunaryExit.ValidatorIndex, "Decoded SignedVoluntaryExit has incorrect validator index")
+	assert.Equal(t, signedExit.VoluntaryExit.Epoch, decodedExit.VoluntaryExit.Epoch, "Decoded SignedVoluntaryExit has incorrect epoch")
+	assert.Equal(t, signedExit.VoluntaryExit.ValidatorIndex, decodedExit.VoluntaryExit.ValidatorIndex, "Decoded SignedVoluntaryExit has incorrect validator index")
 	assert.Equal(t, signedExit.Signature, decodedExit.Signature, "Decoded SignedVoluntaryExit has incorrect signature")
 }
 
@@ -47,7 +47,6 @@ func TestDepositData(t *testing.T) {
 		WithdrawalCredentials: [32]byte{4, 5, 6},
 		Amount:                100,
 		Signature:             [96]byte{7, 8, 9},
-		Root:                  [32]byte{10, 11, 12},
 	}
 
 	// Encode DepositData to SSZ

@@ -54,7 +54,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 		"4974416255391052161ba8184fe652f3bf8c915592c65f7de127af8e637dce5d",
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
-	offset := common.Hex2Bytes("29")
+	offset := libcommon.Hex2Bytes("29")
 	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b, latestBlock)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 		"4974416255391052161ba8184fe652f3bf8c915592c65f7de127af8e637dce5d",
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
-	offset := common.Hex2Bytes("30")
+	offset := libcommon.Hex2Bytes("30")
 	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
-	offset := common.Hex2Bytes("ff")
+	offset := libcommon.Hex2Bytes("ff")
 	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {

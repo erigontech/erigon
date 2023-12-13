@@ -10,37 +10,51 @@ import (
 )
 
 type HttpCfg struct {
-	Enabled                  bool
-	PrivateApiAddr           string
+	Enabled bool
+
 	GraphQLEnabled           bool
 	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	DataDir                  string
 	Dirs                     datadir.Dirs
-	HttpListenAddress        string
 	AuthRpcHTTPListenAddress string
 	TLSCertfile              string
 	TLSCACert                string
 	TLSKeyFile               string
-	HttpPort                 int
-	AuthRpcPort              int
-	HttpCORSDomain           []string
-	HttpVirtualHost          []string
-	AuthRpcVirtualHost       []string
-	HttpCompression          bool
-	API                      []string
-	Gascap                   uint64
-	MaxTraces                uint64
-	WebsocketEnabled         bool
-	WebsocketCompression     bool
-	RpcAllowListFilePath     string
-	RpcBatchConcurrency      uint
-	RpcStreamingDisable      bool
-	DBReadConcurrency        int
-	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr            string
-	StateCache               kvcache.CoherentConfig
-	Snap                     ethconfig.BlocksFreezing
-	Sync                     ethconfig.Sync
+
+	HttpServerEnabled  bool
+	HttpURL            string
+	HttpListenAddress  string
+	HttpPort           int
+	HttpCORSDomain     []string
+	HttpVirtualHost    []string
+	AuthRpcVirtualHost []string
+	HttpCompression    bool
+
+	HttpsServerEnabled bool
+	HttpsURL           string
+	HttpsListenAddress string
+	HttpsPort          int
+	HttpsCertfile      string
+	HttpsKeyFile       string
+
+	AuthRpcPort    int
+	PrivateApiAddr string
+
+	API                  []string
+	Gascap               uint64
+	MaxTraces            uint64
+	WebsocketPort        int
+	WebsocketEnabled     bool
+	WebsocketCompression bool
+	RpcAllowListFilePath string
+	RpcBatchConcurrency  uint
+	RpcStreamingDisable  bool
+	DBReadConcurrency    int
+	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr        string
+	StateCache           kvcache.CoherentConfig
+	Snap                 ethconfig.BlocksFreezing
+	Sync                 ethconfig.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool
@@ -48,10 +62,9 @@ type HttpCfg struct {
 	GRPCPort               int
 	GRPCHealthCheckEnabled bool
 
-	// Raw TCP Server
-	TCPServerEnabled bool
-	TCPListenAddress string
-	TCPPort          int
+	// Socket Server
+	SocketServerEnabled bool
+	SocketListenUrl     string
 
 	JWTSecretPath   string // Engine API Authentication
 	TraceRequests   bool   // Always trace requests in INFO level
@@ -61,9 +74,12 @@ type HttpCfg struct {
 	LogDirVerbosity string
 	LogDirPath      string
 
-	BatchLimit      int // Maximum number of requests in a batch
-	ReturnDataLimit int // Maximum number of bytes returned from calls (like eth_call)
-
+	BatchLimit                  int  // Maximum number of requests in a batch
+	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
+	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
+	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
 	// Ots API
 	OtsMaxPageSize uint64
+
+	RPCSlowLogThreshold time.Duration
 }

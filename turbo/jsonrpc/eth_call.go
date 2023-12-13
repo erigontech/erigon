@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
@@ -15,10 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -59,7 +60,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +235,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// try and get the block from the lru cache first then try DB before failing
 	block := api.tryBlockFromLru(latestCanHash)
 	if block == nil {
-		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
+		block, err = api.blockWithSenders(dbtx, latestCanHash, latestCanBlockNumber)
 		if err != nil {
 			return 0, err
 		}
@@ -313,9 +314,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // assumes that if more than 100_000 blocks are skipped, that the entire trie
 // should be re-computed. Re-computing the entire trie will currently take ~15
 // minutes on mainnet.  The current limit has been chosen arbitrarily as
-// 'useful' without likely being overly computationally intense.  This parameter
-// could possibly be made configurable in the future if needed.
-var maxGetProofRewindBlockCount uint64 = 1_000
+// 'useful' without likely being overly computationally intense.
 
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
@@ -353,10 +352,10 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	rl := trie.NewRetainList(0)
 	var loader *trie.FlatDBTrieLoader
 	if blockNr < latestBlock {
-		if latestBlock-blockNr > maxGetProofRewindBlockCount {
-			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
+		if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
+			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
 		}
-		batch := memdb.NewMemoryBatch(tx, api.dirs.Tmp)
+		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp)
 		defer batch.Rollback()
 
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
@@ -449,7 +448,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -502,11 +501,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	excl := make(map[libcommon.Address]struct{})
+	for _, pc := range precompiles {
+		excl[pc] = struct{}{}
+	}
 
 	// Create an initial tracer
-	prevTracer := logger.NewAccessListTracer(nil, *args.From, to, precompiles)
+	prevTracer := logger.NewAccessListTracer(nil, excl, nil)
 	if args.AccessList != nil {
-		prevTracer = logger.NewAccessListTracer(*args.AccessList, *args.From, to, precompiles)
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 	for {
 		state := state.New(stateReader)
@@ -537,7 +540,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
+		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
 		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
 		txCtx := core.NewEVMTxContext(msg)
@@ -554,8 +557,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				errString = res.Err.Error()
 			}
 			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
-			if optimizeGas != nil && *optimizeGas {
-				optimizeToInAccessList(accessList, to)
+			if optimizeGas == nil || *optimizeGas { // optimize gas unless explicitly told not to
+				optimizeWarmAddrInAccessList(accessList, *args.From)
+				optimizeWarmAddrInAccessList(accessList, to)
+				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
+				for addr := range tracer.CreatedContracts() {
+					if !tracer.UsedBeforeCreation(addr) {
+						optimizeWarmAddrInAccessList(accessList, addr)
+					}
+				}
 			}
 			return accessList, nil
 		}
@@ -563,14 +573,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 }
 
-// to address is warm already, so we can save by adding it to the access list
-// only if we are adding a lot of its storage slots as well
-func optimizeToInAccessList(accessList *accessListResult, to libcommon.Address) {
+// some addresses (like sender, recipient, block producer, and created contracts)
+// are considered warm already, so we can save by adding these to the access list
+// only if we are adding a lot of their respective storage slots as well
+func optimizeWarmAddrInAccessList(accessList *accessListResult, addr libcommon.Address) {
 	indexToRemove := -1
 
 	for i := 0; i < len(*accessList.Accesslist); i++ {
 		entry := (*accessList.Accesslist)[i]
-		if entry.Address != to {
+		if entry.Address != addr {
 			continue
 		}
 

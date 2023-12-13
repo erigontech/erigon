@@ -63,7 +63,7 @@ var (
 		common.FromHex("5544"),
 	).WithSignature(
 		*LatestSignerForChainID(nil),
-		common.Hex2Bytes("98ff921201554726367d2be8c804a7ff89ccf285ebc57dff8ae4c44b9c19ac4a8887321be575c8095f789dd4c743dfe42c1820f9231f98a962b210e3ac2452a301"),
+		libcommon.Hex2Bytes("98ff921201554726367d2be8c804a7ff89ccf285ebc57dff8ae4c44b9c19ac4a8887321be575c8095f789dd4c743dfe42c1820f9231f98a962b210e3ac2452a301"),
 	)
 
 	emptyEip2718Tx = &AccessListTx{
@@ -82,7 +82,7 @@ var (
 
 	signedEip2718Tx, _ = emptyEip2718Tx.WithSignature(
 		*LatestSignerForChainID(big.NewInt(1)),
-		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
+		libcommon.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
 
 	dynFeeTx = &DynamicFeeTransaction{
@@ -100,11 +100,12 @@ var (
 
 	signedDynFeeTx, _ = dynFeeTx.WithSignature(
 		*LatestSignerForChainID(big.NewInt(1)),
-		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
+		libcommon.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
 )
 
 func TestDecodeEmptyInput(t *testing.T) {
+	t.Parallel()
 	input := []byte{}
 	_, err := DecodeTransaction(input)
 	if !errors.Is(err, io.EOF) {
@@ -113,6 +114,7 @@ func TestDecodeEmptyInput(t *testing.T) {
 }
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
+	t.Parallel()
 	input := []byte{0x80}
 	_, err := DecodeTransaction(input)
 	if !errors.Is(err, rlp.EOL) {
@@ -121,6 +123,7 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 }
 
 func TestTransactionSigHash(t *testing.T) {
+	t.Parallel()
 	if emptyTx.SigningHash(nil) != libcommon.HexToHash("c775b99e7ad12f50d819fcd602390467e28141316969f4b57f0626f74fe3b386") {
 		t.Errorf("empty transaction hash mismatch, got %x", emptyTx.SigningHash(nil))
 	}
@@ -130,6 +133,7 @@ func TestTransactionSigHash(t *testing.T) {
 }
 
 func TestTransactionEncode(t *testing.T) {
+	t.Parallel()
 	txb, err := rlp.EncodeToBytes(rightvrsTx)
 	if err != nil {
 		t.Fatalf("encode error: %v", err)
@@ -142,6 +146,7 @@ func TestTransactionEncode(t *testing.T) {
 }
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
+	t.Parallel()
 	if emptyEip2718Tx.SigningHash(big.NewInt(1)) != libcommon.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
 		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(big.NewInt(1)))
 	}
@@ -233,6 +238,7 @@ func TestEIP2930Signer(t *testing.T) {
 }
 
 func TestEIP2718TransactionEncode(t *testing.T) {
+	t.Parallel()
 	// RLP representation
 	{
 		have, err := rlp.EncodeToBytes(signedEip2718Tx)
@@ -260,6 +266,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 	}
 }
 func TestEIP1559TransactionEncode(t *testing.T) {
+	t.Parallel()
 	{
 		var buf bytes.Buffer
 		if err := signedDynFeeTx.MarshalBinary(&buf); err != nil {
@@ -289,8 +296,9 @@ func defaultTestKey() (*ecdsa.PrivateKey, libcommon.Address) {
 }
 
 func TestRecipientEmpty(t *testing.T) {
+	t.Parallel()
 	_, addr := defaultTestKey()
-	tx, err := decodeTx(common.Hex2Bytes("f8498080808080011ca09b16de9d5bdee2cf56c28d16275a4da68cd30273e2525f3959f5d62557489921a0372ebd8fb3345f7db7b5a86d42e24d36e983e259b0664ceb8c227ec9af572f3d"))
+	tx, err := decodeTx(libcommon.Hex2Bytes("f8498080808080011ca09b16de9d5bdee2cf56c28d16275a4da68cd30273e2525f3959f5d62557489921a0372ebd8fb3345f7db7b5a86d42e24d36e983e259b0664ceb8c227ec9af572f3d"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,9 +313,10 @@ func TestRecipientEmpty(t *testing.T) {
 }
 
 func TestRecipientNormal(t *testing.T) {
+	t.Parallel()
 	_, addr := defaultTestKey()
 
-	tx, err := decodeTx(common.Hex2Bytes("f85d80808094000000000000000000000000000000000000000080011ca0527c0d8f5c63f7b9f41324a7c8a563ee1190bcbf0dac8ab446291bdbf32f5c79a0552c4ef0a09a04395074dab9ed34d3fbfb843c2f2546cc30fe89ec143ca94ca6"))
+	tx, err := decodeTx(libcommon.Hex2Bytes("f85d80808094000000000000000000000000000000000000000080011ca0527c0d8f5c63f7b9f41324a7c8a563ee1190bcbf0dac8ab446291bdbf32f5c79a0552c4ef0a09a04395074dab9ed34d3fbfb843c2f2546cc30fe89ec143ca94ca6"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +334,7 @@ func TestRecipientNormal(t *testing.T) {
 // decreasing order, but at the same time with increasing nonces when issued by
 // the same account.
 func TestTransactionPriceNonceSort(t *testing.T) {
+	t.Parallel()
 	// Generate a batch of accounts to start with
 	keys := make([]*ecdsa.PrivateKey, 25)
 	for i := 0; i < len(keys); i++ {
@@ -384,6 +394,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 // Tests that if multiple transactions have the same price, the ones seen earlier
 // are prioritized to avoid network spam attacks aiming for a specific ordering.
 func TestTransactionTimeSort(t *testing.T) {
+	t.Parallel()
 	// Generate a batch of accounts to start with
 	keys := make([]*ecdsa.PrivateKey, 5)
 	for i := 0; i < len(keys); i++ {
@@ -437,6 +448,7 @@ func TestTransactionTimeSort(t *testing.T) {
 
 // TestTransactionCoding tests serializing/de-serializing to/from rlp and JSON.
 func TestTransactionCoding(t *testing.T) {
+	t.Parallel()
 	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatalf("could not generate key: %v", err)

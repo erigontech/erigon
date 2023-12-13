@@ -10,20 +10,20 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -32,7 +32,7 @@ import (
 const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
-var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
 	lock           sync.RWMutex
@@ -275,7 +275,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 }
 
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
-	ExecTxsDone.Inc()
+	execTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
@@ -652,7 +652,9 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
+func (rs *StateV3) DoneCount() uint64 {
+	return execTxsDone.GetValueUint64()
+}
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()

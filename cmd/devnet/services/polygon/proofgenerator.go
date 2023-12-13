@@ -10,15 +10,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -38,7 +40,7 @@ func NewProofGenerator() *ProofGenerator {
 func (pg *ProofGenerator) NodeCreated(ctx context.Context, node devnet.Node) {
 
 	if pg.heimdall == nil {
-		if strings.HasPrefix(node.Name(), "bor") {
+		if strings.HasPrefix(node.GetName(), "bor") {
 			if network := devnet.CurrentNetwork(ctx); network != nil {
 				for _, service := range network.Services {
 					if heimdall, ok := service.(*Heimdall); ok {
@@ -72,11 +74,11 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	isCheckpointed, err := pg.isCheckPointed(ctx, burnTxHash)
 
 	if err != nil {
-		return nil, fmt.Errorf("Error getting burn transaction: %w", err)
+		return nil, fmt.Errorf("error getting burn transaction: %w", err)
 	}
 
 	if !isCheckpointed {
-		return nil, fmt.Errorf("Burn transaction has not been checkpointed yet")
+		return nil, fmt.Errorf("eurn transaction has not been checkpointed yet")
 	}
 
 	// build payload for exit
@@ -84,14 +86,14 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 
 	if err != nil {
 		if errors.Is(err, ErrTokenIndexOutOfRange) {
-			return nil, fmt.Errorf("Block not included: %w", err)
+			return nil, fmt.Errorf("block not included: %w", err)
 		}
 
-		return nil, fmt.Errorf("Null receipt received")
+		return nil, fmt.Errorf("null receipt received")
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("Null result received")
+		return nil, fmt.Errorf("null result received")
 	}
 
 	return result, nil
@@ -106,6 +108,7 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 	var burnTransaction *jsonrpc.RPCTransaction
 	var err [2]error
 
+	// err group
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -145,11 +148,11 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	node := devnet.SelectBlockProducer(ctx)
 
 	if node == nil {
-		return nil, fmt.Errorf("No node available")
+		return nil, fmt.Errorf("no node available")
 	}
 
 	if index < 0 {
-		return nil, fmt.Errorf("Index must not negative")
+		return nil, fmt.Errorf("index must not negative")
 	}
 
 	var receipt *types.Receipt
@@ -163,32 +166,29 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	}
 
 	if lastChildBlockNum < txBlockNum {
-		return nil, fmt.Errorf("Burn transaction has not been checkpointed as yet")
+		return nil, fmt.Errorf("burn transaction has not been checkpointed as yet")
 	}
 
 	// step 2-  get transaction receipt from txhash and
 	// block information from block number
 
-	var wg sync.WaitGroup
-	var errs [2]error
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		receipt, errs[0] = node.GetTransactionReceipt(burnTxHash)
-	}()
+	g.Go(func() error {
+		var err error
+		receipt, err = node.GetTransactionReceipt(gctx, burnTxHash)
+		return err
+	})
 
-	go func() {
-		defer wg.Done()
-		block, errs[1] = node.GetBlockByNumber(rpc.AsBlockNumber(txBlockNum), true)
-	}()
+	g.Go(func() error {
+		var err error
+		block, err = node.GetBlockByNumber(gctx, rpc.AsBlockNumber(txBlockNum), true)
+		return err
+	})
 
-	wg.Wait()
-
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	// step 3 - get information about block saved in parent chain
@@ -202,20 +202,22 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		return nil, err
 	}
 
-	blockProof, err := getBlockProof(node, txBlockNum, start, end)
+	blockProofs, err := getBlockProofs(ctx, node, txBlockNum, start, end)
 
 	if err != nil {
 		return nil, err
 	}
 
 	// step 5- create receipt proof
-	receiptProof, err := getReceiptProof(receipt, block, node, nil)
+	receiptProof, err := getReceiptProof(ctx, node, receipt, block, nil)
 
 	if err != nil {
 		return nil, err
 	}
 
 	// step 6 - encode payload, convert into hex
+	var logIndex int
+
 	if index > 0 {
 		logIndices := getAllLogIndices(logEventSig, receipt)
 
@@ -223,56 +225,34 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 			return nil, ErrTokenIndexOutOfRange
 		}
 
-		return encodePayload(
-			rootBlockNumber,
-			blockProof,
-			txBlockNum,
-			block.Time,
-			block.TxHash,
-			block.ReceiptHash,
-			getReceiptBytes(receipt), // rlp encoded
-			receiptProof.parentNodes,
-			receiptProof.path,
-			logIndices[index]), nil
+		logIndex = logIndices[index]
+	} else {
+		logIndex = getLogIndex(logEventSig, receipt)
 	}
-
-	logIndex := getLogIndex(logEventSig, receipt)
 
 	if logIndex < 0 {
-		return nil, fmt.Errorf("Log not found in receipt")
+		return nil, fmt.Errorf("log not found in receipt")
 	}
 
-	return encodePayload(
-		rootBlockNumber,
-		blockProof,
-		txBlockNum,
-		block.Time,
-		block.TxHash,
-		block.ReceiptHash,
-		getReceiptBytes(receipt), // rlp encoded
-		receiptProof.parentNodes,
-		receiptProof.path,
-		logIndex), nil
-}
+	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
 
-func encodePayload(headerNumber uint64, buildBlockProof string, blockNumber uint64, timestamp uint64, transactionsRoot libcommon.Hash, receiptsRoot libcommon.Hash, receipt []byte, receiptParentNodes [][]byte, path []byte, logIndex int) []byte {
-	parentNodesBytes, _ := rlp.EncodeToBytes(receiptParentNodes)
+	if err != nil {
+		return nil, err
+	}
 
-	bytes, _ := rlp.EncodeToBytes(
+	return rlp.EncodeToBytes(
 		[]interface{}{
-			headerNumber,
-			buildBlockProof,
-			blockNumber,
-			timestamp,
-			hexutility.Encode(transactionsRoot[:]),
-			hexutility.Encode(receiptsRoot[:]),
-			hexutility.Encode(receipt),
+			rootBlockNumber,
+			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
+			block.Number.Uint64(),
+			block.Time,
+			hexutility.Encode(block.TxHash[:]),
+			hexutility.Encode(block.ReceiptHash[:]),
+			hexutility.Encode(getReceiptBytes(receipt)), //rpl encoded
 			hexutility.Encode(parentNodesBytes),
-			hexutility.Encode(append([]byte{0}, path...)),
+			hexutility.Encode(append([]byte{0}, receiptProof.path...)),
 			logIndex,
 		})
-
-	return bytes
 }
 
 type receiptProof struct {
@@ -283,40 +263,42 @@ type receiptProof struct {
 	value       interface{}
 }
 
-func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.Node, receipts []*types.Receipt) (*receiptProof, error) {
+func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receipt *types.Receipt, block *requests.Block, receipts []*types.Receipt) (*receiptProof, error) {
 	stateSyncTxHash := types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 	receiptsTrie := trie.New(trie.EmptyRoot)
 
 	if len(receipts) == 0 {
-		var wg sync.WaitGroup
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(len(block.Transactions))
+
 		var lock sync.Mutex
 
-		errs := make([]error, len(block.Transactions))
-		for i, transaction := range block.Transactions {
+		for _, transaction := range block.Transactions {
 			if transaction.Hash == stateSyncTxHash {
 				// ignore if tx hash is bor state-sync tx
 				continue
 			}
 
 			hash := transaction.Hash
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				receipt, errs[i] = node.GetTransactionReceipt(hash)
+			g.Go(func() error {
+				receipt, err := node.GetTransactionReceipt(gctx, hash)
+
+				if err != nil {
+					return err
+				}
+
 				path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
 				rawReceipt := getReceiptBytes(receipt)
 				lock.Lock()
 				defer lock.Unlock()
 				receiptsTrie.Update(path, rawReceipt)
-			}(i)
+
+				return nil
+			})
 		}
 
-		wg.Wait()
-
-		for _, err := range errs {
-			if err != nil {
-				return nil, err
-			}
+		if err := g.Wait(); err != nil {
+			return nil, err
 		}
 	} else {
 		for _, receipt := range receipts {
@@ -327,10 +309,10 @@ func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.
 	}
 
 	path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
-	result, ok := receiptsTrie.Get(path)
+	result, parents, ok := receiptsTrie.FindPath(path)
 
 	if !ok {
-		return nil, fmt.Errorf("Node does not contain the key")
+		return nil, fmt.Errorf("node does not contain the key")
 	}
 
 	var nodeValue any
@@ -343,24 +325,14 @@ func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.
 
 	return &receiptProof{
 		blockHash:   receipt.BlockHash,
-		parentNodes: nil, //TODO - not sure how to get this result.stack.map(s => s.raw()),
+		parentNodes: parents,
 		root:        block.ReceiptHash[:],
 		path:        path,
 		value:       nodeValue,
 	}, nil
 }
 
-func getBlockProof(node devnet.Node, txBlockNum, startBlock, endBlock uint64) (string, error) {
-	proofs, err := getFastMerkleProof(node, txBlockNum, startBlock, endBlock)
-
-	if err != nil {
-		return "", err
-	}
-
-	return hexutility.Encode(bytes.Join(proofs, []byte{})), nil
-}
-
-func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint64) ([][]byte, error) {
+func getBlockProofs(ctx context.Context, node requests.RequestGenerator, blockNumber, startBlock, endBlock uint64) ([][]byte, error) {
 	merkleTreeDepth := int(math.Ceil(math.Log2(float64(endBlock - startBlock + 1))))
 
 	// We generate the proof root down, whereas we need from leaf up
@@ -372,7 +344,7 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 	rightBound := endBlock - offset
 
 	//   console.log("Searching for", targetIndex);
-	for depth := 0; depth < merkleTreeDepth; depth += 1 {
+	for depth := 0; depth < merkleTreeDepth; depth++ {
 		nLeaves := uint64(2) << (merkleTreeDepth - depth)
 
 		// The pivot leaf is the last leaf which is included in the left subtree
@@ -381,8 +353,7 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 		if targetIndex > pivotLeaf {
 			// Get the root hash to the merkle subtree to the left
 			newLeftBound := pivotLeaf + 1
-			// eslint-disable-next-line no-await-in-loop
-			subTreeMerkleRoot, err := node.GetRootHash(offset+leftBound, offset+pivotLeaf)
+			subTreeMerkleRoot, err := node.GetRootHash(ctx, offset+leftBound, offset+pivotLeaf)
 
 			if err != nil {
 				return nil, err
@@ -420,7 +391,7 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 				// We need to build a tree which has heightDifference layers
 
 				// The first leaf will hold the root hash as returned by the RPC
-				remainingNodesHash, err := node.GetRootHash(offset+pivotLeaf+1, offset+rightBound)
+				remainingNodesHash, err := node.GetRootHash(ctx, offset+pivotLeaf+1, offset+rightBound)
 
 				if err != nil {
 					return nil, err
@@ -430,14 +401,23 @@ func getFastMerkleProof(node devnet.Node, blockNumber, startBlock, endBlock uint
 				leafRoots := recursiveZeroHash(subTreeHeight)
 
 				// Build a merkle tree of correct size for the subtree using these merkle roots
-				leaves := make([][]byte, 2<<heightDifference)
+				var leafCount int
+
+				if heightDifference > 0 {
+					leafCount = 2 << heightDifference
+				} else {
+					leafCount = 1
+				}
+
+				leaves := make([]interface{}, leafCount)
+
 				leaves[0] = remainingNodesHash[:]
 
 				for i := 1; i < len(leaves); i++ {
 					leaves[i] = leafRoots[:]
 				}
 
-				subTreeMerkleRoot, err := merkle_tree.HashTreeRoot(leaves)
+				subTreeMerkleRoot, err := merkle_tree.HashTreeRoot(leaves...)
 
 				if err != nil {
 					return nil, err

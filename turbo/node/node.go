@@ -2,6 +2,9 @@
 package node
 
 import (
+	"context"
+
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -12,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
@@ -32,6 +34,14 @@ func (eri *ErigonNode) Serve() error {
 	eri.stack.Wait()
 
 	return nil
+}
+
+func (eri *ErigonNode) Backend() *eth.Ethereum {
+	return eri.backend
+}
+
+func (eri *ErigonNode) Node() *node.Node {
+	return eri.stack
 }
 
 func (eri *ErigonNode) Close() {
@@ -68,6 +78,8 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 		logger.Info("Starting Erigon in ephemeral dev mode...")
 	case networkname.MumbaiChainName:
 		logger.Info("Starting Erigon on Mumbai testnet...")
+	case networkname.AmoyChainName:
+		logger.Info("Starting Erigon on Amoy testnet...")
 	case networkname.BorMainnetChainName:
 		logger.Info("Starting Erigon on Bor Mainnet...")
 	case networkname.BorDevnetChainName:
@@ -98,17 +110,18 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log
 // * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
 // * optionalParams - additional parameters for running a node.
 func New(
+	ctx context.Context,
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
-	node, err := node.New(nodeConfig, logger)
+	node, err := node.New(ctx, nodeConfig, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(node, ethConfig, logger)
+	ethereum, err := eth.New(ctx, node, ethConfig, logger)
 	if err != nil {
 		return nil, err
 	}

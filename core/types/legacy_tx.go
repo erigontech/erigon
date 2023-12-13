@@ -21,14 +21,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -175,7 +174,7 @@ func (tx LegacyTx) copy() *LegacyTx {
 			},
 			Nonce: tx.Nonce,
 			To:    tx.To, // TODO: copy pointed-to address
-			Data:  common.CopyBytes(tx.Data),
+			Data:  libcommon.CopyBytes(tx.Data),
 			Gas:   tx.Gas,
 			// These are initialized below.
 			Value: new(uint256.Int),
@@ -215,19 +214,7 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize++
-	switch len(tx.Data) {
-	case 0:
-	case 1:
-		if tx.Data[0] >= 128 {
-			payloadSize++
-		}
-	default:
-		if len(tx.Data) >= 56 {
-			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
-		}
-		payloadSize += len(tx.Data)
-	}
+	payloadSize += rlp2.StringLen(tx.Data)
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)

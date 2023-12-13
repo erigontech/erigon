@@ -242,12 +242,18 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	cancun := chain.Config().IsCancun(header.Time)
-	if cancun {
-		return misc.VerifyPresenceOfCancunHeaderFields(header)
-	} else {
+	if !chain.Config().IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
+
+	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
+		return err
+	}
+	expectedExcessBlobGas := misc.CalcExcessBlobGas(chain.Config(), parent)
+	if *header.ExcessBlobGas != expectedExcessBlobGas {
+		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
+	}
+	return nil
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
@@ -266,10 +272,10 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger,
 ) {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall)
+		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger)
 	}
 	if chain.Config().IsCancun(header.Time) {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {

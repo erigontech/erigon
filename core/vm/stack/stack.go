@@ -66,20 +66,20 @@ func (st *Stack) Cap() int {
 }
 
 func (st *Stack) Swap(n int) {
-	st.Data[st.Len()-n], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-n]
+	st.Data[len(st.Data)-n], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-n]
 }
 
 func (st *Stack) Dup(n int) {
-	st.Push(&st.Data[st.Len()-n])
+	st.Data = append(st.Data, st.Data[len(st.Data)-n])
 }
 
 func (st *Stack) Peek() *uint256.Int {
-	return &st.Data[st.Len()-1]
+	return &st.Data[len(st.Data)-1]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.Data[st.Len()-n-1]
+	return &st.Data[len(st.Data)-n-1]
 }
 
 func (st *Stack) Reset() {
@@ -106,43 +106,4 @@ func (st *Stack) Print() {
 func ReturnNormalStack(s *Stack) {
 	s.Data = s.Data[:0]
 	stackPool.Put(s)
-}
-
-var rStackPool = sync.Pool{
-	New: func() interface{} {
-		return &ReturnStack{data: make([]uint32, 0, 10)}
-	},
-}
-
-func ReturnRStack(rs *ReturnStack) {
-	rs.data = rs.data[:0]
-	rStackPool.Put(rs)
-}
-
-// ReturnStack is an object for basic return stack operations.
-type ReturnStack struct {
-	data []uint32
-}
-
-func NewReturnStack() *ReturnStack {
-	rStack, ok := rStackPool.Get().(*ReturnStack)
-	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get ReturnStack pointer from rStackPool")
-	}
-	return rStack
-}
-
-func (st *ReturnStack) Push(d uint32) {
-	st.data = append(st.data, d)
-}
-
-// A uint32 is sufficient as for code below 4.2G
-func (st *ReturnStack) Pop() (ret uint32) {
-	ret = st.data[len(st.data)-1]
-	st.data = st.data[:len(st.data)-1]
-	return
-}
-
-func (st *ReturnStack) Data() []uint32 {
-	return st.data
 }

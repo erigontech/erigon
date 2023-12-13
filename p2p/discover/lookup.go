@@ -155,6 +155,7 @@ func (it *lookup) slowdown() {
 func (it *lookup) query(n *node, reply chan<- []*node) {
 	fails := it.tab.db.FindFails(n.ID(), n.IP())
 	r, err := it.queryfunc(n)
+
 	if err == errClosed {
 		// Avoid recording failures on shutdown.
 		reply <- nil
@@ -180,6 +181,7 @@ func (it *lookup) query(n *node, reply chan<- []*node) {
 	for _, n := range r {
 		it.tab.addSeenNode(n)
 	}
+
 	reply <- r
 }
 

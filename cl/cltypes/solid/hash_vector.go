@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -22,8 +24,20 @@ func NewHashVector(s int) HashVectorSSZ {
 	}
 }
 
+func (arr *hashVector) Bytes() []byte {
+	return arr.u.u[:arr.u.l*length.Hash]
+}
+
 func (h *hashVector) Append(val libcommon.Hash) {
 	panic("not implmented")
+}
+
+func (h hashVector) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.u)
+}
+
+func (h *hashVector) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, h.u)
 }
 
 func (h *hashVector) Cap() int {

@@ -117,7 +117,10 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	db, err := enode.OpenDB("" /* path */, "" /* tmpDir */)
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */)
 	if err != nil {
 		panic(err)
 	}
@@ -127,15 +130,12 @@ func main() {
 		NetRestrict: restrictList,
 	}
 
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
 	if *runv5 {
-		if _, err := discover.ListenV5(ctx, conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(ctx, "any", conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(ctx, conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(ctx, "any", conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

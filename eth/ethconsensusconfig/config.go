@@ -1,6 +1,7 @@
 package ethconsensusconfig
 
 import (
+	"context"
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
@@ -13,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -24,8 +26,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
-	heimdallClient bor.IHeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
+func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+	heimdallClient heimdall.IHeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger,
 ) consensus.Engine {
 	var eng consensus.Engine
@@ -69,7 +71,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
+			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -82,7 +84,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
+			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -105,7 +107,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
+			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -126,21 +128,21 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 	}
 }
 
-func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger) consensus.Engine {
+func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) consensus.Engine {
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if chainConfig.Aura != nil {
-		consensusConfig = &chainConfig.Aura
+		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &chainConfig.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake
 		consensusConfig = &ethashCfg
 	}
 
-	return CreateConsensusEngine(&nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
 		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger)
 }

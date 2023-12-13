@@ -21,7 +21,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	for _, block := range req.Blocks {
 		header, err := eth1_utils.HeaderRpcToHeader(block.Header)
@@ -34,6 +34,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil || parentTd == nil {
 			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
 		}
+
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {

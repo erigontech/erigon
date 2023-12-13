@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -16,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -47,7 +48,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 		blockNumber = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+	block, err := api.blockByNumberWithSenders(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +168,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, bErr := api.blockWithSenders(tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -387,7 +388,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
-		block, bErr := api.blockByNumberWithSenders(ctx, dbtx, b)
+		block, bErr := api.blockByNumberWithSenders(dbtx, b)
 		if bErr != nil {
 			if first {
 				first = false
@@ -617,7 +618,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// TODO(yperbasis) proper rewards for Gnosis
 
 			// if we are in POS
-			// we dont check for uncles or block rewards
+			// we don't check for uncles or block rewards
 			if isPos {
 				continue
 			}
@@ -897,7 +898,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState)
+	logger := log.New("trace_filtering")
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
 	if err != nil {
 		return nil, nil, err
 	}

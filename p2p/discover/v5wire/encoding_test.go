@@ -18,6 +18,7 @@ package v5wire
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"flag"
@@ -30,8 +31,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -167,7 +169,7 @@ func TestHandshake_norecord(t *testing.T) {
 func TestHandshake_rekey(t *testing.T) {
 	// runtime: setevent failed; errno=6
 	// fatal error: runtime.semawakeup
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 
@@ -535,7 +537,7 @@ func (t *handshakeTest) close() {
 }
 
 func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.Logger) {
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}

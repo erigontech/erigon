@@ -31,6 +31,7 @@ import (
 
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
+	t.Parallel()
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainConfig}
@@ -62,7 +63,7 @@ func TestHeaderVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
@@ -72,6 +73,7 @@ func TestHeaderVerification(t *testing.T) {
 
 // Tests that simple header with seal verification works, for both good and bad blocks.
 func TestHeaderWithSealVerification(t *testing.T) {
+	t.Parallel()
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
@@ -104,7 +106,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 

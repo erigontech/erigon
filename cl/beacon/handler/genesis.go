@@ -1,42 +1,33 @@
 package handler
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/types"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/log/v3"
 )
 
-type genesisReponse struct {
-	GenesisTime          uint64       `json:"genesis_time,omitempty"`
-	GenesisValidatorRoot common.Hash  `json:"genesis_validator_root,omitempty"`
-	GenesisForkVersion   types.Bytes4 `json:"genesis_fork_version,omitempty"`
+type genesisResponse struct {
+	GenesisTime          uint64           `json:"genesis_time,omitempty"`
+	GenesisValidatorRoot common.Hash      `json:"genesis_validator_root,omitempty"`
+	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
 }
 
-func (a *ApiHandler) getGenesis(w http.ResponseWriter, _ *http.Request) {
+func (a *ApiHandler) getGenesis(r *http.Request) (*beaconResponse, error) {
 	if a.genesisCfg == nil {
-		w.WriteHeader(http.StatusNotFound)
-		io.WriteString(w, "Genesis Config is missing")
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "Genesis Config is missing")
 	}
 
 	digest, err := fork.ComputeForkDigest(a.beaconChainCfg, a.genesisCfg)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		io.WriteString(w, "Failed to compute fork digest")
-		log.Error("[Beacon API] genesis handler failed", err)
-		return
+		return nil, err
 	}
 
-	w.Header().Set("Content-Type", "Application/json")
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(genesisReponse{
+	return newBeaconResponse(&genesisResponse{
 		GenesisTime:          a.genesisCfg.GenesisTime,
 		GenesisValidatorRoot: a.genesisCfg.GenesisValidatorRoot,
-		GenesisForkVersion:   types.Bytes4(digest),
-	})
+		GenesisForkVersion:   digest,
+	}), nil
 }

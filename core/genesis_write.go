@@ -32,14 +32,15 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -48,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -348,10 +348,9 @@ func HoleskyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HoleskyChainConfig,
 		Nonce:      4660,
-		ExtraData:  hexutil.MustDecode("0x686f77206d7563682069732074686520666973683f"),
 		GasLimit:   25000000,
 		Difficulty: big.NewInt(1),
-		Timestamp:  1694786100,
+		Timestamp:  1695902100,
 		Alloc:      readPrealloc("allocs/holesky.json"),
 	}
 }
@@ -381,6 +380,7 @@ func GoerliGenesisBlock() *types.Genesis {
 	}
 }
 
+// MumbaiGenesisBlock returns the Amoy network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.MumbaiChainConfig,
@@ -391,6 +391,20 @@ func MumbaiGenesisBlock() *types.Genesis {
 		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/mumbai.json"),
+	}
+}
+
+// AmoyGenesisBlock returns the Amoy network genesis block.
+func AmoyGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.AmoyChainConfig,
+		Nonce:      0,
+		Timestamp:  1700225065,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/amoy.json"),
 	}
 }
 
@@ -541,6 +555,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
+
 		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 		var tx kv.RwTx
@@ -650,6 +665,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GoerliGenesisBlock()
 	case networkname.MumbaiChainName:
 		return MumbaiGenesisBlock()
+	case networkname.AmoyChainName:
+		return AmoyGenesisBlock()
 	case networkname.BorMainnetChainName:
 		return BorMainnetGenesisBlock()
 	case networkname.BorDevnetChainName:

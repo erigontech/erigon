@@ -2,12 +2,12 @@ package jsonrpc
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -215,7 +215,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
+	return b.baseApi.blockByRPCNumber(number, b.tx)
 }
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc

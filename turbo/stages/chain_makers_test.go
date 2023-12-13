@@ -35,6 +35,7 @@ import (
 )
 
 func TestGenerateChain(t *testing.T) {
+	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -92,18 +93,17 @@ func TestGenerateChain(t *testing.T) {
 		fmt.Printf("generate chain: %v\n", err)
 	}
 
+	// Import the chain. This runs all block validation rules.
+	if err := m.InsertChain(chain); err != nil {
+		fmt.Printf("insert error%v\n", err)
+		return
+	}
 	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
-
-	// Import the chain. This runs all block validation rules.
-	if err := m.InsertChain(chain, tx); err != nil {
-		fmt.Printf("insert error%v\n", err)
-		return
-	}
 
 	st := state.New(m.NewStateReader(tx))
 	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {

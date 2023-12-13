@@ -1,3 +1,5 @@
+//go:build integration
+
 package tests
 
 import (
@@ -19,11 +21,6 @@ func TestExecutionSpec(t *testing.T) {
 	bt := new(testMatcher)
 
 	dir := filepath.Join(".", "execution-spec-tests")
-
-	// TODO(yperbasis): fix me
-	bt.skipLoad(`^cancun/eip4844_blobs/blob_txs/`)
-	bt.skipLoad(`^cancun/eip4844_blobs/blob_txs_full/`)
-	bt.skipLoad(`^cancun/eip4844_blobs/excess_blob_gas/`)
 
 	checkStateRoot := true
 

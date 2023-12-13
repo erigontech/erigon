@@ -29,7 +29,7 @@ func TestGetLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	{
-		ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+		ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		assert.NoError(err)
@@ -214,7 +214,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.Block
 	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
-		err := m.InsertChain(chain, nil)
+		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}
 	return m

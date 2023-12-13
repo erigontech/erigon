@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -44,7 +44,7 @@ TODO:
 		&BackupLabelsFlag,
 		&BackupTablesFlag,
 		&WarmupThreadsFlag,
-	}, debug.Flags, logging.Flags),
+	}),
 }
 
 var (
@@ -76,7 +76,7 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -95,14 +95,14 @@ func doBackup(cliCtx *cli.Context) error {
 	var lables = []kv.Label{kv.ChainDB, kv.TxPoolDB, kv.DownloaderDB}
 	if cliCtx.IsSet(BackupToPageSizeFlag.Name) {
 		lables = lables[:0]
-		for _, l := range utils.SplitAndTrim(cliCtx.String(BackupLabelsFlag.Name)) {
+		for _, l := range common.CliString2Array(cliCtx.String(BackupLabelsFlag.Name)) {
 			lables = append(lables, kv.UnmarshalLabel(l))
 		}
 	}
 
 	var tables []string
 	if cliCtx.IsSet(BackupTablesFlag.Name) {
-		tables = utils.SplitAndTrim(cliCtx.String(BackupTablesFlag.Name))
+		tables = common.CliString2Array(cliCtx.String(BackupTablesFlag.Name))
 	}
 
 	readAheadThreads := backup.ReadAheadThreads

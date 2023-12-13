@@ -1,7 +1,10 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -15,6 +18,14 @@ const FIELD_ELEMENTS_PER_BLOB = 4096
 const BYTES_PER_BLOB = uint64(BYTES_PER_FIELD_ELEMENT * FIELD_ELEMENTS_PER_BLOB)
 
 type KZGCommitment gokzg4844.KZGCommitment
+
+func (b KZGCommitment) MarshalJSON() ([]byte, error) {
+	return json.Marshal(libcommon.Bytes48(b))
+}
+
+func (b *KZGCommitment) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, (*libcommon.Bytes48)(b))
+}
 
 func (b *KZGCommitment) Copy() *KZGCommitment {
 	copy := *b

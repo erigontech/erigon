@@ -31,7 +31,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -267,7 +266,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		StepDuration:        auraParams.StepDurations[0],
 	}
 	durations = append(durations, durInfo)
-	times := common.SortedKeys(auraParams.StepDurations)
+	times := libcommon.SortedKeys(auraParams.StepDurations)
 	for i := 1; i < len(auraParams.StepDurations); i++ { // skip first
 		time := times[i]
 		dur := auraParams.StepDurations[time]
@@ -632,7 +631,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
 ) {
 	blockNum := header.Number.Uint64()
 
@@ -671,7 +670,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 
 	epoch, err := c.e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
-		log.Warn("[aura] initialize block: on epoch begin", "err", err)
+		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
 	isEpochBegin := epoch != nil
@@ -680,7 +679,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	}
 	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
 	if err != nil {
-		log.Warn("[aura] initialize block: on epoch begin", "err", err)
+		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
 	// check_and_lock_block -> check_epoch_end_signal END (before enact)
@@ -733,7 +732,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 	if epochEndProof != nil {
 		c.EpochManager.noteNewEpoch()
-		log.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
+		logger.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
 		if err := c.e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
 			return nil, nil, err
 		}

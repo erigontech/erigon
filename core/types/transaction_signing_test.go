@@ -23,11 +23,11 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestEIP1559Signing(t *testing.T) {
+	t.Parallel()
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
@@ -48,6 +48,7 @@ func TestEIP1559Signing(t *testing.T) {
 }
 
 func TestEIP155Signing(t *testing.T) {
+	t.Parallel()
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
@@ -67,6 +68,7 @@ func TestEIP155Signing(t *testing.T) {
 }
 
 func TestEIP155ChainId(t *testing.T) {
+	t.Parallel()
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
@@ -99,6 +101,7 @@ func TestEIP155ChainId(t *testing.T) {
 }
 
 func TestEIP155SigningVitalik(t *testing.T) {
+	t.Parallel()
 	// Test vectors come from http://vitalik.ca/files/eip155_testvec.txt
 	for i, test := range []struct {
 		txRlp, addr string
@@ -116,7 +119,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		tx, err := DecodeTransaction(common.Hex2Bytes(test.txRlp))
+		tx, err := DecodeTransaction(libcommon.Hex2Bytes(test.txRlp))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -137,6 +140,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 }
 
 func TestChainId(t *testing.T) {
+	t.Parallel()
 	key, _ := defaultTestKey()
 
 	var tx Transaction = NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)

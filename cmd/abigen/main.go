@@ -25,6 +25,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -180,7 +182,7 @@ func abigen(c *cli.Context) error {
 	} else {
 		// Generate the list of types to exclude from binding
 		exclude := make(map[string]bool)
-		for _, kind := range utils.SplitAndTrim(c.String(excFlag.Name)) {
+		for _, kind := range common.CliString2Array(c.String(excFlag.Name)) {
 			exclude[strings.ToLower(kind)] = true
 		}
 		var err error

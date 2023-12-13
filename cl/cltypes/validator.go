@@ -16,11 +16,10 @@ const (
 )
 
 type DepositData struct {
-	PubKey                [48]byte
-	WithdrawalCredentials [32]byte // 32 byte
-	Amount                uint64
-	Signature             [96]byte
-	Root                  libcommon.Hash // Ignored if not for hashing
+	PubKey                libcommon.Bytes48 `json:"pubkey"`
+	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64            `json:"amount"`
+	Signature             libcommon.Bytes96 `json:"signature"`
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -49,8 +48,8 @@ func (*DepositData) Static() bool {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof solid.HashVectorSSZ // 33 X 32 size.
-	Data  *DepositData
+	Proof solid.HashVectorSSZ `json:"proof"` // 33 X 32 size.
+	Data  *DepositData        `json:"data"`
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -73,8 +72,8 @@ func (d *Deposit) HashSSZ() ([32]byte, error) {
 }
 
 type VoluntaryExit struct {
-	Epoch          uint64
-	ValidatorIndex uint64
+	Epoch          uint64 `json:"epoch"`
+	ValidatorIndex uint64 `json:"validator_index"`
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -102,23 +101,23 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 }
 
 type SignedVoluntaryExit struct {
-	VolunaryExit *VoluntaryExit
-	Signature    [96]byte
+	VoluntaryExit *VoluntaryExit    `json:"message"`
+	Signature     libcommon.Bytes96 `json:"signature"`
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, e.VolunaryExit, e.Signature[:])
+	return ssz2.MarshalSSZ(dst, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, version int) error {
-	e.VolunaryExit = new(VoluntaryExit)
-	return ssz2.UnmarshalSSZ(buf, version, e.VolunaryExit, e.Signature[:])
+	e.VoluntaryExit = new(VoluntaryExit)
+	return ssz2.UnmarshalSSZ(buf, version, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(e.VolunaryExit, e.Signature[:])
+	return merkle_tree.HashTreeRoot(e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
-	return 96 + e.VolunaryExit.EncodingSizeSSZ()
+	return 96 + e.VoluntaryExit.EncodingSizeSSZ()
 }

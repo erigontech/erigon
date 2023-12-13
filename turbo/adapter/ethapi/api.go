@@ -19,6 +19,7 @@ package ethapi
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -28,7 +29,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -47,6 +47,7 @@ type CallArgs struct {
 	Value                *hexutil.Big       `json:"value"`
 	Nonce                *hexutil.Uint64    `json:"nonce"`
 	Data                 *hexutility.Bytes  `json:"data"`
+	Input                *hexutility.Bytes  `json:"input"`
 	AccessList           *types2.AccessList `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
@@ -142,7 +143,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		}
 	}
 	var data []byte
-	if args.Data != nil {
+	if args.Input != nil {
+		data = *args.Input
+	} else if args.Data != nil {
 		data = *args.Data
 	}
 	var accessList types2.AccessList

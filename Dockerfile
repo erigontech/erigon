@@ -6,6 +6,8 @@ RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc
 WORKDIR /app
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN go mod download
 ADD . .
@@ -13,7 +15,7 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make all
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
 FROM docker.io/library/golang:1.20-alpine3.17 AS tools-builder
@@ -24,6 +26,8 @@ ADD Makefile Makefile
 ADD tools.go tools.go
 ADD go.mod go.mod
 ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN mkdir -p /app/build/bin
 
@@ -74,7 +78,7 @@ COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
-COPY --from=builder /app/build/bin/caplin-phase1 /usr/local/bin/caplin-phase1
+COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
 COPY --from=builder /app/build/bin/caplin-regression /usr/local/bin/caplin-regression
 
 

@@ -1,36 +1,58 @@
 package app
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/net/http2"
 )
+
+const (
+	wsReadBuffer       = 1024
+	wsWriteBuffer      = 1024
+	wsPingInterval     = 60 * time.Second
+	wsPingWriteTimeout = 5 * time.Second
+	wsMessageSizeLimit = 32 * 1024 * 1024
+)
+
+var wsBufferPool = new(sync.Pool)
 
 var (
 	diagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
+		Name:  "diagnostics.addr",
+		Usage: "Address of the diagnostics system provided by the support team, include unique session PIN",
 	}
-	metricsURLsFlag = cli.StringSliceFlag{
-		Name:  "metrics.urls",
-		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
+
+	debugURLsFlag = cli.StringSliceFlag{
+		Name:  "debug.addrs",
+		Usage: "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
 	}
+
 	insecureFlag = cli.BoolFlag{
 		Name:  "insecure",
 		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
+
+	sessionsFlag = cli.StringSliceFlag{
+		Name:  "diagnostics.sessions",
+		Usage: "Comma separated list of support session ids to connect to",
 	}
 )
 
@@ -38,16 +60,15 @@ var supportCommand = cli.Command{
 	Action:    MigrateFlags(connectDiagnostics),
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
-	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --metrics.urls <http://erigon_host:metrics_port>",
+	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Flags: []cli.Flag{
-		&metricsURLsFlag,
+		&debugURLsFlag,
 		&diagnosticsURLFlag,
+		&sessionsFlag,
 		&insecureFlag,
 	},
 	//Category: "SUPPORT COMMANDS",
-	Description: `
-The support command connects a running Erigon instances to a diagnostics system specified
-by the URL.`,
+	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
 }
 
 const Version = 1
@@ -63,10 +84,13 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
-	metricsURL := metricsURLs[0] // TODO: Generalise
+	debugURLs := []string{}
 
-	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name)
+	for _, debugURL := range cliCtx.StringSlice(debugURLsFlag.Name) {
+		debugURLs = append(debugURLs, "http://"+debugURL)
+	}
+
+	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name) + "/bridge"
 
 	// Create TLS configuration with the certificate of the server
 	insecure := cliCtx.Bool(insecureFlag.Name)
@@ -74,9 +98,11 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
+	sessionIds := cliCtx.StringSlice(sessionsFlag.Name)
+
 	// Perform the requests in a loop (reconnect)
 	for {
-		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, metricsURL, logger); err != nil {
+		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, sessionIds, debugURLs, logger); err != nil {
 			return err
 		}
 		select {
@@ -91,96 +117,306 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	}
 }
 
-var successLine = []byte("SUCCESS")
+type conn struct {
+	io.ReadCloser
+	*io.PipeWriter
+}
+
+func (c *conn) Close() error {
+	c.ReadCloser.Close()
+	c.PipeWriter.Close()
+	return nil
+}
+
+func (c *conn) SetWriteDeadline(time time.Time) error {
+	return nil
+}
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
-func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, metricsURL string, logger log.Logger) error {
-	diagnosticsClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
-	defer diagnosticsClient.CloseIdleConnections()
+// tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
+// needs to be called repeatedly to implement re-connect logic
+func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
-	// Create a request object to send to the server
-	reader, writer := io.Pipe()
+
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
+
 	go func() {
 		select {
 		case <-sigs:
 			cancel()
 		case <-ctx1.Done():
 		}
-		reader.Close()
-		writer.Close()
 	}()
-	req, err := http.NewRequestWithContext(ctx1, http.MethodPost, diagnosticsUrl, reader)
-	if err != nil {
-		return err
+
+	type enode struct {
+		Enode        string               `json:"enode,omitempty"`
+		Enr          string               `json:"enr,omitempty"`
+		Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
+		ListenerAddr string               `json:"listener_addr,omitempty"`
 	}
 
-	// Create a connection
-	// Apply given context to the sent request
-	resp, err := diagnosticsClient.Do(req)
+	type info struct {
+		Id        string          `json:"id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Protocols json.RawMessage `json:"protocols,omitempty"`
+		Enodes    []enode         `json:"enodes,omitempty"`
+	}
+
+	type node struct {
+		debugURL string
+		info     *info
+	}
+
+	nodes := map[string]*node{}
+
+	for _, debugURL := range debugURLs {
+		debugResponse, err := metricsClient.Get(debugURL + "/debug/nodeinfo")
+
+		if err != nil {
+			return err
+		}
+
+		if debugResponse.StatusCode != http.StatusOK {
+			return fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
+		}
+
+		var reply remote.NodesInfoReply
+
+		err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+		debugResponse.Body.Close()
+
+		if err != nil {
+			return err
+		}
+
+		for _, ni := range reply.NodesInfo {
+			if n, ok := nodes[ni.Id]; ok {
+				n.info.Enodes = append(n.info.Enodes, enode{
+					Enode:        ni.Enode,
+					Enr:          ni.Enr,
+					Ports:        ni.Ports,
+					ListenerAddr: ni.ListenerAddr,
+				})
+			} else {
+				nodes[ni.Id] = &node{debugURL, &info{
+					Id:        ni.Id,
+					Name:      ni.Name,
+					Protocols: ni.Protocols,
+					Enodes: []enode{{
+						Enode:        ni.Enode,
+						Enr:          ni.Enr,
+						Ports:        ni.Ports,
+						ListenerAddr: ni.ListenerAddr,
+					}}}}
+			}
+		}
+	}
+
+	dialer := websocket.Dialer{
+		ReadBufferSize:  wsReadBuffer,
+		WriteBufferSize: wsWriteBuffer,
+		WriteBufferPool: wsBufferPool,
+	}
+
+	conn, resp, err := dialer.DialContext(ctx1, "wss://"+diagnosticsUrl, nil)
+
+	if err != nil {
+		conn, resp, err = dialer.DialContext(ctx1, "ws://"+diagnosticsUrl, nil)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
+	}
+
+	type connectionInfo struct {
+		Version  uint64   `json:"version"`
+		Sessions []string `json:"sessions"`
+		Nodes    []*info  `json:"nodes"`
+	}
+
+	codec := rpc.NewWebsocketCodec(conn)
+	defer codec.Close()
+
+	err = codec.WriteJSON(ctx1, &connectionInfo{
+		Version:  Version,
+		Sessions: sessionIds,
+		Nodes: func() (replies []*info) {
+			for _, node := range nodes {
+				replies = append(replies, node.info)
+			}
+
+			return replies
+		}(),
+	})
+
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-	defer writer.Close()
-
-	// Apply the connection context on the request context
-	var metricsBuf bytes.Buffer
-	r := bufio.NewReaderSize(resp.Body, 4096)
-	line, isPrefix, err := r.ReadLine()
-	if err != nil {
-		return fmt.Errorf("reading first line: %v", err)
-	}
-	if isPrefix {
-		return fmt.Errorf("request too long")
-	}
-	if !bytes.Equal(line, successLine) {
-		return fmt.Errorf("connecting to diagnostics system, first line [%s]", line)
-	}
-	var versionBytes [8]byte
-	binary.BigEndian.PutUint64(versionBytes[:], Version)
-	if _, err = writer.Write(versionBytes[:]); err != nil {
-		return fmt.Errorf("sending version: %v", err)
 	}
 
 	logger.Info("Connected")
 
-	for line, isPrefix, err = r.ReadLine(); err == nil && !isPrefix; line, isPrefix, err = r.ReadLine() {
-		metricsBuf.Reset()
-		metricsResponse, err := metricsClient.Get(metricsURL + string(line))
-		if err != nil {
-			fmt.Fprintf(&metricsBuf, "ERROR: Requesting metrics url [%s], query [%s], err: %v", metricsURL, line, err)
-		} else {
-			// Buffer the metrics response, and relay it back to the diagnostics system, prepending with the size
-			if _, err := io.Copy(&metricsBuf, metricsResponse.Body); err != nil {
-				metricsBuf.Reset()
-				fmt.Fprintf(&metricsBuf, "ERROR: Extracting metrics url [%s], query [%s], err: %v", metricsURL, line, err)
-			}
-			metricsResponse.Body.Close()
-		}
-		var sizeBuf [4]byte
-		binary.BigEndian.PutUint32(sizeBuf[:], uint32(metricsBuf.Len()))
-		if _, err = writer.Write(sizeBuf[:]); err != nil {
-			logger.Error("Problem relaying metrics prefix len", "url", metricsURL, "query", line, "err", err)
-			break
-		}
-		if _, err = writer.Write(metricsBuf.Bytes()); err != nil {
-			logger.Error("Problem relaying", "url", metricsURL, "query", line, "err", err)
-			break
-		}
-	}
-	if err != nil {
+	for {
+		requests, _, err := codec.ReadBatch()
+
 		select {
 		case <-ctx.Done():
+			return nil
 		default:
-			logger.Error("Breaking connection", "err", err)
+			if err != nil {
+				logger.Info("Breaking connection", "err", err)
+				return nil
+			}
+		}
+
+		var requestId string
+
+		if err = json.Unmarshal(requests[0].ID, &requestId); err != nil {
+			logger.Error("Invalid request id", "err", err)
+			continue
+		}
+
+		nodeRequest := struct {
+			NodeId      string     `json:"nodeId"`
+			QueryParams url.Values `json:"queryParams"`
+		}{}
+
+		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
+			logger.Error("Invalid node request", "err", err, "id", requestId)
+			continue
+		}
+
+		type responseError struct {
+			Code    int64            `json:"code"`
+			Message string           `json:"message"`
+			Data    *json.RawMessage `json:"data,omitempty"`
+		}
+
+		type nodeResponse struct {
+			Id     string          `json:"id"`
+			Result json.RawMessage `json:"result,omitempty"`
+			Error  *responseError  `json:"error,omitempty"`
+			Last   bool            `json:"last,omitempty"`
+		}
+
+		if node, ok := nodes[nodeRequest.NodeId]; ok {
+			err := func() error {
+				var queryString string
+
+				if len(nodeRequest.QueryParams) > 0 {
+					queryString = "?" + nodeRequest.QueryParams.Encode()
+				}
+
+				debugURL := node.debugURL + "/debug/" + requests[0].Method + queryString
+				debugResponse, err := metricsClient.Get(debugURL)
+
+				if err != nil {
+					return codec.WriteJSON(ctx1, &nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    http.StatusFailedDependency,
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+						},
+						Last: true,
+					})
+				}
+
+				defer debugResponse.Body.Close()
+
+				//Websocket ok message
+				if resp.StatusCode != http.StatusSwitchingProtocols {
+					body, _ := io.ReadAll(debugResponse.Body)
+					return codec.WriteJSON(ctx1, &nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    int64(resp.StatusCode),
+							Message: fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)),
+						},
+						Last: true,
+					})
+				}
+
+				buffer := &bytes.Buffer{}
+
+				switch debugResponse.Header.Get("Content-Type") {
+				case "application/json":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    http.StatusInternalServerError,
+								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							},
+							Last: true,
+						})
+
+					}
+				case "application/octet-stream":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+					offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
+					size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
+
+					data, err := json.Marshal(struct {
+						Offset int64  `json:"offset"`
+						Size   int64  `json:"size"`
+						Data   []byte `json:"chunk"`
+					}{
+						Offset: offset,
+						Size:   size,
+						Data:   buffer.Bytes(),
+					})
+
+					buffer = bytes.NewBuffer(data)
+
+					if err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+				default:
+					return codec.WriteJSON(ctx1, &nodeResponse{
+						Id: requestId,
+						Error: &responseError{
+							Code:    int64(http.StatusInternalServerError),
+							Message: fmt.Sprintf("Unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugURL),
+						},
+						Last: true,
+					})
+				}
+
+				return codec.WriteJSON(ctx1, &nodeResponse{
+					Id:     requestId,
+					Result: json.RawMessage(buffer.Bytes()),
+					Last:   true,
+				})
+			}()
+
+			if err != nil {
+				return err
+			}
 		}
 	}
-	if isPrefix {
-		logger.Error("Request too long, circuit breaker")
-	}
-	return nil
 }

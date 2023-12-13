@@ -1,6 +1,8 @@
 package solid
 
 import (
+	"encoding/json"
+
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 )
 
@@ -12,6 +14,14 @@ func NewUint64ListSSZ(limit int) Uint64ListSSZ {
 	return &uint64ListSSZ{
 		u: NewUint64Slice(limit),
 	}
+}
+
+func (h uint64ListSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.u)
+}
+
+func (h uint64ListSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, h.u)
 }
 
 func (h *uint64ListSSZ) Static() bool {
@@ -30,6 +40,10 @@ func NewUint64ListSSZFromSlice(limit int, slice []uint64) Uint64ListSSZ {
 
 func (arr *uint64ListSSZ) Clear() {
 	arr.u.Clear()
+}
+
+func (arr *uint64ListSSZ) Bytes() []byte {
+	return arr.u.u[:arr.u.l*8]
 }
 
 func (arr *uint64ListSSZ) CopyTo(target IterableSSZ[uint64]) {

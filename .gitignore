@@ -47,6 +47,7 @@ profile.cov
 
 # VS Code
 .vscode
+*.code-workspace
 
 # dashboard
 /dashboard/assets/flow-typed
@@ -70,9 +71,7 @@ __pycache__
 libmdbx/build/*
 tests/testdata/*
 
-go.work
-go.work.sum
-erigon-lib/
+go.work*
 
 /goerli
 
@@ -82,7 +81,20 @@ coverage.out
 
 dist
 __debug_bin
+*.exe
 
 *.log
 
 caplin-recordings
+
+jwt.hex
+
+.tool-versions
+
+*__debug_bin*
+yarn.lock
+node_modules
+
+/config.toml
+/config.yaml
+/config.yml

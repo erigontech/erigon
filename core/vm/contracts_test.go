@@ -96,9 +96,10 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 
 func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := common.Hex2Bytes(test.Input)
+	in := libcommon.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
+		t.Parallel()
 		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
@@ -108,7 +109,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := common.Hex2Bytes(test.Input)
+		exp := libcommon.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -117,16 +118,17 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 
 func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := common.Hex2Bytes(test.Input)
+	in := libcommon.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in) - 1
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
+		t.Parallel()
 		_, _, err := RunPrecompiledContract(p, in, gas)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := common.Hex2Bytes(test.Input)
+		exp := libcommon.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -135,15 +137,16 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 
 func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing.T) {
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := common.Hex2Bytes(test.Input)
+	in := libcommon.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
+		t.Parallel()
 		_, _, err := RunPrecompiledContract(p, in, gas)
 		if err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := common.Hex2Bytes(test.Input)
+		exp := libcommon.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -155,7 +158,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		return
 	}
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := common.Hex2Bytes(test.Input)
+	in := libcommon.Hex2Bytes(test.Input)
 	reqGas := p.RequiredGas(in)
 
 	var (
@@ -247,6 +250,7 @@ func BenchmarkPrecompiledBn256Add(b *testing.B) { benchJson("bn256Add", "06", b)
 
 // Tests OOG
 func TestPrecompiledModExpOOG(t *testing.T) {
+	t.Parallel()
 	modexpTests, err := loadJson("modexp")
 	if err != nil {
 		t.Fatal(err)
@@ -268,6 +272,7 @@ func TestPrecompiledBlake2F(t *testing.T)      { testJson("blake2F", "09", t) }
 func BenchmarkPrecompiledBlake2F(b *testing.B) { benchJson("blake2F", "09", b) }
 
 func TestPrecompileBlake2FMalformedInput(t *testing.T) {
+	t.Parallel()
 	for _, test := range blake2FMalformedInputTests {
 		testPrecompiledFailure("09", test, t)
 	}

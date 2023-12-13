@@ -546,16 +546,17 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if contractCreation {
-		if previous != nil && previous.selfdestructed {
-			prevInc = previous.data.Incarnation
+	if previous != nil && previous.selfdestructed {
+		prevInc = previous.data.Incarnation
+	} else {
+		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
+			prevInc = inc
 		} else {
-			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-				prevInc = inc
-			} else {
-				sdb.savedErr = err
-			}
+			sdb.savedErr = err
 		}
+	}
+	if previous != nil && prevInc < previous.data.PrevIncarnation {
+		prevInc = previous.data.PrevIncarnation
 	}
 
 	newObj := sdb.createObject(addr, previous)
@@ -563,6 +564,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
 	newObj.data.Initialised = true
+	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.newlyCreatedContract = true
@@ -685,24 +687,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	return nil
 }
 
-func (sdb *IntraBlockState) SoftFinalise() {
-	for addr := range sdb.journal.dirties {
-		_, exist := sdb.stateObjects[addr]
-		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
-			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
-			// it will persist in the journal even though the journal is reverted. In this special circumstance,
-			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
-			// Thus, we can safely ignore it here
-			continue
-		}
-		sdb.stateObjectsDirty[addr] = struct{}{}
-	}
-	// Invalidate journal because reverting across transactions is not allowed.
-	sdb.clearJournalAndRefund()
-}
-
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
@@ -809,15 +793,17 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 }
 
 // AddAddressToAccessList adds the given address to the access list
-func (sdb *IntraBlockState) AddAddressToAccessList(addr libcommon.Address) {
-	if sdb.accessList.AddAddress(addr) {
+func (sdb *IntraBlockState) AddAddressToAccessList(addr libcommon.Address) (addrMod bool) {
+	addrMod = sdb.accessList.AddAddress(addr)
+	if addrMod {
 		sdb.journal.append(accessListAddAccountChange{&addr})
 	}
+	return addrMod
 }
 
 // AddSlotToAccessList adds the given (address, slot)-tuple to the access list
-func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) {
-	addrMod, slotMod := sdb.accessList.AddSlot(addr, slot)
+func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot libcommon.Hash) (addrMod, slotMod bool) {
+	addrMod, slotMod = sdb.accessList.AddSlot(addr, slot)
 	if addrMod {
 		// In practice, this should not happen, since there is no way to enter the
 		// scope of 'address' without having the 'address' become already added
@@ -831,6 +817,7 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot lib
 			slot:    &slot,
 		})
 	}
+	return addrMod, slotMod
 }
 
 // AddressInAccessList returns true if the given address is in the access list.
@@ -838,7 +825,6 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 	return sdb.accessList.ContainsAddress(addr)
 }
 
-// SlotInAccessList returns true if the given (address, slot)-tuple is in the access list.
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
 }

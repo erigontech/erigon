@@ -37,7 +37,7 @@ const BorSeparate = "BorSeparate"
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(
+func NewSnapshot(
 	config *chain.BorConfig,
 	sigcache *lru.ARCCache[common.Hash, common.Address],
 	number uint64,
@@ -57,7 +57,7 @@ func newSnapshot(
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
+func LoadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache[common.Hash, c
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db kv.RwDB) error {
+func (s *Snapshot) Store(db kv.RwDB) error {
 	blob, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -118,7 +118,7 @@ func (s *Snapshot) copy() *Snapshot {
 	return cpy
 }
 
-func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot, error) {
+func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger log.Logger) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -145,31 +145,43 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 		if number >= sprintLen {
 			delete(snap.Recents, number-sprintLen)
 		}
-
 		// Resolve the authorization key and check against signers
-		signer, err := ecrecover(header, s.sigcache, s.config)
+		signer, err := Ecrecover(header, s.sigcache, s.config)
+
 		if err != nil {
 			return nil, err
 		}
 
+		var validSigner bool
+		var succession int
+
 		// check if signer is in validator set
 		if !snap.ValidatorSet.HasAddress(signer) {
-			return nil, &UnauthorizedSignerError{number, signer.Bytes()}
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
 		}
-
-		if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-			return nil, err
+		if succession, err = snap.GetSignerSuccessionNumber(signer); err != nil {
+			return snap, err
 		}
 
 		// add recents
 		snap.Recents[number] = signer
 
+		validSigner = true
+
+		if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, s.config) {
+			return snap, &BlockTooSoonError{number, succession}
+		}
+		difficulty := snap.Difficulty(signer)
+		if header.Difficulty.Uint64() != difficulty {
+			return snap, &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
+		}
+
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
-			if err := validateHeaderExtraField(header.Extra); err != nil {
-				return nil, err
+			if err := ValidateHeaderExtraField(header.Extra); err != nil {
+				return snap, err
 			}
-			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			validatorBytes := GetValidatorBytes(header, s.config)
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
@@ -177,10 +189,14 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 			v.IncrementProposerPriority(1, logger)
 			snap.ValidatorSet = v
 		}
-	}
 
-	snap.Number += uint64(len(headers))
-	snap.Hash = headers[len(headers)-1].Hash()
+		if number > 64 && !validSigner {
+			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
+		}
+		parent = header
+		snap.Number = number
+		snap.Hash = header.Hash()
+	}
 
 	return snap, nil
 }

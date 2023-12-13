@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -23,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -101,6 +102,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
+		hd.stats.RejectedBadHeaders++
 		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
@@ -121,6 +123,11 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
+}
+
+func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	// Find the link, remove it and all its descendands from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
@@ -167,9 +174,10 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 		toRemove = toRemove[:len(toRemove)-1]
 		delete(hd.links, removal.hash)
 		hd.moveLinkToQueue(removal, NoQueue)
-		for child := removal.fChild; child != nil; child, child.next = child.next, nil {
+		for child := removal.fChild; child != nil; child = child.next {
 			toRemove = append(toRemove, child)
 		}
+		removal.ClearChildren()
 	}
 }
 
@@ -202,29 +210,12 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 	for hd.linkQueue.Len() > hd.linkLimit {
 		link := heap.Pop(&hd.linkQueue).(*Link)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-			var prevChild *Link
-			for child := parentLink.fChild; child != nil && child != link; child = child.next {
-				prevChild = child
-			}
-			if prevChild == nil {
-				parentLink.fChild = link.next
-			} else {
-				prevChild.next = link.next
-			}
+			parentLink.RemoveChild(link)
 		}
 		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
-			var prevChild *Link
-			for child := anchor.fLink; child != nil && child != link; child = child.next {
-				prevChild = child
-			}
-			if prevChild == nil {
-				anchor.fLink = link.next
-			} else {
-				prevChild.next = link.next
-			}
+			anchor.RemoveChild(link)
 			if anchor.fLink == nil {
 				hd.removeAnchor(anchor)
 			}
@@ -322,8 +313,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	for hd.persistedLinkQueue.Len() > 0 {
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Headers)
@@ -443,6 +433,8 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
+	hd.logger.Debug("[downloader] Request header", "numer", anchor.blockHeight-1, "length", 192)
+
 	// Request ancestors
 	request = &HeaderRequest{
 		Anchor:  anchor,
@@ -493,7 +485,7 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime time.T
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	hd.logger.Debug("[downloader] Request skeleton", "anchors", len(hd.anchors), "highestInDb", hd.highestInDb)
+
 	var stride uint64
 	if hd.initialCycle {
 		stride = 192
@@ -506,6 +498,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	} else {
 		from--
 	}
+
 	return &HeaderRequest{Number: from, Length: length, Skip: stride, Reverse: false}
 }
 
@@ -521,7 +514,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	var returnTd *big.Int
 	var lastD *big.Int
 	var lastTime uint64
-	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
+	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
 		_, bad := hd.badHeaders[link.hash]
 		if !bad && !link.persisted {
@@ -533,6 +526,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
+			hd.stats.RejectedBadHeaders++
 			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
@@ -548,7 +542,11 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
+					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+						parentLink.RemoveChild(link)
+					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
+					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
 				}
 			}
@@ -608,8 +606,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 		delete(hd.links, link.hash)
-		for child := link.fChild; child != nil; child, child.next = child.next, nil {
-		}
+		link.ClearChildren()
 	}
 	var blocksToTTD uint64
 	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil {
@@ -763,6 +760,15 @@ func (hd *HeaderDownload) HasLink(linkHash libcommon.Hash) bool {
 	return false
 }
 
+func (hd *HeaderDownload) SourcePeerId(linkHash libcommon.Hash) [64]byte {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	if link, ok := hd.getLink(linkHash); ok {
+		return link.peerId
+	}
+	return [64]byte{}
+}
+
 // SaveExternalAnnounce - does mark hash as seen in external announcement
 // only such hashes will broadcast further after
 func (hd *HeaderDownload) SaveExternalAnnounce(hash libcommon.Hash) {
@@ -890,24 +896,40 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
+
 	// Now we can decide wether this header will create a change in the canonical head
-	if td.Cmp(hi.localTd) > 0 {
-		hi.newCanonical = true
-		forkingPoint, err := hi.ForkingPoint(db, header, parent)
-		if err != nil {
-			return nil, err
+	if td.Cmp(hi.localTd) >= 0 {
+		reorg := true
+
+		// TODO: Add bor check here if required
+		// Borrowed from https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L81
+		if td.Cmp(hi.localTd) == 0 {
+			if blockHeight > hi.highest {
+				reorg = false
+			} else if blockHeight == hi.highest {
+				// Compare hashes of block in case of tie breaker. Lexicographically larger hash wins.
+				reorg = bytes.Compare(hi.highestHash.Bytes(), hash.Bytes()) < 0
+			}
 		}
-		hi.highest = blockHeight
-		hi.highestHash = hash
-		hi.highestTimestamp = header.Time
-		hi.canonicalCache.Add(blockHeight, hash)
-		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
-		if forkingPoint < hi.unwindPoint {
-			hi.unwindPoint = forkingPoint
-			hi.unwind = true
+
+		if reorg {
+			hi.newCanonical = true
+			forkingPoint, err := hi.ForkingPoint(db, header, parent)
+			if err != nil {
+				return nil, err
+			}
+			hi.highest = blockHeight
+			hi.highestHash = hash
+			hi.highestTimestamp = header.Time
+			hi.canonicalCache.Add(blockHeight, hash)
+			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
+			if forkingPoint < hi.unwindPoint {
+				hi.unwindPoint = forkingPoint
+				hi.unwind = true
+			}
+			// This makes sure we end up choosing the chain with the max total difficulty
+			hi.localTd.Set(td)
 		}
-		// This makes sure we end up choosing the chain with the max total difficulty
-		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
@@ -942,6 +964,10 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash l
 	hi.highestTimestamp = header.Time
 
 	return nil
+}
+
+func (hi *HeaderInserter) GetLocalTd() *big.Int {
+	return hi.localTd
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {
@@ -1062,6 +1088,8 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 }
 
 func (hd *HeaderDownload) ExtractStats() Stats {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	s := hd.stats
 	hd.stats = Stats{}
 	return s

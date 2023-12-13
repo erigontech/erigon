@@ -16,24 +16,24 @@ import (
 
 // ETH1Block represents a block structure CL-side.
 type Eth1Block struct {
-	ParentHash    libcommon.Hash
-	FeeRecipient  libcommon.Address
-	StateRoot     libcommon.Hash
-	ReceiptsRoot  libcommon.Hash
-	LogsBloom     types.Bloom
-	PrevRandao    libcommon.Hash
-	BlockNumber   uint64
-	GasLimit      uint64
-	GasUsed       uint64
-	Time          uint64
-	Extra         *solid.ExtraData
-	BaseFeePerGas [32]byte
+	ParentHash    libcommon.Hash    `json:"parent_hash"`
+	FeeRecipient  libcommon.Address `json:"fee_recipient"`
+	StateRoot     libcommon.Hash    `json:"state_root"`
+	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
+	LogsBloom     types.Bloom       `json:"logs_bloom"`
+	PrevRandao    libcommon.Hash    `json:"prev_randao"`
+	BlockNumber   uint64            `json:"block_number"`
+	GasLimit      uint64            `json:"gas_limit"`
+	GasUsed       uint64            `json:"gas_used"`
+	Time          uint64            `json:"timestamp"`
+	Extra         *solid.ExtraData  `json:"extra_data"`
+	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash     libcommon.Hash
-	Transactions  *solid.TransactionsSSZ
-	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
-	BlobGasUsed   uint64
-	ExcessBlobGas uint64
+	BlockHash     libcommon.Hash              `json:"block_hash"`
+	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
+	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty"`
+	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
@@ -70,7 +70,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 		BaseFeePerGas: baseFee32,
 		BlockHash:     header.Hash(),
 		Transactions:  solid.NewTransactionsSSZFromTransactions(body.Transactions),
-		Withdrawals:   solid.NewStaticListSSZFromList(body.Withdrawals, int(beaconCfg.MaxWithdrawalsPerPayload), 44),
+		Withdrawals:   solid.NewStaticListSSZFromList(convertExecutionWithdrawalsToConsensusWithdrawals(body.Withdrawals), int(beaconCfg.MaxWithdrawalsPerPayload), 44),
 		beaconCfg:     beaconCfg,
 	}
 
@@ -94,8 +94,11 @@ func (*Eth1Block) Static() bool {
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
 	var transactionsRoot, withdrawalsRoot libcommon.Hash
-	if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
-		return nil, err
+	// Corner case: before TTD this is 0, since all fields are 0, a 0 hash check will suffice.
+	if b.BlockHash != (libcommon.Hash{}) {
+		if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
+			return nil, err
+		}
 	}
 	if b.version >= clparams.CapellaVersion {
 		withdrawalsRoot, err = b.Withdrawals.HashSSZ()
@@ -145,7 +148,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 
 	if b.version >= clparams.CapellaVersion {
 		if b.Withdrawals == nil {
-			b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+			b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 		}
 		size += b.Withdrawals.EncodingSizeSSZ() + 4
 	}
@@ -161,7 +164,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Extra = solid.NewExtraData()
 	b.Transactions = &solid.TransactionsSSZ{}
-	b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
@@ -202,8 +205,8 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		withdrawalsHash = new(libcommon.Hash)
 		// extract all withdrawals from itearable list
 		withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
-		b.Withdrawals.Range(func(idx int, w *types.Withdrawal, _ int) bool {
-			withdrawals[idx] = w
+		b.Withdrawals.Range(func(idx int, w *Withdrawal, _ int) bool {
+			withdrawals[idx] = convertConsensusWithdrawalToExecutionWithdrawal(w)
 			return true
 		})
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
@@ -251,8 +254,8 @@ func (b *Eth1Block) Version() clparams.StateVersion {
 // Body returns the equivalent raw body (only eth1 body section).
 func (b *Eth1Block) Body() *types.RawBody {
 	withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
-	b.Withdrawals.Range(func(idx int, w *types.Withdrawal, _ int) bool {
-		withdrawals[idx] = w
+	b.Withdrawals.Range(func(idx int, w *Withdrawal, _ int) bool {
+		withdrawals[idx] = convertConsensusWithdrawalToExecutionWithdrawal(w)
 		return true
 	})
 	return &types.RawBody{

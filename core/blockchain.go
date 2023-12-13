@@ -21,28 +21,26 @@ import (
 	"fmt"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
-	BlockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
@@ -85,7 +83,7 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (*EphemeralExecResult, error) {
 
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
+	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -93,7 +91,7 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
+	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -101,15 +99,10 @@ func ExecuteBlockEphemerally(
 		receipts    types.Receipts
 	)
 
-	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs); err != nil {
-			return nil, err
-		}
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
+		return nil, err
 	}
 
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
@@ -190,7 +183,7 @@ func ExecuteBlockEphemerally(
 
 		stateSyncReceipt := &types.Receipt{}
 		if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
+			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
 
 			if len(blockLogs) > len(logs) {
 				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
@@ -317,11 +310,11 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
-	})
+	}, logger)
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil

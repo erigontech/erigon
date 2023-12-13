@@ -117,9 +117,9 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
-		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
+		x := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.X))
+		y := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.Y))
+		expected := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.Expected))
 		stack.Push(x)
 		stack.Push(y)
 		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
@@ -135,6 +135,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 }
 
 func TestByteOp(t *testing.T) {
+	t.Parallel()
 	tests := []TwoOperandTestcase{
 		{"ABCDEF0908070605040302010000000000000000000000000000000000000000", "00", "AB"},
 		{"ABCDEF0908070605040302010000000000000000000000000000000000000000", "01", "CD"},
@@ -149,6 +150,7 @@ func TestByteOp(t *testing.T) {
 }
 
 func TestSHL(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#shl-shift-left
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "01", "0000000000000000000000000000000000000000000000000000000000000002"},
@@ -166,6 +168,7 @@ func TestSHL(t *testing.T) {
 }
 
 func TestSHR(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#shr-logical-shift-right
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "00", "0000000000000000000000000000000000000000000000000000000000000001"},
@@ -184,6 +187,7 @@ func TestSHR(t *testing.T) {
 }
 
 func TestSAR(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#sar-arithmetic-shift-right
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "00", "0000000000000000000000000000000000000000000000000000000000000001"},
@@ -208,6 +212,7 @@ func TestSAR(t *testing.T) {
 }
 
 func TestAddMod(t *testing.T) {
+	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
@@ -230,10 +235,10 @@ func TestAddMod(t *testing.T) {
 	// in 256 bit repr, fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd
 
 	for i, test := range tests {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.x))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
-		z := new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
-		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
+		x := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.x))
+		y := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.y))
+		z := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.z))
+		expected := new(uint256.Int).SetBytes(libcommon.Hex2Bytes(test.expected))
 		stack.Push(z)
 		stack.Push(y)
 		stack.Push(x)
@@ -283,6 +288,7 @@ func TestAddMod(t *testing.T) {
 
 // TestJsonTestcases runs through all the testcases defined as json-files
 func TestJsonTestcases(t *testing.T) {
+	t.Parallel()
 	for name := range twoOpMethods {
 		data, err := os.ReadFile(fmt.Sprintf("testdata/testcases_%v.json", name))
 		if err != nil {
@@ -305,7 +311,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	// convert args
 	byteArgs := make([][]byte, len(args))
 	for i, arg := range args {
-		byteArgs[i] = common.Hex2Bytes(arg)
+		byteArgs[i] = libcommon.Hex2Bytes(arg)
 	}
 	pc := uint64(0)
 	b.ResetTimer()
@@ -529,6 +535,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 }
 
 func TestOpMstore(t *testing.T) {
+	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
@@ -540,7 +547,7 @@ func TestOpMstore(t *testing.T) {
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
-	stack.PushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
+	stack.PushN(*new(uint256.Int).SetBytes(libcommon.Hex2Bytes(v)), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
@@ -574,6 +581,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 }
 
 func TestOpTstore(t *testing.T) {
+	t.Parallel()
 	var (
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
@@ -583,9 +591,9 @@ func TestOpTstore(t *testing.T) {
 		caller         = libcommon.Address{}
 		to             = libcommon.Address{1}
 		contractRef    = contractRef{caller}
-		contract       = NewContract(contractRef, AccountRef(to), u256.Num0, 0, false)
+		contract       = NewContract(contractRef, to, u256.Num0, 0, false)
 		scopeContext   = ScopeContext{mem, stack, contract}
-		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
+		value          = libcommon.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
 	env.interpreter = evmInterpreter
@@ -632,6 +640,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 }
 
 func TestCreate2Addreses(t *testing.T) {
+	t.Parallel()
 	type testcase struct {
 		origin   string
 		salt     string
@@ -706,6 +715,7 @@ func TestCreate2Addreses(t *testing.T) {
 }
 
 func TestOpMCopy(t *testing.T) {
+	t.Parallel()
 	// Test cases from https://eips.ethereum.org/EIPS/eip-5656#test-cases
 	for i, tc := range []struct {
 		dst, src, len string

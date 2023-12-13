@@ -130,7 +130,6 @@ func ComputeNextForkDigest(
 	// Retrieve next fork version.
 	nextForkIndex := 0
 	forkList := forkList(beaconConfig.ForkVersionSchedule)
-	fmt.Println(forkList, beaconConfig.ForkVersionSchedule)
 	for _, fork := range forkList {
 		if currentEpoch >= fork.epoch {
 			nextForkIndex++
@@ -143,7 +142,6 @@ func ComputeNextForkDigest(
 		return [4]byte{}, nil
 	}
 	nextForkIndex++
-	fmt.Println(forkList[nextForkIndex].version)
 	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }
 
@@ -152,7 +150,7 @@ type fork struct {
 	version [4]byte
 }
 
-func forkList(schedule map[[4]byte]uint64) (f []fork) {
+func forkList(schedule map[libcommon.Bytes4]uint64) (f []fork) {
 	for version, epoch := range schedule {
 		f = append(f, fork{epoch: epoch, version: version})
 	}
@@ -165,7 +163,7 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
 	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
-	dataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
+	dataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
@@ -229,7 +227,7 @@ func ComputeDomain(
 ) ([]byte, error) {
 	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
-	forkDataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
+	forkDataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
 }
 
@@ -241,7 +239,7 @@ func ComputeSigningRoot(
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return utils.Keccak256(objRoot[:], domain), nil
+	return utils.Sha256(objRoot[:], domain), nil
 }
 
 func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot libcommon.Hash) ([]byte, error) {

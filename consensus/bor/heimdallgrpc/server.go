@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/log/v3"
 	proto "github.com/maticnetwork/polyproto/heimdall"
 	"google.golang.org/grpc"
@@ -19,7 +19,7 @@ import (
 
 type HeimdallGRPCServer struct {
 	proto.UnimplementedHeimdallServer
-	heimdall bor.HeimdallServer
+	heimdall heimdall.HeimdallServer
 	logger   log.Logger
 }
 
@@ -27,7 +27,7 @@ func (h *HeimdallGRPCServer) Span(ctx context.Context, in *proto.SpanRequest) (*
 	result, err := h.heimdall.Span(ctx, in.ID)
 
 	if err != nil {
-		h.logger.Error("Error while fetching span")
+		h.logger.Error("[bor.heimdall] Error while fetching span")
 		return nil, err
 	}
 
@@ -106,7 +106,7 @@ func (h *HeimdallGRPCServer) FetchCheckpointCount(ctx context.Context, in *empty
 	count, err := h.heimdall.FetchCheckpointCount(ctx)
 
 	if err != nil {
-		h.logger.Error("Error while fetching checkpoint count")
+		h.logger.Error("[bor.heimdall] Error while fetching checkpoint count")
 		return nil, err
 	}
 
@@ -121,7 +121,7 @@ func (h *HeimdallGRPCServer) FetchCheckpoint(ctx context.Context, in *proto.Fetc
 	_ /*checkpoint*/, err := h.heimdall.FetchCheckpoint(ctx, in.ID)
 
 	if err != nil {
-		h.logger.Error("Error while fetching checkpoint")
+		h.logger.Error("[bor.heimdall] Error while fetching checkpoint")
 		return nil, err
 	}
 
@@ -159,7 +159,7 @@ func (h *HeimdallGRPCServer) StateSyncEvents(req *proto.StateSyncEventsRequest, 
 		height, events, err := h.heimdall.StateSyncEvents(context.Background(), fromId, int64(req.ToTime), int(req.Limit))
 
 		if err != nil {
-			h.logger.Error("Error while fetching event records", "error", err)
+			h.logger.Error("[bor.heimdall] Error while fetching event records", "error", err)
 			return status.Errorf(codes.Internal, err.Error())
 		}
 
@@ -187,7 +187,7 @@ func (h *HeimdallGRPCServer) StateSyncEvents(req *proto.StateSyncEventsRequest, 
 		})
 
 		if err != nil {
-			h.logger.Error("Error while sending event record", "error", err)
+			h.logger.Error("[bor.heimdall] Error while sending event record", "error", err)
 			return status.Errorf(codes.Internal, err.Error())
 		}
 
@@ -204,7 +204,7 @@ func (h *HeimdallGRPCServer) StateSyncEvents(req *proto.StateSyncEventsRequest, 
 // StartHeimdallServer creates a heimdall GRPC server - which is implemented via the passed in client
 // interface.  It is intended for use in testing where more than a single test validator is required rather
 // than to replace the maticnetwork implementation
-func StartHeimdallServer(shutDownCtx context.Context, heimdall bor.HeimdallServer, addr string, logger log.Logger) error {
+func StartHeimdallServer(shutDownCtx context.Context, heimdall heimdall.HeimdallServer, addr string, logger log.Logger) error {
 	grpcServer := grpc.NewServer(withLoggingUnaryInterceptor(logger))
 	proto.RegisterHeimdallServer(grpcServer,
 		&HeimdallGRPCServer{
@@ -219,16 +219,16 @@ func StartHeimdallServer(shutDownCtx context.Context, heimdall bor.HeimdallServe
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("failed to serve grpc server", "err", err)
+			logger.Error("[bor.heimdall] failed to serve grpc server", "err", err)
 		}
 
 		<-shutDownCtx.Done()
 		grpcServer.Stop()
 		lis.Close()
-		logger.Info("GRPC Server stopped", "addr", addr)
+		logger.Info("[bor.heimdall] GRPC Server stopped", "addr", addr)
 	}()
 
-	logger.Info("GRPC Server started", "addr", addr)
+	logger.Info("[bor.heimdall] GRPC Server started", "addr", addr)
 
 	return nil
 }
@@ -242,7 +242,7 @@ func withLoggingUnaryInterceptor(logger log.Logger) grpc.ServerOption {
 			err = status.Errorf(codes.Internal, err.Error())
 		}
 
-		logger.Debug("Request", "method", info.FullMethod, "duration", time.Since(start), "error", err)
+		logger.Debug("[bor.heimdall] Request", "method", info.FullMethod, "duration", time.Since(start), "error", err)
 
 		return h, err
 	})

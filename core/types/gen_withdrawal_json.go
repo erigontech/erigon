@@ -4,9 +4,9 @@ package types
 
 import (
 	"encoding/json"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 var _ = (*withdrawalMarshaling)(nil)

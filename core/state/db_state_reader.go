@@ -3,13 +3,12 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/VictoriaMetrics/fastcache"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -52,7 +51,7 @@ func (dbr *DbStateReader) ReadAccountData(address libcommon.Address) (*accounts.
 	}
 	if !ok {
 		var err error
-		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
+		if addrHash, err1 := libcommon.HashData(address[:]); err1 == nil {
 			enc, err = dbr.db.GetOne(kv.HashedAccounts, addrHash[:])
 		} else {
 			return nil, err1
@@ -75,11 +74,11 @@ func (dbr *DbStateReader) ReadAccountData(address libcommon.Address) (*accounts.
 }
 
 func (dbr *DbStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	addrHash, err := common.HashData(address[:])
+	addrHash, err := libcommon.HashData(address[:])
 	if err != nil {
 		return nil, err
 	}
-	seckey, err1 := common.HashData(key[:])
+	seckey, err1 := libcommon.HashData(key[:])
 	if err1 != nil {
 		return nil, err1
 	}

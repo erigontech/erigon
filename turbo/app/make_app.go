@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -38,12 +39,35 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 			cli.ShowAppHelpAndExit(context, 1)
 		}
 
+		// handle case: config flag
+		configFilePath := context.String(utils.ConfigFlag.Name)
+		if configFilePath != "" {
+			if err := cli2.SetFlagsFromConfigFile(context, configFilePath); err != nil {
+				log.Error("failed setting config flags from yaml/toml file", "err", err)
+				return err
+			}
+		}
+
 		// run default action
 		return action(context)
 	}
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Flags = append(app.Flags, utils.MetricFlags...)
 	app.Flags = append(app.Flags, logging.Flags...)
+	app.Flags = append(app.Flags, &utils.ConfigFlag)
+
+	// remove exact duplicate flags, keeping only the first one. this will allow easier composition later down the line
+	allFlags := app.Flags
+	newFlags := make([]cli.Flag, 0, len(allFlags))
+	seen := map[string]struct{}{}
+	for _, vv := range allFlags {
+		v := vv
+		if _, ok := seen[v.String()]; ok {
+			continue
+		}
+		newFlags = append(newFlags, v)
+	}
+	app.Flags = newFlags
 
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
@@ -132,12 +156,12 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	return &nodeConfig
 }
 
-func MakeConfigNodeDefault(ctx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(NewNodeConfig(ctx), logger)
+func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
+	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx), logger)
 }
 
-func makeConfigNode(config *nodecfg.Config, logger log.Logger) *node.Node {
-	stack, err := node.New(config, logger)
+func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
+	stack, err := node.New(ctx, config, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}

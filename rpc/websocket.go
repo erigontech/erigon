@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -63,7 +63,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn)
+		codec := NewWebsocketCodec(conn)
 		s.ServeCodec(codec, 0)
 	})
 }
@@ -72,7 +72,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 // websocket upgrade process. When a '*' is specified as an allowed origins all
 // connections are accepted.
 func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http.Request) bool {
-	origins := mapset.NewSet()
+	origins := mapset.NewSet[string]()
 	allowAllOrigins := false
 
 	for _, origin := range allowedOrigins {
@@ -125,10 +125,14 @@ func (e wsHandshakeError) Error() string {
 	return s
 }
 
-func originIsAllowed(allowedOrigins mapset.Set, browserOrigin string, logger log.Logger) bool {
+func (e wsHandshakeError) Unwrap() error {
+	return e.err
+}
+
+func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.Logger) bool {
 	it := allowedOrigins.Iterator()
 	for origin := range it.C {
-		if ruleAllowsOrigin(origin.(string), browserOrigin, logger) {
+		if ruleAllowsOrigin(origin, browserOrigin, logger) {
 			return true
 		}
 	}
@@ -201,7 +205,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 			}
 			return nil, hErr
 		}
-		return newWebsocketCodec(conn), nil
+		return NewWebsocketCodec(conn), nil
 	}, logger)
 }
 
@@ -244,7 +248,7 @@ type websocketCodec struct {
 	pingReset chan struct{}
 }
 
-func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
+func NewWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	wc := &websocketCodec{
 		jsonCodec: NewFuncCodec(conn, conn.WriteJSON, conn.ReadJSON).(*jsonCodec),
@@ -256,13 +260,13 @@ func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	return wc
 }
 
-func (wc *websocketCodec) close() {
-	wc.jsonCodec.close()
+func (wc *websocketCodec) Close() {
+	wc.jsonCodec.Close()
 	wc.wg.Wait()
 }
 
-func (wc *websocketCodec) writeJSON(ctx context.Context, v interface{}) error {
-	err := wc.jsonCodec.writeJSON(ctx, v)
+func (wc *websocketCodec) WriteJSON(ctx context.Context, v interface{}) error {
+	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.
 		select {

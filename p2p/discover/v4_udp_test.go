@@ -82,12 +82,12 @@ func newUDPTestContext(ctx context.Context, t *testing.T, logger log.Logger) *ud
 	tmpDir := t.TempDir()
 
 	var err error
-	test.db, err = enode.OpenDB("", tmpDir)
+	test.db, err = enode.OpenDB(ctx, "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey, logger)
-	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
+	test.udp, err = ListenV4(ctx, "test", test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
 
@@ -237,7 +237,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 			p.errc = nilErr
 			test.udp.addReplyMatcher <- p
 			time.AfterFunc(randomDuration(60*time.Millisecond), func() {
-				if !test.udp.handleReply(p.from, p.ip, testPacket(p.ptype)) {
+				if !test.udp.handleReply(p.from, p.ip, p.port, testPacket(p.ptype)) {
 					t.Logf("not matched: %v", p)
 				}
 			})
@@ -548,9 +548,8 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("FIXME: https://github.com/ledgerwatch/erigon/issues/8731")
+
 	t.Parallel()
 	logger := log.New()
 
@@ -620,7 +619,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB("", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -643,7 +642,7 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config, logger log.
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV4(ctx, socket, ln, cfg)
+	udp, err := ListenV4(ctx, "test", socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

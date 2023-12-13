@@ -40,7 +40,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, log.New())
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -81,7 +81,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain, nil); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
 
