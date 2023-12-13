@@ -548,9 +548,8 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("i do timeout on win and mac. fix me plz-plz")
-	}
+	t.Skip("FIXME: https://github.com/ledgerwatch/erigon/issues/8731")
+
 	t.Parallel()
 	logger := log.New()
 

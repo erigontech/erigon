@@ -36,7 +36,6 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	vt = state_accessors.NewStaticValidatorTable()
 	require.NoError(t, state_accessors.ReadValidatorsTable(tx, vt))
 	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, f, preState)
-
 	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
 	require.NoError(t, err)
 

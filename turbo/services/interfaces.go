@@ -93,7 +93,6 @@ type BlockSnapshots interface {
 	LogStat()
 	ReopenFolder() error
 	SegmentsMax() uint64
-	ScanDir() (map[string]struct{}, []*Range, error)
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
@@ -125,14 +124,12 @@ type DBEventNotifier interface {
 }
 
 type DownloadRequest struct {
-	Ranges      *Range
 	Path        string
 	TorrentHash string
-	Bor         bool
 }
 
-func NewDownloadRequest(ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
-	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
+func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
+	return DownloadRequest{Path: path, TorrentHash: torrentHash}
 }
 
 type Range struct {

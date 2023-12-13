@@ -2,10 +2,9 @@ package antiquary
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"testing"
-
-	_ "embed"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
