@@ -343,6 +343,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// there is optimized custom cache to recycle big GC overhead.
 	for ; slot < to; slot++ {
 		slashingOccured = false // Set this to false at the beginning of each slot.
+		key := base_encoding.Encode64ToBytes4(slot)
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
@@ -369,17 +370,21 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		if isDumpSlot && block == nil {
-			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
-				return err
-			}
-			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
-				return err
-			}
-		}
-
 		// If we have a missed block, we just skip it.
 		if block == nil {
+			if isDumpSlot {
+				if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
+					return err
+				}
+				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
+					return err
+				}
+			} else if slot%s.cfg.SlotsPerEpoch == 0 {
+				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+					return err
+				}
+			}
+
 			continue
 		}
 		// We now compute the difference between the two balances.
@@ -420,13 +425,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			continue
 		}
 
-		// antiquate fields
-		key := base_encoding.Encode64ToBytes4(slot)
-		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+		// antiquate diffs
+		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
+		if slot%s.cfg.SlotsPerEpoch == 0 {
+			if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+				return err
+			}
+		} else if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
-		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
-
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
 			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), effectiveBalance, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
 				return err
