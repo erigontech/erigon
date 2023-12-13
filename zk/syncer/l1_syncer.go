@@ -42,6 +42,7 @@ type L1Syncer struct {
 	em                IEtherman
 	l1ContractAddress common.Address
 	blockRange        uint64
+	queryDelay        uint64
 
 	latestL1Block uint64
 
@@ -56,11 +57,12 @@ type L1Syncer struct {
 	progressMessageChan chan string
 }
 
-func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, blockRange uint64) *L1Syncer {
+func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, blockRange, queryDelay uint64) *L1Syncer {
 	return &L1Syncer{
 		em:                  em,
 		l1ContractAddress:   l1ContractAddress,
 		blockRange:          blockRange,
+		queryDelay:          queryDelay,
 		verificationsChan:   make(chan types.L1BatchInfo, 1000),
 		sequencesChan:       make(chan types.L1BatchInfo, 1000),
 		progressMessageChan: make(chan string),
@@ -127,6 +129,7 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 			}
 
 			s.isDownloading.Store(false)
+			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
 	}()
 }

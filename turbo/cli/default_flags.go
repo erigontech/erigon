@@ -171,6 +171,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.L1RpcUrlFlag,
 	&utils.L1ContractAddressFlag,
 	&utils.L1BlockRangeFlag,
+	&utils.L1QueryDelayFlag,
 	&utils.L1MaticContractAddressFlag,
 	&utils.L1GERManagerContractAddressFlag,
 	&utils.L1FirstBlockFlag,

@@ -263,6 +263,7 @@ type Zk struct {
 	L1RpcUrl                    string
 	L1ContractAddress           common.Address
 	L1BlockRange                uint64
+	L1QueryDelay                uint64
 	L1MaticContractAddress      common.Address
 	L1GERManagerContractAddress common.Address
 	L1FirstBlock                uint64

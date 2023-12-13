@@ -306,6 +306,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RpcRateLimits:               ctx.Int(utils.RpcRateLimitsFlag.Name),
 		RebuildTreeAfter:            ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
 		L1BlockRange:                ctx.Uint64(utils.L1BlockRangeFlag.Name),
+		L1QueryDelay:                ctx.Uint64(utils.L1QueryDelayFlag.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)
@@ -320,6 +321,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.Zk.RpcRateLimits)
 	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.Zk.RebuildTreeAfter)
 	checkFlag(utils.L1BlockRangeFlag.Name, cfg.Zk.L1BlockRange)
+	checkFlag(utils.L1QueryDelayFlag.Name, cfg.Zk.L1QueryDelay)
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

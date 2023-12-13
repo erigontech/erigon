@@ -139,17 +139,17 @@ Loop:
 				return fmt.Errorf("failed to save stage progress, %w", err)
 			}
 		}
+
+		// State Root Verifications Check
+		err = verifyAgainstLocalBlocks(tx, hermezDb, logPrefix)
+		if err != nil {
+			if errors.Is(err, ErrStateRootMismatch) {
+				panic(err)
+			}
+			// do nothing in hope the node will recover if it isn't a stateroot mismatch
+		}
 	} else {
 		log.Info(fmt.Sprintf("[%s] No new L1 blocks to sync", logPrefix))
-	}
-
-	// State Root Verifications Check
-	err = verifyAgainstLocalBlocks(tx, hermezDb, logPrefix)
-	if err != nil {
-		if errors.Is(err, ErrStateRootMismatch) {
-			panic(err)
-		}
-		// do nothing in hope the node will recover if it isn't a stateroot mismatch
 	}
 
 	if firstCycle {

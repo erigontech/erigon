@@ -377,10 +377,15 @@ var (
 		Value: "",
 	}
 	L1BlockRangeFlag = cli.Uint64Flag{
-		Name:     "zkevm.l1-block-range",
+		Name:  "zkevm.l1-block-range",
+		Usage: "Ethereum L1 block range used to filter verifications and sequences",
+		Value: 20000,
+	}
+	L1QueryDelayFlag = cli.Uint64Flag{
+		Name:     "zkevm.l1-query-delay",
 		Required: false,
-		Usage:    "Ethereum L1 block range to filter events from",
-		Value:    20000,
+		Usage:    "Ethereum L1 delay between queries for verifications and sequences - in milliseconds",
+		Value:    6000,
 	}
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
