@@ -257,7 +257,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv)
 			require.NoError(t, err)
-			binary.BigEndian.PutUint64(l0[16:24], uint64(i))
+			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
 			for locs := 0; locs < 15000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
@@ -313,19 +313,19 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 		existed := make(map[string]struct{})
 		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte) error {
-			//fmt.Printf("%x\n", k)
 			existed[string(k)] = struct{}{}
 			return nil
 		})
+		require.NoError(t, err)
 
 		missed := 0
 		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte) error {
-			//fmt.Printf("%x\n", k)
 			if _, been := existed[string(k)]; !been {
 				missed++
 			}
 			return nil
 		})
+		require.NoError(t, err)
 		require.Zero(t, missed)
 
 		err = domains.deleteAccount(k0, pv)
