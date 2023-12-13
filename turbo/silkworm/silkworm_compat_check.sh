@@ -12,7 +12,7 @@ function glibc_version {
 }
 
 function glibcpp_version {
-    link_path=$(/sbin/ldconfig -p | grep libstdc++ | awk '{ print $NF }')
+    link_path=$(/sbin/ldconfig -p | grep libstdc++ | awk '{ print $NF }' | head -1)
     if [[ ! -L "$link_path" ]]
     then
         echo "0"
