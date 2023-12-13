@@ -138,6 +138,8 @@ func SpawnStageBatches(
 	lastHash := emptyHash
 	atLeastOneBlockWritten := false
 	startTime := time.Now()
+
+	log.Info(fmt.Sprintf("[%s] Reading blocks from the datastream.", logPrefix))
 	for {
 		// get block
 		// if no blocks available should block
@@ -227,7 +229,7 @@ func SpawnStageBatches(
 				lastWrittenTs := cfg.dsClient.LastWrittenTime.Load()
 				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
 				if cfg.dsClient.Streaming.Load() && timePassedAfterlastBlock.Milliseconds() > 500 {
-					log.Info(fmt.Sprintf("[%s] No new blocks. Continue.", logPrefix), "lastBlockHeight", lastBlockHeight)
+					log.Info(fmt.Sprintf("[%s] No new blocks in %d miliseconds. Ending the stage.", logPrefix, timePassedAfterlastBlock.Milliseconds()), "lastBlockHeight", lastBlockHeight)
 					writeThreadFinished = true
 				}
 
@@ -244,12 +246,12 @@ func SpawnStageBatches(
 		}
 
 		if endLoop {
+			log.Info(fmt.Sprintf("[%s] Total blocks read: %d", logPrefix, blocksWritten))
 			break
 		}
 	}
 
 	if lastBlockHeight == batchesProgress {
-		log.Info(fmt.Sprintf("[%s] No new progress. Continue.", logPrefix), "lastBlockHeight", lastBlockHeight)
 		return nil
 	}
 
