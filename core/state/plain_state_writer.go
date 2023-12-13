@@ -63,6 +63,14 @@ func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
+	if account.Incarnation == 0 && original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := w.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
+			return err
+		}
+	}
+
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 
