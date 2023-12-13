@@ -137,6 +137,8 @@ func SpawnStageBatches(
 		return fmt.Errorf("failed to get last fork id, %w", err)
 	}
 	lastHash := emptyHash
+	atLeastOneBlockWritten := false
+	startTime := time.Now()
 	for {
 		// get block
 		// if no blocks available should block
@@ -144,6 +146,7 @@ func SpawnStageBatches(
 		// if both download routine stopped and channel empty - stop loop
 		select {
 		case l2Block := <-cfg.dsClient.L2BlockChan:
+			atLeastOneBlockWritten = true
 			zeroHash := common.Hash{}
 			// skip if we already have this block
 			if l2Block.L2BlockNumber < lastBlockHeight+1 {
@@ -217,18 +220,27 @@ func SpawnStageBatches(
 			}
 			writeThreadFinished = true
 		default:
-			// if no blocks available should and time since last block written is > 500ms
-			// consider that we are at the tip and blocks come in the datastream as they are produced
-			// stop the current iteration of the stage
-			lastWrittenTs := cfg.dsClient.LastWrittenTime.Load()
-			timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
-			if cfg.dsClient.Streaming.Load() && timePassedAfterlastBlock.Milliseconds() > 500 {
-				log.Info(fmt.Sprintf("[%s] No new blocks. Continue.", logPrefix), "lastBlockHeight", lastBlockHeight)
-				writeThreadFinished = true
-			}
+			//wait at least one block to be written, before continuing
+			if atLeastOneBlockWritten {
+				// if no blocks available should and time since last block written is > 500ms
+				// consider that we are at the tip and blocks come in the datastream as they are produced
+				// stop the current iteration of the stage
+				lastWrittenTs := cfg.dsClient.LastWrittenTime.Load()
+				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
+				if cfg.dsClient.Streaming.Load() && timePassedAfterlastBlock.Milliseconds() > 500 {
+					log.Info(fmt.Sprintf("[%s] No new blocks. Continue.", logPrefix), "lastBlockHeight", lastBlockHeight)
+					writeThreadFinished = true
+				}
 
-			if writeThreadFinished {
-				endLoop = true
+				if writeThreadFinished {
+					endLoop = true
+				}
+			} else {
+				timePassedAfterlastBlock := time.Since(startTime)
+				if timePassedAfterlastBlock.Seconds() > 10 {
+					log.Info(fmt.Sprintf("[%s] Waiting for at least one new block.", logPrefix))
+					startTime = time.Now()
+				}
 			}
 		}
 
