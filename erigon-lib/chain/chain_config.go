@@ -48,6 +48,7 @@ type Config struct {
 	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
 	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
 	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
+	Eip158Block           *big.Int `json:"eip158Block,omitempty"`
 	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
 	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
 	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`

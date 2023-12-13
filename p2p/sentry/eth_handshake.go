@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func readAndValidatePeerStatusMessage(
@@ -59,6 +60,8 @@ func checkPeerStatusCompatibility(
 	minVersion uint,
 ) error {
 	networkID := status.NetworkId
+	// TODO @somnathb1
+	// log.Info("[SPIDERMAN] status reply peer status compatibility ", "theirs", reply, "ours", status)
 	if reply.NetworkID != networkID {
 		return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
 	}

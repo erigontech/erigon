@@ -141,7 +141,6 @@ var ChiadoBootnodes = []string{
 }
 
 var VerkleGenDevnet2Bootnodes = []string{
-
 	"enode://2f686cbb89217e1be5c394f901592a94a1a3ee08ef721e17b282632e0f64b503f6623859cbf109733bfac94a06fa0b8580416bc8b5916890657509261f337f45@128.140.104.95:30303?discport=30303",
 	"enode://87efbbf17380808b7cd539347b447c38aec4dbeecb43bb9877a172995889e0a3984590a25e8964c3bbdccddc403e64041cef6eb249a03f66e2a6c1ea7f0c27be@128.140.104.94:30303?discport=30303",
 	"enode://39d3a81e43a93177b6c33707ce714363566b99cc844ab561218334f35a9a24eb4e9373ec7e2eb4e9f76b4e3c08c7b94ca1c95c21dd98e2b89251de99964f30fd@135.181.109.82:30303?discport=30303",
@@ -192,6 +191,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.ChiadoChainName:
 		return ChiadoBootnodes
+	case networkname.VerkleGenDevnet2:
+		return VerkleGenDevnet2Bootnodes
 	default:
 		return []string{}
 	}

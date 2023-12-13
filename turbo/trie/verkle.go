@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	DBVerkleNodeTable  = "VerkleNodeTable"
 	errInvalidRootType = errors.New("invalid node type for root")
 	errDeletedAccount  = errors.New("account deleted in VKT")
 	zero               [32]byte
@@ -25,6 +24,7 @@ var (
 type VerkleTrie struct {
 	root       verkle.VerkleNode
 	db         kv.RwDB
+	tx         kv.RwTx
 	pointCache *vtree.PointCache
 	ended      bool
 }
@@ -33,10 +33,11 @@ func (vt *VerkleTrie) ToDot() string {
 	return verkle.ToDot(vt.root)
 }
 
-func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, pointCache *vtree.PointCache, ended bool) *VerkleTrie {
+func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, tx kv.RwTx, pointCache *vtree.PointCache, ended bool) *VerkleTrie {
 	return &VerkleTrie{
 		root:       root,
 		db:         db,
+		tx:         tx,
 		pointCache: pointCache,
 		ended:      ended,
 	}
@@ -48,7 +49,7 @@ func (vt *VerkleTrie) DbNodeResolver(root []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return tx.GetOne(DBVerkleNodeTable, root)
+	return tx.GetOne(kv.VerkleTrie, root)
 }
 
 // Get returns the value for key stored in the vt. The value bytes must
@@ -230,27 +231,32 @@ func (vt *VerkleTrie) Commit(_ bool) (common.Hash, error) {
 	if !ok {
 		return common.Hash{}, errors.New(fmt.Sprintf("unexpected root node type %v", root.Hash().String()))
 	}
-	// nodes, err := root.BatchSerialize()
-	// if err != nil {
-	// return common.Hash{}, fmt.Errorf("serializing tree nodes: %s", err)
-	// }
 
-	// tx, err := vt.db.BeginRw(context.Background())
-	// defer tx.Rollback()
-	// for _, node := range nodes {
-	// 	if err := tx.Put(DBVerkleNodeTable, node.Path, node.SerializedBytes); err != nil {
-	// 		return common.Hash{}, fmt.Errorf("put node to disk: %s", err)
-	// 	}
-	// 	//TODO(somnathb1) - handle OOM
+	if vt.tx == nil {
+		return vt.Hash(), nil
+	}
 
-	// 	// if batch.ValueSize() >= ethdb.IdealBatchSize {
-	// 	// 	batch.Write()
-	// 	// 	batch.Reset()
-	// 	// }
-	// }
-	// err = tx.Commit()
+	nodes, err := root.BatchSerialize()
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("serializing tree nodes: %s", err)
+	}
+	for _, node := range nodes {
+		if err := vt.tx.Put(kv.VerkleTrie, node.Path, node.SerializedBytes); err != nil {
+			return common.Hash{}, fmt.Errorf("put node to disk: %s", err)
+		}
+	}
+	root.Flush(func(path []byte, node verkle.VerkleNode) {
+		s, err := node.Serialize()
+		if err != nil {
+			panic(err)
+		}
+		if err := vt.tx.Put(kv.VerkleTrie, path, s); err != nil {
+			panic(err)
+		}
+	})
 
-	return vt.Hash(), nil
+	err = vt.tx.Commit()
+	return vt.Hash(), err
 }
 
 // // NodeIterator returns an iterator that returns nodes of the vt. Iteration

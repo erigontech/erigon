@@ -317,6 +317,11 @@ func handShake(
 		defer debug.LogPanic()
 		status, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
 
+		// TODO @somnathb1
+		// if status != nil {
+		// 	log.Info("[SPIDERMAN]", "status from peer", status)
+		// }
+
 		if err == nil {
 			resultChan <- status
 			errChan <- nil

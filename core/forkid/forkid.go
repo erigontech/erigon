@@ -77,7 +77,8 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 		next = fork
 		break
 	}
-	return ID{Hash: checksumToBytes(hash), Next: next}
+	idHash := checksumToBytes(hash)
+	return ID{Hash: idHash, Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
@@ -231,9 +232,10 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		if rule != nil {
 			if time {
 				t := rule.Uint64()
-				if t > genesisTime {
-					timeForks = append(timeForks, t)
-				}
+				// TODO @somnathb1
+				// if t > genesisTime {
+				timeForks = append(timeForks, t)
+				// }
 			} else {
 				heightForks = append(heightForks, rule.Uint64())
 			}
