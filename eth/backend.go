@@ -692,10 +692,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		//datastream end
 
 		etherMan := newEtherMan(cfg)
-		zkVerificationsSyncer := syncer.NewVerificationsSyncer(etherMan.EthClient, cfg.L1ContractAddress)
-		zkSequencesSyncer := syncer.NewSequencesSyncer(etherMan.EthClient, cfg.L1ContractAddress)
+		zkL1Syncer := syncer.NewL1Syncer(etherMan.EthClient, cfg.L1ContractAddress, cfg.L1BlockRange)
 
-		backend.syncStages = stages2.NewDefaultZkStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, zkVerificationsSyncer, zkSequencesSyncer, &datastreamClient)
+		backend.syncStages = stages2.NewDefaultZkStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, zkL1Syncer, &datastreamClient)
 		backend.syncUnwindOrder = stagedsync.ZkUnwindOrder
 		// TODO: prune order
 	} else {

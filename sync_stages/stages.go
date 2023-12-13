@@ -57,8 +57,7 @@ var (
 	BeaconIndexes               SyncStage = "BeaconIndexes"               // Fills up Beacon indexes
 
 	// ZK stages
-	L1Verifications             SyncStage = "L1Verifications"
-	L1Sequences                 SyncStage = "L1Sequences"
+	L1Syncer                    SyncStage = "L1Syncer"
 	L1VerificationsBatchNo      SyncStage = "L1VerificationsBatchNo"
 	Batches                     SyncStage = "Batches"
 	HighestHashableL2BlockNo    SyncStage = "HighestHashableL2BlockNo"

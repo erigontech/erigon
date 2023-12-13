@@ -295,8 +295,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 func DefaultZkStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
-	l1VerificationsCfg zkStages.L1VerificationsCfg,
-	l1SequencesCfg zkStages.L1SequencesCfg,
+	l1SyncerCfg zkStages.L1SyncerCfg,
 	batchesCfg zkStages.BatchesCfg,
 	cumulativeIndex CumulativeIndexCfg,
 	blockHashCfg BlockHashesCfg,
@@ -313,35 +312,19 @@ func DefaultZkStages(
 ) []*sync_stages.Stage {
 	return []*sync_stages.Stage{
 		{
-			ID:          sync_stages.L1Verifications,
+			ID:          sync_stages.L1Syncer,
 			Description: "Download L1 Verifications",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return zkStages.SpawnStageL1Verifications(s, u, ctx, tx, l1VerificationsCfg, firstCycle, test)
+				return zkStages.SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, firstCycle, test)
 			},
 			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
-				return zkStages.UnwindL1VerificationsStage(u, tx, l1VerificationsCfg, ctx)
+				return zkStages.UnwindL1SyncerStage(u, tx, l1SyncerCfg, ctx)
 			},
 			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
-				return zkStages.PruneL1VerificationsStage(p, tx, l1VerificationsCfg, ctx)
-			},
-		},
-		{
-			ID:          sync_stages.L1Sequences,
-			Description: "Download L1 Sequences",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return zkStages.SpawnStageL1Sequences(s, u, ctx, tx, l1SequencesCfg, firstCycle, test)
-			},
-			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
-				return zkStages.UnwindL1SequencesStage(u, tx, l1SequencesCfg, ctx)
-			},
-			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
-				return zkStages.PruneL1SequencesStage(p, tx)
+				return zkStages.PruneL1SyncerStage(p, tx, l1SyncerCfg, ctx)
 			},
 		},
 		{
@@ -549,7 +532,7 @@ var DefaultForwardOrder = sync_stages.UnwindOrder{
 }
 
 var ZkUnwindOrder = sync_stages.UnwindOrder{
-	sync_stages.L1Verifications,
+	sync_stages.L1Syncer,
 	sync_stages.Batches,
 	sync_stages.BlockHashes,
 

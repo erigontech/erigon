@@ -15,43 +15,54 @@ import (
 	"github.com/ledgerwatch/erigon/zk/types"
 )
 
-type IVerificationsSyncer interface {
-	GetVerifications(logPrefix string, startBlock uint64) (verifications []types.L1BatchInfo, highestL1Block uint64, err error)
+type IL1Syncer interface {
+
+	// atomic
+	IsSyncStarted() bool
+	IsDownloading() bool
+	GetLastCheckedL1Block() uint64
+
+	// Channels
+	GetVerificationsChan() chan types.L1BatchInfo
+	GetSequencesChan() chan types.L1BatchInfo
+	GetProgressMessageChan() chan string
+
+	Run(lastCheckedBlock uint64)
 }
 
 var ErrStateRootMismatch = fmt.Errorf("state root mismatch")
 
-type L1VerificationsCfg struct {
+type L1SyncerCfg struct {
 	db     kv.RwDB
-	syncer IVerificationsSyncer
+	syncer IL1Syncer
 
 	zkCfg *ethconfig.Zk
 }
 
-func StageL1VerificationsCfg(db kv.RwDB, syncer IVerificationsSyncer, zkCfg *ethconfig.Zk) L1VerificationsCfg {
-	return L1VerificationsCfg{
+func StageL1SyncerCfg(db kv.RwDB, syncer IL1Syncer, zkCfg *ethconfig.Zk) L1SyncerCfg {
+	return L1SyncerCfg{
 		db:     db,
 		syncer: syncer,
 		zkCfg:  zkCfg,
 	}
 }
 
-func SpawnStageL1Verifications(
+func SpawnStageL1Syncer(
 	s *sync_stages.StageState,
 	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
-	cfg L1VerificationsCfg,
+	cfg L1SyncerCfg,
 	firstCycle bool,
 	quiet bool,
 ) error {
 
 	logPrefix := s.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Starting L1 Verifications download stage", logPrefix))
-	defer log.Info(fmt.Sprintf("[%s] Finished L1 Verifications download stage ", logPrefix))
+	log.Info(fmt.Sprintf("[%s] Starting L1 sync stage", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
 
 	if tx == nil {
-		log.Debug("l1 verifications: no tx provided, creating a new one")
+		log.Debug("l1 sync: no tx provided, creating a new one")
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
@@ -67,46 +78,70 @@ func SpawnStageL1Verifications(
 	}
 
 	// get l1 block progress from this stage's progress
-	l1BlockProgress, err := sync_stages.GetStageProgress(tx, sync_stages.L1Verifications)
+	l1BlockProgress, err := sync_stages.GetStageProgress(tx, sync_stages.L1Syncer)
 	if err != nil {
 		return fmt.Errorf("failed to get l1 progress block, %w", err)
 	}
 
-	if l1BlockProgress == 0 {
-		l1BlockProgress = cfg.zkCfg.L1FirstBlock - 1
+	// start syncer if not started
+	if !cfg.syncer.IsSyncStarted() {
+		if l1BlockProgress == 0 {
+			l1BlockProgress = cfg.zkCfg.L1FirstBlock - 1
+		}
+
+		// start the syncer
+		cfg.syncer.Run(l1BlockProgress)
 	}
 
-	// get as many verifications as we can from the network
-	log.Info(fmt.Sprintf("[%s] Downloading verifications from L1...", logPrefix))
+	verificationsChan := cfg.syncer.GetVerificationsChan()
+	sequencesChan := cfg.syncer.GetSequencesChan()
+	progressMessageChan := cfg.syncer.GetProgressMessageChan()
+	highestVerification := types.L1BatchInfo{}
 
-	verifications, _, err := cfg.syncer.GetVerifications(logPrefix, l1BlockProgress+1)
-	if err != nil {
-		return fmt.Errorf("failed to get l1 verifications from network, %w", err)
-	}
-
-	if len(verifications) > 0 {
-		highestVerification := types.L1BatchInfo{}
-		log.Info(fmt.Sprintf("[%s] L1 verifications downloaded", logPrefix), "count", len(verifications))
-		log.Info(fmt.Sprintf("[%s] Saving verifications...", logPrefix))
-
-		// write verifications to the hermezdb
-		for _, verification := range verifications {
+	newVerificationsCount := 0
+	newSequencesCount := 0
+Loop:
+	for {
+		select {
+		case verification := <-verificationsChan:
 			if verification.BatchNo > highestVerification.BatchNo {
 				highestVerification = verification
 			}
 			if err := hermezDb.WriteVerification(verification.L1BlockNo, verification.BatchNo, verification.L1TxHash, verification.StateRoot); err != nil {
 				return fmt.Errorf("failed to write verification for block %d, %w", verification.L1BlockNo, err)
 			}
+			fmt.Println(verification)
+			newVerificationsCount++
+		case sequence := <-sequencesChan:
+			err = hermezDb.WriteSequence(sequence.L1BlockNo, sequence.BatchNo, sequence.L1TxHash, sequence.StateRoot)
+			if err != nil {
+				return fmt.Errorf("failed to write batch info, %w", err)
+			}
+			newSequencesCount++
+		case progressMessage := <-progressMessageChan:
+			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
+		default:
+			if !cfg.syncer.IsDownloading() {
+				break Loop
+			}
 		}
-		log.Info(fmt.Sprintf("[%s] Finished saving verifications to DB.", logPrefix))
+	}
 
-		// update stage progress - highest l1 block containing a verification
-		if err := sync_stages.SaveStageProgress(tx, sync_stages.L1Verifications, highestVerification.L1BlockNo); err != nil {
+	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
+	if latestCheckedBlock > l1BlockProgress {
+		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount)
+
+		if err := sync_stages.SaveStageProgress(tx, sync_stages.L1Syncer, latestCheckedBlock); err != nil {
 			return fmt.Errorf("failed to save stage progress, %w", err)
 		}
-		if err := sync_stages.SaveStageProgress(tx, sync_stages.L1VerificationsBatchNo, highestVerification.BatchNo); err != nil {
-			return fmt.Errorf("failed to save stage progress, %w", err)
+		if highestVerification.BatchNo > 0 {
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "highestVerificationBatchNo", highestVerification.BatchNo)
+			if err := sync_stages.SaveStageProgress(tx, sync_stages.L1VerificationsBatchNo, highestVerification.BatchNo); err != nil {
+				return fmt.Errorf("failed to save stage progress, %w", err)
+			}
 		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] No new L1 blocks to sync", logPrefix))
 	}
 
 	// State Root Verifications Check
@@ -119,7 +154,7 @@ func SpawnStageL1Verifications(
 	}
 
 	if firstCycle {
-		log.Debug("l1 verifications: first cycle, committing tx")
+		log.Debug("l1 sync: first cycle, committing tx")
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit tx, %w", err)
 		}
@@ -128,7 +163,7 @@ func SpawnStageL1Verifications(
 	return nil
 }
 
-func UnwindL1VerificationsStage(u *sync_stages.UnwindState, tx kv.RwTx, cfg L1VerificationsCfg, ctx context.Context) (err error) {
+func UnwindL1SyncerStage(u *sync_stages.UnwindState, tx kv.RwTx, cfg L1SyncerCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -151,7 +186,7 @@ func UnwindL1VerificationsStage(u *sync_stages.UnwindState, tx kv.RwTx, cfg L1Ve
 	return nil
 }
 
-func PruneL1VerificationsStage(s *sync_stages.PruneState, tx kv.RwTx, cfg L1VerificationsCfg, ctx context.Context) (err error) {
+func PruneL1SyncerStage(s *sync_stages.PruneState, tx kv.RwTx, cfg L1SyncerCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -198,7 +233,6 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 	//     1. verified and node both equal
 	//     2. node behind l1 - verification block is higher than hashed block - use hashed block to find verification block
 	//     3. l1 behind node - verification block is lower than hashed block - use verification block to find hashed block
-
 	blockToCheck := min(verifiedBlockNo, hashedBlockNo)
 
 	// already checked

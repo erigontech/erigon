@@ -376,6 +376,12 @@ var (
 		Usage: "Ethereum L1 contract address",
 		Value: "",
 	}
+	L1BlockRangeFlag = cli.Uint64Flag{
+		Name:     "zkevm.l1-block-range",
+		Required: false,
+		Usage:    "Ethereum L1 block range to filter events from",
+		Value:    20000,
+	}
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
 		Usage: "Ethereum L1 Matic contract address",

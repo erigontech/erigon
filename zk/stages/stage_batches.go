@@ -22,9 +22,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type ISyncer interface {
-}
-
 type ErigonDb interface {
 	WriteHeader(batchNo *big.Int, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts uint64) (*ethTypes.Header, error)
 	WriteBody(batchNumber *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
@@ -46,15 +43,13 @@ type HermezDb interface {
 
 type BatchesCfg struct {
 	db                  kv.RwDB
-	syncer              ISyncer
 	blockRoutineStarted bool
 	dsClient            *dsclient.StreamClient
 }
 
-func StageBatchesCfg(db kv.RwDB, syncer ISyncer, dsClient *dsclient.StreamClient) BatchesCfg {
+func StageBatchesCfg(db kv.RwDB, dsClient *dsclient.StreamClient) BatchesCfg {
 	return BatchesCfg{
 		db:                  db,
-		syncer:              syncer,
 		blockRoutineStarted: false,
 		dsClient:            dsClient,
 	}
@@ -102,7 +97,7 @@ func SpawnStageBatches(
 
 	// start routine to download blocks and push them in a channel
 	if firstCycle {
-		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", batchesProgress+1)
+		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", batchesProgress)
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
@@ -111,7 +106,7 @@ func SpawnStageBatches(
 			// this will download all blocks from datastream and push them in a channel
 			// if no error, break, else continue trying to get them
 			// Create bookmark
-			bookmark := types.NewL2BlockBookmark(batchesProgress + 1)
+			bookmark := types.NewL2BlockBookmark(batchesProgress)
 			err = cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 
 			//[zkevm] - this is expected to be returned only when given block number is higher than the highest block number in datastream
