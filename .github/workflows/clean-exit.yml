@@ -6,6 +6,7 @@ on:
       - devel
       - alpha
       - 'release/**'
+      - workflow_clean_exit
   #pull_request:
   #  branches:
   #    - devel
@@ -75,7 +76,7 @@ jobs:
 
     - name: Download Python Script for Checking Logs
       run: |
-        curl -o check_erigon_exit.py 'https://your-script-hosting-location/check_erigon_exit.py'
+        curl -o check_erigon_exit.py 'https://gist.github.com/mriccobene/8db4030a745de34d527f136f2caa104f'
 
     - name: Check Erigon Logs for Errors
       run: python3 check_erigon_exit.py
