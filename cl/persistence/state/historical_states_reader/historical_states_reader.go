@@ -445,7 +445,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		return nil, err
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
-	fmt.Println(roundedSlot, freshDumpSlot)
 	for i := freshDumpSlot; i < roundedSlot; i += r.cfg.SlotsPerEpoch {
 		diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
 		if err != nil {
@@ -454,7 +453,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		if len(diff) == 0 {
 			continue
 		}
-		fmt.Println(i)
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff)
 		if err != nil {
 			return nil, err
@@ -478,13 +476,10 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		if base_encoding.Decode64FromBytes4(k) > slot {
 			return nil, fmt.Errorf("diff not found for slot %d", slot)
 		}
-		fmt.Println(base_encoding.Decode64FromBytes4(k))
-		s := time.Now()
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("diffing", time.Since(s))
 	}
 
 	return currentList, err
