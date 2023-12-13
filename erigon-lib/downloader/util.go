@@ -338,7 +338,6 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 		return ctx.Err()
 	default:
 	}
-
 	if !IsSnapNameAllowed(ts.DisplayName) {
 		return nil
 	}

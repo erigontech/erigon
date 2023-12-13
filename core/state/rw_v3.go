@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,7 +19,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
@@ -110,51 +111,53 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
-	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
-		list, ok := txTask.WriteLists[table]
-		if !ok {
-			continue
-		}
+	if txTask.WriteLists != nil {
+		for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+			list, ok := txTask.WriteLists[table]
+			if !ok {
+				continue
+			}
 
-		switch kv.Domain(table) {
-		case kv.AccountsDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
-					}
-				}
-			}
-		case kv.CodeDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
+			switch kv.Domain(table) {
+			case kv.AccountsDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.AccountsDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.AccountsDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
 					}
 				}
-			}
-		case kv.StorageDomain:
-			for i, key := range list.Keys {
-				if list.Vals[i] == nil {
-					if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
-						return err
-					}
-				} else {
-					if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
-						return err
+			case kv.CodeDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.CodeDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.CodeDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
 					}
 				}
+			case kv.StorageDomain:
+				for i, key := range list.Keys {
+					if list.Vals[i] == nil {
+						if err := domains.DomainDel(kv.StorageDomain, []byte(key), nil, nil); err != nil {
+							return err
+						}
+					} else {
+						if err := domains.DomainPut(kv.StorageDomain, []byte(key), nil, list.Vals[i], nil); err != nil {
+							return err
+						}
+					}
+				}
+			default:
+				continue
 			}
-		default:
-			continue
 		}
 	}
 
@@ -197,7 +200,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(ctx, txTask.TxNum)
+	rs.domains.SetTxNum(txTask.TxNum)
 	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
@@ -214,7 +217,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, false, txTask.BlockNum, "")
+		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, "")
 		if err != nil {
 			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
 		}
@@ -377,7 +380,7 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 }
 
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(ctx, txNum)
+	w.rs.domains.SetTxNum(txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 
@@ -403,7 +406,15 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), nil)
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
+			return err
+		}
+		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
@@ -451,6 +462,102 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 		return nil
 	})
 	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type StateWriterV3 struct {
+	rs    *StateV3
+	trace bool
+
+	tx kv.Tx
+}
+
+func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
+	return &StateWriterV3{
+		rs: rs,
+		//trace: true,
+	}
+}
+
+func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
+	w.rs.domains.SetTxNum(txNum)
+}
+func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
+
+func (w *StateWriterV3) ResetWriteSet() {}
+
+func (w *StateWriterV3) WriteSet() map[string]*libstate.KvList {
+	return nil
+}
+
+func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+	return nil, nil, nil, nil
+}
+
+func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if w.trace {
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	}
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
+			return err
+		}
+		if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+			return err
+		}
+	}
+	value := accounts.SerialiseV3(account)
+	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if w.trace {
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
+	}
+	if err := w.rs.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
+	if w.trace {
+		fmt.Printf("del acc: %x\n", address)
+	}
+	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if *original == *value {
+		return nil
+	}
+	composite := append(address.Bytes(), key.Bytes()...)
+	if err := w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, value.Bytes(), original.Bytes()); err != nil {
+		return err
+	}
+	if w.trace {
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+	}
+	return nil
+}
+
+func (w *StateWriterV3) CreateContract(address common.Address) error {
+	if w.trace {
+		fmt.Printf("create contract: %x\n", address)
+	}
+
+	//seems don't need delete code here. IntraBlockState take care of it.
+	if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 		return err
 	}
 	return nil
