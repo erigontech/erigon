@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
@@ -386,6 +387,10 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
+	if api.historyV3(dbtx) {
+		return api.searchTransactionsAfterV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	}
+
 	callFromCursor, err := dbtx.Cursor(kv.CallFromIndex)
 	if err != nil {
 		return nil, err
@@ -453,6 +458,111 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 		txs[i], txs[lentxs-1-i] = txs[lentxs-1-i], txs[i]
 		receipts[i], receipts[lentxs-1-i] = receipts[lentxs-1-i], receipts[i]
 	}
+	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
+}
+
+func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	isLastPage := false
+	fromTxNum := -1
+	if fromBlockNum == 0 {
+		isLastPage = true
+	} else {
+		// Internal search code considers blockNum [including], so adjust the value
+		_txNum, err := rawdbv3.TxNums.Min(tx, fromBlockNum+1)
+		if err != nil {
+			return nil, err
+		}
+		fromTxNum = int(_txNum)
+	}
+
+	// ensure result union will always have at least pageSize+1 results in order to determine
+	// there is more results or this is the last page, at the same time avoiding unbounded
+	lookupSize := int(pageSize) + 1
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, lookupSize)
+	if err != nil {
+		return nil, err
+	}
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Asc, lookupSize)
+	if err != nil {
+		return nil, err
+	}
+	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, lookupSize)
+	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc)
+
+	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
+	var blockHash common.Hash
+	var header *types.Header
+	txs := make([]*RPCTransaction, 0, pageSize)
+	receipts := make([]map[string]interface{}, 0, pageSize)
+	resultCount := uint16(0)
+
+	for txNumsIter.HasNext() {
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if isFinalTxn {
+			continue
+		}
+
+		if blockNumChanged { // things which not changed within 1 block
+			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+				return nil, err
+			}
+			if header == nil {
+				log.Warn("[rpc] header is nil", "blockNum", blockNum)
+				continue
+			}
+			blockHash = header.Hash()
+			exec.changeBlock(header)
+		}
+
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		if err != nil {
+			return nil, err
+		}
+		if txn == nil {
+			continue
+		}
+		rawLogs, res, err := exec.execTx(txNum, txIndex, txn)
+		if err != nil {
+			return nil, err
+		}
+		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		txs = append(txs, rpcTx)
+		receipt := &types.Receipt{
+			Type:              txn.Type(),
+			GasUsed:           res.UsedGas,
+			CumulativeGasUsed: res.UsedGas, // TODO: cumulative gas is wrong, wait for cumulative gas index fix
+			TransactionIndex:  uint(txIndex),
+			BlockNumber:       header.Number,
+			BlockHash:         blockHash,
+			Logs:              rawLogs,
+		}
+		if res.Failed() {
+			receipt.Status = types.ReceiptStatusFailed
+		} else {
+			receipt.Status = types.ReceiptStatusSuccessful
+		}
+
+		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt["timestamp"] = header.Time
+		receipts = append(receipts, mReceipt)
+
+		resultCount++
+		if resultCount >= pageSize {
+			break
+		}
+	}
+	hasMore := txNumsIter.HasNext()
+	slices.Reverse(txs)
+	slices.Reverse(receipts)
 	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
 }
 
