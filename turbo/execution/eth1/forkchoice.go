@@ -183,7 +183,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		hash:   fcuHeader.Hash(),
 		number: fcuHeader.Number.Uint64(),
 	})
+	i := 0
 	for !isCanonicalHash {
+		i++
 		newCanonicals = append(newCanonicals, &canonicalEntry{
 			hash:   currentParentHash,
 			number: currentParentNumber,
@@ -194,6 +196,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			return
 		}
 		if currentHeader == nil {
+			log.Warn("[dbg] forkChoice2", "currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash)
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 				Status:          execution.ExecutionStatus_MissingSegment,
@@ -203,12 +206,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		currentParentHash = currentHeader.ParentHash
 		currentParentNumber = currentHeader.Number.Uint64() - 1
 		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
-		log.Warn("[dbg] forkChoice2", "isCanonicalHash", isCanonicalHash, "currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
 	}
+	log.Warn("[dbg] forkChoice2", "i", i, "currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash)
 
 	if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
 		log.Warn("[dbg] forkChoice3", "err", err)
