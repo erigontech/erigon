@@ -265,7 +265,7 @@ func ExecV3(ctx context.Context,
 		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
 		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(_blockNum)
-		doms.SetTxNum(ctx, inputTxNum)
+		doms.SetTxNum(inputTxNum)
 		return nil
 	}
 	if applyTx != nil {
@@ -437,7 +437,7 @@ func ExecV3(ctx context.Context,
 						if doms.BlockNum() != outputBlockNum.GetValueUint64() {
 							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.GetValueUint64()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
+						_, err := doms.ComputeCommitment(ctx, true, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
 						if err != nil {
 							return err
 						}
@@ -1048,9 +1048,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
+		//if err := doms.Flush(ctx, applyTx); err != nil {
+		//	return false, err
+		//}
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
@@ -1064,7 +1064,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64(), u.LogPrefix())
+	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
