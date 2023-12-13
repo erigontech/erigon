@@ -405,7 +405,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 			break
 		}
 		to := chooseSegmentEnd(i, toSlot, blocksPerFile)
-		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
+		logger.Warn("Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, b, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
 		}
