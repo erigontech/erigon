@@ -57,7 +57,6 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		require.NoError(t, err)
 		require.EqualValues(t, expectedRoot, haveRoot)
 		// Cannot test it without a config.
-		// TODO: parse and use config
 		if isBeaconState {
 			return nil
 		}

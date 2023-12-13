@@ -365,7 +365,7 @@ func processSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) (
 			vIdx, exists := s.ValidatorIndexByPubkey(committeeKeys[currPubKeyIndex])
 			// Impossible scenario.
 			if !exists {
-				return nil, errors.New("validator public key does not exist in state")
+				return nil, fmt.Errorf("validator public key does not exist in state: %x", committeeKeys[currPubKeyIndex])
 			}
 			if syncAggregateBits[i]&byte(bit) > 0 {
 				votedKeys = append(votedKeys, committeeKeys[currPubKeyIndex][:])

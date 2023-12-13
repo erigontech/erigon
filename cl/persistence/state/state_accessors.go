@@ -265,3 +265,34 @@ func ReadPreviousEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.Lis
 	}
 	return attestations, nil
 }
+
+func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
+	cursor, err := tx.Cursor(kv.StaticValidators)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+
+	var buf bytes.Buffer
+	for k, v, err := cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+		staticValidator := &StaticValidator{}
+		buf.Reset()
+		if _, err := buf.Write(v); err != nil {
+			return err
+		}
+		if err := staticValidator.ReadFrom(&buf); err != nil {
+			return err
+		}
+		out.validatorTable = append(out.validatorTable, staticValidator)
+	}
+	if err != nil {
+		return err
+	}
+	slot, err := GetStateProcessingProgress(tx)
+	if err != nil {
+		return err
+	}
+	out.slot = slot
+	return err
+
+}

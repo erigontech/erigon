@@ -135,6 +135,22 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
+	{
+		cfg.blockReader.Snapshots().LogStat()
+		ac := cfg.agg.MakeContext()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress
+		})
+		ac.Close()
+	}
+
+	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
+
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.dbEventNotifier, &cfg.chainConfig); err != nil {
 		return err
 	}

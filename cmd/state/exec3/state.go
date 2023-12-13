@@ -84,6 +84,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 		dirs: dirs,
 	}
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
