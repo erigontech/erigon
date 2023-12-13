@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type forkchoiceOutcome struct {
@@ -175,11 +176,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 
 		currentParentHash := fcuHeader.ParentHash
 		currentParentNumber := fcuHeader.Number.Uint64() - 1
+
 		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		log.Warn("[dbg] forkChoice1", "currentParentNumber", currentParentNumber, "currentParentHash", currentParentHash, "isCanonicalHash", isCanonicalHash)
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
 		newCanonicals = append(newCanonicals, &canonicalEntry{
