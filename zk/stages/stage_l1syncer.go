@@ -110,7 +110,6 @@ Loop:
 			if err := hermezDb.WriteVerification(verification.L1BlockNo, verification.BatchNo, verification.L1TxHash, verification.StateRoot); err != nil {
 				return fmt.Errorf("failed to write verification for block %d, %w", verification.L1BlockNo, err)
 			}
-			fmt.Println(verification)
 			newVerificationsCount++
 		case sequence := <-sequencesChan:
 			err = hermezDb.WriteSequence(sequence.L1BlockNo, sequence.BatchNo, sequence.L1TxHash, sequence.StateRoot)

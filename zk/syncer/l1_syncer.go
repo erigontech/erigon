@@ -57,9 +57,6 @@ type L1Syncer struct {
 }
 
 func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, blockRange uint64) *L1Syncer {
-	fmt.Println("00000000000000000000000000000000000000")
-	fmt.Println(blockRange)
-	fmt.Println("00000000000000000000000000000000000000")
 	return &L1Syncer{
 		em:                  em,
 		l1ContractAddress:   l1ContractAddress,
