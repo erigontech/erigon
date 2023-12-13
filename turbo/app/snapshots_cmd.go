@@ -677,7 +677,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		defer ac.Close()
 		sd := libstate.NewSharedDomains(tx)
 		defer sd.Close()
-		if _, err = sd.ComputeCommitment(ctx, true, false, sd.BlockNum(), ""); err != nil {
+		if _, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), ""); err != nil {
 			return err
 		}
 		if err := sd.Flush(ctx, tx); err != nil {
