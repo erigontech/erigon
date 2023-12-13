@@ -19,7 +19,7 @@ on:
   #    - ready_for_review
 
 jobs:
-  build-and-test:
+  long-running-test:
     #if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     #strategy:
     #  matrix:
@@ -51,32 +51,42 @@ jobs:
         make erigon
       working-directory: ${{ github.workspace }}
 
-    - name: Run and Test Erigon
+    #- name: Download Python Script for Logs Checking
+    #  run: |
+    #    curl -o check_erigon_exit.py 'https://gist.githubusercontent.com/mriccobene/8db4030a745de34d527f136f2caa104f/raw/3c1a860cb87d61075e78ce399e17f0ab157cacc6/check_erigon_exit.py'
+
+    - name: Run Erigon and Monitor Logs
       run: |
-        # Run Erigon in the background and redirect output to a log file
-        ./build/bin/erigon & ERIGON_PID=$!        
-        echo "Erigon PID: $ERIGON_PID"
+        # Run Erigon in background 
+        ./build/bin/erigon & 
+        ERIGON_PID=$!
         
-        # Wait for Erigon to initialize (adjust the sleep time as necessary)
-        sleep 10
+        # Start the log monitoring script in the background
+        python3 ./tests/qa/check_clean_exit.py $ERIGON_PID /home/runner/.local/share/erigon/logs/erigon.log &
 
-        # Send Ctrl-C signal to Erigon
-        kill -SIGINT $ERIGON_PID
-
-        # Wait for Erigon to perform cleanup operations
-        sleep 90 # Adjust this time based on expected cleanup duration
-
-        # Check if Erigon exited cleanly
-        if wait $ERIGON_PID; then
-          echo "Erigon exited cleanly"
+        # Wait for the monitoring script to finish
+        wait $!
+        
+        # Capture monitoring script exit status
+        monitoring_exit_status=$?
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
         else
-          echo "Erigon did not exit cleanly"
+          echo "Erigon has already terminated"
+        fi
+        
+        # Check monitoring script exit status
+        if [ $monitoring_exit_status -eq 0 ]; then
+          echo "Monitoring completed successfully"
+        else
+          echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
           exit 1
         fi
 
-    - name: Download Python Script for Checking Logs
-      run: |
-        curl -o check_erigon_exit.py 'https://gist.github.com/mriccobene/8db4030a745de34d527f136f2caa104f'
 
     - name: Check Erigon Logs for Errors
       run: python3 check_erigon_exit.py
