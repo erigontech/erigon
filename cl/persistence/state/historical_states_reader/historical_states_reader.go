@@ -407,10 +407,12 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		if base_encoding.Decode64FromBytes4(k) > slot {
 			return nil, fmt.Errorf("diff not found for slot %d", slot)
 		}
+		s := time.Now()
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
 		if err != nil {
 			return nil, err
 		}
+		fmt.Println("diffing", time.Since(s))
 	}
 
 	return currentList, err
