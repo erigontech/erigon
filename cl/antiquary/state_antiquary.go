@@ -194,7 +194,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	} else {
 		progress = 0
 	}
-	progress, err = findNearestSlotBackwards(tx, progress) // Maybe the guess was a missed slot.
+	progress, err = findNearestSlotBackwards(tx, s.cfg, progress) // Maybe the guess was a missed slot.
 	if err != nil {
 		return err
 	}
@@ -217,6 +217,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
@@ -231,6 +232,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		}
 	}
 
@@ -775,12 +777,12 @@ func (s *Antiquary) antiquateFullUint64List(collector *etl.Collector, slot uint6
 	return collector.Collect(base_encoding.Encode64ToBytes4(slot), common.Copy(buffer.Bytes()))
 }
 
-func findNearestSlotBackwards(tx kv.Tx, slot uint64) (uint64, error) {
+func findNearestSlotBackwards(tx kv.Tx, cfg *clparams.BeaconChainConfig, slot uint64) (uint64, error) {
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return 0, err
 	}
-	for canonicalRoot == (common.Hash{}) && slot > 0 {
+	for (canonicalRoot == (common.Hash{}) && slot > 0) || slot%cfg.SlotsPerEpoch != 0 {
 		slot--
 		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
