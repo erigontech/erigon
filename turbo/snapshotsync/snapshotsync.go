@@ -160,30 +160,32 @@ Loop:
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
+				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+					Downloaded:           stats.BytesCompleted,
+					Total:                stats.BytesTotal,
+					TotalTime:            time.Since(downloadStartTime).Round(time.Second).Seconds(),
+					DownloadRate:         stats.DownloadRate,
+					UploadRate:           stats.UploadRate,
+					Peers:                stats.PeersUnique,
+					Files:                stats.FilesTotal,
+					Connections:          stats.ConnectionsTotal,
+					Alloc:                m.Alloc,
+					Sys:                  m.Sys,
+					DownloadFinished:     stats.Completed,
+					TorrentMetadataReady: stats.MetadataReady,
+				})
+
 				if stats.MetadataReady < stats.FilesTotal {
 					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
+
 				dbg.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				suffix := "downloading"
 				if stats.Progress > 0 && stats.DownloadRate == 0 {
 					suffix += " (or verifying)"
 				}
-
-				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-					Downloaded:       stats.BytesCompleted,
-					Total:            stats.BytesTotal,
-					TotalTime:        time.Since(downloadStartTime).Round(time.Second).Seconds(),
-					DownloadRate:     stats.DownloadRate,
-					UploadRate:       stats.UploadRate,
-					Peers:            stats.PeersUnique,
-					Files:            stats.FilesTotal,
-					Connections:      stats.ConnectionsTotal,
-					Alloc:            m.Alloc,
-					Sys:              m.Sys,
-					DownloadFinished: stats.Completed,
-				})
 
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, suffix),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
