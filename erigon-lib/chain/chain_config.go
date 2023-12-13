@@ -209,6 +209,13 @@ func (c *Config) IsAgra(num uint64) bool {
 	return isForked(c.Bor.AgraBlock, num)
 }
 
+func (c *Config) IsNapoli(num uint64) bool {
+	if c == nil || c.Bor == nil {
+		return false
+	}
+	return isForked(c.Bor.NapoliBlock, num)
+}
+
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -468,6 +475,7 @@ type BorConfig struct {
 	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
 	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
 	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already in agra)
+	NapoliBlock                *big.Int          `json:"NapoliBlock"`                // Napoli switch block (nil = no fork, 0 = already in napoli)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	ParallelUniverseBlock *big.Int `json:"parallelUniverseBlock"` // TODO: update all occurrence, change name and finalize number (hardfork for block-stm related changes)
@@ -641,7 +649,9 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
+	IsBerlin, IsLondon, IsShanghai                          bool
+	IsCancun, IsNapoli                                      bool
+	IsPrague                                                bool
 	IsAura                                                  bool
 }
 
@@ -665,6 +675,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsLondon:           c.IsLondon(num),
 		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
+		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,
 	}

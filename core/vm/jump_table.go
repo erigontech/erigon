@@ -61,6 +61,7 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
+	napoliInstructionSet           = newNapoliInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 )
@@ -99,14 +100,14 @@ func newPragueInstructionSet() JumpTable {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
-	instructionSet := newPolycunInstructionSet()
+	instructionSet := newNapoliInstructionSet()
 	enable4844(&instructionSet) // BLOBHASH opcode
 	enable7516(&instructionSet) // BLOBBASEFEE opcode
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
 
-func newPolycunInstructionSet() JumpTable {
+func newNapoliInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
 	enable1153(&instructionSet) // Transient storage opcodes
 	enable5656(&instructionSet) // MCOPY opcode
