@@ -64,7 +64,7 @@ jobs:
         kill -SIGINT $ERIGON_PID
 
         # Wait for Erigon to perform cleanup operations
-        sleep 30 # Adjust this time based on expected cleanup duration
+        sleep 90 # Adjust this time based on expected cleanup duration
 
         # Check if Erigon exited cleanly
         if wait $ERIGON_PID; then
