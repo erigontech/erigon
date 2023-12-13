@@ -1291,6 +1291,10 @@ func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlo
 	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
 
+func (br *BlockRetire) SetWorkers(workers int) {
+	br.workers = workers
+}
+
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
 func (br *BlockRetire) borSnapshots() *BorRoSnapshots {

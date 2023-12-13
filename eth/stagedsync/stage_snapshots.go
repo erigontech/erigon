@@ -98,6 +98,8 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 		cfg.snapshotUploader = &snapshotUploader{cfg: &cfg, uploadFs: uploadFs}
 
+		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
 		if freezingCfg.Enabled && freezingCfg.Produce {
@@ -115,11 +117,11 @@ func StageSnapshotsCfg(db kv.RwDB,
 				}
 
 				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
+					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 
 				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxSeedable - u.frozenBlockLimit)
+					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 			}
 		}
@@ -457,7 +459,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		// ahead of the snapshot production process - otherwise DB will
 		// grow larger than necessary - we may also want to increase the
 		// workers
-		if s.ForwardProgress > cfg.blockReader.FrozenBlocks()+200_000 {
+		if s.ForwardProgress > cfg.blockReader.FrozenBlocks()+300_000 {
 			func() {
 				checkEvery := time.NewTicker(logInterval)
 				defer checkEvery.Stop()
@@ -467,7 +469,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 					case <-ctx.Done():
 						return
 					case <-checkEvery.C:
-						log.Info(fmt.Sprintf("[%s] Awaiting snapshots", s.LogPrefix()), "progress", s.ForwardProgress, "frozen", cfg.blockReader.FrozenBlocks(), "gap", s.ForwardProgress-cfg.blockReader.FrozenBlocks())
+						log.Info(fmt.Sprintf("[%s] Waiting for snapshots...", s.LogPrefix()), "progress", s.ForwardProgress, "frozen", cfg.blockReader.FrozenBlocks(), "gap", s.ForwardProgress-cfg.blockReader.FrozenBlocks())
 					}
 				}
 			}()
@@ -485,15 +487,16 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 type uploadState struct {
 	sync.Mutex
-	file            string
-	info            *snaptype.FileInfo
-	torrent         *torrent.TorrentSpec
-	buildingTorrent bool
-	uploads         []string
-	remote          bool
-	remoteHash      string
-	local           bool
-	localHash       string
+	file             string
+	info             *snaptype.FileInfo
+	torrent          *torrent.TorrentSpec
+	buildingTorrent  bool
+	uploads          []string
+	remote           bool
+	hasRemoteTorrent bool
+	remoteHash       string
+	local            bool
+	localHash        string
 }
 
 type snapshotUploader struct {
@@ -505,6 +508,7 @@ type snapshotUploader struct {
 	frozenBlockLimit uint64
 	uploadScheduled  atomic.Bool
 	uploading        atomic.Bool
+	manifestMutex    sync.Mutex
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -545,14 +549,6 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 	}
 
 	return max
-}
-
-type fileInfo struct {
-	name string
-}
-
-func (fi *fileInfo) Name() string {
-	return fi.name
 }
 
 type dirEntry struct {
@@ -616,6 +612,9 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 }
 
 func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry, error) {
+	u.manifestMutex.Lock()
+	defer u.manifestMutex.Unlock()
+
 	reader, err := u.uploadSession.Cat(ctx, "manifest.txt")
 
 	if err != nil {
@@ -637,21 +636,36 @@ func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry,
 	return entries, nil
 }
 
-func (u *snapshotUploader) uploadManifest(ctx context.Context) error {
+func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh bool) error {
+	u.manifestMutex.Lock()
+	defer u.manifestMutex.Unlock()
+
+	if remoteRefresh {
+		u.refreshFromRemote(ctx)
+	}
+
 	manifestFile := "manifest.txt"
 
 	fileMap := map[string]string{}
 
 	for file, state := range u.files {
-		if len(state.localHash) > 0 && state.remote {
-			fileMap[file] = file + ".torrent"
+		if state.remote {
+			if state.hasRemoteTorrent {
+				fileMap[file] = file + ".torrent"
+			} else {
+				fileMap[file] = ""
+			}
 		}
 	}
 
 	var files []string
 
 	for torrent, file := range fileMap {
-		files = append(files, file, torrent)
+		files = append(files, file)
+
+		if len(torrent) > 0 {
+			files = append(files, torrent)
+		}
 	}
 
 	sort.Strings(files)
@@ -666,6 +680,53 @@ func (u *snapshotUploader) uploadManifest(ctx context.Context) error {
 	defer os.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
 
 	return u.uploadSession.Upload(ctx, manifestFile)
+}
+
+func (u *snapshotUploader) refreshFromRemote(ctx context.Context) {
+	remoteFiles, err := u.uploadSession.ReadRemoteDir(ctx, true)
+
+	if err != nil {
+		return
+	}
+
+	u.updateRemotes(remoteFiles)
+}
+
+func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
+	for _, fi := range remoteFiles {
+		var file string
+		var hasTorrent bool
+
+		if hasTorrent = filepath.Ext(fi.Name()) == ".torrent"; hasTorrent {
+			file = strings.TrimSuffix(fi.Name(), ".torrent")
+		} else {
+			file = fi.Name()
+		}
+
+		// if we have found the file & its torrent we don't
+		// need to attempt another sync operation
+		if state, ok := u.files[file]; ok {
+			state.remote = true
+
+			if hasTorrent {
+				state.hasRemoteTorrent = true
+			}
+
+		} else {
+			info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name())
+
+			if !ok || info.Version != u.cfg.version {
+				continue
+			}
+
+			u.files[file] = &uploadState{
+				file:             file,
+				info:             &info,
+				local:            dir.FileNonZero(info.Path),
+				hasRemoteTorrent: hasTorrent,
+			}
+		}
+	}
 }
 
 func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version uint8) error {
@@ -800,45 +861,17 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 
 	go func() {
 
-		remoteFiles, err := u.downloadManifest(ctx)
+		remoteFiles, _ := u.downloadManifest(ctx)
+		refreshFromRemote := false
 
-		hasManifest := len(remoteFiles) > 0
-
-		if err != nil {
-			remoteFiles, err = u.uploadSession.ReadRemoteDir(ctx, true)
+		if len(remoteFiles) > 0 {
+			u.updateRemotes(remoteFiles)
+			refreshFromRemote = true
+		} else {
+			u.refreshFromRemote(ctx)
 		}
 
-		for _, fi := range remoteFiles {
-			var file string
-
-			if filepath.Ext(fi.Name()) != ".torrent" {
-				file = fi.Name()
-			} else {
-				file = strings.TrimSuffix(fi.Name(), ".torrent")
-			}
-
-			// if we have found the file & its torrent we don't
-			// need to attmept another sync operation
-			if state, ok := u.files[file]; ok {
-				state.remote = true
-			} else {
-				info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name())
-
-				if !ok {
-					continue
-				}
-
-				u.files[file] = &uploadState{
-					file:  file,
-					info:  &info,
-					local: dir.FileNonZero(info.Path),
-				}
-			}
-		}
-
-		if !hasManifest {
-			go u.uploadManifest(ctx)
-		}
+		go u.uploadManifest(ctx, refreshFromRemote)
 
 		logger.Debug("[snapshot uploader] starting snapshot subscription...")
 		snapshotSubCh, snapshotSubClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
@@ -1136,6 +1169,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 
 						state.Lock()
 						state.remote = true
+						state.hasRemoteTorrent = true
 						state.Unlock()
 						return nil
 					})
@@ -1163,7 +1197,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 	var err error
 
 	if uploadCount > 0 {
-		err = u.uploadManifest(ctx)
+		err = u.uploadManifest(ctx, false)
 	}
 
 	if err == nil {

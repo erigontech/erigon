@@ -103,6 +103,7 @@ type BlockRetire interface {
 	RetireBlocksInBackground(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
+	SetWorkers(workers int)
 }
 
 /*
