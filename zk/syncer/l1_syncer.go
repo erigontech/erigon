@@ -22,6 +22,11 @@ var (
 	batchWorkers = 2
 )
 
+type IEtherman interface {
+	BlockByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Block, error)
+	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
+}
+
 type fetchJob struct {
 	From uint64
 	To   uint64
