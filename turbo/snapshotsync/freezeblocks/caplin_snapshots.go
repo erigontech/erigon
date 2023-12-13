@@ -462,7 +462,7 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 		return nil, 0, libcommon.Hash{}, nil
 	}
 
-	log.Info("[dbg] seg.idxSlot", "slot", slot, "seg.idxSlot.BaseDataID()", seg.idxSlot.BaseDataID(), "seg.idxSlot.KeyCount()", seg.idxSlot.KeyCount())
+	log.Info("[dbg] seg.idxSlot", "idx_name", seg.idxSlot.FileName(), "slot", slot, "seg.idxSlot.BaseDataID()", seg.idxSlot.BaseDataID(), "seg.idxSlot.KeyCount()", seg.idxSlot.KeyCount())
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 
 	gg := seg.seg.MakeGetter()
