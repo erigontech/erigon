@@ -109,31 +109,12 @@ var KnownCfgs = map[string]*Cfg{
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
-func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
+func KnownCfg(networkName string) *Cfg {
 	c, ok := KnownCfgs[networkName]
 	if !ok {
 		return newCfg(Preverified{})
 	}
-
-	var result Preverified
-	if len(whiteList) == 0 {
-		result = c.Preverified
-	} else {
-		wlMap := make(map[string]struct{}, len(whiteList))
-		for _, fName := range whiteList {
-			wlMap[fName] = struct{}{}
-		}
-
-		result = make(Preverified, 0, len(c.Preverified))
-		for _, p := range c.Preverified {
-			if _, ok := wlMap[p.Name]; !ok {
-				continue
-			}
-			result = append(result, p)
-		}
-	}
-
-	return newCfg(result)
+	return newCfg(c.Preverified)
 }
 
 var KnownWebseeds = map[string][]string{

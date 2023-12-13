@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -36,7 +37,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
-	domains.SetTxNum(ctx, toTxNum)
+	domains.SetTxNum(toTxNum)
 
 	logger := log.New("stage", "patricia_trie", "block", domains.BlockNum())
 	logger.Info("Collecting account/storage keys")
@@ -63,18 +64,20 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 		processed atomic.Uint64
 	)
 
+	sdCtx := state.NewSharedDomainsCommitmentContext(domains, state.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+
 	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if domains.Commitment.Size() >= batchSize {
-			rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+		if sdCtx.KeysCount() >= batchSize {
+			rh, err := sdCtx.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			if err != nil {
 				return err
 			}
 			logger.Info("Committing batch",
-				"processed", fmt.Sprintf("%d/%d (%.2f%%)", processed.Load(), totalKeys.Load(), float64(processed.Load())/float64(totalKeys.Load())*100),
+				"processed", fmt.Sprintf("%dM/%dM (%.2f%%)", processed.Load()/1_000_000, totalKeys.Load()/1_000_000, float64(processed.Load())/float64(totalKeys.Load())*100),
 				"intermediate root", fmt.Sprintf("%x", rh))
 		}
 		processed.Add(1)
-		domains.Commitment.TouchPlainKey(string(k), nil, nil)
+		sdCtx.TouchPlainKey(string(k), nil, nil)
 
 		return nil
 	}
@@ -84,7 +87,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	}
 	collector.Close()
 
-	rh, err := domains.ComputeCommitment(ctx, true, false, domains.BlockNum(), "")
+	rh, err := sdCtx.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +123,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 
 	for i := uint64(0); i < math.MaxUint64; i++ {
 		if i%1000000 == 0 {
-			fmt.Printf("\r [%s] Counting block for tx %d: cur block %d cur tx %d\n", "restoreCommit", txnum, i, txCounter)
+			fmt.Printf("\r [%s] Counting block for tx %d: cur block %dM cur tx %d\n", "restoreCommit", txnum, i/1_000_000, txCounter)
 		}
 
 		h, err := blockReader.HeaderByNumber(ctx, tx, i)
@@ -212,7 +215,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 
 		return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 	}
-	logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, rh, toTxNum))
+	logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, toTxNum, rh))
 
 	if !useExternalTx {
 		if err := rwTx.Commit(); err != nil {

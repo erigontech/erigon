@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -106,14 +107,8 @@ var snapshotCommand = cli.Command{
 			Name:   "bt-search",
 			Action: doBtSearch,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{
-					Name:     "src",
-					Required: true,
-				},
-				&cli.StringFlag{
-					Name:     "key",
-					Required: true,
-				},
+				&cli.PathFlag{Name: "src", Required: true},
+				&cli.StringFlag{Name: "key", Required: true},
 			}),
 		},
 		{
@@ -161,14 +156,17 @@ var snapshotCommand = cli.Command{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{
-					Name:     "src",
-					Required: true,
-				},
-				&cli.PathFlag{
-					Name:     "dst",
-					Required: true,
-				},
+				&cli.PathFlag{Name: "src", Required: true},
+				&cli.PathFlag{Name: "dst", Required: true},
+			}),
+		},
+		{
+			Name:   "debug",
+			Action: doDebugKey,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "key", Required: true},
+				&cli.StringFlag{Name: "domain", Required: true},
 			}),
 		},
 	},
@@ -229,6 +227,71 @@ func doBtSearch(cliCtx *cli.Context) error {
 		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
 	} else {
 		fmt.Printf("seek: %x, -> nil\n", seek)
+	}
+
+	return nil
+}
+
+func doDebugKey(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+	key := common.FromHex(cliCtx.String("key"))
+	var domain kv.Domain
+	var idx kv.InvertedIdx
+	ds := cliCtx.String("domain")
+	switch ds {
+	case "accounts":
+		domain, idx = kv.AccountsDomain, kv.AccountsHistoryIdx
+	case "storage":
+		domain, idx = kv.StorageDomain, kv.StorageHistoryIdx
+	case "code":
+		domain, idx = kv.CodeDomain, kv.CodeHistoryIdx
+	case "commitment":
+		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
+	default:
+		panic(ds)
+	}
+
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	if err = agg.OpenFolder(false); err != nil {
+		return err
+	}
+
+	view := agg.MakeContext()
+	defer view.Close()
+	if err := view.DebugKey(domain, key); err != nil {
+		return err
+	}
+	tx, err := chainDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, _, err := view.GetLatest(domain, key, nil, tx); err != nil {
+		return err
+	}
+	{
+		it, err := view.IndexRange(idx, key, -1, -1, order.Asc, -1, tx)
+		if err != nil {
+			return err
+		}
+		blockNumsIt := rawdbv3.TxNums2BlockNums(tx, it, order.Asc)
+		var blockNums, txNums []uint64
+		for blockNumsIt.HasNext() {
+			txNum, blockNum, _, _, _, _ := blockNumsIt.Next()
+			blockNums = append(blockNums, blockNum)
+			txNums = append(txNums, txNum)
+		}
+		log.Info("HistoryIdx", "blockNums", blockNums, "txNums", txNums)
 	}
 
 	return nil
@@ -498,7 +561,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(estimate.AlmostAllCPUs())
+	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
@@ -579,6 +642,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
 		}
+		if err := br.RetireBorBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
+			panic(err)
+		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
@@ -586,7 +652,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
+				if err := br.PruneAncientBlocks(tx, 100, true /* includeBor */); err != nil {
 					return err
 				}
 			}
@@ -611,7 +677,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		defer ac.Close()
 		sd := libstate.NewSharedDomains(tx)
 		defer sd.Close()
-		if _, err = sd.ComputeCommitment(ctx, true, false, sd.BlockNum(), ""); err != nil {
+		if _, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), ""); err != nil {
 			return err
 		}
 		if err := sd.Flush(ctx, tx); err != nil {

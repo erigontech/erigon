@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon-lib
 go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.36.2
-	github.com/ledgerwatch/interfaces v0.0.0-20231031050643-c86352e41520
+	github.com/erigontech/mdbx-go v0.37.0
+	github.com/ledgerwatch/interfaces v0.0.0-20231209102305-b17e86fbe07d
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -14,7 +14,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.20.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
-	github.com/anacrolix/torrent v1.53.1
+	github.com/anacrolix/torrent v1.53.2
 	github.com/aws/aws-sdk-go-v2 v1.21.2
 	github.com/aws/aws-sdk-go-v2/config v1.19.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
@@ -31,7 +31,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231201092054-5a06f93813fd
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231210034157-75657fa2e51a
 	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.1.0

@@ -97,3 +97,6 @@ yarn.lock
 node_modules
 
 *.pgo
+/config.toml
+/config.yaml
+/config.yml

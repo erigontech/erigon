@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -17,22 +18,22 @@ type proposerDuties struct {
 	Slot           uint64            `json:"slot"`
 }
 
-func (a *ApiHandler) getDutiesProposer(r *http.Request) *beaconResponse {
+func (a *ApiHandler) getDutiesProposer(r *http.Request) (*beaconResponse, error) {
 
 	epoch, err := epochFromRequest(r)
 	if err != nil {
-		return newApiErrorResponse(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
-		return newApiErrorResponse(http.StatusBadRequest, "invalid epoch")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "invalid epoch")
 	}
 
 	// We need to compute our duties
 	state, cancel := a.syncedData.HeadState()
 	defer cancel()
 	if state == nil {
-		return newApiErrorResponse(http.StatusInternalServerError, "beacon node is syncing")
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, "beacon node is syncing")
 
 	}
 
@@ -88,6 +89,6 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) *beaconResponse {
 	}
 	wg.Wait()
 
-	return newBeaconResponse(duties).withFinalized(false).withVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
+	return newBeaconResponse(duties).withFinalized(false).withVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
 
 }

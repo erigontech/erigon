@@ -159,9 +159,9 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
-		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1024)
+		agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 		defer agg.SetCollateAndBuildWorkers(1)
 
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
@@ -195,7 +195,6 @@ func ExecV3(ctx context.Context,
 	}
 	if initialCycle {
 		if casted, ok := applyTx.(*temporal.Tx); ok {
-			log.Info(fmt.Sprintf("[%s] ViewID: %d, AggCtxID: %d", execStage.LogPrefix(), casted.ViewID(), casted.AggCtx().ViewID()))
 			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
 				return histBlockNumProgress
@@ -214,7 +213,6 @@ func ExecV3(ctx context.Context,
 	doms := state2.NewSharedDomains(applyTx)
 	defer doms.Close()
 
-	blockNum = doms.BlockNum()
 	var inputTxNum = doms.TxNum()
 	var offsetFromBlockBeginning uint64
 
@@ -236,14 +234,21 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 
-		ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
+		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
 		}
-		_min, err := rawdbv3.TxNums.Min(applyTx, blockNum)
+		{
+			_max, _ := rawdbv3.TxNums.Max(applyTx, _blockNum)
+			if doms.TxNum() == _max {
+				_blockNum++
+			}
+		}
+
+		_min, err := rawdbv3.TxNums.Min(applyTx, _blockNum)
 		if err != nil {
 			return err
 		}
@@ -259,8 +264,8 @@ func ExecV3(ctx context.Context,
 
 		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
 		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
-		doms.SetBlockNum(blockNum)
-		doms.SetTxNum(ctx, inputTxNum)
+		doms.SetBlockNum(_blockNum)
+		doms.SetTxNum(inputTxNum)
 		return nil
 	}
 	if applyTx != nil {
@@ -290,6 +295,9 @@ func ExecV3(ctx context.Context,
 			return nil
 		}
 	}
+
+	blockNum = doms.BlockNum()
+	outputTxNum.Store(doms.TxNum())
 
 	if applyTx != nil {
 		if dbg.DiscardHistory() {
@@ -429,7 +437,7 @@ func ExecV3(ctx context.Context,
 						if doms.BlockNum() != outputBlockNum.GetValueUint64() {
 							panic(fmt.Errorf("%d != %d", doms.BlockNum(), outputBlockNum.GetValueUint64()))
 						}
-						_, err := doms.ComputeCommitment(ctx, true, false, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
+						_, err := doms.ComputeCommitment(ctx, true, outputBlockNum.GetValueUint64(), execStage.LogPrefix())
 						if err != nil {
 							return err
 						}
@@ -1040,9 +1048,9 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
+		//if err := doms.Flush(ctx, applyTx); err != nil {
+		//	return false, err
+		//}
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
@@ -1056,7 +1064,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	rh, err := doms.ComputeCommitment(ctx, true, false, header.Number.Uint64(), u.LogPrefix())
+	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}

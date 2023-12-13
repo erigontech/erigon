@@ -282,7 +282,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		return nil, err
 	}
 	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
-	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash

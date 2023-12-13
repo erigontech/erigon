@@ -37,7 +37,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -55,7 +54,7 @@ type AggregatorV3 struct {
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
-	commitment       *DomainCommitted
+	commitment       *Domain
 	tracesTo         *InvertedIndex
 	logAddrs         *InvertedIndex
 	logTopics        *InvertedIndex
@@ -159,11 +158,10 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		},
 		compress: CompressNone,
 	}
-	commitd, err := NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
-	if err != nil {
+	if a.commitment, err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
-	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	//a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	idxCfg := iiCfg{salt: salt, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
@@ -498,8 +496,8 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
-	log.Warn("[dbg] collate and build", "step", step, "workers", a.collateAndBuildWorkers)
-	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
+
+	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment} {
 		d := d
 
 		a.wg.Add(1)
@@ -741,17 +739,20 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	if err != nil {
 		return 0, false, err
 	}
+
 	// not all blocks have commitment
-	blockNumWithCommitment, _, ok, err := ac.a.commitment.SeekCommitment(tx, ac.commitment, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
+	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
+	domains := NewSharedDomains(tx)
+	defer domains.Close()
+
+	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
 	if err != nil {
-		return 0, false, err
-	}
-	if !ok {
 		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
-		return _minBlockNum, false, nil
+		return _minBlockNum, false, nil //nolint
 	}
 	return blockNumWithCommitment, true, nil
 }
+
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -1139,21 +1140,21 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		}
 	}()
 
-	var predicates sync.WaitGroup
+	//var predicates sync.WaitGroup
 	if r.accounts.any() {
 		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
-		predicates.Add(1)
+		//predicates.Add(1)
 		g.Go(func() (err error) {
-			defer predicates.Done()
+			//defer predicates.Done()
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
 
 	if r.storage.any() {
-		predicates.Add(1)
+		//predicates.Add(1)
 		g.Go(func() (err error) {
-			defer predicates.Done()
+			//defer predicates.Done()
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
@@ -1165,14 +1166,17 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		})
 	}
 	if r.commitment.any() {
-		predicates.Wait()
+		//predicates.Wait()
 		//log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
-			var v4Files SelectedStaticFiles
-			var v4MergedF MergedFiles
-
-			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
+			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, files.commitment, files.commitmentIdx, files.commitmentHist, r.commitment, ac.a.ps)
 			return err
+			//var v4Files SelectedStaticFiles
+			//var v4MergedF MergedFiles
+			//
+			//// THIS merge uses strategy with replacement of hisotry keys in commitment.
+			//mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
+			//return err
 		})
 	}
 
@@ -1269,6 +1273,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
+	log.Info("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.accounts.compressWorkers)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1331,6 +1336,8 @@ func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs,
 		return ac.storage.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.CodeHistoryIdx:
 		return ac.code.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	case kv.CommitmentHistoryIdx:
+		return ac.commitment.hc.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogTopicIdx:
 		return ac.logTopics.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	case kv.LogAddrIdx:
@@ -1490,6 +1497,47 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 	default:
 		panic(fmt.Sprintf("unexpected: %s", domain))
 	}
+}
+
+// search key in all files of all domains and print file names
+func (ac *AggregatorV3Context) DebugKey(domain kv.Domain, k []byte) error {
+	switch domain {
+	case kv.AccountsDomain:
+		l, err := ac.account.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.StorageDomain:
+		l, err := ac.code.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CodeDomain:
+		l, err := ac.storage.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CommitmentDomain:
+		l, err := ac.commitment.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
+	}
+	return nil
 }
 
 // --- Domain part END ---

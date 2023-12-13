@@ -443,8 +443,8 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
-	blocksAvailable := r.sn.blocksAvailable()
-	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+	maxBlockNumInFiles := r.sn.blocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
@@ -463,8 +463,8 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 }
 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	blocksAvailable := r.sn.blocksAvailable()
-	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+	maxBlockNumInFiles := r.sn.blocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -994,7 +994,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	maxBlockNumInFiles := r.FrozenBlocks()
+	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
@@ -1113,7 +1113,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
-	maxBlockNumInFiles := r.FrozenBlocks()
+	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {

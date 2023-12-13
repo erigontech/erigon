@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,7 +19,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
@@ -109,7 +110,13 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
-	for table, list := range txTask.WriteLists {
+	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
+	for _, table := range []string{string(kv.AccountsDomain), string(kv.CodeDomain), string(kv.StorageDomain)} {
+		list, ok := txTask.WriteLists[table]
+		if !ok {
+			continue
+		}
+
 		switch kv.Domain(table) {
 		case kv.AccountsDomain:
 			for i, key := range list.Keys {
@@ -191,7 +198,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(ctx, txTask.TxNum)
+	rs.domains.SetTxNum(txTask.TxNum)
 	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
@@ -208,7 +215,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, false, txTask.BlockNum, "")
+		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum, "")
 		if err != nil {
 			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
 		}
@@ -371,7 +378,7 @@ func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 }
 
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(ctx, txNum)
+	w.rs.domains.SetTxNum(txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
 
@@ -395,17 +402,12 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), nil)
+	}
 	value := accounts.SerialiseV3(account)
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
-	if original.Incarnation > account.Incarnation {
-		w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-			w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
 
 	return nil
 }
@@ -471,6 +473,7 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 		//trace:     true,
 		rs:        rs,
 		readLists: newReadList(),
+		composite: make([]byte, 20+32),
 	}
 }
 
@@ -482,14 +485,13 @@ func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace 
 func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestAccount(addr)
+	enc, err := r.rs.domains.LatestAccount(address[:])
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[string(kv.AccountsDomain)].Push(string(addr), enc)
+		r.readLists[string(kv.AccountsDomain)].Push(string(address[:]), enc)
 	}
 	if len(enc) == 0 {
 		if r.trace {
@@ -509,35 +511,35 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var composite [20 + 32]byte
-	copy(composite[:], address[:])
-	copy(composite[20:], key.Bytes())
-	enc, err := r.rs.domains.LatestStorage(composite[:])
+	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	//var composite [20 + 32]byte
+	//copy(composite[:], address[:])
+	//copy(composite[20:], key.Bytes())
+	enc, err := r.rs.domains.LatestStorage(r.composite)
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
-		r.readLists[string(kv.StorageDomain)].Push(string(composite[:]), enc)
+		r.readLists[string(kv.StorageDomain)].Push(string(r.composite), enc)
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite, enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
 		}
 	}
 	return enc, nil
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestCode(addr)
+	enc, err := r.rs.domains.LatestCode(address[:])
 	if err != nil {
 		return nil, err
 	}
 
 	if !r.discardReadList {
-		r.readLists[string(kv.CodeDomain)].Push(string(addr), enc)
+		r.readLists[string(kv.CodeDomain)].Push(string(address[:]), enc)
 	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
@@ -546,15 +548,14 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestCode(addr)
+	enc, err := r.rs.domains.LatestCode(address[:])
 	if err != nil {
 		return 0, err
 	}
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[libstate.CodeSizeTableFake].Push(string(addr), sizebuf[:])
+		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {

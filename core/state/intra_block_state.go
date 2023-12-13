@@ -142,15 +142,15 @@ func (sdb *IntraBlockState) Reset() {
 		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	*/
 
-	//sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	clear(sdb.nilAccounts)
-	//sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	clear(sdb.stateObjects)
-	//sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-	clear(sdb.stateObjectsDirty)
+	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	//clear(sdb.nilAccounts)
+	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	//clear(sdb.stateObjects)
+	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	//clear(sdb.stateObjectsDirty)
 	sdb.logs = make(map[libcommon.Hash][]*types.Log)
-	//sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
-	clear(sdb.balanceInc)
+	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
@@ -563,16 +563,17 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
 	var prevInc uint64
 	previous := sdb.getStateObject(addr)
-	if contractCreation {
-		if previous != nil && previous.selfdestructed {
-			prevInc = previous.data.Incarnation
+	if previous != nil && previous.selfdestructed {
+		prevInc = previous.data.Incarnation
+	} else {
+		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
+			prevInc = inc
 		} else {
-			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-				prevInc = inc
-			} else {
-				sdb.savedErr = err
-			}
+			sdb.savedErr = err
 		}
+	}
+	if previous != nil && prevInc < previous.data.PrevIncarnation {
+		prevInc = previous.data.PrevIncarnation
 	}
 
 	newObj := sdb.createObject(addr, previous)
@@ -580,6 +581,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
 	newObj.data.Initialised = true
+	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {
 		newObj.createdContract = true
@@ -804,10 +806,10 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		//al := newAccessList()
-		//sdb.accessList = al
-		sdb.accessList.Reset()
-		al := sdb.accessList
+		al := newAccessList()
+		sdb.accessList = al
+		//sdb.accessList.Reset()
+		//al := sdb.accessList
 
 		al.AddAddress(sender)
 		if dst != nil {

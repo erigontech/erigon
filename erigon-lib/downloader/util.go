@@ -101,20 +101,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		subs := historyFileRegex.FindStringSubmatch(name)
-		if len(subs) != 6 {
-			continue
-		}
-		// Check that it's seedable
-		from, err := strconv.ParseUint(subs[3], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
-		}
-		to, err := strconv.ParseUint(subs[4], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
-		}
-		if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
+		if !e3seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -122,6 +109,25 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	return res, nil
 }
 
+func e3seedable(name string) bool {
+	subs := historyFileRegex.FindStringSubmatch(name)
+	if len(subs) != 6 {
+		return false
+	}
+	// Check that it's seedable
+	from, err := strconv.ParseUint(subs[3], 10, 64)
+	if err != nil {
+		return false
+	}
+	to, err := strconv.ParseUint(subs[4], 10, 64)
+	if err != nil {
+		return false
+	}
+	if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
+		return false
+	}
+	return true
+}
 func ensureCantLeaveDir(fName, root string) (string, error) {
 	if filepath.IsAbs(fName) {
 		newFName, err := filepath.Rel(root, fName)
@@ -152,10 +158,10 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePat
 
 	fPath := filepath.Join(root, fName)
 	if dir2.FileExist(fPath + ".torrent") {
-		return
+		return fPath, nil
 	}
 	if !dir2.FileExist(fPath) {
-		return
+		return fPath, nil
 	}
 
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
@@ -264,6 +270,9 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if dbg.DownloaderOnlyBlocks {
+		return files, nil
+	}
 	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
 	if err != nil {
 		return nil, err
@@ -286,9 +295,12 @@ func AllTorrentSpecs(dirs datadir.Dirs) (res []*torrent.TorrentSpec, err error) 
 		return nil, err
 	}
 	for _, fPath := range files {
+		if len(fPath) == 0 {
+			continue
+		}
 		a, err := loadTorrent(fPath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("AllTorrentSpecs: %w", err)
 		}
 		res = append(res, a)
 	}
@@ -304,23 +316,16 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
 
-var (
-	// if non empty, will skip downloading any non-v1 snapshots
-	envUseOnlyBlockSnapshotsV1 = dbg.EnvString("DOWNLOADER_ONLY_BLOCKS", "")
-)
-
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
-	if envUseOnlyBlockSnapshotsV1 == "" {
-		return true
-	}
-	prefixes := []string{"domain", "history", "idx"}
-	for _, p := range prefixes {
-		if strings.HasPrefix(name, p) {
-			return false
+	if dbg.DownloaderOnlyBlocks {
+		for _, p := range []string{"domain", "history", "idx"} {
+			if strings.HasPrefix(name, p) {
+				return false
+			}
 		}
 	}
-	return strings.HasPrefix(name, "v1")
+	return true
 }
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
@@ -333,7 +338,6 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 		return ctx.Err()
 	default:
 	}
-
 	if !IsSnapNameAllowed(ts.DisplayName) {
 		return nil
 	}

@@ -1050,6 +1050,18 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
+func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error) {
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		_, ok, err := dc.getFromFile(i, k)
+		if err != nil {
+			return res, err
+		}
+		if ok {
+			res = append(res, dc.files[i].src.decompressor.FileName())
+		}
+	}
+	return res, nil
+}
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.files.Walk(func(items []*filesItem) bool {
@@ -1511,9 +1523,9 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo, txNumUnwindFrom, limit uint64) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo uint64) error {
 	d := dc.d
-	//fmt.Printf("[domain][%s] unwinding txs [%d; %d) step %d\n", d.filenameBase, txNumUnindTo, txNumUnwindFrom, step)
+	//fmt.Printf("[domain][%s] unwinding to txNum=%d, step %d\n", d.filenameBase, txNumUnindTo, step)
 	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
@@ -1602,8 +1614,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, txNumUnwindFrom, limit, true, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txNumUnindTo, txNumUnwindFrom, err)
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
 	return restored.flush(ctx, rwTx)
 }
@@ -2316,20 +2328,20 @@ type SelectedStaticFiles struct {
 	commitment     []*filesItem
 	commitmentIdx  []*filesItem
 	commitmentHist []*filesItem
-	codeI          int
-	storageI       int
-	accountsI      int
-	commitmentI    int
+	//codeI          int
+	//storageI       int
+	//accountsI      int
+	//commitmentI    int
 }
 
-func (sf SelectedStaticFiles) FillV3(s *SelectedStaticFilesV3) SelectedStaticFiles {
-	sf.accounts, sf.accountsIdx, sf.accountsHist = s.accounts, s.accountsIdx, s.accountsHist
-	sf.storage, sf.storageIdx, sf.storageHist = s.storage, s.storageIdx, s.storageHist
-	sf.code, sf.codeIdx, sf.codeHist = s.code, s.codeIdx, s.codeHist
-	sf.commitment, sf.commitmentIdx, sf.commitmentHist = s.commitment, s.commitmentIdx, s.commitmentHist
-	sf.codeI, sf.accountsI, sf.storageI, sf.commitmentI = s.codeI, s.accountsI, s.storageI, s.commitmentI
-	return sf
-}
+//func (sf SelectedStaticFiles) FillV3(s *SelectedStaticFilesV3) SelectedStaticFiles {
+//	sf.accounts, sf.accountsIdx, sf.accountsHist = s.accounts, s.accountsIdx, s.accountsHist
+//	sf.storage, sf.storageIdx, sf.storageHist = s.storage, s.storageIdx, s.storageHist
+//	sf.code, sf.codeIdx, sf.codeHist = s.code, s.codeIdx, s.codeHist
+//	sf.commitment, sf.commitmentIdx, sf.commitmentHist = s.commitment, s.commitmentIdx, s.commitmentHist
+//	sf.codeI, sf.accountsI, sf.storageI, sf.commitmentI = s.codeI, s.accountsI, s.storageI, s.commitmentI
+//	return sf
+//}
 
 func (sf SelectedStaticFiles) Close() {
 	for _, group := range [][]*filesItem{
