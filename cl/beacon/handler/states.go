@@ -230,7 +230,7 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 		}
 		if currentJustifiedCheckpoint == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read checkpoints: %x", blockRoot))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
 		}
 	}
 	version := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
