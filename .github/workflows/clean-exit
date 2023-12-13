@@ -1,0 +1,81 @@
+name: Erigon clean exit on Ctrl-C
+
+on:
+  push:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+  #pull_request:
+  #  branches:
+  #    - devel
+  #    - alpha
+  #    - 'release/**'
+  #  types:
+  #    - opened
+  #    - reopened
+  #    - synchronize
+  #    - ready_for_review
+
+jobs:
+  build-and-test:
+    #if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    #strategy:
+    #  matrix:
+    #    os: [ ubuntu-22.04, macos-13-xlarge ] 
+    #runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.20' 
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    #- name: Install dependencies
+    #  run: |
+    #    sudo apt-get update
+    #    sudo apt-get install -y build-essential make gcc
+
+    - name: Build Erigon
+      run: |
+        make erigon
+      working-directory: ${{ github.workspace }}
+
+    - name: Run and Test Erigon
+      run: |
+        # Run Erigon in the background and redirect output to a log file
+        ./erigon > erigon.log 2>&1 &
+        ERIGON_PID=$!
+
+        # Wait for Erigon to initialize (adjust the sleep time as necessary)
+        sleep 10
+
+        # Send Ctrl-C signal to Erigon
+        kill -SIGINT $ERIGON_PID
+
+        # Wait for Erigon to perform cleanup operations
+        sleep 30 # Adjust this time based on expected cleanup duration
+
+        # Check if Erigon exited cleanly
+        if wait $ERIGON_PID; then
+          echo "Erigon exited cleanly"
+        else
+          echo "Erigon did not exit cleanly"
+          exit 1
+        fi
+
+    - name: Download Python Script for Checking Logs
+      run: |
+        curl -o check_erigon_exit.py 'https://your-script-hosting-location/check_erigon_exit.py'
+
+    - name: Check Erigon Logs for Errors
+      run: python3 check_erigon_exit.py
