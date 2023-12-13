@@ -214,9 +214,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, checkpoints, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
+			s.balances32 = s.balances32[:0]
 			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
@@ -232,6 +233,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
+			s.balances32 = s.balances32[:0]
 			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		}
 	}
@@ -679,7 +681,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, checkpoints, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -710,6 +712,15 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	}
 	var commonBuffer bytes.Buffer
 	if err := s.antiquateFullUint64List(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
+		return err
+	}
+
+	k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
+	v := make([]byte, solid.CheckpointSize*3)
+	copy(v, state.CurrentJustifiedCheckpoint())
+	copy(v[solid.CheckpointSize:], state.PreviousJustifiedCheckpoint())
+	copy(v[solid.CheckpointSize*2:], state.FinalizedCheckpoint())
+	if err := checkpoints.Collect(k, v); err != nil {
 		return err
 	}
 

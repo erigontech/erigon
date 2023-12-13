@@ -478,6 +478,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		if base_encoding.Decode64FromBytes4(k) > slot {
 			return nil, fmt.Errorf("diff not found for slot %d", slot)
 		}
+		fmt.Println(base_encoding.Decode64FromBytes4(k))
 		s := time.Now()
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
 		if err != nil {
