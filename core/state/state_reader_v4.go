@@ -1,6 +1,8 @@
 package state
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -28,6 +30,7 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 	if err = accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, err
 	}
+	fmt.Printf("ReadAccountData: %x, %s\n", address, a.Balance.String())
 	return &a, nil
 }
 
