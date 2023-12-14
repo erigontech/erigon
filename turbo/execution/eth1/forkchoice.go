@@ -264,24 +264,24 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, canonicalSegment.number); err != nil {
+	}
+	if e.historyV3 {
+		if len(newCanonicals) > 0 {
+			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
+			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			//	return
-			//}
-			//if err := rawdb.AppendCanonicalTxNums(tx, fcuHeader.Number.Uint64()); err != nil {
-			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			//	return
-			//}
 		}
+		//} else {
+		//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+		//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		//	return
+		//}
+		//}
 	}
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
