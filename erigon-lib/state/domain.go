@@ -1921,7 +1921,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		//keySuffix := make([]byte, len(k)+8)
 		//copy(keySuffix, k)
 		//copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
+		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 		txNum := step * dc.d.aggregationStep
 		//if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 		//	return err
@@ -2199,7 +2199,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		//keySuffix := make([]byte, len(k)+8)
 		//copy(keySuffix, k)
 		//copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
+		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
 		txNum := step * dc.d.aggregationStep
 		//if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 		//	return err
