@@ -410,8 +410,8 @@ func (h *Harness) mockBorSpanner() {
 		GetCurrentProducers(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ uint64, _ libcommon.Address, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 			res := make([]*valset.Validator, len(h.heimdallNextMockSpan.SelectedProducers))
-			for i, producer := range h.heimdallNextMockSpan.SelectedProducers {
-				res[i] = &producer
+			for i := range h.heimdallNextMockSpan.SelectedProducers {
+				res[i] = &h.heimdallNextMockSpan.SelectedProducers[i]
 			}
 
 			return res, nil
