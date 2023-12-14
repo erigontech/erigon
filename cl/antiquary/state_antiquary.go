@@ -194,7 +194,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	} else {
 		progress = 0
 	}
-	progress, err = findNearestSlotBackwards(tx, progress) // Maybe the guess was a missed slot.
+	progress, err = findNearestSlotBackwards(tx, s.cfg, progress) // Maybe the guess was a missed slot.
 	if err != nil {
 		return err
 	}
@@ -214,9 +214,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
@@ -231,6 +232,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		}
 	}
 
@@ -243,13 +245,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, inactivityScores, prevValSet, slashingsBytes []byte
+	var prevBalances, prevValSet []byte
 	events := state_accessors.NewStateEvents()
-
+	slashingOccured := false
 	// var validatorStaticState
 	// var validatorStaticState map[uint64]*state.ValidatorStatic
 	// Setup state events handlers
 	s.currentState.SetEvents(raw.Events{
+		OnNewSlashingSegment: func(index int, segment uint64) error {
+			slashingOccured = true
+			return nil
+		},
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
 			return intraRandaoMixes.Collect(base_encoding.Encode64ToBytes4(slot), mix[:])
 		},
@@ -326,12 +332,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 		},
-		OnResetParticipation: func(previousParticipation *solid.BitList) error {
-			if err := s.antiquateField(ctx, s.cfg.RoundSlotToEpoch(slot), previousParticipation.Bytes(), compressedWriter, "participation"); err != nil {
-				s.logger.Error("Failed to antiquate participation", "err", err)
-			}
-			return err
-		},
 	})
 	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
@@ -342,6 +342,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
 	// there is optimized custom cache to recycle big GC overhead.
 	for ; slot < to; slot++ {
+		slashingOccured = false // Set this to false at the beginning of each slot.
+		key := base_encoding.Encode64ToBytes4(slot)
+
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
 		if err != nil {
@@ -367,36 +370,30 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		if isDumpSlot && block == nil {
-			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
-				return err
-			}
-			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
-				return err
-			}
-			if s.currentState.Version() >= clparams.AltairVersion {
-				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
-					return err
-				}
-			}
-			if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
-				return err
-			}
-		}
-
 		// If we have a missed block, we just skip it.
 		if block == nil {
+			if isDumpSlot {
+				if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
+					return err
+				}
+				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
+					return err
+				}
+			} else if slot%s.cfg.SlotsPerEpoch == 0 {
+				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+					return err
+				}
+				s.balances32 = s.balances32[:0]
+				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+			}
+
 			continue
 		}
 		// We now compute the difference between the two balances.
 		prevBalances = prevBalances[:0]
 		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
-		inactivityScores = inactivityScores[:0]
-		inactivityScores = append(inactivityScores, s.currentState.RawInactivityScores()...)
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
-		slashingsBytes = slashingsBytes[:0]
-		slashingsBytes = append(slashingsBytes, s.currentState.RawSlashings()...)
 
 		fullValidation := slot%100_000 == 0 || first
 		// We sanity check the state every 100k slots or when we start.
@@ -404,9 +401,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		first = false
-		// if s.currentState.Slot() == 3868670 {
-		// 	s.dumpFullBeaconState()
-		// }
+
+		// dump the whole sla
+		if slashingOccured {
+			if err := s.antiquateFullUint64List(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
+				return err
+			}
+		}
+
 		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
 			return err
 		}
@@ -422,33 +424,26 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 				return err
 			}
-			if s.currentState.Version() >= clparams.AltairVersion {
-				if err := s.antiquateField(ctx, slot, s.currentState.RawInactivityScores(), compressedWriter, "inactivity_scores"); err != nil {
-					return err
-				}
-			}
-			if err := s.antiquateFullSlashings(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
-				return err
-			}
 			continue
 		}
 
-		// antiquate fields
-		key := base_encoding.Encode64ToBytes4(slot)
-		if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
-			return err
-		}
-		if err := s.antiquateBytesListDiff(ctx, key, slashingsBytes, s.currentState.RawSlashings(), slashings, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
-			return err
-		}
+		// antiquate diffs
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
-
+		if slot%s.cfg.SlotsPerEpoch == 0 {
+			if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+				return err
+			}
+			s.balances32 = s.balances32[:0]
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+		} else if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+			return err
+		}
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
 			if err := s.antiquateBytesListDiff(ctx, key, prevValSet, s.currentState.RawValidatorSet(), effectiveBalance, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {
-				if err := s.antiquateBytesListDiff(ctx, key, inactivityScores, s.currentState.RawInactivityScores(), inactivityScoresC, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+				if err := s.antiquateFullUint64List(inactivityScoresC, slot, s.currentState.RawInactivityScores(), commonBuffer, compressedWriter); err != nil {
 					return err
 				}
 			}
@@ -684,7 +679,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -713,21 +708,16 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	if err := s.antiquateEffectiveBalances(ctx, roundedSlotToDump, s.currentState.RawValidatorSet(), compressor); err != nil {
 		return err
 	}
-	if s.currentState.Version() >= clparams.AltairVersion {
-		if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
-			return err
-		}
-	}
 	var commonBuffer bytes.Buffer
-	if err := s.antiquateFullSlashings(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
+	if err := s.antiquateFullUint64List(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
 		return err
 	}
 
 	if state.Version() >= clparams.AltairVersion {
-		if err := s.antiquateField(ctx, roundedSlotToDump, state.RawInactivityScores(), compressor, "inactivity_scores"); err != nil {
+		// dump inactivity scores
+		if err := s.antiquateFullUint64List(inactivities, slot, state.RawInactivityScores(), &commonBuffer, compressor); err != nil {
 			return err
 		}
-
 	}
 
 	var b bytes.Buffer
@@ -786,10 +776,10 @@ func flattenRandaoMixes(hashes []libcommon.Hash) []byte {
 }
 
 // antiquateFullSlashings goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
-func (s *Antiquary) antiquateFullSlashings(collector *etl.Collector, slot uint64, slashings []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
+func (s *Antiquary) antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
-	if _, err := compressor.Write(slashings); err != nil {
+	if _, err := compressor.Write(raw); err != nil {
 		return err
 	}
 	if err := compressor.Close(); err != nil {
@@ -798,12 +788,12 @@ func (s *Antiquary) antiquateFullSlashings(collector *etl.Collector, slot uint64
 	return collector.Collect(base_encoding.Encode64ToBytes4(slot), common.Copy(buffer.Bytes()))
 }
 
-func findNearestSlotBackwards(tx kv.Tx, slot uint64) (uint64, error) {
+func findNearestSlotBackwards(tx kv.Tx, cfg *clparams.BeaconChainConfig, slot uint64) (uint64, error) {
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return 0, err
 	}
-	for canonicalRoot == (common.Hash{}) && slot > 0 {
+	for (canonicalRoot == (common.Hash{}) && slot > 0) || slot%cfg.SlotsPerEpoch != 0 {
 		slot--
 		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
