@@ -12,13 +12,15 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/u256"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/sync_stages"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
@@ -123,13 +125,8 @@ func (api *ZkEvmAPIImpl) IsBlockVirtualized(ctx context.Context, blockNumber rpc
 		return false, err
 	}
 
-	highestVerifiedBatchNo, err := sync_stages.GetStageProgress(tx, sync_stages.L1VerificationsBatchNo)
-	if err != nil {
-		return false, err
-	}
-
-	// higher than the latest verified batch but lower than or equal to the latest sequenced batch
-	return batchNum <= latestSequencedBatch && batchNum > highestVerifiedBatchNo, nil
+	// if the batch is lower than the latest sequenced then it must be virtualized
+	return batchNum <= latestSequencedBatch, nil
 }
 
 // BatchNumberByBlockNumber returns the batch number of the block
@@ -156,16 +153,12 @@ func (api *ZkEvmAPIImpl) BatchNumber(ctx context.Context) (hexutil.Uint64, error
 	}
 	defer tx.Rollback()
 
-	bn, err := rpchelper.GetLatestBlockNumber(tx)
+	currentBatchNumber, err := getLatestBatchNumber(tx)
 	if err != nil {
-		return hexutil.Uint64(0), err
-	}
-	batchNum, err := getBatchNoByL2Block(tx, bn)
-	if err != nil {
-		return hexutil.Uint64(0), err
+		return 0, err
 	}
 
-	return hexutil.Uint64(batchNum), err
+	return hexutil.Uint64(currentBatchNumber), err
 }
 
 // VirtualBatchNumber returns the latest virtual batch number
@@ -272,13 +265,19 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 	number := baseBlock.NumberU64()
 	signer := eritypes.MakeSigner(cc, number)
 	var senders []common.Address
+	var effectiveGasPricePercentages []uint8
 	if fullTx {
-		for _, tx := range baseBlock.Transactions() {
-			sender, err := tx.Sender(*signer)
+		for _, txn := range baseBlock.Transactions() {
+			sender, err := txn.Sender(*signer)
 			if err != nil {
 				return types.Block{}, err
 			}
 			senders = append(senders, sender)
+			effectiveGasPricePercentage, err := api.ethApi.getEffectiveGasPricePercentage(tx, txn.Hash())
+			if err != nil {
+				return types.Block{}, err
+			}
+			effectiveGasPricePercentages = append(effectiveGasPricePercentages, effectiveGasPricePercentage)
 		}
 	}
 
@@ -287,7 +286,7 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 		return types.Block{}, err
 	}
 
-	return convertBlockToRpcBlock(baseBlock, receipts, senders, fullTx)
+	return convertBlockToRpcBlock(baseBlock, receipts, senders, effectiveGasPricePercentages, fullTx)
 }
 
 // GetBroadcastURI returns the URI of the broadcaster - the trusted sequencer
@@ -341,6 +340,25 @@ func getAllBlocksInBatchNumber(tx kv.Tx, batchNumber uint64) ([]uint64, error) {
 	}
 
 	return result, nil
+}
+
+func getLatestBatchNumber(tx kv.Tx) (uint64, error) {
+	c, err := tx.Cursor(hermez_db.BLOCKBATCHES)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	// get the last entry from the table
+	k, v, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+
+	return hermez_db.BytesToUint64(v), nil
 }
 
 func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
@@ -408,6 +426,7 @@ func convertBlockToRpcBlock(
 	orig *eritypes.Block,
 	receipts eritypes.Receipts,
 	senders []common.Address,
+	effectiveGasPricePercentages []uint8,
 	full bool,
 ) (types.Block, error) {
 	header := orig.Header()
@@ -454,9 +473,13 @@ func convertBlockToRpcBlock(
 			if len(senders) > idx {
 				sender = senders[idx]
 			}
+			var effectiveGasPricePercentage uint8 = 0
+			if len(effectiveGasPricePercentages) > idx {
+				effectiveGasPricePercentage = effectiveGasPricePercentages[idx]
+			}
 			var receipt *types.Receipt
 			if len(receipts) > idx {
-				receipt = convertReceipt(receipts[idx], sender, tx.GetTo())
+				receipt = convertReceipt(receipts[idx], sender, tx.GetTo(), tx.GetPrice(), effectiveGasPricePercentage)
 			}
 
 			tran := types.Transaction{
@@ -492,7 +515,13 @@ func convertBlockToRpcBlock(
 	return result, nil
 }
 
-func convertReceipt(r *eritypes.Receipt, from common.Address, to *common.Address) *types.Receipt {
+func convertReceipt(
+	r *eritypes.Receipt,
+	from common.Address,
+	to *common.Address,
+	gasPrice *uint256.Int,
+	effectiveGasPricePercentage uint8,
+) *types.Receipt {
 	var cAddr *common.Address
 	if r.ContractAddress != (common.Address{}) {
 		cAddr = &r.ContractAddress
@@ -502,6 +531,18 @@ func convertReceipt(r *eritypes.Receipt, from common.Address, to *common.Address
 	logs := make([]*eritypes.Log, 0)
 	if len(r.Logs) > 0 {
 		logs = r.Logs
+	}
+
+	var effectiveGasPrice *types.ArgBig
+	gas := gasPrice.Clone()
+	if effectiveGasPricePercentage > zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED && gasPrice != nil {
+		clone := gasPrice.Clone()
+		effectiveGasPricePerc := new(uint256.Int).SetUint64(uint64(effectiveGasPricePercentage))
+		effectiveGasPricePerc.Add(effectiveGasPricePerc, u256.Num1)
+		clone.Mul(clone, effectiveGasPricePerc)
+		gas.Div(clone, zktypes.EFFECTIVE_GAS_PRICE_MAX_VAL)
+		asBig := types.ArgBig(*gas.ToBig())
+		effectiveGasPrice = &asBig
 	}
 
 	return &types.Receipt{
@@ -519,6 +560,6 @@ func convertReceipt(r *eritypes.Receipt, from common.Address, to *common.Address
 		ToAddr:            to,
 		ContractAddress:   cAddr,
 		Type:              types.ArgUint64(r.Type),
-		EffectiveGasPrice: nil,
+		EffectiveGasPrice: effectiveGasPrice,
 	}
 }

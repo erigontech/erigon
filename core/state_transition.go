@@ -36,7 +36,6 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
-var effectiveGasMaxVal = new(uint256.Int).SetUint64(256)
 
 /*
 The State Transitioning Model
@@ -165,7 +164,7 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		epi := new(uint256.Int).SetUint64(uint64(ep))
 		epi = epi.Add(epi, u256.Num1)
 		val = val.Mul(val, epi)
-		gas = gas.Div(val, effectiveGasMaxVal)
+		gas = gas.Div(val, zktypes.EFFECTIVE_GAS_PRICE_MAX_VAL)
 	}
 
 	return &StateTransition{
