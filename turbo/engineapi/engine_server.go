@@ -452,24 +452,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if payloadAttributes != nil {
+		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+		}
+		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+			return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+		}
+
 		timestamp := uint64(payloadAttributes.Timestamp)
 		if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-			if payloadAttributes.ParentBeaconBlockRoot == nil {
-				return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
-			}
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 		}
 		if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-			if payloadAttributes.ParentBeaconBlockRoot != nil {
-				return nil, &rpc.InvalidParamsError{Message: "Unexpected Beacon Root"}
-			}
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
-
-		if s.config.IsCancun(timestamp) && version >= clparams.DenebVersion {
-			if payloadAttributes.ParentBeaconBlockRoot == nil {
-				return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
-			}
 		}
 	}
 
