@@ -663,8 +663,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 				if UseBtree || UseBpsTree {
 					if ci1.btCursor.Next() {
 						ci1.key = common.Copy(ci1.btCursor.Key())
-						fmt.Printf("file: %d, %s, %d, %x\n", ci1.t, ci1.btCursor.getter.FileName(), ci1.endTxNum, k)
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+							fmt.Printf("file: %d, %s, %d, %x\n", ci1.t, ci1.btCursor.getter.FileName(), ci1.endTxNum, ci1.key)
 							ci1.val = common.Copy(ci1.btCursor.Value())
 							heap.Push(cpPtr, ci1)
 						}
