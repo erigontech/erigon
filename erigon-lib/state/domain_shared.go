@@ -14,6 +14,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -885,6 +886,44 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	for _, tomb := range tombs {
 		if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v); err != nil {
 			return err
+		}
+	}
+
+	//assert
+	cnt := 0
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		cnt++
+		return nil
+	}); err != nil {
+		return err
+	}
+	if cnt != 0 {
+		log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
+
+		type pair struct{ k, v []byte }
+		tombs := make([]pair, 0, 8)
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+			tombs = append(tombs, pair{k, v})
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, tomb := range tombs {
+			if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v); err != nil {
+				return err
+			}
+		}
+
+		cnt = 0
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+			cnt++
+			return nil
+		}); err != nil {
+			return err
+		}
+		if cnt != 0 {
+			log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
+			panic(1)
 		}
 	}
 	return nil
