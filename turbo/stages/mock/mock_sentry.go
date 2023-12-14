@@ -692,7 +692,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 			return err
 		}
 	}
-	fmt.Printf("b1\n")
 	if err := wr.InsertBlocksAndWait(chain.Blocks); err != nil {
 		return err
 	}
