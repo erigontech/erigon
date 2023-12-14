@@ -598,7 +598,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -878,7 +878,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		tombs = append(tombs, pair{k, v})
+		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	}); err != nil {
 		return err
