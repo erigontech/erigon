@@ -100,7 +100,7 @@ func ProgressPrinterWithoutValues(message string, total uint64) (chan uint64, fu
 				}
 			case <-ticker.C:
 				if pc > 0 {
-					log.Info(fmt.Sprintf("%s: (%d%%)", message, pc, total, pct))
+					log.Info(fmt.Sprintf("%s: (%d%%)", message, pct))
 				}
 			case <-ctDone:
 				return

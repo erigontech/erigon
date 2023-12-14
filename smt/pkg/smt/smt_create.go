@@ -65,6 +65,7 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 	//start a progress checker
 	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutValues(fmt.Sprintf("[%s] SMT regenerate progress", logPrefix), uint64(totalKeysCount)*2)
 	defer stopProgressPrinter()
+	progressChan <- uint64(totalKeysCount)
 
 	insertedKeysCount := uint64(0)
 
@@ -218,7 +219,7 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 		}
 
 		insertedKeysCount++
-		progressChan <- insertedKeysCount
+		progressChan <- uint64(totalKeysCount) + insertedKeysCount
 	}
 
 	tempTreeBuildTime := time.Since(tempTreeBuildStart)
