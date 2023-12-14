@@ -899,6 +899,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	if cnt != 0 {
 		log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
+		panic(1)
 
 		type pair struct{ k, v []byte }
 		tombs := make([]pair, 0, 8)
