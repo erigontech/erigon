@@ -1397,6 +1397,34 @@ func rlptest() error {
 	return nil
 }
 
+func countAccounts(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	var count uint64
+	var keys []string
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			if len(k) == 20 {
+				count++
+				keys = append(keys, common.Bytes2Hex(k))
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
+	fmt.Printf("count=%d\n", count)
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Printf("%s\n", k)
+	}
+
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1439,6 +1467,9 @@ func main() {
 
 	case "dumpStorage":
 		dumpStorage()
+
+	case "countAccounts":
+		countAccounts(*chaindata)
 
 	case "current":
 		printCurrentBlockNumber(*chaindata)
