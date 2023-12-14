@@ -281,7 +281,7 @@ func BorHeimdallForward(
 			}
 		}
 
-		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			var callTime time.Duration
 			var records int
 			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
