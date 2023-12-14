@@ -56,8 +56,9 @@ func Test_BtreeIndex_Init(t *testing.T) {
 func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 120, 30
-	compressFlags := CompressKeys | CompressVals
+	keyCount, M := 120_000, 30
+	//compressFlags := CompressKeys | CompressVals
+	compressFlags := FileCompression(0)
 	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
@@ -96,12 +97,12 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		_, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.SeekDeprecated(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 	})
 
-	c, err := bt.SeekDeprecated(nil)
+	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
@@ -113,7 +114,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	}
 
 	for i := 0; i < len(keys); i++ {
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValues(t, keys[i], cur.key)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
@@ -127,7 +128,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 				break
 			}
 		}
-		cur, err := bt.SeekDeprecated(keys[i])
+		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
 	}
