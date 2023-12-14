@@ -453,7 +453,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		if len(diff) == 0 {
 			continue
 		}
-		fmt.Println("AX")
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff)
 		if err != nil {
 			return nil, err
