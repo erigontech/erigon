@@ -636,7 +636,6 @@ func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old,
 	diffBuffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(diffBuffer)
 	diffBuffer.Reset()
-	fmt.Println("in", len(s.balances32))
 
 	if err := diffFn(diffBuffer, old, new); err != nil {
 		return err
