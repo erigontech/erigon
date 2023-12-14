@@ -46,8 +46,8 @@ def wait_for_process_to_exit(pid, timeout=600):
     while check_if_process_exists(pid):
         time.sleep(1)
         if time.time() - start_time > timeout:
-            return False
-    return True
+            return False, timeout
+    return True, time.time() - start_time
 
 
 def tail_f(file):
@@ -81,6 +81,7 @@ def check_log_for_exit_status(log_file):
 
 
 def send_ctrl_c_and_check_log(pid, log_file):
+    threshold = 60 # 60 seconds
     try:
         time.sleep(120)  # Wait before sending SIGINT, please increment this delay as necessary
 
@@ -88,9 +89,9 @@ def send_ctrl_c_and_check_log(pid, log_file):
         os.kill(pid, signal.SIGINT)
 
         # Wait for process to exit in a reasonable amount of time
-        exited = wait_for_process_to_exit(pid, timeout=600)
-        if not exited:
-            report_result(Result.FAILURE, "process did not exit within timeout period")
+        exited, duration = wait_for_process_to_exit(pid, timeout=600)
+        if not exited or duration > threshold:
+            report_result(Result.FAILURE, f"process did not exit within timeout period, expected < {threshold} secs, measured {duration} secs")
             sys.exit(1)
 
         # Check the log file for exit status
