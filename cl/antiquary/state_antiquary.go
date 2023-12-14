@@ -190,8 +190,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	// Go back a little bit
 	if progress > s.cfg.SlotsPerEpoch*2 {
-		//progress -= s.cfg.SlotsPerEpoch * 2
-		progress = 0
+		progress -= s.cfg.SlotsPerEpoch * 2
 	} else {
 		progress = 0
 	}
