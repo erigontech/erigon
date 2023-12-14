@@ -887,7 +887,9 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
 		fmt.Printf("del: %x, %d, %t\n", k, len(v), v == nil)
-		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
+		if len(v) > 0 {
+			tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
+		}
 		return nil
 	}); err != nil {
 		return err
