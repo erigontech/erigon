@@ -662,9 +662,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			case FILE_CURSOR:
 				if UseBtree || UseBpsTree {
 					if ci1.btCursor.Next() {
-						ci1.key = ci1.btCursor.Key()
+						ci1.key = common.Copy(ci1.btCursor.Key())
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-							ci1.val = ci1.btCursor.Value()
+							ci1.val = common.Copy(ci1.btCursor.Value())
 							heap.Push(cpPtr, ci1)
 						}
 					}
