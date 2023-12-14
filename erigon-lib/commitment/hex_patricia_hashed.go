@@ -1386,6 +1386,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	return rootHash, nil
 }
 
+// if commitmentWriteNoETL is true, puts updates directly into domain, instead of buffering in ETL
 const commitmentWriteNoETL = true
 
 func (hph *HexPatriciaHashed) CollectUpdate(
@@ -1413,8 +1414,8 @@ func (hph *HexPatriciaHashed) CollectUpdate(
 	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
 
-	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
 	if commitmentWriteNoETL {
+		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
 		if err = hph.ctx.PutBranch(cp, cu, prev); err != nil {
 			return 0, err
 		}
