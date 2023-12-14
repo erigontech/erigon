@@ -564,6 +564,20 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
+	{
+		fmt.Printf("--keys start\n")
+		roTx.ForPrefix(sd.Storage.keysTable, prefix, func(k, v []byte) error {
+			fmt.Printf("%x\n", k)
+			return nil
+		})
+		fmt.Printf("--keys end\n")
+		fmt.Printf("--vals start\n")
+		roTx.ForPrefix(sd.Storage.valsTable, prefix, func(k, v []byte) error {
+			fmt.Printf("%x\n", k)
+			return nil
+		})
+		fmt.Printf("--vals end\n")
+	}
 
 	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
 	if err != nil {
