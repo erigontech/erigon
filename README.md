@@ -4,6 +4,13 @@ zkEVM-Erigon is a fork of Erigon, currently in Alpha, optimized for syncing with
 
 ***
 
+## Prereqs
+In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicone it will fall back to the iden3 library and as such these dependencies are not required in that case.
+
+Please install: 
+- Linux: `libgtest-dev` `libomp-dev` `libgmp-dev`
+- MacOS: `brew install libomp` `brew install gmp`
+
 ## zkevm-specific API Support
 
 In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag (see the example config below).
