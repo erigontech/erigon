@@ -498,9 +498,7 @@ func SpawnExecuteBlocksStage(s *sync_stages.StageState, u sync_stages.Unwinder, 
 	if to <= s.BlockNumber {
 		return nil
 	}
-	if !quiet && to > s.BlockNumber+16 {
-		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
+
 	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
 	// changes are stored through memory buffer
@@ -534,7 +532,17 @@ func SpawnExecuteBlocksStage(s *sync_stages.StageState, u sync_stages.Unwinder, 
 		to = noProgressTo
 	}
 
+	// limit execution to 100 blocks at a time for faster sync near tip
+	// [TODO] remove it after Interhashes  incremental is optimized
 	total := to - stageProgress
+	if total > 100 && total < 100000 {
+		to = stageProgress + 100
+		total = 100
+	}
+	if !quiet && to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
+
 	initialBlock := stageProgress + 1
 	eridb := erigon_db.NewErigonDb(tx)
 Loop:
