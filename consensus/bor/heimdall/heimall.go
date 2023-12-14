@@ -14,7 +14,7 @@ func MilestoneRewindPending() bool {
 	return generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0
 }
 
-//go:generate mockgen -destination=../../tests/bor/mocks/IHeimdallClient.go -package=mocks . IHeimdallClient
+//go:generate mockgen -destination=./mock/heimdall_client_mock.go -package=mock . IHeimdallClient
 type IHeimdallClient interface {
 	StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error)
 	Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error)
