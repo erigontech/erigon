@@ -102,15 +102,17 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcom
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHash, safeHash, finalizedHash libcommon.Hash, outcomeCh chan forkchoiceOutcome) {
+	fmt.Printf("updateForkChoice01\n")
 	if !e.semaphore.TryAcquire(1) {
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			Status:          execution.ExecutionStatus_Busy,
 		})
+		fmt.Printf("updateForkChoice02\n")
 		return
 	}
 	defer e.semaphore.Release(1)
-
+	fmt.Printf("updateForkChoice03\n")
 	type canonicalEntry struct {
 		hash   libcommon.Hash
 		number uint64
@@ -129,7 +131,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	fmt.Printf("updateForkChoice1\n")
 	if fcuHeader == nil {
+		fmt.Printf("updateForkChoice11\n")
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
 		return
 	}
@@ -138,8 +142,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	fmt.Printf("updateForkChoice12\n")
 
 	if canonicalHash == blockHash {
+		fmt.Printf("updateForkChoice13\n")
 		// if block hash is part of the canonical chain treat it as no-op.
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -158,6 +164,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 			Status:          execution.ExecutionStatus_Success,
 		})
+		if e.historyV3 {
+			if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+			if err := rawdb.AppendCanonicalTxNums(tx, fcuHeader.Number.Uint64()); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
 		return
 	}
 
@@ -200,6 +216,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			return
 		}
 		currentParentHash = currentHeader.ParentHash
+		if currentHeader.Number.Uint64() == 0 {
+			panic("assert:uint64 underflow") //uint-underflow
+		}
 		currentParentNumber = currentHeader.Number.Uint64() - 1
 		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
@@ -237,7 +256,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-
+	if e.historyV3 {
+		fmt.Printf("truncate: %d\n", currentParentNumber)
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
 		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
@@ -264,13 +290,33 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		//if e.historyV3 {
+		//	if len(newCanonicals) > 0 {
+		//		if err := rawdbv3.TxNums.Truncate(tx, canonicalSegment.number); err != nil {
+		//			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		//			return
+		//		}
+		//		if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
+		//			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		//			return
+		//		}
+		//	}
+		//	//} else {
+		//	//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+		//	//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		//	//	return
+		//	//}
+		//	//}
+		//}
 	}
 	if e.historyV3 {
 		if len(newCanonicals) > 0 {
+			fmt.Printf("truncate: %d\n", newCanonicals[0].number)
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
+			fmt.Printf("append: %d\n", newCanonicals[len(newCanonicals)-1].number)
 			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return

@@ -703,10 +703,12 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	if err != nil {
 		return err
 	}
-	ms.DB.Update(ms.Ctx, func(tx kv.RwTx) error {
+	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 	if status != execution.ExecutionStatus_Success {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}

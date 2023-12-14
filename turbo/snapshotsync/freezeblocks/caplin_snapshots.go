@@ -405,7 +405,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 			break
 		}
 		to := chooseSegmentEnd(i, toSlot, blocksPerFile)
-		logger.Warn("Dumping beacon blocks", "from", i, "to", to)
+		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, b, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
 		}
@@ -460,10 +460,6 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	if seg.idxSlot == nil {
 		return nil, 0, libcommon.Hash{}, nil
-	}
-
-	if slot >= 99999 {
-		log.Info("[dbg] seg.idxSlot", "idx_name", seg.idxSlot.FileName(), "slot", slot, "seg.idxSlot.BaseDataID()", seg.idxSlot.BaseDataID(), "seg.idxSlot.KeyCount()", seg.idxSlot.KeyCount(), "seg.seg.Count()", seg.seg.Count())
 	}
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 

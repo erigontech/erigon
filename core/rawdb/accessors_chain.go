@@ -685,7 +685,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
-	nextBaseTxNum := -1
+	nextBaseTxNum := 0
 	if from > 0 {
 		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(tx, from-1)
 		if err != nil {
