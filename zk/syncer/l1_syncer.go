@@ -225,7 +225,7 @@ loop:
 			if aimingFor == 0 {
 				continue
 			}
-			s.progressMessageChan <- fmt.Sprintf("Progress: %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
+			s.progressMessageChan <- fmt.Sprintf("Blocks processed rogress (amounts): %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
 		}
 	}
 
