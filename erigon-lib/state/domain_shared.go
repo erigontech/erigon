@@ -878,6 +878,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		fmt.Printf("%x\n", k)
 		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	}); err != nil {
@@ -899,11 +900,13 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	if cnt != 0 {
 		log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
-		panic(1)
+
+		fmt.Printf("-----\n")
 
 		type pair struct{ k, v []byte }
 		tombs := make([]pair, 0, 8)
 		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+			fmt.Printf("%x\n", k)
 			tombs = append(tombs, pair{k, v})
 			return nil
 		}); err != nil {
@@ -922,6 +925,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		}); err != nil {
 			return err
 		}
+		panic(1)
 		if cnt != 0 {
 			log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
 			panic(1)
