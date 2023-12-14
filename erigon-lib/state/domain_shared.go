@@ -542,6 +542,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
 	sc := sd.Storage.MakeContext()
 	defer sc.Close()
+	fmt.Printf("----\n")
 
 	sd.Storage.stats.FilesQueries.Add(1)
 
@@ -603,6 +604,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	for cp.Len() > 0 {
+		fmt.Printf("%d, %x\n", cp[0].t, cp[0].key)
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
@@ -878,7 +880,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		fmt.Printf("%x\n", k)
 		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	}); err != nil {
@@ -900,13 +901,10 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	if cnt != 0 {
 		log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
-
-		fmt.Printf("-----\n")
-
+		panic(1)
 		type pair struct{ k, v []byte }
 		tombs := make([]pair, 0, 8)
 		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-			fmt.Printf("%x\n", k)
 			tombs = append(tombs, pair{k, v})
 			return nil
 		}); err != nil {
@@ -925,7 +923,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		}); err != nil {
 			return err
 		}
-		panic(1)
 		if cnt != 0 {
 			log.Error(fmt.Sprintf("not all storage was deleted: %d, %x", cnt, prefix))
 			panic(1)
