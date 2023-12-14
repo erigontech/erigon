@@ -920,6 +920,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		fmt.Printf("del: %x, %d, %t\n", k, len(v), v == nil)
 		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
 		return nil
 	}); err != nil {
