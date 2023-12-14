@@ -103,6 +103,7 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 	agg       *libstate.AggregatorV3
+	zk        *ethconfig.Zk
 }
 
 func StageExecuteBlocksCfg(
@@ -124,6 +125,7 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
+	zk *ethconfig.Zk,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            db,
@@ -143,6 +145,7 @@ func StageExecuteBlocksCfg(
 		historyV3:     historyV3,
 		syncCfg:       syncCfg,
 		agg:           agg,
+		zk:            zk,
 	}
 }
 
@@ -535,9 +538,9 @@ func SpawnExecuteBlocksStage(s *sync_stages.StageState, u sync_stages.Unwinder, 
 	// limit execution to 100 blocks at a time for faster sync near tip
 	// [TODO] remove it after Interhashes  incremental is optimized
 	total := to - stageProgress
-	if total > 100 && total < 100000 {
-		to = stageProgress + 100
-		total = 100
+	if total > cfg.zk.RebuildTreeAfter && total < 100000 {
+		to = stageProgress + cfg.zk.RebuildTreeAfter
+		total = cfg.zk.RebuildTreeAfter
 	}
 	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
