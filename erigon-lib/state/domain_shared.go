@@ -653,10 +653,10 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
 					k = []byte(ci1.iter.Key())
+					fmt.Printf("file: %d, %s, %x\n", ci1.t, ci1.btCursor.getter.FileName(), cp[0].key)
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
-						fmt.Printf("file: %d, %s, %x\n", ci1.t, ci1.btCursor.getter.FileName(), cp[0].key)
 						heap.Push(cpPtr, ci1)
 					}
 				}
