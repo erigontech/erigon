@@ -1,4 +1,4 @@
-name: QA - Erigon clean exit on Ctrl-C
+name: QA - Clean exit on Ctrl-C
 
 on:
   push:
