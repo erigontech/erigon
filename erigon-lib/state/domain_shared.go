@@ -591,8 +591,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		//keySuffix := make([]byte, len(k)+8)
 		//copy(keySuffix, k)
 		//copy(keySuffix[len(k):], v)
-		//step := ^binary.BigEndian.Uint64(v)
-		//txNum := step * sd.Storage.aggregationStep
+		step := ^binary.BigEndian.Uint64(k[len(k)-8:])
+		txNum := step * sd.Storage.aggregationStep
 		//if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 		//	return err
 		//}
