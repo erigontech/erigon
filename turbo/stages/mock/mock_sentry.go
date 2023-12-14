@@ -528,6 +528,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		if err = mock.InsertChain(c); err != nil {
 			tb.Fatal(err)
 		}
+		fmt.Printf("--inserted gen\n")
 	}
 	return mock
 }
@@ -692,6 +693,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 			return err
 		}
 	}
+	fmt.Printf("b1\n")
 	if err := wr.InsertBlocksAndWait(chain.Blocks); err != nil {
 		return err
 	}
@@ -744,6 +746,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
+		fmt.Printf("a3\n")
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	//if ms.HistoryV3 {

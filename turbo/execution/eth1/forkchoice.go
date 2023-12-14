@@ -138,7 +138,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
+	fmt.Printf("Alex1: %d, %x, %x\n", fcuHeader.Number.Uint64(), canonicalHash, blockHash)
 	if canonicalHash == blockHash {
+		fmt.Printf("Alex: %d\n", fcuHeader.Number.Uint64())
 		// if block hash is part of the canonical chain treat it as no-op.
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
