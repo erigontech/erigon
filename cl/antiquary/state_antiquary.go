@@ -381,6 +381,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 					return err
 				}
+				s.balances32 = s.balances32[:0]
+				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			} else if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
@@ -429,13 +431,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 				return err
 			}
+			// Reset it as we antiquated it.
+			s.balances32 = s.balances32[:0]
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			continue
 		}
 
 		// antiquate diffs
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 		if slot%s.cfg.SlotsPerEpoch == 0 {
-			fmt.Println("out", len(s.balances32))
 			if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 				return err
 			}
