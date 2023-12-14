@@ -119,14 +119,17 @@ func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		return err
 	}
 	defer c.Close()
+	fmt.Printf("[dbg] truncate: %d\n", blockNum)
 	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
-		if err = c.DeleteCurrent(); err != nil {
+		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
-
+		//if err = c.DeleteCurrent(); err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }
