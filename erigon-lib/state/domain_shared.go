@@ -579,7 +579,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		fmt.Printf("--vals end\n")
 	}
 
-	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
+	keysCursor, err := roTx.CursorDupSort(sd.Storage.valsTable)
 	if err != nil {
 		return err
 	}
@@ -588,14 +588,14 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * sd.Storage.aggregationStep
-		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
-			return err
-		}
+		//keySuffix := make([]byte, len(k)+8)
+		//copy(keySuffix, k)
+		//copy(keySuffix[len(k):], v)
+		//step := ^binary.BigEndian.Uint64(v)
+		//txNum := step * sd.Storage.aggregationStep
+		//if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+		//	return err
+		//}
 		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
@@ -669,12 +669,12 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
-					keySuffix := make([]byte, len(k)+8)
-					copy(keySuffix, k)
-					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
-						return err
-					}
+					//keySuffix := make([]byte, len(k)+8)
+					//copy(keySuffix, k)
+					//copy(keySuffix[len(k):], v)
+					//if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+					//	return err
+					//}
 					ci1.val = common.Copy(v)
 					heap.Push(cpPtr, ci1)
 				}
