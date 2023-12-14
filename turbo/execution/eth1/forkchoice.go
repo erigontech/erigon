@@ -238,13 +238,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
-	// Truncate tx nums
-	if e.historyV3 {
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
 		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
