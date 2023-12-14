@@ -552,26 +552,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	var k, v []byte
 	var err error
 
-	{
-		scanCnt := 0
-		sd.storage.Scan(func(key string, value []byte) bool {
-			if bytes.HasPrefix([]byte(key), prefix) {
-				scanCnt++
-			}
-			return true
-		})
-		fmt.Printf("--ram start\n")
-
-		iter := sd.storage.Iter()
-		iterCnt := 0
-		for ok := iter.Seek(string(prefix)); ok; ok = iter.Next() {
-			if bytes.HasPrefix([]byte(iter.Key()), prefix) {
-				iterCnt++
-			}
-		}
-		fmt.Printf("--ram end: scanCnt=%d, iterCnt=%d\n", scanCnt, iterCnt)
-	}
-
 	iter := sd.storage.Iter()
 	if iter.Seek(string(prefix)) {
 		kx := iter.Key()
@@ -584,20 +564,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	{
-		//fmt.Printf("--keys start\n")
-		//roTx.ForPrefix(sd.Storage.keysTable, prefix, func(k, v []byte) error {
-		//	fmt.Printf("%x\n", k)
-		//	return nil
-		//})
-		//fmt.Printf("--keys end\n")
-		//fmt.Printf("--vals start\n")
-		//roTx.ForPrefix(sd.Storage.valsTable, prefix, func(k, v []byte) error {
-		//	fmt.Printf("%x\n", k)
-		//	return nil
-		//})
-		//fmt.Printf("--vals end\n")
-	}
 
 	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
 	if err != nil {
@@ -640,9 +606,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 	for cp.Len() > 0 {
 		if cp[0].t == FILE_CURSOR {
-			fmt.Printf("%d, %s,%d, %x\n", cp[0].t, cp[0].btCursor.getter.FileName(), cp[0].endTxNum, cp[0].key)
+			fmt.Printf("l: %d, %s,%d, %x, %d, %t\n", cp[0].t, cp[0].btCursor.getter.FileName(), cp[0].endTxNum, cp[0].key, len(cp[0].val), cp[0].val == nil)
 		} else {
-			fmt.Printf("%d, %x\n", cp[0].t, cp[0].key)
+			fmt.Printf("l: %d, %x, %d, %t\n", cp[0].t, cp[0].key, len(cp[0].val), cp[0].val == nil)
 		}
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
