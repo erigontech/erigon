@@ -557,7 +557,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 		iter := sd.storage.Iter()
 		jj := 0
-		for ok := iter.Seek(string(prefix)); ok; iter.Next() {
+		for ok := iter.Seek(string(prefix)); ok; ok = iter.Next() {
 			jj++
 		}
 		fmt.Printf("--ram end: %d\n", jj)
@@ -624,8 +624,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
-			val := cursor.Value()
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			//val := cursor.Value()
+			//heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
