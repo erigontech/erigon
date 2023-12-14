@@ -1909,7 +1909,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 	//	}
 	//}
 
-	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+	keysCursor, err := roTx.Cursor(dc.d.valsTable)
 	if err != nil {
 		return err
 	}
@@ -2061,9 +2061,8 @@ func (dc *DomainContext) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit
 
 func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
 	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dc,
-		roTx:         roTx,
-		idxKeysTable: dc.d.keysTable,
-		h:            &CursorHeap{},
+		roTx: roTx,
+		h:    &CursorHeap{},
 	}
 	if err := fit.init(dc); err != nil {
 		return nil, err
@@ -2169,8 +2168,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 type DomainLatestIterFile struct {
 	dc *DomainContext
 
-	roTx         kv.Tx
-	idxKeysTable string
+	roTx kv.Tx
 
 	limit int
 
@@ -2190,7 +2188,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 	var k, v []byte
 	var err error
 
-	keysCursor, err := hi.roTx.CursorDupSort(dc.d.keysTable)
+	keysCursor, err := hi.roTx.Cursor(dc.d.valsTable)
 	if err != nil {
 		return err
 	}
