@@ -86,7 +86,6 @@ func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 }
 
 func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
-	fmt.Printf("[dbg] append: %d, %d\n", blockNum, maxTxNum)
 	lastK, err := LastKey(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
@@ -120,7 +119,6 @@ func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		return err
 	}
 	defer c.Close()
-	fmt.Printf("[dbg] truncate: %d\n", blockNum)
 	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
