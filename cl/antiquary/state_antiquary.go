@@ -190,7 +190,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	// Go back a little bit
 	if progress > s.cfg.SlotsPerEpoch*2 {
-		progress -= s.cfg.SlotsPerEpoch * 2
+		//progress -= s.cfg.SlotsPerEpoch * 2
+		progress = 0
 	} else {
 		progress = 0
 	}
@@ -217,8 +218,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, checkpoints, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
-			s.balances32 = s.balances32[:0]
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
@@ -233,9 +232,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
-			s.balances32 = s.balances32[:0]
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+
 		}
+		s.balances32 = s.balances32[:0]
+		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 	}
 
 	logLvl := log.LvlInfo
@@ -407,7 +407,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		first = false
 
-		// dump the whole sla
+		// dump the whole slashings vector.
 		if slashingOccured {
 			if err := s.antiquateFullUint64List(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
 				return err
@@ -435,6 +435,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// antiquate diffs
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 		if slot%s.cfg.SlotsPerEpoch == 0 {
+			fmt.Println("out", len(s.balances32))
 			if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 				return err
 			}
@@ -631,6 +632,7 @@ func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old,
 	diffBuffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(diffBuffer)
 	diffBuffer.Reset()
+	fmt.Println("in", len(s.balances32))
 
 	if err := diffFn(diffBuffer, old, new); err != nil {
 		return err
