@@ -903,6 +903,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	//assert
 	cnt := 0
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+		fmt.Printf("see: %x, %d, %t\n", k, len(v), v == nil)
 		cnt++
 		return nil
 	}); err != nil {
