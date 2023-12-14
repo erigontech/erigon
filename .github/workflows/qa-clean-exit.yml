@@ -1,4 +1,4 @@
-name: Erigon clean exit on Ctrl-C
+name: QA - Erigon clean exit on Ctrl-C
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
     #if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     #strategy:
     #  matrix:
-    #    os: [ ubuntu-22.04, macos-13-xlarge ] 
+    #    os: [ ubuntu-22.04, macos-13-xlarge ]
     #runs-on: ${{ matrix.os }}
     runs-on: ubuntu-latest
 
@@ -34,7 +34,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.20' 
+        go-version: '1.20'
 
     - name: Set up Python
       uses: actions/setup-python@v4

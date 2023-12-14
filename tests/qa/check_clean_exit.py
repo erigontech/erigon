@@ -1,8 +1,31 @@
+import enum
 import os
 import signal
 import time
 import sys
-from datetime import datetime
+import datetime
+
+
+class Result(enum.Enum):
+    SUCCESS = 1
+    FAILURE = 2
+    ERROR = 3
+
+
+def hr_utc_time():
+    #return datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def report_result(result: Result, reason):
+    if result == Result.SUCCESS:
+        print(f"Check passed: {reason} - {hr_utc_time()}")
+    elif result == Result.FAILURE:
+        print(f"Check failed: {reason} - {hr_utc_time()}")
+    elif result == Result.ERROR:
+        print(f"Check error: {reason} - {hr_utc_time()}")
+    else:
+        print(f"Check unknown: {reason} - {hr_utc_time()}")
 
 
 def check_if_process_exists(pid):
@@ -56,6 +79,7 @@ def check_log_for_exit_status(log_file):
     print("e")
     return True, "clean exit"  # Default to False if neither condition is found
 
+
 def send_ctrl_c_and_check_log(pid, log_file):
     try:
         time.sleep(120)  # Wait before sending SIGINT, please increment this delay as necessary
@@ -66,20 +90,20 @@ def send_ctrl_c_and_check_log(pid, log_file):
         # Wait for process to exit in a reasonable amount of time
         exited = wait_for_process_to_exit(pid, timeout=600)
         if not exited:
-            print("Check failed: process did not exit within timeout period")
+            report_result(Result.FAILURE, "process did not exit within timeout period")
             sys.exit(1)
 
         # Check the log file for exit status
         clean_exit, reason = check_log_for_exit_status(log_file)
 
         if clean_exit:
-            print("Check passed: {}".format(reason))
+            report_result(Result.SUCCESS, reason)
             sys.exit(0)  # Clean exit
         else:
-            print("Check completed with error: {}".format(reason))
+            report_result(Result.FAILURE, reason)
             sys.exit(1)  # Segmentation fault or error
     except Exception as e:
-        print("Check error: {}".format(e))
+        report_result(Result.ERROR, e)
         sys.exit(0)  # Assume clean exit, script failed unexpectedly
 
 
@@ -90,8 +114,7 @@ if __name__ == "__main__":
 
     pid = int(sys.argv[1])
     log_file = sys.argv[2]
-    current_utc_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-    print(f"Checking pid={pid} log={log_file} start-time={current_utc_time}")
+    print(f"Checking pid={pid} log={log_file} start-time={hr_utc_time()}")
 
     send_ctrl_c_and_check_log(pid, log_file)
