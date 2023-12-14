@@ -28,6 +28,7 @@ import (
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -927,6 +928,12 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
+
+				diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+					Segments:    ps.DiagnossticsData(),
+					TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+				})
+
 				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			case <-finish:
 				return
@@ -1015,6 +1022,11 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
+			dd := ps.DiagnossticsData()
+			diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+				Segments:    dd,
+				TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+			})
 			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
