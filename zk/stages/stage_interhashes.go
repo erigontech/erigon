@@ -22,18 +22,19 @@ import (
 
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
-	"io"
-	"net/http"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 type ZkInterHashesCfg struct {
@@ -244,7 +245,7 @@ func regenerateIntermediateHashes(logPrefix string, db kv.RwTx, eridb *db2.EriDb
 		return trie.EmptyRoot, err
 	}
 
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(logPrefix, total)
+	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutValues(fmt.Sprintf("[%s] SMT regenerate progress", logPrefix), total*2)
 
 	progCt := uint64(0)
 	err := psr.ForEach(kv.PlainState, nil, func(k, acc []byte) error {
@@ -339,7 +340,7 @@ func zkIncrementIntermediateHashes(logPrefix string, s *sync_stages.StageState, 
 	// progress printer
 	total := to - s.BlockNumber + 1
 
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(logPrefix, total)
+	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress inserting values", logPrefix), total)
 	defer stopProgressPrinter()
 
 	accChanges := make(map[libcommon.Address]*accounts.Account)
@@ -482,7 +483,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashe
 	currentPsr := state2.NewPlainStateReader(db)
 
 	total := from - to + 1
-	progressChan, stopPrinter := zk.ProgressPrinter(logPrefix, total)
+	progressChan, stopPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress unwinding", logPrefix), total)
 	defer stopPrinter()
 
 	// walk backwards through the blocks, applying state changes, and deletes

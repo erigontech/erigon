@@ -118,7 +118,7 @@ func SpawnStageBatches(
 	}
 
 	// start a routine to print blocks written progress
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(logPrefix, 0)
+	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutTotal(fmt.Sprintf("[%s] Downloaded blocks from datastream progress", logPrefix))
 	defer stopProgressPrinter()
 
 	lastBlockHeight := batchesProgress

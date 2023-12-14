@@ -63,7 +63,7 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 	}
 
 	//start a progress checker
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(logPrefix, uint64(totalKeysCount))
+	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutValues(fmt.Sprintf("[%s] SMT regenerate progress", logPrefix), uint64(totalKeysCount)*2)
 	defer stopProgressPrinter()
 
 	insertedKeysCount := uint64(0)

@@ -9,7 +9,7 @@ import (
 
 // prints progress every 10 seconds
 // returns a channel to send progress to, and a function to stop the printer routine
-func ProgressPrinter(logPrefix string, total uint64) (chan uint64, func()) {
+func ProgressPrinter(message string, total uint64) (chan uint64, func()) {
 	progress := make(chan uint64)
 	ctDone := make(chan bool)
 
@@ -32,11 +32,75 @@ func ProgressPrinter(logPrefix string, total uint64) (chan uint64, func()) {
 				}
 			case <-ticker.C:
 				if pc > 0 {
-					if total > 0 {
-						log.Info(fmt.Sprintf("[%s] Progress: %d/%d (%d%%)", logPrefix, pc, total, pct))
-					} else {
-						log.Info(fmt.Sprintf("[%s] Progress: %d / unknown", logPrefix, pc))
-					}
+					log.Info(fmt.Sprintf("%s: %d/%d (%d%%)", message, pc, total, pct))
+				}
+			case <-ctDone:
+				return
+			}
+		}
+	}()
+
+	return progress, func() { ctDone <- true }
+}
+
+// prints progress every 10 seconds
+// returns a channel to send progress to, and a function to stop the printer routine
+func ProgressPrinterWithoutTotal(message string) (chan uint64, func()) {
+	progress := make(chan uint64)
+	ctDone := make(chan bool)
+
+	go func() {
+		defer close(progress)
+		defer close(ctDone)
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		var pc uint64
+
+		for {
+			select {
+			case newPc := <-progress:
+				pc = newPc
+			case <-ticker.C:
+				if pc > 0 {
+					log.Info(fmt.Sprintf("%s: %d", message, pc))
+				}
+			case <-ctDone:
+				return
+			}
+		}
+	}()
+
+	return progress, func() { ctDone <- true }
+}
+
+// prints progress every 10 seconds
+// returns a channel to send progress to, and a function to stop the printer routine
+func ProgressPrinterWithoutValues(message string, total uint64) (chan uint64, func()) {
+	progress := make(chan uint64)
+	ctDone := make(chan bool)
+
+	go func() {
+		defer close(progress)
+		defer close(ctDone)
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		var pc uint64
+		var pct uint64
+
+		for {
+			select {
+			case newPc := <-progress:
+				pc = newPc
+				if total > 0 {
+					pct = (pc * 100) / total
+				}
+			case <-ticker.C:
+				if pc > 0 {
+					log.Info(fmt.Sprintf("%s: (%d%%)", message, pc, total, pct))
 				}
 			case <-ctDone:
 				return
