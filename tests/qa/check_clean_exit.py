@@ -58,7 +58,7 @@ def check_log_for_exit_status(log_file):
 
 def send_ctrl_c_and_check_log(pid, log_file):
     try:
-        time.sleep(1)  # Wait 60 seconds before sending SIGINT, please increment this delay as necessary
+        time.sleep(120)  # Wait before sending SIGINT, please increment this delay as necessary
 
         # Send SIGINT (equivalent to Ctrl-C) to the process
         os.kill(pid, signal.SIGINT)
