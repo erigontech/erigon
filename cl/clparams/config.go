@@ -55,7 +55,7 @@ const (
 
 const (
 	SubDivisionFolderSize = 10_000
-	SlotsPerDump          = 2048
+	SlotsPerDump          = 1024
 )
 
 var (

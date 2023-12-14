@@ -365,7 +365,7 @@ func processSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) (
 			vIdx, exists := s.ValidatorIndexByPubkey(committeeKeys[currPubKeyIndex])
 			// Impossible scenario.
 			if !exists {
-				return nil, errors.New("validator public key does not exist in state")
+				return nil, fmt.Errorf("validator public key does not exist in state: %x", committeeKeys[currPubKeyIndex])
 			}
 			if syncAggregateBits[i]&byte(bit) > 0 {
 				votedKeys = append(votedKeys, committeeKeys[currPubKeyIndex][:])
@@ -514,7 +514,7 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
 
 	c := h.Tag("step", "get_participation_flag")
-	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(data, stateSlot-data.Slot())
+	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(data, stateSlot-data.Slot(), false)
 	if err != nil {
 		return nil, err
 	}

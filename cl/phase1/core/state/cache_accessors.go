@@ -135,7 +135,7 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 	return committeCount
 }
 
-func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error) {
+func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
 
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
@@ -145,8 +145,17 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 		justifiedCheckpoint = b.PreviousJustifiedCheckpoint()
 	}
 	// Matching roots
-	if !data.Source().Equal(justifiedCheckpoint) {
-		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
+	if !data.Source().Equal(justifiedCheckpoint) && !skipAssert {
+		// jsonify the data.Source and justifiedCheckpoint
+		jsonSource, err := data.Source().MarshalJSON()
+		if err != nil {
+			return nil, err
+		}
+		jsonJustifiedCheckpoint, err := justifiedCheckpoint.MarshalJSON()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match. source: %s, justifiedCheckpoint: %s", jsonSource, jsonJustifiedCheckpoint)
 	}
 	targetRoot, err := GetBlockRoot(b, data.Target().Epoch())
 	if err != nil {

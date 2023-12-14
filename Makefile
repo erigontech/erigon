@@ -37,7 +37,7 @@ endif
 BUILD_TAGS = nosqlite,noboltdb
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
-	BUILD_TAGS := "$(BUILD_TAGS),nosilkworm"
+	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
 PACKAGE = github.com/ledgerwatch/erigon
@@ -233,6 +233,16 @@ git-submodules:
 	@# these lines will also fail if ran as root in a non-root user's checked out repository
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
+
+## install:                            copies binaries and libraries to DIST
+DIST ?= $(CURDIR)/build/dist
+.PHONY: install
+install:
+	mkdir -p "$(DIST)"
+	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
+	cp -f "$(GOBIN)/"* "$(DIST)"
+	@echo "Copied files to $(DIST):"
+	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
 GOLANG_CROSS_VERSION  ?= v1.20.7

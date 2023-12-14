@@ -11,6 +11,17 @@ function glibc_version {
     $cmd | head -1 | awk '{ print $NF }'
 }
 
+function glibcpp_version {
+    link_path=$(/sbin/ldconfig -p | grep libstdc++ | awk '{ print $NF }' | head -1)
+    if [[ ! -L "$link_path" ]]
+    then
+        echo "0"
+    else
+        file_name=$(readlink "$link_path")
+        echo "${file_name##*.}"
+    fi
+}
+
 function version_major {
     IFS='.' read -a components <<< "$1"
     echo "${components[0]}"
@@ -57,6 +68,13 @@ case $(uname -s) in
         then
             echo "not supported glibc version: $version"
             exit 4
+        fi
+
+        version=$(glibcpp_version)
+        if (( version < 30 ))
+        then
+            echo "not supported glibcpp version: $version"
+            exit 5
         fi
 
 		;;

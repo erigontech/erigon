@@ -16,7 +16,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	b.stateRoots.CopyTo(dst.stateRoots)
 	b.historicalRoots.CopyTo(dst.historicalRoots)
 	dst.eth1Data = b.eth1Data.Copy()
-	dst.eth1DataVotes = solid.NewDynamicListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()))
+	dst.eth1DataVotes = solid.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
 	b.eth1DataVotes.Range(func(index int, value *cltypes.Eth1Data, length int) bool {
 		dst.eth1DataVotes.Append(value.Copy())
 		return true

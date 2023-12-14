@@ -1207,13 +1207,13 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if s.downloaderClient != nil {
-			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
+			req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				req.Items = append(req.Items, &proto_downloader.AddItem{
 					Path: filepath.Join("history", fName),
 				})
 			}
-			if _, err := s.downloaderClient.Download(ctx, req); err != nil {
+			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
 				s.logger.Warn("[snapshots] notify downloader", "err", err)
 			}
 		}
