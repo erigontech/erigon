@@ -2252,7 +2252,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					return err
 				}
 				if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
-					ci1.key = common.Copy(k[:len(ci1.key)-8])
+					ci1.key = common.Copy(k[:len(k)-8])
 					//keySuffix := make([]byte, len(k)+8)
 					//copy(keySuffix, k)
 					//copy(keySuffix[len(k):], v)
