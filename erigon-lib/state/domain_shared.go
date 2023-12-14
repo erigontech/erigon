@@ -564,22 +564,22 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	{
-		fmt.Printf("--keys start\n")
-		roTx.ForPrefix(sd.Storage.keysTable, prefix, func(k, v []byte) error {
-			fmt.Printf("%x\n", k)
-			return nil
-		})
-		fmt.Printf("--keys end\n")
-		fmt.Printf("--vals start\n")
-		roTx.ForPrefix(sd.Storage.valsTable, prefix, func(k, v []byte) error {
-			fmt.Printf("%x\n", k)
-			return nil
-		})
-		fmt.Printf("--vals end\n")
-	}
+	//{
+	//	fmt.Printf("--keys start\n")
+	//	roTx.ForPrefix(sd.Storage.keysTable, prefix, func(k, v []byte) error {
+	//		fmt.Printf("%x, %x\n", k, v)
+	//		return nil
+	//	})
+	//	fmt.Printf("--keys end\n")
+	//	fmt.Printf("--vals start\n")
+	//	roTx.ForPrefix(sd.Storage.valsTable, prefix, func(k, v []byte) error {
+	//		fmt.Printf("%x, %x\n", k, v)
+	//		return nil
+	//	})
+	//	fmt.Printf("--vals end\n")
+	//}
 
-	keysCursor, err := roTx.CursorDupSort(sd.Storage.valsTable)
+	keysCursor, err := roTx.Cursor(sd.Storage.valsTable)
 	if err != nil {
 		return err
 	}
@@ -596,7 +596,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		//if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 		//	return err
 		//}
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k[:len(k)-8]), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
@@ -662,13 +662,17 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case DB_CURSOR:
-				k, v, err = ci1.c.NextNoDup()
+				seek, ok := kv.NextSubtree(ci1.key)
+				if !ok {
+					break
+				}
+				k, v, err = ci1.c.Seek(seek)
 				if err != nil {
 					return err
 				}
 
 				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
+					ci1.key = common.Copy(k[:len(k)-8])
 					//keySuffix := make([]byte, len(k)+8)
 					//copy(keySuffix, k)
 					//copy(keySuffix[len(k):], v)

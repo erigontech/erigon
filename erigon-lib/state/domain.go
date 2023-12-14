@@ -903,7 +903,7 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
-	c            kv.CursorDupSort
+	c            kv.Cursor
 	iter         btree2.MapIter[string, []byte]
 	dg           ArchiveGetter
 	dg2          ArchiveGetter
@@ -1918,15 +1918,15 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
+		//keySuffix := make([]byte, len(k)+8)
+		//copy(keySuffix, k)
+		//copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
 		txNum := step * dc.d.aggregationStep
-		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
-			return err
-		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum + dc.d.aggregationStep, reverse: true})
+		//if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+		//	return err
+		//}
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k[:len(k)-8], val: v, c: keysCursor, endTxNum: txNum + dc.d.aggregationStep, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -2002,18 +2002,22 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 					}
 				}
 			case DB_CURSOR:
-				k, v, err = ci1.c.NextNoDup()
+				seek, ok := kv.NextSubtree(ci1.key)
+				if !ok {
+					break
+				}
+				k, v, err = ci1.c.Seek(seek)
 				if err != nil {
 					return err
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = k
-					keySuffix := make([]byte, len(k)+8)
-					copy(keySuffix, k)
-					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
-						return err
-					}
+					ci1.key = k[:len(ci1.key)-8]
+					//keySuffix := make([]byte, len(k)+8)
+					//copy(keySuffix, k)
+					//copy(keySuffix[len(k):], v)
+					//if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+					//	return err
+					//}
 					ci1.val = v
 					heap.Push(&cp, ci1)
 				}
@@ -2194,15 +2198,15 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		return err
 	}
 	if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
+		//keySuffix := make([]byte, len(k)+8)
+		//copy(keySuffix, k)
+		//copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
 		txNum := step * dc.d.aggregationStep
-		if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
-			return err
-		}
-		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		//if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+		//	return err
+		//}
+		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k[:len(k)-8]), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -2241,18 +2245,22 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					}
 				}
 			case DB_CURSOR:
-				k, v, err := ci1.c.NextNoDup()
+				seek, ok := kv.NextSubtree(ci1.key)
+				if !ok {
+					break
+				}
+				k, v, err := ci1.c.Seek(seek)
 				if err != nil {
 					return err
 				}
 				if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
-					ci1.key = common.Copy(k)
-					keySuffix := make([]byte, len(k)+8)
-					copy(keySuffix, k)
-					copy(keySuffix[len(k):], v)
-					if v, err = hi.roTx.GetOne(hi.dc.d.valsTable, keySuffix); err != nil {
-						return err
-					}
+					ci1.key = common.Copy(k[:len(ci1.key)-8])
+					//keySuffix := make([]byte, len(k)+8)
+					//copy(keySuffix, k)
+					//copy(keySuffix[len(k):], v)
+					//if v, err = hi.roTx.GetOne(hi.dc.d.valsTable, keySuffix); err != nil {
+					//	return err
+					//}
 					ci1.val = common.Copy(v)
 					heap.Push(hi.h, ci1)
 				}
