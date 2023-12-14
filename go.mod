@@ -154,7 +154,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
-	github.com/gateway-fm/vectorized-poseidon-gold v0.1.0 // indirect
+	github.com/gateway-fm/vectorized-poseidon-gold v0.1.2 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff // indirect
 	github.com/getsentry/sentry-go v0.13.0 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect

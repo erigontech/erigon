@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-
-	poseidon "github.com/iden3/go-iden3-crypto/goldenposeidon"
+	
 	"github.com/ledgerwatch/erigon/zkevm/hex"
+	poseidon "github.com/iden3/go-iden3-crypto/goldenposeidon"
 )
 
 // maxBigIntLen is 256 bits (32 bytes)

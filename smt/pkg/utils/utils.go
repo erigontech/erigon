@@ -10,7 +10,7 @@ import (
 
 	"sort"
 
-	poseidon "github.com/iden3/go-iden3-crypto/goldenposeidon"
+	poseidon "github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
 )
 
 const (

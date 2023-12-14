@@ -373,6 +373,8 @@ github.com/gateway-fm/vectorized-poseidon-gold v0.0.0-20230919111511-f0bfea1fd06
 github.com/gateway-fm/vectorized-poseidon-gold v0.0.0-20230919111511-f0bfea1fd067/go.mod h1:VLGQpyjrOg8+FugH/+d8tfYd/c3z4Xqa+zbUBITygaw=
 github.com/gateway-fm/vectorized-poseidon-gold v0.1.0 h1:c6Mt1UiHut+XD06Vot5Ut2lh/EDfLRB/9jxCe8GagVo=
 github.com/gateway-fm/vectorized-poseidon-gold v0.1.0/go.mod h1:VLGQpyjrOg8+FugH/+d8tfYd/c3z4Xqa+zbUBITygaw=
+github.com/gateway-fm/vectorized-poseidon-gold v0.1.2 h1:bxZg4UFRdW/qnVGKYvEP6nKsc7vqANNr0kX1JTFNzrE=
+github.com/gateway-fm/vectorized-poseidon-gold v0.1.2/go.mod h1:VLGQpyjrOg8+FugH/+d8tfYd/c3z4Xqa+zbUBITygaw=
 github.com/gavv/httpexpect v2.0.0+incompatible/go.mod h1:x+9tiU1YnrOvnB725RkpoLv1M62hOWzwo5OXotisrKc=
 github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff h1:tY80oXqGNY4FhTFhk+o9oFHGINQ/+vhlm8HFzi6znCI=
 github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff/go.mod h1:x7DCsMOv1taUwEWCzT4cmDeAkigA5/QCwUodaVOe8Ww=
