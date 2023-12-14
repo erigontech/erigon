@@ -138,188 +138,162 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		return
 	}
 
-	fmt.Printf("Alex1: %d, %x, %x\n", fcuHeader.Number.Uint64(), canonicalHash, blockHash)
-	if canonicalHash == blockHash {
-		fmt.Printf("Alex: %d\n", fcuHeader.Number.Uint64())
-		// if block hash is part of the canonical chain treat it as no-op.
-		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
-		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if !valid {
+	var finishProgressBefore, headersProgressBefore uint64
+	if fcuHeader.Number.Uint64() > 0 {
+		if canonicalHash == blockHash {
+			// if block hash is part of the canonical chain treat it as no-op.
+			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+			if err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+			if !valid {
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+					LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+					Status:          execution.ExecutionStatus_InvalidForkchoice,
+				})
+				return
+			}
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-				Status:          execution.ExecutionStatus_InvalidForkchoice,
+				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+				Status:          execution.ExecutionStatus_Success,
 			})
 			return
 		}
-		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-			Status:          execution.ExecutionStatus_Success,
-		})
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			if err := rawdb.AppendCanonicalTxNums(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-		}
-		return
-	}
+		fmt.Printf("Alex2: %d\n", fcuHeader.Number.Uint64())
 
-	// If we don't have it, too bad
-	if fcuHeader == nil {
-		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			Status:          execution.ExecutionStatus_MissingSegment,
-		})
-		return
-	}
-	currentParentHash := fcuHeader.ParentHash
-	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
-	if err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-	// Find such point, and collect all hashes
-	newCanonicals := make([]*canonicalEntry, 0, 64)
-	newCanonicals = append(newCanonicals, &canonicalEntry{
-		hash:   fcuHeader.Hash(),
-		number: fcuHeader.Number.Uint64(),
-	})
-	for !isCanonicalHash {
-		newCanonicals = append(newCanonicals, &canonicalEntry{
-			hash:   currentParentHash,
-			number: currentParentNumber,
-		})
-		currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if currentHeader == nil {
+		// If we don't have it, too bad
+		if fcuHeader == nil {
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 				Status:          execution.ExecutionStatus_MissingSegment,
 			})
 			return
 		}
-		currentParentHash = currentHeader.ParentHash
-		if currentHeader.Number.Uint64() == 0 {
-			panic("assert:uint64 underflow") //uint-underflow
-		}
-		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
+		currentParentHash := fcuHeader.ParentHash
+		currentParentNumber := fcuHeader.Number.Uint64() - 1
+		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-	}
-
-	if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-
-	var finishProgressBefore, headersProgressBefore uint64
-	if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-	if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if e.hook != nil {
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-	}
-
-	// Run the unwind
-	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
-		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		return
-	}
-	if e.historyV3 {
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-			//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-	}
-	// Mark all new canonicals as canonicals
-	for _, canonicalSegment := range newCanonicals {
-		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
-
-		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
-		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
-
-		if b == nil || h == nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number))
-			return
-		}
-
-		if err := e.engine.VerifyHeader(chainReader, h, true); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-
-		if err := e.engine.VerifyUncles(chainReader, h, b.Uncles); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-
-		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		//if e.historyV3 {
-		//	if len(newCanonicals) > 0 {
-		//		if err := rawdbv3.TxNums.Truncate(tx, canonicalSegment.number); err != nil {
-		//			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		//			return
-		//		}
-		//		if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
-		//			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		//			return
-		//		}
-		//	}
-		//	//} else {
-		//	//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-		//	//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		//	//	return
-		//	//}
-		//	//}
-		//}
-	}
-	if e.historyV3 {
-		if len(newCanonicals) > 0 {
-			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+		// Find such point, and collect all hashes
+		newCanonicals := make([]*canonicalEntry, 0, 64)
+		newCanonicals = append(newCanonicals, &canonicalEntry{
+			hash:   fcuHeader.Hash(),
+			number: fcuHeader.Number.Uint64(),
+		})
+		for !isCanonicalHash {
+			newCanonicals = append(newCanonicals, &canonicalEntry{
+				hash:   currentParentHash,
+				number: currentParentNumber,
+			})
+			currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
+			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+			if currentHeader == nil {
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+					LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+					Status:          execution.ExecutionStatus_MissingSegment,
+				})
+				return
+			}
+			currentParentHash = currentHeader.ParentHash
+			if currentHeader.Number.Uint64() == 0 {
+				panic("assert:uint64 underflow") //uint-underflow
+			}
+			currentParentNumber = currentHeader.Number.Uint64() - 1
+			isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
+			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
 		}
-		//} else {
-		//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-		//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		//	return
-		//}
-		//}
+
+		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+
+		if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+
+		isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+		if e.hook != nil {
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
+
+		// Run the unwind
+		if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if e.historyV3 {
+			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
+		// Mark all new canonicals as canonicals
+		for _, canonicalSegment := range newCanonicals {
+			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
+
+			b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
+			h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
+
+			if b == nil || h == nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number))
+				return
+			}
+
+			if err := e.engine.VerifyHeader(chainReader, h, true); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+
+			if err := e.engine.VerifyUncles(chainReader, h, b.Uncles); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+
+			if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
+		if e.historyV3 {
+			if len(newCanonicals) > 0 {
+				if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
+				if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
+			}
+			//} else {
+			//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			//	return
+			//}
+			//}
+		}
 	}
+
 	// Set Progress for headers and bodies accordingly.
 	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
