@@ -553,14 +553,23 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	var err error
 
 	{
+		scanCnt := 0
+		sd.storage.Scan(func(key string, value []byte) bool {
+			if bytes.HasPrefix([]byte(key), prefix) {
+				scanCnt++
+			}
+			return true
+		})
 		fmt.Printf("--ram start\n")
 
 		iter := sd.storage.Iter()
-		jj := 0
+		iterCnt := 0
 		for ok := iter.Seek(string(prefix)); ok; ok = iter.Next() {
-			jj++
+			if bytes.HasPrefix([]byte(iter.Key()), prefix) {
+				iterCnt++
+			}
 		}
-		fmt.Printf("--ram end: %d\n", jj)
+		fmt.Printf("--ram end: scanCnt=%d, iterCnt=%d\n", scanCnt, iterCnt)
 	}
 
 	iter := sd.storage.Iter()
