@@ -94,13 +94,12 @@ var (
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
-	decompressor *compress.Decompressor
-	index        *recsplit.Index
-	bindex       *BtIndex
-	bm           *bitmapdb.FixedSizeBitmaps
-	existence    *ExistenceFilter
-	startTxNum   uint64
-	endTxNum     uint64
+	decompressor         *compress.Decompressor
+	index                *recsplit.Index
+	bindex               *BtIndex
+	bm                   *bitmapdb.FixedSizeBitmaps
+	existence            *ExistenceFilter
+	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInColdFile. Completely immutable.
 	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -562,7 +561,14 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 			continue
 		}
 
+		// Semantic: [startTxNum, endTxNum)
+		// Example:
+		//   stepSize = 4
+		//   0-1.kv: [0, 8)
+		//   0-2.kv: [0, 16)
+		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
+
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
