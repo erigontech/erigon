@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -14,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -550,7 +551,18 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
 	sd.Storage.stats.FilesQueries.Add(1)
+
+	haveRamUpdates := sd.storage.Len() > 0
 
 	var cp CursorHeap
 	cpPtr := &cp
@@ -579,15 +591,19 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v)
+		endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		if haveRamUpdates && endTxNum >= sd.txNum {
+			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+		}
+
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * sd.Storage.aggregationStep
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
@@ -605,7 +621,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 		}
 	}
 
@@ -654,6 +671,13 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
+					step := ^binary.BigEndian.Uint64(v)
+					endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					if haveRamUpdates && endTxNum >= sd.txNum {
+						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+					}
+					ci1.endTxNum = endTxNum
+
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
