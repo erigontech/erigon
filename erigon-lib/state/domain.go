@@ -883,10 +883,6 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	//	fmt.Printf("addValue @%d %x->%x buffered %t largeVals %t file %s\n", d.dc.hc.ic.txNum, fullkey, value, d.buffered, d.largeValues, d.dc.d.filenameBase)
 	//}()
 
-	if len(value) == 0 {
-		fmt.Printf("wal.del: %x, %x\n", fullkey[:kl], fullkey[kl:])
-		fmt.Printf("wal.del2: %x, %x\n", fullkey, value)
-	}
 	if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
