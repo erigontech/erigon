@@ -372,6 +372,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
+			fmt.Printf("alex: %s\n", d.verbosity)
 			if d.verbosity <= log.LvlInfo || isDiagEnabled {
 				webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile)
 				rates, peersRates := getPeersRatesForlogs(peersOfThisFile)
