@@ -912,6 +912,9 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.tracesTo.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
+	if min > 0 {
+		min-- //[startTxNum, endTxNum)
+	}
 	a.minimaxTxNumInFiles.Store(min)
 }
 
