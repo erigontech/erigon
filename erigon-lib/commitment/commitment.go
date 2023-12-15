@@ -9,9 +9,10 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -165,19 +166,10 @@ func (be *BranchEncoder) initCollector() {
 
 // reads previous comitted value and merges current with it if needed.
 func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
-	merger := NewHexBranchMerger(4096)
 	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, err := pc.GetBranch(prefix)
 		if err != nil {
 			return err
-		}
-		if len(stateValue) > 0 {
-			stated := BranchData(stateValue)
-			merged, err := merger.Merge(stated, update)
-			if err != nil {
-				return err
-			}
-			update = merged
 		}
 		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
@@ -186,7 +178,6 @@ func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 		if err = pc.PutBranch(cp, cu, stateValue); err != nil {
 			return err
 		}
-		mxCommitmentBranchUpdates.Inc()
 		return nil
 	}
 }
