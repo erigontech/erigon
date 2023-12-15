@@ -372,26 +372,24 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
-			if d.verbosity <= log.LvlInfo || isDiagEnabled {
-				webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile)
-				rates, peersRates := getPeersRatesForlogs(peersOfThisFile)
-				// more detailed statistic: download rate of each peer (for each file)
-				if !t.Complete.Bool() && progress != 0 {
-					d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
-					d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
-				}
+			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile)
+			rates, peersRates := getPeersRatesForlogs(peersOfThisFile)
+			// more detailed statistic: download rate of each peer (for each file)
+			if !t.Complete.Bool() && progress != 0 && d.verbosity >= log.LvlInfo {
+				d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
+				d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
+			}
 
-				if isDiagEnabled {
-					diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-						Name:            t.Name(),
-						TotalBytes:      uint64(t.Length()),
-						DownloadedBytes: uint64(t.BytesCompleted()),
-						WebseedsCount:   len(weebseedPeersOfThisFile),
-						PeersCount:      len(peersOfThisFile),
-						WebseedsRate:    websRates,
-						PeersRate:       peersRates,
-					})
-				}
+			if isDiagEnabled {
+				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+					Name:            t.Name(),
+					TotalBytes:      uint64(t.Length()),
+					DownloadedBytes: uint64(t.BytesCompleted()),
+					WebseedsCount:   len(weebseedPeersOfThisFile),
+					PeersCount:      len(peersOfThisFile),
+					WebseedsRate:    websRates,
+					PeersRate:       peersRates,
+				})
 			}
 
 		default:
