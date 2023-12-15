@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -26,10 +27,11 @@ type ApiHandler struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
 	syncedData      *synced_data.SyncedDataManager
+	stateReader     *historical_states_reader.HistoricalStatesReader
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData}
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader}
 }
 
 func (a *ApiHandler) init() {
@@ -46,10 +48,11 @@ func (a *ApiHandler) init() {
 				r.Get("/fork_schedule", beaconhttp.HandleEndpointFunc(a.getForkSchedule))
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Route("/headers", func(r chi.Router) {
-					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
-					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
-				})
+				// r.Route("/headers", func(r chi.Router) {
+				// 	r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
+				// 	r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
+				// })
+				r.Get("/headers", beaconhttp.HandleEndpointFunc(a.getHeaders))
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", http.NotFound)
 					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
@@ -72,6 +75,7 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", http.NotFound) // otterscan
 					r.Get("/head/committees", http.NotFound)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))

@@ -10,7 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -179,4 +181,67 @@ func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
 	}
 
 	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version()), nil
+}
+
+type finalityCheckpointsResponse struct {
+	FinalizedCheckpoint         solid.Checkpoint `json:"finalized_checkpoint"`
+	CurrentJustifiedCheckpoint  solid.Checkpoint `json:"current_justified_checkpoint"`
+	PreviousJustifiedCheckpoint solid.Checkpoint `json:"previous_justified_checkpoint"`
+}
+
+func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, error) {
+	ctx := r.Context()
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blockId, err := stateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+
+	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+	}
+
+	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
+	if err != nil {
+		return nil, err
+	}
+
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if slot == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block slot: %x", blockRoot))
+	}
+
+	ok, finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+	if !ok {
+		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		}
+		if currentJustifiedCheckpoint == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
+		}
+	}
+	version := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
+
+	return newBeaconResponse(finalityCheckpointsResponse{
+		FinalizedCheckpoint:         finalizedCheckpoint,
+		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
+		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
+	}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
 }
