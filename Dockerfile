@@ -61,7 +61,7 @@ COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
 ## then give each binary its own layer
 COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
 COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
-COPY --from=builder /app/build/bin/zkevm-erigon /usr/local/bin/zkevm-erigon
+COPY --from=builder /app/build/bin/cdk-erigon /usr/local/bin/cdk-erigon
 COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
@@ -100,8 +100,8 @@ LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.schema-version="1.0" \
       org.label-schema.url="https://torquem.ch" \
       org.label-schema.vcs-ref=$VCS_REF \
-      org.label-schema.vcs-url="https://github.com/gateway-fm/zkevm-erigon.git" \
+      org.label-schema.vcs-url="https://github.com/0xPolygonHermez/cdk-erigon.git" \
       org.label-schema.vendor="Torquem" \
       org.label-schema.version=$VERSION
 
-ENTRYPOINT ["zkevm-erigon"]
+ENTRYPOINT ["cdk-erigon"]

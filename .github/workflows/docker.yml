@@ -9,7 +9,7 @@ on:
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  IMAGE_NAME: gatewayfm/zkevm-erigon
+  IMAGE_NAME: gatewayfm/cdk-erigon
 jobs:
   build-and-push:
     runs-on: ubuntu-latest

@@ -99,7 +99,7 @@ dbg:
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## erigon:                            build erigon
-zkevm-erigon: go-version zkevm-erigon.cmd
+cdk-erigon: go-version cdk-erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
@@ -125,7 +125,7 @@ COMMANDS += erigon-el
 $(COMMANDS): %: %.cmd
 
 ## all:                               run erigon with all commands
-all: zkevm-erigon $(COMMANDS)
+all: cdk-erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
 db-tools:
@@ -211,7 +211,7 @@ git-submodules:
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
-PACKAGE_NAME          := github.com/gateway-fm/zkevm-erigon
+PACKAGE_NAME          := github.com/0xPolygonHermez/cdk-erigon
 GOLANG_CROSS_VERSION  ?= v1.20.2
 
 .PHONY: release-dry-run

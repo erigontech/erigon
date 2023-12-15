@@ -5,4 +5,4 @@ RUN apk add --no-cache ca-certificates && \
 COPY erigon /usr/local/bin/
 
 EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
-ENTRYPOINT ["zkevm-erigon"]
+ENTRYPOINT ["cdk-erigon"]
