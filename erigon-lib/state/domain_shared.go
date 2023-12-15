@@ -549,6 +549,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
 	sd.Storage.stats.FilesQueries.Add(1)
 
+	haveRamUpdates := sd.storage.Len() > 0
+
 	var cp CursorHeap
 	cpPtr := &cp
 	heap.Init(cpPtr)
@@ -580,11 +582,14 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * sd.Storage.aggregationStep
+		endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		if haveRamUpdates && endTxNum >= sd.txNum {
+			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+		}
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
@@ -653,7 +658,11 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
 					step := ^binary.BigEndian.Uint64(v)
-					ci1.endTxNum = step * sd.Storage.aggregationStep
+					endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					if haveRamUpdates && endTxNum >= sd.txNum {
+						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+					}
+					ci1.endTxNum = endTxNum
 
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)

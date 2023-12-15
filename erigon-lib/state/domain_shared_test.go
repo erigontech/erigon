@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -224,6 +225,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2-3), iterCount(domains))
 	}
 	{ // flush delete/updates to DB
+		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
+		require.NoError(err)
+		err = rawdbv3.TxNums.Append(rwTx, domains.TxNum()/2, domains.txNum)
+		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
 		domains.Close()
@@ -239,6 +244,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
+		domains.SetTxNum(domains.TxNum() + 1)
 		err := domains.DomainDelPrefix(kv.StorageDomain, []byte{})
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
