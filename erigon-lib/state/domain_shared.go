@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -772,12 +773,12 @@ func (sd *SharedDomains) rotate() []flusher {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	_, f, l, _ := runtime.Caller(1)
 	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
 	if err != nil {
 		return err
 	}
 	if sd.trace {
+		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggCtx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggCtx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
 
@@ -887,6 +888,19 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	for _, tomb := range tombs {
 		if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v); err != nil {
 			return err
+		}
+	}
+
+	if assert.Enable {
+		forgotten := 0
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
+			forgotten++
+			return nil
+		}); err != nil {
+			return err
+		}
+		if forgotten > 0 {
+			panic(fmt.Errorf("DomainDelPrefix: %d forgotten keys after '%x' prefix removal", forgotten, prefix))
 		}
 	}
 	return nil
@@ -1095,6 +1109,8 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
+		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
+		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.hc.ic.txNum, blockNum, rh)
 		return nil
 	}
 	if sdc.sd.trace {
