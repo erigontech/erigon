@@ -81,7 +81,7 @@ xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana 
 setup_xdg_data_home:
 	mkdir -p $(xdg_data_home_subdirs)
 	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || chown -R 472:0 $(xdg_data_home)/erigon-grafana
-	@echo "✔️ xdg_data_home setup"
+	@echo "✔️ xdg_data_home setup"ama ]e e q
 	@ls -al $(xdg_data_home)
 
 ## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
@@ -97,6 +97,13 @@ dbg:
 	@echo "Building $*"
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+
+build-libs:
+ifeq ($(UNAME), Darwin )
+	@brew install libomp gmp
+else ifeq ($(UNAME), Linux )
+	@sudo apt install libgtest-dev libomp-dev libgmp-dev
+endif
 
 ## erigon:                            build erigon
 zkevm-erigon: go-version zkevm-erigon.cmd
