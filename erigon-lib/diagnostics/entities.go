@@ -30,18 +30,19 @@ type PeerStatistics struct {
 }
 
 type SnapshotDownloadStatistics struct {
-	Downloaded       uint64                               `json:"downloaded"`
-	Total            uint64                               `json:"total"`
-	TotalTime        float64                              `json:"totalTime"`
-	DownloadRate     uint64                               `json:"downloadRate"`
-	UploadRate       uint64                               `json:"uploadRate"`
-	Peers            int32                                `json:"peers"`
-	Files            int32                                `json:"files"`
-	Connections      uint64                               `json:"connections"`
-	Alloc            uint64                               `json:"alloc"`
-	Sys              uint64                               `json:"sys"`
-	DownloadFinished bool                                 `json:"downloadFinished"`
-	Segments         map[string]SegmentDownloadStatistics `json:"segments"`
+	Downloaded           uint64                               `json:"downloaded"`
+	Total                uint64                               `json:"total"`
+	TotalTime            float64                              `json:"totalTime"`
+	DownloadRate         uint64                               `json:"downloadRate"`
+	UploadRate           uint64                               `json:"uploadRate"`
+	Peers                int32                                `json:"peers"`
+	Files                int32                                `json:"files"`
+	Connections          uint64                               `json:"connections"`
+	Alloc                uint64                               `json:"alloc"`
+	Sys                  uint64                               `json:"sys"`
+	DownloadFinished     bool                                 `json:"downloadFinished"`
+	Segments             map[string]SegmentDownloadStatistics `json:"segments"`
+	TorrentMetadataReady int32                                `json:"torrentMetadataReady"`
 }
 
 type SegmentDownloadStatistics struct {

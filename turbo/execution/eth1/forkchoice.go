@@ -205,7 +205,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			}
 			currentParentHash = currentHeader.ParentHash
 			if currentHeader.Number.Uint64() == 0 {
-				panic("assert") //uint-underflow
+				panic("assert:uint64 underflow") //uint-underflow
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
 			isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
@@ -243,7 +243,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-
+		if e.historyV3 {
+			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
 			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
@@ -272,65 +278,55 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			}
 		}
 		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
+			if len(newCanonicals) > 0 {
+				if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
+				if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
 			}
-			if err := rawdb.AppendCanonicalTxNums(tx, fcuHeader.Number.Uint64()); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-
-		}
-
-		// Set Progress for headers and bodies accordingly.
-		if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if err := stages.SaveStageProgress(tx, stages.BlockHashes, fcuHeader.Number.Uint64()); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if blockHash == e.forkValidator.ExtendingForkHeadHash() {
-			e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
-			if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-		}
-		if e.forcePartialCommit {
-			if err := tx.Commit(); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			tx = nil
+			//} else {
+			//if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+			//	sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			//	return
+			//}
+			//}
 		}
 	}
 
+	// Set Progress for headers and bodies accordingly.
+	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, fcuHeader.Number.Uint64()); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
+		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+	}
 	// Run the forkchoice
 	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if e.forcePartialCommit {
-		tx, err = e.db.BeginRwNosync(ctx)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		defer tx.Rollback()
-	}
-
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)

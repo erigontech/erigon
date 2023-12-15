@@ -53,6 +53,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 				d.snapshotDownload.Alloc = info.Alloc
 				d.snapshotDownload.Sys = info.Sys
 				d.snapshotDownload.DownloadFinished = info.DownloadFinished
+				d.snapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
 				if info.DownloadFinished {
 					return

@@ -480,10 +480,18 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchPlainKey(compositeS, value, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
-	if len(value) == 0 {
-		return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
-	}
 	return sd.aggCtx.storage.PutWithPrev(composite, nil, value, preVal)
+}
+func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) error {
+	composite := addr
+	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
+		composite = make([]byte, 0, len(addr)+len(loc))
+		composite = append(append(composite, addr...), loc...)
+	}
+	compositeS := string(composite)
+	sd.sdCtx.TouchPlainKey(compositeS, nil, sd.sdCtx.TouchStorage)
+	sd.put(kv.StorageDomain, compositeS, nil)
+	return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -541,9 +549,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
-	sc := sd.Storage.MakeContext()
-	defer sc.Close()
-
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -851,6 +856,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte) error {
+
 	if prevVal == nil {
 		var err error
 		prevVal, err = sd.DomainGet(domain, k1, k2)
@@ -865,7 +871,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		if prevVal == nil {
 			return nil
 		}
-		return sd.writeAccountStorage(k1, k2, nil, prevVal)
+		return sd.delAccountStorage(k1, k2, prevVal)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
@@ -885,7 +891,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte) error {
-		tombs = append(tombs, pair{common.Copy(k), common.Copy(v)})
+		tombs = append(tombs, pair{k, v})
 		return nil
 	}); err != nil {
 		return err
