@@ -175,7 +175,7 @@ func setupLogger(ctx *cli.Context) (log.Logger, error) {
 		return nil, err
 	}
 
-	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
+	logger := logging.SetupLoggerCtx("devnet", ctx, log.LvlInfo, log.LvlInfo, false /* rootLogger */)
 
 	// Make root logger fail
 	log.Root().SetHandler(PanicHandler{})

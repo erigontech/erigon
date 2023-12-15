@@ -146,6 +146,47 @@ func (u *RCloneClient) sync(ctx context.Context, request *rcloneRequest) error {
 	return err
 }
 
+/*
+return retryConnects(ctx, func(ctx context.Context) error {
+	return client.CallContext(ctx, result, string(method), args...)
+})
+}
+*/
+
+func isConnectionError(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Op == "dial"
+	}
+	return false
+}
+
+const connectionTimeout = time.Second * 5
+
+func retry(ctx context.Context, op func(context.Context) error, isRecoverableError func(error) bool, delay time.Duration, lastErr error) error {
+	err := op(ctx)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) && lastErr != nil {
+		return lastErr
+	}
+	if !isRecoverableError(err) {
+		return err
+	}
+
+	delayTimer := time.NewTimer(delay)
+	select {
+	case <-delayTimer.C:
+		return retry(ctx, op, isRecoverableError, delay, err)
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return err
+		}
+		return ctx.Err()
+	}
+}
+
 func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) ([]byte, error) {
 	requestBody, err := json.Marshal(args)
 
@@ -162,7 +203,15 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 
 	request.Header.Set("Content-Type", "application/json")
 
-	response, err := u.rcloneSession.Do(request)
+	ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
+	defer cancel()
+
+	var response *http.Response
+
+	err = retry(ctx, func(ctx context.Context) error {
+		response, err = u.rcloneSession.Do(request)
+		return err
+	}, isConnectionError, time.Millisecond*200, nil)
 
 	if err != nil {
 		return nil, err

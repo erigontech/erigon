@@ -10,7 +10,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/snapshots/cmp"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/copy"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/torrents"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/verify"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/params"
@@ -22,13 +24,15 @@ import (
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "snapshot"
+	app.Name = "snapshots"
 	app.Version = params.VersionWithCommit(params.GitCommit)
 
 	app.Commands = []*cli.Command{
 		&cmp.Command,
 		&copy.Command,
 		&verify.Command,
+		&torrents.Command,
+		&manifest.Command,
 	}
 
 	app.Flags = []cli.Flag{}
@@ -80,7 +84,7 @@ func setupLogger(ctx *cli.Context) (log.Logger, error) {
 		return nil, err
 	}
 
-	logger := logging.SetupLoggerCtx("snapshot", ctx, false /* rootLogger */)
+	logger := logging.SetupLoggerCtx("snapshot", ctx, log.LvlError, log.LvlInfo, false)
 
 	return logger, nil
 }

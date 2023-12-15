@@ -67,7 +67,7 @@ func (l Locator) String() string {
 	return val
 }
 
-var locatorExp, _ = regexp.Compile(`^(?:(\w+)\:)?(.*)(?:\:(v\d+))+`)
+var locatorExp, _ = regexp.Compile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
 var srcExp, _ = regexp.Compile(`^erigon-v\d+-snapshots-(.*)$`)
 
 func ParseLocator(value string) (*Locator, error) {

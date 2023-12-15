@@ -184,7 +184,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 
 	RaiseFdLimit()
 
-	logger := logging.SetupLoggerCtx("erigon", ctx, rootLogger)
+	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {

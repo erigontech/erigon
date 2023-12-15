@@ -39,11 +39,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
@@ -70,7 +72,7 @@ func main() {
 		},
 	}
 	app.Before = func(ctx *cli.Context) error {
-		logger := logging.SetupLoggerCtx("p2psim", ctx, false /* rootLogger */)
+		logger := logging.SetupLoggerCtx("p2psim", ctx, log.LvlInfo, log.LvlInfo, false /* rootLogger */)
 		client = simulations.NewClient(ctx.String("api"), logger)
 		return nil
 	}

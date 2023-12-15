@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -629,12 +630,19 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	var force bool
 	var blocksToTTD uint64
 	var blockTime uint64
+
+	startHeight := hd.highestInDb
+
 	for more {
 		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
 		}
 		if force {
 			return true, nil
+		}
+
+		if dbg.StageSyncLimit() > 0 && hd.highestInDb-startHeight > uint64(dbg.StageSyncLimit()) {
+			break
 		}
 	}
 	if blocksToTTD > 0 {
