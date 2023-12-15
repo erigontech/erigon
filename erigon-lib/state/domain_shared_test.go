@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -98,14 +100,14 @@ Loop:
 	goto Loop
 }
 
-/*
 func TestSharedDomain_IteratePrefix(t *testing.T) {
 	stepSize := uint64(8)
+	require := require.New(t)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
-		require.NoError(t, domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+		require.NoError(domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
 			list = append(list, k)
 			return nil
 		}))
@@ -117,7 +119,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	ctx := context.Background()
 
 	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer rwTx.Rollback()
 
 	ac = agg.MakeContext()
@@ -125,90 +127,113 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 	defer domains.Close()
 
+	acc := func(i uint64) []byte {
+		buf := make([]byte, 20)
+		binary.BigEndian.PutUint64(buf[20-8:], i)
+		return buf
+	}
+	st := func(i uint64) []byte {
+		buf := make([]byte, 32)
+		binary.BigEndian.PutUint64(buf[32-8:], i)
+		return buf
+	}
+	addr := acc(1)
 	for i := uint64(0); i < stepSize*2; i++ {
 		domains.SetTxNum(i)
-		if err = domains.DomainPut(kv.AccountsDomain, hexutility.EncodeTs(i), nil, hexutility.EncodeTs(i), nil); err != nil {
+		if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, hexutility.EncodeTs(i), nil, hexutility.EncodeTs(i), nil); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, addr, st(i), acc(i), nil); err != nil {
 			panic(err)
 		}
 	}
 
 	{ // no deletes
 		err = domains.Flush(ctx, rwTx)
-		require.NoError(t, err)
+		require.NoError(err)
 		domains.Close()
 
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
-		require.Equal(t, int(stepSize*2), iterCount(domains))
+		require.Equal(int(stepSize*2), iterCount(domains))
 	}
 	{ // delete marker is in RAM
-		require.NoError(t, domains.Flush(ctx, rwTx))
+		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
 		domains.SetTxNum(stepSize*2 + 1)
-		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(1), nil, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(1), nil); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(stepSize+2), nil, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(stepSize+2), nil); err != nil {
 			panic(err)
 		}
-		require.Equal(t, int(stepSize*2-2), iterCount(domains))
+		require.Equal(int(stepSize*2-2), iterCount(domains))
 	}
 	{ // delete marker is in DB
-		require.NoError(t, domains.Flush(ctx, rwTx))
+		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
-		require.Equal(t, int(stepSize*2-2), iterCount(domains))
+		require.Equal(int(stepSize*2-2), iterCount(domains))
 	}
 	{ //delete marker is in Files
 		domains.Close()
 		ac.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
-		require.NoError(t, err)
-		require.NoError(t, agg.BuildFiles(stepSize*2))
-		require.NoError(t, agg.BuildFiles(stepSize*2))
-		require.Equal(t, 1, agg.storage.files.Len())
+		require.NoError(err)
+		require.NoError(agg.BuildFiles(stepSize * 2))
+		require.NoError(agg.BuildFiles(stepSize * 2))
+		require.Equal(1, agg.storage.files.Len())
 
 		ac = agg.MakeContext()
 		defer ac.Close()
 		rwTx, err = db.BeginRw(ctx)
-		require.NoError(t, err)
+		require.NoError(err)
 		defer rwTx.Rollback()
-		require.NoError(t, ac.Prune(ctx, rwTx))
+		require.NoError(ac.Prune(ctx, rwTx))
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
-		require.Equal(t, int(stepSize*2-2), iterCount(domains))
+		require.Equal(int(stepSize*2-2), iterCount(domains))
 	}
 
 	{ // delete/update more keys in RAM
-		require.NoError(t, domains.Flush(ctx, rwTx))
+		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 
 		domains.SetTxNum(stepSize*2 + 2)
-		if err := domains.DomainDel(kv.StorageDomain, hexutility.EncodeTs(4), nil, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(4), nil); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, hexutility.EncodeTs(5), nil, hexutility.EncodeTs(5), nil); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, addr, st(5), acc(5), nil); err != nil {
 			panic(err)
 		}
-		require.Equal(t, int(stepSize*2-3), iterCount(domains))
+		fmt.Printf("---------start\n")
+		require.Equal(int(stepSize*2-3), iterCount(domains))
+		fmt.Printf("---------end\n")
 	}
 	{ // flush delete/updates to DB
 		err = domains.Flush(ctx, rwTx)
-		require.NoError(t, err)
+		require.NoError(err)
 		domains.Close()
 
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
-		require.Equal(t, int(stepSize*2-3), iterCount(domains))
+		require.Equal(int(stepSize*2-3), iterCount(domains))
+	}
+	{ // delete everything - must see 0
+		err = domains.Flush(ctx, rwTx)
+		require.NoError(err)
+		domains.Close()
+
+		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+		defer domains.Close()
+		err := domains.DomainDelPrefix(kv.StorageDomain, []byte{})
+		require.NoError(err)
+		require.Equal(0, iterCount(domains))
 	}
 }
-*/
