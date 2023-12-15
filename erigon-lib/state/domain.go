@@ -1899,21 +1899,19 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
-
-	//iter := sd.storage.Iter()
-	//if iter.Seek(string(prefix)) {
-	//	kx := iter.Key()
-	//	v = iter.Value()
-	//	k = []byte(kx)
-	//
-	//	if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-	//		heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
-	//	}
-	//}
 
 	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -1975,9 +1973,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			//if string(ci1.key) == string(hexutility.MustDecodeString("301f9a245a0adeb61835403f6fd256dd96d103942d747c6d41e95a5d655bc20ab0fac941c854894cc0ed84cdaf557374b49ed723")) {
-			//	fmt.Printf("found %x\n", ci1.key)
-			//}
 			switch ci1.t {
 			//case RAM_CURSOR:
 			//	if ci1.iter.Next() {
@@ -2190,6 +2185,15 @@ type DomainLatestIterFile struct {
 func (hi *DomainLatestIterFile) Close() {
 }
 func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
 	heap.Init(hi.h)
 	var k, v []byte
 	var err error
