@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	txtype "github.com/ledgerwatch/erigon/zk/tx"
 
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -89,6 +90,11 @@ func SpawnStageBatches(
 	batchesProgress, err := sync_stages.GetStageProgress(tx, sync_stages.Batches)
 	if err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
+	}
+
+	highestVerifiedBatch, err := sync_stages.GetStageProgress(tx, sync_stages.L1VerificationsBatchNo)
+	if err != nil {
+		return fmt.Errorf("could not retrieve l1 verifications batch no progress")
 	}
 
 	startSyncTime := time.Now()
@@ -190,6 +196,11 @@ func SpawnStageBatches(
 				highestHashableL2BlockNo = l2Block.L2BlockNumber - 1
 			}
 			highestSeenBatchNo = l2Block.BatchNumber
+
+			// store our finalized state if this batch matches the highest verified batch number on the L1
+			if l2Block.BatchNumber == highestVerifiedBatch {
+				rawdb.WriteForkchoiceFinalized(tx, l2Block.L2Blockhash)
+			}
 
 			if lastHash != emptyHash {
 				l2Block.ParentHash = lastHash
