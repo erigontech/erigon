@@ -547,9 +547,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte) error) error {
-	sc := sd.Storage.MakeContext()
-	defer sc.Close()
-
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
