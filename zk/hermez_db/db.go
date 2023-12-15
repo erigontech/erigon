@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/types"
@@ -39,44 +38,39 @@ func NewHermezDb(tx kv.RwTx) (*HermezDb, error) {
 	db := &HermezDb{tx: tx}
 	db.HermezDbReader = NewHermezDbReader(tx)
 
-	err := db.CreateBuckets()
-	if err != nil {
-		log.Warn("failed to create buckets", "err", err)
-	}
-
 	return db, nil
 }
 
-func (db *HermezDb) CreateBuckets() error {
-	err := db.tx.CreateBucket(L1VERIFICATIONS)
+func CreateHermezBuckets(tx kv.RwTx) error {
+	err := tx.CreateBucket(L1VERIFICATIONS)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(L1SEQUENCES)
+	err = tx.CreateBucket(L1SEQUENCES)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(FORKIDS)
+	err = tx.CreateBucket(FORKIDS)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(BLOCKBATCHES)
+	err = tx.CreateBucket(BLOCKBATCHES)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(GLOBAL_EXIT_ROOTS)
+	err = tx.CreateBucket(GLOBAL_EXIT_ROOTS)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(GLOBAL_EXIT_ROOTS_BATCHES)
+	err = tx.CreateBucket(GLOBAL_EXIT_ROOTS_BATCHES)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(TX_PRICE_PERCENTAGE)
+	err = tx.CreateBucket(TX_PRICE_PERCENTAGE)
 	if err != nil {
 		return err
 	}
-	err = db.tx.CreateBucket(STATE_ROOTS)
+	err = tx.CreateBucket(STATE_ROOTS)
 	if err != nil {
 		return err
 	}

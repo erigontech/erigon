@@ -4,12 +4,13 @@ import (
 	"math/big"
 
 	"fmt"
+	"strings"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/log/v3"
-	"strings"
 )
 
 type SmtDbTx interface {
@@ -32,26 +33,30 @@ type EriDb struct {
 	tx   SmtDbTx
 }
 
-func NewEriDb(tx kv.RwTx) (*EriDb, error) {
+func CreateEriDbBuckets(tx kv.RwTx) error {
 	err := tx.CreateBucket(TableSmt)
 	if err != nil {
-		return &EriDb{}, err
+		return err
 	}
 
 	err = tx.CreateBucket(TableLastRoot)
 	if err != nil {
-		return &EriDb{}, err
+		return err
 	}
 
 	err = tx.CreateBucket(TableAccountValues)
 	if err != nil {
-		return &EriDb{}, err
+		return err
 	}
 
+	return nil
+}
+
+func NewEriDb(tx kv.RwTx) *EriDb {
 	return &EriDb{
 		kvTx: tx,
 		tx:   tx,
-	}, nil
+	}
 }
 
 func (m *EriDb) OpenBatch(quitCh <-chan struct{}) {

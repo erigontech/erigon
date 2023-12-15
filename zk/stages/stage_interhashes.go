@@ -116,10 +116,7 @@ func SpawnZkIntermediateHashesStage(s *sync_stages.StageState, u sync_stages.Unw
 
 	shouldRegenerate := to > s.BlockNumber && to-s.BlockNumber > cfg.zk.RebuildTreeAfter
 
-	eridb, err := db2.NewEriDb(tx)
-	if err != nil {
-		return trie.EmptyRoot, err
-	}
+	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb)
 
 	if s.BlockNumber == 0 || shouldRegenerate {
@@ -453,10 +450,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashe
 	log.Info(fmt.Sprintf("[%s] Unwind trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Unwind ended", logPrefix))
 
-	eridb, err := db2.NewEriDb(db)
-	if err != nil {
-		return trie.EmptyRoot, err
-	}
+	eridb := db2.NewEriDb(db)
 	dbSmt := smt.NewSMT(eridb)
 
 	log.Info(fmt.Sprintf("[%s]", logPrefix), "last root", libcommon.BigToHash(dbSmt.LastRoot()))
