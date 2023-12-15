@@ -40,6 +40,7 @@ type Antiquary struct {
 	genesisState    *state.CachingBeaconState
 	// set to nil
 	currentState *state.CachingBeaconState
+	balances32   []byte
 }
 
 func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
