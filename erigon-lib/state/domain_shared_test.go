@@ -171,7 +171,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		if err := domains.DomainDel(kv.StorageDomain, addr, st(2), nil); err != nil {
 			panic(err)
 		}
-		for i := uint64(stepSize); i < stepSize*2; i++ {
+		for i := stepSize; i < stepSize*2; i++ {
 			domains.SetTxNum(i)
 			if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil); err != nil {
 				panic(err)

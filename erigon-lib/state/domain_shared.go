@@ -587,14 +587,15 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
 		endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
 			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 		}
+
+		keySuffix := make([]byte, len(k)+8)
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], v)
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}

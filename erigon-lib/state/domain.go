@@ -1922,15 +1922,16 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v)
+		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * dc.d.aggregationStep
 		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum + dc.d.aggregationStep, reverse: true})
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -2011,6 +2012,10 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = k
+					step := ^binary.BigEndian.Uint64(v)
+					endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					ci1.endTxNum = endTxNum
+
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
@@ -2206,15 +2211,16 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		return err
 	}
 	if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+		step := ^binary.BigEndian.Uint64(v)
+		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * dc.d.aggregationStep
 		if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -2260,6 +2266,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				}
 				if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 					ci1.key = common.Copy(k)
+					step := ^binary.BigEndian.Uint64(v)
+					endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					ci1.endTxNum = endTxNum
+
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
