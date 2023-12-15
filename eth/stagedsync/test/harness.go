@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
@@ -122,21 +123,23 @@ type HarnessCfg struct {
 }
 
 type Harness struct {
-	logger               log.Logger
-	chainDataDb          kv.RwDB
-	borConsensusDb       kv.RwDB
-	chainConfig          *chain.Config
-	blockReader          *freezeblocks.BlockReader
-	stateSyncStages      []*stagedsync.Stage
-	stateSync            *stagedsync.Sync
-	bhCfg                stagedsync.BorHeimdallCfg
-	heimdallClient       *heimdallmock.MockIHeimdallClient
-	heimdallNextMockSpan *span.HeimdallSpan
-	sealedHeaders        map[uint64]*types.Header
-	borSpanner           *bormock.MockSpanner
-	validatorAddress     libcommon.Address
-	validatorKey         *ecdsa.PrivateKey
-	genesisInitData      *genesisInitData
+	logger                     log.Logger
+	chainDataDb                kv.RwDB
+	borConsensusDb             kv.RwDB
+	chainConfig                *chain.Config
+	blockReader                *freezeblocks.BlockReader
+	stateSyncStages            []*stagedsync.Stage
+	stateSync                  *stagedsync.Sync
+	bhCfg                      stagedsync.BorHeimdallCfg
+	heimdallClient             *heimdallmock.MockIHeimdallClient
+	heimdallNextMockSpan       *span.HeimdallSpan
+	heimdallLastEventId        uint64
+	heimdallLastEventHeaderNum uint64
+	sealedHeaders              map[uint64]*types.Header
+	borSpanner                 *bormock.MockSpanner
+	validatorAddress           libcommon.Address
+	validatorKey               *ecdsa.PrivateKey
+	genesisInitData            *genesisInitData
 }
 
 func (h *Harness) SaveStageProgress(ctx context.Context, t *testing.T, stageId stages.SyncStage, progress uint64) {
@@ -197,6 +200,59 @@ func (h *Harness) ReadSpansFromDb(ctx context.Context) (spans []*span.HeimdallSp
 	}
 
 	return spans, nil
+}
+
+func (h *Harness) ReadStateSyncEventsFromDb(ctx context.Context) (eventIds []uint64, err error) {
+	err = h.chainDataDb.View(ctx, func(tx kv.Tx) error {
+		eventsIter, err := tx.Range(kv.BorEvents, nil, nil)
+		if err != nil {
+			return err
+		}
+
+		for eventsIter.HasNext() {
+			keyBytes, _, err := eventsIter.Next()
+			if err != nil {
+				return err
+			}
+
+			eventIds = append(eventIds, binary.BigEndian.Uint64(keyBytes))
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return eventIds, nil
+}
+
+func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDb(ctx context.Context) (nums map[uint64]uint64, err error) {
+	nums = map[uint64]uint64{}
+	err = h.chainDataDb.View(ctx, func(tx kv.Tx) error {
+		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
+		if err != nil {
+			return err
+		}
+
+		for eventNumsIter.HasNext() {
+			blockNumBytes, firstEventNumBytes, err := eventNumsIter.Next()
+			if err != nil {
+				return err
+			}
+
+			blockNum := binary.BigEndian.Uint64(blockNumBytes)
+			firstEventNum := binary.BigEndian.Uint64(firstEventNumBytes)
+			nums[blockNum] = firstEventNum
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return nums, nil
 }
 
 func (h *Harness) createGenesisInitData(t *testing.T) *genesisInitData {
@@ -442,8 +498,20 @@ func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
 		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
-			return nil, nil
+		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*clerk.EventRecordWithTime, error) {
+			h.heimdallLastEventId++
+			h.heimdallLastEventHeaderNum += h.chainConfig.Bor.CalculateSprint(h.heimdallLastEventHeaderNum)
+			stateSyncDelay := h.chainConfig.Bor.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
+			newEvent := clerk.EventRecordWithTime{
+				EventRecord: clerk.EventRecord{
+					ID:      h.heimdallLastEventId,
+					ChainID: h.chainConfig.ChainID.String(),
+				},
+				Time: time.Unix(int64(h.sealedHeaders[h.heimdallLastEventHeaderNum].Time-stateSyncDelay-1), 0),
+			}
+
+			// 1 per sprint
+			return []*clerk.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
 }
