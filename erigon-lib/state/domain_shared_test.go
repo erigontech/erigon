@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -212,9 +211,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		if err := domains.DomainPut(kv.StorageDomain, addr, st(5), acc(5), nil); err != nil {
 			panic(err)
 		}
-		fmt.Printf("---------start\n")
 		require.Equal(int(stepSize*2-3), iterCount(domains))
-		fmt.Printf("---------end\n")
 	}
 	{ // flush delete/updates to DB
 		err = domains.Flush(ctx, rwTx)
