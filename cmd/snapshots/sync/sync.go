@@ -75,6 +75,18 @@ func ParseLocator(value string) (*Locator, error) {
 		var loc Locator
 
 		switch {
+		case matches[1] == "torrent":
+			loc.LType = TorrentFs
+
+			if len(matches[2]) > 0 {
+				version, err := strconv.ParseUint(matches[2][1:], 10, 8)
+				if err != nil {
+					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
+				}
+
+				loc.Version = uint8(version)
+			}
+
 		case len(matches[1]) > 0:
 			loc.LType = RemoteFs
 			loc.Src = matches[1]
@@ -84,20 +96,18 @@ func ParseLocator(value string) (*Locator, error) {
 				loc.Chain = matches[1]
 			}
 
-		case matches[2] == "torrent":
-			loc.LType = TorrentFs
+			if len(matches[3]) > 0 {
+				version, err := strconv.ParseUint(matches[3][1:], 10, 8)
+				if err != nil {
+					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
+				}
+
+				loc.Version = uint8(version)
+			}
+
 		default:
 			loc.LType = LocalFs
 			loc.Root = downloader.Clean(matches[2])
-		}
-
-		if len(matches[3]) > 0 {
-			version, err := strconv.ParseUint(matches[3][1:], 10, 8)
-			if err != nil {
-				return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
-			}
-
-			loc.Version = uint8(version)
 		}
 
 		return &loc, nil

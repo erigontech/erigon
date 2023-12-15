@@ -214,7 +214,7 @@ func cmp(cliCtx *cli.Context) error {
 		return fmt.Errorf("no second session established")
 	}
 
-	logger.Info(fmt.Sprintf("Starting compare: %s==%s", loc1.String(), loc2.String()), "first", firstBlock, "last", lastBlock, "types", snapTypes)
+	logger.Info(fmt.Sprintf("Starting compare: %s==%s", loc1.String(), loc2.String()), "first", firstBlock, "last", lastBlock, "types", snapTypes, "dir", tempDir)
 
 	logger.Info("Reading s1 dir", "remoteFs", session1.RemoteFsRoot(), "label", session1.Label())
 	files, err := sync.DownloadManifest(cliCtx.Context, session1)
