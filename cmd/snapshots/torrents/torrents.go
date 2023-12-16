@@ -291,7 +291,6 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 
 				hashesMutex.Lock()
 				defer hashesMutex.Unlock()
-				fmt.Printf("%s:%s\n", file, info.Name)
 				hashes = append(hashes, hashInfo{info.Name, mi.HashInfoBytes().String()})
 
 				return nil
