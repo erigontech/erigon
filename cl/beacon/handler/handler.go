@@ -60,7 +60,7 @@ func (a *ApiHandler) init() {
 					r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.getBlockRoot))
 				})
 				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.getGenesis))
-				r.Post("/binded_blocks", http.NotFound)
+				r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlindedBlock))
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", http.NotFound)
 					r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.poolVoluntaryExits))
