@@ -17,6 +17,11 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+type syncCommittees struct {
+	currentSyncCommittee *solid.SyncCommittee
+	nextSyncCommittee    *solid.SyncCommittee
+}
+
 var lz4PoolWriterPool = sync.Pool{
 	New: func() interface{} {
 		return lz4.NewWriter(nil)
@@ -69,6 +74,8 @@ type forkGraphDisk struct {
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints map[libcommon.Hash]solid.Checkpoint
 	finalizedCheckpoints        map[libcommon.Hash]solid.Checkpoint
+	// for each block root we keep track of the sync committees for head retrieval.
+	syncCommittees map[libcommon.Hash]syncCommittees
 
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
@@ -171,6 +178,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		}
 
 		return nil, InvalidBlock, invalidBlockErr
+	}
+	f.syncCommittees[blockRoot] = syncCommittees{
+		currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
+		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 	}
 
 	f.blocks[blockRoot] = signedBlock
@@ -382,9 +393,18 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.finalizedCheckpoints, root)
 		delete(f.headers, root)
 		delete(f.saveStates, root)
+		delete(f.syncCommittees, root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
+}
+
+func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	obj, has := f.syncCommittees[blockRoot]
+	if !has {
+		return nil, nil, false
+	}
+	return obj.currentSyncCommittee, obj.nextSyncCommittee, true
 }
