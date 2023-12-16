@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	gosync "sync"
+	"time"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/downloader"
@@ -21,21 +24,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
-	SrcFlag = cli.StringFlag{
-		Name:     "src",
-		Usage:    `Source location for files`,
-		Required: false,
-	}
-)
-
 var Command = cli.Command{
 	Action:    torrents,
 	Name:      "torrent",
 	Usage:     "torrent utilities - list, hashes, update, verify",
 	ArgsUsage: "<cmd> <start block> <end block>",
 	Flags: []cli.Flag{
-		&SrcFlag,
 		&utils.DataDirFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
@@ -50,11 +44,64 @@ func torrents(cliCtx *cli.Context) error {
 	var src *sync.Locator
 	var err error
 
-	var rcCli *downloader.RCloneClient
+	var firstBlock, lastBlock uint64
 
-	if src, err = sync.ParseLocator(cliCtx.String(SrcFlag.Name)); err != nil {
+	command := "list"
+	pos := 0
+
+	if cliCtx.Args().Len() == 0 {
+		return fmt.Errorf("unknown torrent command")
+	}
+
+	arg := cliCtx.Args().Get(pos)
+
+	switch arg {
+	case "update", "hashes", "verify":
+		command = arg
+		pos++
+		arg = cliCtx.Args().Get(pos)
+	}
+
+	if src, err = sync.ParseLocator(arg); err != nil {
 		return err
 	}
+
+	pos++
+
+	if cliCtx.Args().Len() > pos {
+		if src, err = sync.ParseLocator(cliCtx.Args().Get(pos)); err != nil {
+			return err
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	pos++
+
+	if cliCtx.Args().Len() > pos {
+		firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64)
+		if err != nil {
+			return err
+		}
+	}
+
+	pos++
+
+	if cliCtx.Args().Len() > pos {
+		lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	if src == nil {
+		return fmt.Errorf("missing data source")
+	}
+
+	var rcCli *downloader.RCloneClient
 
 	switch src.LType {
 	case sync.RemoteFs:
@@ -67,48 +114,6 @@ func torrents(cliCtx *cli.Context) error {
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {
-			return err
-		}
-	}
-
-	var firstBlock, lastBlock uint64
-
-	command := "list"
-	pos := 0
-
-	if cliCtx.Args().Len() > 0 {
-		arg := cliCtx.Args().Get(pos)
-
-		firstBlock, err = strconv.ParseUint(arg, 10, 64)
-
-		if err != nil {
-			switch arg {
-			case "update", "hashes", "verify":
-				command = arg
-			default:
-				return fmt.Errorf("unknown torrents command: %q", arg)
-			}
-
-			pos++
-
-			if cliCtx.Args().Len() > pos {
-				firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64)
-
-				if err != nil {
-					return err
-				}
-			}
-		} else {
-			command = "list"
-		}
-	}
-
-	pos++
-
-	if cliCtx.Args().Len() > pos {
-		lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64)
-
-		if err != nil {
 			return err
 		}
 	}
@@ -153,9 +158,34 @@ func torrents(cliCtx *cli.Context) error {
 	case "hashes":
 		return torrentHashes(cliCtx.Context, srcSession, firstBlock, lastBlock)
 	case "update":
-		return updateTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock)
+		startTime := time.Now()
+
+		logger.Info(fmt.Sprintf("Starting update: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+
+		err := updateTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
+
+		if err == nil {
+			logger.Info(fmt.Sprintf("Finished update: %s", src.String()), "elapsed", time.Since(startTime))
+		} else {
+			logger.Info(fmt.Sprintf("Aborted update: %s", src.String()), "err", err)
+		}
+
+		return err
+
 	case "verify":
-		return verifyTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock)
+		startTime := time.Now()
+
+		logger.Info(fmt.Sprintf("Starting verify: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+
+		err := verifyTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
+
+		if err == nil {
+			logger.Info(fmt.Sprintf("Verified: %s", src.String()), "elapsed", time.Since(startTime))
+		} else {
+			logger.Info(fmt.Sprintf("Verification failed: %s", src.String()), "err", err)
+		}
+
+		return err
 	}
 
 	return listTorrents(cliCtx.Context, srcSession, os.Stdout, firstBlock, lastBlock)
@@ -224,16 +254,18 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 				}
 			}
 
+			file := fi.Name()
+
 			g.Go(func() error {
 				var mi *metainfo.MetaInfo
 
 				errs := 0
 
 				for {
-					reader, err := srcSession.Cat(gctx, fi.Name())
+					reader, err := srcSession.Cat(gctx, file)
 
 					if err != nil {
-						return fmt.Errorf("can't read remote torrent: %s: %w", fi.Name(), err)
+						return fmt.Errorf("can't read remote torrent: %s: %w", file, err)
 					}
 
 					mi, err = metainfo.Load(reader)
@@ -242,7 +274,7 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 						errs++
 
 						if errs == 4 {
-							return fmt.Errorf("can't parse remote torrent: %s: %w", fi.Name(), err)
+							return fmt.Errorf("can't parse remote torrent: %s: %w", file, err)
 						}
 
 						continue
@@ -254,11 +286,12 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 				info, err := mi.UnmarshalInfo()
 
 				if err != nil {
-					return fmt.Errorf("can't unmarshal torrent info: %s: %w", fi.Name(), err)
+					return fmt.Errorf("can't unmarshal torrent info: %s: %w", file, err)
 				}
 
 				hashesMutex.Lock()
 				defer hashesMutex.Unlock()
+				fmt.Printf("%s:%s\n", file, info.Name)
 				hashes = append(hashes, hashInfo{info.Name, mi.HashInfoBytes().String()})
 
 				return nil
@@ -281,18 +314,21 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 	return nil
 }
 
-func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64) error {
+func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.Logger) error {
 	entries, err := manifest.DownloadManifest(ctx, srcSession)
 
 	if err != nil {
 		return err
 	}
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(16)
+
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) == ".torrent" {
 			file := strings.TrimSuffix(fi.Name(), ".torrent")
 
-			err := func() error {
+			g.Go(func() error {
 				if from > 0 || to > 0 {
 					info, _ := snaptype.ParseFileName("", file)
 
@@ -305,7 +341,9 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 					}
 				}
 
-				err := srcSession.Download(ctx, file)
+				logger.Info(fmt.Sprintf("Updating %s", file+".torrent"))
+
+				err := srcSession.Download(gctx, file)
 
 				if err != nil {
 					return err
@@ -313,7 +351,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 				defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-				torrentPath, err := downloader.BuildTorrentIfNeed(ctx, file, srcSession.LocalFsRoot())
+				torrentPath, err := downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot())
 
 				if err != nil {
 					return err
@@ -321,18 +359,119 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 				defer os.Remove(torrentPath)
 
-				return srcSession.Upload(ctx, file+".torrent")
-			}()
-
-			if err != nil {
-				return err
-			}
+				return srcSession.Upload(gctx, file+".torrent")
+			})
 		}
 	}
 
-	return nil
+	return g.Wait()
 }
 
-func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64) error {
-	return fmt.Errorf("TODO")
+func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.Logger) error {
+	entries, err := manifest.DownloadManifest(ctx, srcSession)
+
+	if err != nil {
+		return err
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(16)
+
+	for _, fi := range entries {
+		if filepath.Ext(fi.Name()) == ".torrent" {
+			file := strings.TrimSuffix(fi.Name(), ".torrent")
+
+			g.Go(func() error {
+				if from > 0 || to > 0 {
+					info, _ := snaptype.ParseFileName("", file)
+
+					if from > 0 && info.From < from {
+						return nil
+					}
+
+					if to > 0 && info.From > to {
+						return nil
+					}
+				}
+
+				logger.Info(fmt.Sprintf("Validating %s", file+".torrent"))
+
+				var mi *metainfo.MetaInfo
+
+				errs := 0
+
+				for {
+					reader, err := srcSession.Cat(gctx, file+".torrent")
+
+					if err != nil {
+						return fmt.Errorf("can't read remote torrent: %s: %w", file+".torrent", err)
+					}
+
+					mi, err = metainfo.Load(reader)
+
+					if err != nil {
+						errs++
+
+						if errs == 4 {
+							return fmt.Errorf("can't parse remote torrent: %s: %w", file+".torrent", err)
+						}
+
+						continue
+					}
+
+					break
+				}
+
+				info, err := mi.UnmarshalInfo()
+
+				if err != nil {
+					return fmt.Errorf("can't unmarshal torrent info: %s: %w", file+".torrent", err)
+				}
+
+				if info.Name != file {
+					return fmt.Errorf("torrent name does not match file: %s", file)
+				}
+
+				err = srcSession.Download(gctx, file)
+
+				if err != nil {
+					return err
+				}
+
+				defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+
+				torrentPath, err := downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot())
+
+				if err != nil {
+					return err
+				}
+
+				defer os.Remove(torrentPath)
+
+				lmi, err := metainfo.LoadFromFile(torrentPath)
+
+				if err != nil {
+					return fmt.Errorf("can't load local torrent from: %s: %w", torrentPath, err)
+				}
+
+				if lmi.HashInfoBytes() != mi.HashInfoBytes() {
+					return fmt.Errorf("computed local hash does not match torrent: %s: expected: %s, got: %s", file+".torrent", lmi.HashInfoBytes(), mi.HashInfoBytes())
+				}
+
+				localInfo, err := lmi.UnmarshalInfo()
+
+				if err != nil {
+					return fmt.Errorf("can't unmarshal local torrent info: %s: %w", torrentPath, err)
+				}
+
+				if localInfo.Name != info.Name {
+					return fmt.Errorf("computed local name does not match torrent: %s: expected: %s, got: %s", file+".torrent", localInfo.Name, info.Name)
+				}
+
+				return nil
+			})
+		}
+	}
+
+	return g.Wait()
 }
