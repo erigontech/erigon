@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -27,19 +28,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var Locations = cli.StringSliceFlag{
-	Name:     "locations",
-	Usage:    `Locations to source snapshots for comparison with optional ":version" e.g. ../snapshots:v1,r2:location:v2 torrent,r2:location`,
-	Required: true,
-}
-
 var Command = cli.Command{
 	Action:    cmp,
 	Name:      "cmp",
 	Usage:     "Compare snapshot segments",
 	ArgsUsage: "<start block (000's)> <end block (000's)>",
 	Flags: []cli.Flag{
-		&Locations,
 		&utils.DataDirFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
@@ -104,46 +98,44 @@ func cmp(cliCtx *cli.Context) error {
 
 	var chain string
 
-	err = func() error {
-		for _, val := range cliCtx.StringSlice(Locations.Name) {
-			switch {
-			case loc1 == nil:
-				if loc1, err = sync.ParseLocator(val); err != nil {
-					return err
-				}
+	pos := 0
 
-				switch loc1.LType {
-				case sync.RemoteFs:
-					if err = checkRemote(loc1.Src); err != nil {
-						return err
-					}
+	if cliCtx.Args().Len() > pos {
+		val := cliCtx.Args().Get(pos)
 
-					chain = loc1.Chain
-				}
-
-			case loc2 == nil:
-				if loc2, err = sync.ParseLocator(val); err != nil {
-					return err
-				}
-
-				switch loc2.LType {
-				case sync.RemoteFs:
-					if err = checkRemote(loc2.Src); err != nil {
-						return err
-					}
-
-					chain = loc2.Chain
-				}
-
-				return nil
-			}
+		if loc1, err = sync.ParseLocator(val); err != nil {
+			return err
 		}
 
-		return nil
-	}()
+		switch loc1.LType {
+		case sync.RemoteFs:
+			if err = checkRemote(loc1.Src); err != nil {
+				return err
+			}
 
-	if err != nil {
-		return err
+			chain = loc1.Chain
+		}
+	}
+
+	pos++
+
+	if cliCtx.Args().Len() > pos {
+		val := cliCtx.Args().Get(pos)
+
+		if loc2, err = sync.ParseLocator(val); err != nil {
+			return err
+		}
+
+		switch loc2.LType {
+		case sync.RemoteFs:
+			if err = checkRemote(loc2.Src); err != nil {
+				return err
+			}
+
+			chain = loc2.Chain
+		}
+
+		pos++
 	}
 
 	if loc1.LType == sync.TorrentFs || loc2.LType == sync.TorrentFs {
@@ -167,7 +159,7 @@ func cmp(cliCtx *cli.Context) error {
 
 	var firstBlock, lastBlock uint64
 
-	if cliCtx.Args().Len() > 0 {
+	if cliCtx.Args().Len() > pos {
 		firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(0), 10, 64)
 	}
 
@@ -180,7 +172,7 @@ func cmp(cliCtx *cli.Context) error {
 
 	if rcCli != nil {
 		if loc1.LType == sync.RemoteFs {
-			session1, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "s1"), loc1.Src+":"+loc1.Root)
+			session1, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l1"), loc1.Src+":"+loc1.Root)
 
 			if err != nil {
 				return err
@@ -188,7 +180,7 @@ func cmp(cliCtx *cli.Context) error {
 		}
 
 		if loc2.LType == sync.RemoteFs {
-			session2, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "s2"), loc2.Src+":"+loc2.Root)
+			session2, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "l2"), loc2.Src+":"+loc2.Root)
 
 			if err != nil {
 				return err
@@ -275,6 +267,8 @@ func cmp(cliCtx *cli.Context) error {
 	}
 
 	if len(funcs) > 0 {
+		startTime := time.Now()
+
 		g, ctx := errgroup.WithContext(cliCtx.Context)
 		g.SetLimit(len(funcs))
 
@@ -284,7 +278,14 @@ func cmp(cliCtx *cli.Context) error {
 			}(ctx, f)
 		}
 
-		return g.Wait()
+		err = g.Wait()
+
+		if err == nil {
+			logger.Info(fmt.Sprintf("Finished compare: %s==%s", loc1.String(), loc2.String()), "elapsed", time.Since(startTime))
+		} else {
+			logger.Info(fmt.Sprintf("Failed compare: %s==%s", loc1.String(), loc2.String()), "err", err, "elapsed", time.Since(startTime))
+		}
+
 	}
 	return nil
 }

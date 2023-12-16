@@ -18,18 +18,6 @@ import (
 )
 
 var (
-	SrcFlag = cli.StringFlag{
-		Name:     "src",
-		Usage:    `Source location for copy`,
-		Required: true,
-	}
-
-	DstFlag = cli.StringFlag{
-		Name:     "dst",
-		Usage:    `Destination location for copy`,
-		Required: true,
-	}
-
 	TorrentsFlag = cli.BoolFlag{
 		Name:     "torrents",
 		Usage:    `Include torrent files in copy`,
@@ -62,8 +50,6 @@ var Command = cli.Command{
 	Usage:     "copy snapshot segments",
 	ArgsUsage: "<start block> <end block>",
 	Flags: []cli.Flag{
-		&SrcFlag,
-		&DstFlag,
 		&VersionFlag,
 		&flags.SegTypes,
 		&TorrentsFlag,
@@ -98,12 +84,26 @@ func copy(cliCtx *cli.Context) error {
 	var rcCli *downloader.RCloneClient
 	var torrentCli *sync.TorrentClient
 
-	if src, err = sync.ParseLocator(cliCtx.String(SrcFlag.Name)); err != nil {
-		return err
+	pos := 0
+
+	if cliCtx.Args().Len() > pos {
+		val := cliCtx.Args().Get(pos)
+
+		if src, err = sync.ParseLocator(val); err != nil {
+			return err
+		}
 	}
 
-	if dst, err = sync.ParseLocator(cliCtx.String(DstFlag.Name)); err != nil {
-		return err
+	pos++
+
+	if cliCtx.Args().Len() > pos {
+		val := cliCtx.Args().Get(pos)
+
+		if src, err = sync.ParseLocator(val); err != nil {
+			return err
+		}
+
+		pos++
 	}
 
 	switch dst.LType {
@@ -169,12 +169,18 @@ func copy(cliCtx *cli.Context) error {
 		dst.Version = uint8(version)
 	}
 
-	if cliCtx.Args().Len() > 0 {
-		firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(0), 10, 64)
+	if cliCtx.Args().Len() > pos {
+		if firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64); err != nil {
+			return err
+		}
+
+		pos++
 	}
 
-	if cliCtx.Args().Len() > 1 {
-		lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(1), 10, 64)
+	if cliCtx.Args().Len() > pos {
+		if lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(pos), 10, 64); err != nil {
+			return err
+		}
 	}
 
 	switch src.LType {

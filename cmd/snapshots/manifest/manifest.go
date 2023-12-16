@@ -20,12 +20,6 @@ import (
 )
 
 var (
-	SrcFlag = cli.StringFlag{
-		Name:     "src",
-		Usage:    `Source location for files`,
-		Required: false,
-	}
-
 	VersionFlag = cli.IntFlag{
 		Name:     "version",
 		Usage:    `Manifest file versions`,
@@ -40,7 +34,6 @@ var Command = cli.Command{
 	Usage:     "manifest utilities - list, update, verify",
 	ArgsUsage: "<cmd>",
 	Flags: []cli.Flag{
-		&SrcFlag,
 		&VersionFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
@@ -57,9 +50,27 @@ func manifest(cliCtx *cli.Context) error {
 
 	var rcCli *downloader.RCloneClient
 
-	if src, err = sync.ParseLocator(cliCtx.String(SrcFlag.Name)); err != nil {
+	command := "list"
+	pos := 0
+
+	if cliCtx.Args().Len() == 0 {
+		return fmt.Errorf("unknown manifest command")
+	}
+
+	arg := cliCtx.Args().Get(pos)
+
+	switch arg {
+	case "update", "verify":
+		command = arg
+		pos++
+		arg = cliCtx.Args().Get(pos)
+	}
+
+	if src, err = sync.ParseLocator(arg); err != nil {
 		return err
 	}
+
+	pos++
 
 	switch src.LType {
 	case sync.RemoteFs:
@@ -73,19 +84,6 @@ func manifest(cliCtx *cli.Context) error {
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {
 			return err
-		}
-	}
-
-	command := "list"
-	pos := 0
-
-	if cliCtx.Args().Len() > 0 {
-		arg := cliCtx.Args().Get(pos)
-		switch arg {
-		case "update", "verify":
-			command = arg
-		default:
-			return fmt.Errorf("unknown manifest command: %q", arg)
 		}
 	}
 
