@@ -34,9 +34,8 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 	if f.code != 0 {
 		return
 	}
-	if f.code != 404 {
+	if statusCode != 404 {
 		f.rw.WriteHeader(statusCode)
 	}
-	// if it's a 404 and we are not at our last handler, set the target to an io.Discard
 	f.code = statusCode
 }
