@@ -18,7 +18,7 @@ import (
 
 type ApiHandler struct {
 	o   sync.Once
-	mux chi.Router
+	mux *chi.Mux
 
 	blockReader     freezeblocks.BeaconSnapshotReader
 	indiciesDB      kv.RoDB
