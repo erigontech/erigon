@@ -87,7 +87,7 @@ func (a *ApiHandler) getBlock(r *http.Request) (*beaconResponse, error) {
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
-		return nil, beaconhttp.WrapEndpointError(err)
+		return nil, err
 	}
 	return newBeaconResponse(blk).
 		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
@@ -122,7 +122,7 @@ func (a *ApiHandler) getBlindedBlock(r *http.Request) (*beaconResponse, error) {
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
-		return nil, beaconhttp.WrapEndpointError(err)
+		return nil, err
 	}
 	blinded, err := blk.Blinded()
 	if err != nil {
