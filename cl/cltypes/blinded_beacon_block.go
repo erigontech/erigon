@@ -94,9 +94,26 @@ func (b *SignedBlindedBeaconBlock) Version() clparams.StateVersion {
 	return b.Block.Body.Version
 }
 
+func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *SignedBeaconBlock {
+	return &SignedBeaconBlock{
+		Signature: b.Signature,
+		Block:     b.Block.Full(txs, withdrawals),
+	}
+}
+
 // Version returns beacon block version.
 func (b *BlindedBeaconBlock) Version() clparams.StateVersion {
 	return b.Body.Version
+}
+
+func (b *BlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBlock {
+	return &BeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          b.Body.Full(txs, withdrawals),
+	}
 }
 
 func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -189,6 +206,48 @@ func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
 		s = append(s, b.BlobKzgCommitments)
 	}
 	return s
+}
+
+func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBody {
+	// Recover the execution payload
+	executionPayload := &Eth1Block{
+		ParentHash:    b.ExecutionPayload.ParentHash,
+		BlockNumber:   b.ExecutionPayload.BlockNumber,
+		StateRoot:     b.ExecutionPayload.StateRoot,
+		Time:          b.ExecutionPayload.Time,
+		GasLimit:      b.ExecutionPayload.GasLimit,
+		GasUsed:       b.ExecutionPayload.GasUsed,
+		Extra:         b.ExecutionPayload.Extra,
+		ReceiptsRoot:  b.ExecutionPayload.ReceiptsRoot,
+		LogsBloom:     b.ExecutionPayload.LogsBloom,
+		BaseFeePerGas: b.ExecutionPayload.BaseFeePerGas,
+		BlockHash:     b.ExecutionPayload.BlockHash,
+		BlobGasUsed:   b.ExecutionPayload.BlobGasUsed,
+		ExcessBlobGas: b.ExecutionPayload.ExcessBlobGas,
+		FeeRecipient:  b.ExecutionPayload.FeeRecipient,
+		PrevRandao:    b.ExecutionPayload.PrevRandao,
+		Transactions:  txs,
+		Withdrawals:   withdrawals,
+		version:       b.ExecutionPayload.version,
+		beaconCfg:     b.beaconCfg,
+	}
+
+	return &BeaconBody{
+		RandaoReveal:       b.RandaoReveal,
+		Eth1Data:           b.Eth1Data,
+		Graffiti:           b.Graffiti,
+		ProposerSlashings:  b.ProposerSlashings,
+		AttesterSlashings:  b.AttesterSlashings,
+		Attestations:       b.Attestations,
+		Deposits:           b.Deposits,
+		VoluntaryExits:     b.VoluntaryExits,
+		SyncAggregate:      b.SyncAggregate,
+		ExecutionPayload:   executionPayload,
+		ExecutionChanges:   b.ExecutionChanges,
+		BlobKzgCommitments: b.BlobKzgCommitments,
+		Version:            b.Version,
+		beaconCfg:          b.beaconCfg,
+	}
 }
 
 func (b *BlindedBeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
