@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -242,25 +243,28 @@ func cmp(cliCtx *cli.Context) error {
 		session2: session2,
 	}
 
-	var funcs []func(ctx context.Context) error
+	var funcs []func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error)
+
+	bodyWorkers := 4
+	headerWorkers := 4
 
 	if len(snapTypes) == 0 {
-		funcs = append(funcs, func(ctx context.Context) error {
-			return c.compareHeaders(ctx, h1ents, h2ents, logger)
-		}, func(ctx context.Context) error {
-			return c.compareBodies(ctx, b1ents, b2ents, logger)
+		funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
+			return c.compareHeaders(ctx, h1ents, h2ents, headerWorkers, logger)
+		}, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
+			return c.compareBodies(ctx, b1ents, b2ents, bodyWorkers, logger)
 		})
 	} else {
 		for _, snapType := range snapTypes {
 			if snapType == snaptype.Headers {
-				funcs = append(funcs, func(ctx context.Context) error {
-					return c.compareHeaders(ctx, h1ents, h2ents, logger)
+				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
+					return c.compareHeaders(ctx, h1ents, h2ents, headerWorkers, logger)
 				})
 			}
 
 			if snapType == snaptype.Bodies {
-				funcs = append(funcs, func(ctx context.Context) error {
-					return c.compareBodies(ctx, b1ents, b2ents, logger)
+				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
+					return c.compareBodies(ctx, b1ents, b2ents, bodyWorkers, logger)
 				})
 			}
 		}
@@ -269,21 +273,35 @@ func cmp(cliCtx *cli.Context) error {
 	if len(funcs) > 0 {
 		startTime := time.Now()
 
+		var downloadTime uint64
+		var indexTime uint64
+		var compareTime uint64
+
 		g, ctx := errgroup.WithContext(cliCtx.Context)
 		g.SetLimit(len(funcs))
 
 		for _, f := range funcs {
-			func(ctx context.Context, f func(ctx context.Context) error) {
-				g.Go(func() error { return f(ctx) })
+			func(ctx context.Context, f func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error)) {
+				g.Go(func() error {
+					dt, it, ct, err := f(ctx)
+
+					atomic.AddUint64(&downloadTime, uint64(dt))
+					atomic.AddUint64(&indexTime, uint64(it))
+					atomic.AddUint64(&compareTime, uint64(ct))
+
+					return err
+				})
 			}(ctx, f)
 		}
 
 		err = g.Wait()
 
 		if err == nil {
-			logger.Info(fmt.Sprintf("Finished compare: %s==%s", loc1.String(), loc2.String()), "elapsed", time.Since(startTime))
+			logger.Info(fmt.Sprintf("Finished compare: %s==%s", loc1.String(), loc2.String()), "elapsed", time.Since(startTime),
+				"downloading", time.Duration(downloadTime), "indexing", time.Duration(indexTime), "comparing", time.Duration(compareTime))
 		} else {
-			logger.Info(fmt.Sprintf("Failed compare: %s==%s", loc1.String(), loc2.String()), "err", err, "elapsed", time.Since(startTime))
+			logger.Info(fmt.Sprintf("Failed compare: %s==%s", loc1.String(), loc2.String()), "err", err, "elapsed", time.Since(startTime),
+				"downloading", time.Duration(downloadTime), "indexing", time.Duration(indexTime), "comparing", time.Duration(compareTime))
 		}
 
 	}
@@ -358,7 +376,13 @@ func (c comparitor) chainConfig() *chain.Config {
 	return params.ChainConfigByChainName(c.chain)
 }
 
-func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, logger log.Logger) error {
+func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
+	var downloadTime uint64
+	var compareTime uint64
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+
 	for i1, ent1 := range f1ents {
 		var snapInfo1 downloader.SnapInfo
 
@@ -371,6 +395,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 		}
 
 		for i2, ent2 := range f2ents {
+
 			var snapInfo2 downloader.SnapInfo
 
 			ent2Info, err := ent2.Info()
@@ -386,127 +411,155 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				continue
 			}
 
-			g, gctx := errgroup.WithContext(ctx)
-			g.SetLimit(2)
+			i1, i2, ent1, ent2 := i1, i2, ent1, ent2
 
 			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent1.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
-				err := c.session1.Download(gctx, ent1.Name())
+				g, gctx := errgroup.WithContext(ctx)
+				g.SetLimit(2)
 
-				if err != nil {
+				g.Go(func() error {
+					logger.Info(fmt.Sprintf("Downloading %s", ent1.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+					startTime := time.Now()
+					defer func() {
+						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+					}()
+
+					err := c.session1.Download(gctx, ent1.Name())
+
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})
+
+				g.Go(func() error {
+					startTime := time.Now()
+					defer func() {
+						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+					}()
+
+					logger.Info(fmt.Sprintf("Downloading %s", ent2.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
+					err := c.session2.Download(gctx, ent2.Name())
+
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})
+
+				if err := g.Wait(); err != nil {
 					return err
 				}
 
-				return nil
-			})
+				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
+					Enabled:      true,
+					Produce:      false,
+					NoDownloader: true,
+				}, c.session1.LocalFsRoot(), c.loc1.Version, logger)
 
-			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent2.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
-				err := c.session2.Download(gctx, ent2.Name())
+				f1snaps.ReopenList([]string{ent1.Name()}, false)
 
-				if err != nil {
-					return err
+				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
+					Enabled:      true,
+					Produce:      false,
+					NoDownloader: true,
+				}, c.session2.LocalFsRoot(), c.loc2.Version, logger)
+
+				f2snaps.ReopenList([]string{ent2.Name()}, false)
+
+				err = func() error {
+					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Name(), ent2.Name()))
+					startTime := time.Now()
+
+					defer func() {
+						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
+					}()
+
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+
+					g, gctx = errgroup.WithContext(ctx)
+					g.SetLimit(2)
+
+					h2chan := make(chan *types.Header)
+
+					g.Go(func() error {
+						blockReader2.HeadersRange(gctx, func(h2 *types.Header) error {
+							select {
+							case h2chan <- h2:
+								return nil
+							case <-gctx.Done():
+								return gctx.Err()
+							}
+						})
+
+						close(h2chan)
+						return nil
+					})
+
+					g.Go(func() error {
+						err := blockReader1.HeadersRange(gctx, func(h1 *types.Header) error {
+							select {
+							case h2 := <-h2chan:
+								if h2 == nil {
+									return fmt.Errorf("header %d unknown", h1.Number.Uint64())
+								}
+
+								if h1.Number.Uint64() != h2.Number.Uint64() {
+									return fmt.Errorf("mismatched headers: expected %d, Got: %d", h1.Number.Uint64(), h2.Number.Uint64())
+								}
+
+								var h1buf, h2buf bytes.Buffer
+
+								h1.EncodeRLP(&h1buf)
+								h2.EncodeRLP(&h2buf)
+
+								if !bytes.Equal(h1buf.Bytes(), h2buf.Bytes()) {
+									return fmt.Errorf("%d: headers do not match", h1.Number.Uint64())
+								}
+
+								return nil
+							case <-gctx.Done():
+								return gctx.Err()
+							}
+						})
+
+						return err
+					})
+
+					return g.Wait()
+				}()
+
+				files := f1snaps.OpenFiles()
+				f1snaps.Close()
+
+				files = append(files, f2snaps.OpenFiles()...)
+				f2snaps.Close()
+
+				for _, file := range files {
+					os.Remove(file)
 				}
 
-				return nil
-			})
-
-			if err := g.Wait(); err != nil {
-				return err
-			}
-
-			logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Name(), ent2.Name()))
-
-			f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-				Enabled:      true,
-				Produce:      false,
-				NoDownloader: true,
-			}, c.session1.LocalFsRoot(), c.loc1.Version, logger)
-
-			f1snaps.ReopenList([]string{ent1.Name()}, false)
-
-			f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-				Enabled:      true,
-				Produce:      false,
-				NoDownloader: true,
-			}, c.session2.LocalFsRoot(), c.loc2.Version, logger)
-
-			f2snaps.ReopenList([]string{ent2.Name()}, false)
-
-			blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-			blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
-
-			g, gctx = errgroup.WithContext(ctx)
-			g.SetLimit(2)
-
-			h2chan := make(chan *types.Header)
-
-			g.Go(func() error {
-				blockReader2.HeadersRange(gctx, func(h2 *types.Header) error {
-					select {
-					case h2chan <- h2:
-						return nil
-					case <-gctx.Done():
-						return gctx.Err()
-					}
-				})
-
-				close(h2chan)
-				return nil
-			})
-
-			g.Go(func() error {
-				err := blockReader1.HeadersRange(gctx, func(h1 *types.Header) error {
-					select {
-					case h2 := <-h2chan:
-						if h2 == nil {
-							return fmt.Errorf("header %d unknown", h1.Number.Uint64())
-						}
-
-						if h1.Number.Uint64() != h2.Number.Uint64() {
-							return fmt.Errorf("mismatched headers: expected %d, Got: %d", h1.Number.Uint64(), h2.Number.Uint64())
-						}
-
-						var h1buf, h2buf bytes.Buffer
-
-						h1.EncodeRLP(&h1buf)
-						h2.EncodeRLP(&h2buf)
-
-						if !bytes.Equal(h1buf.Bytes(), h2buf.Bytes()) {
-							return fmt.Errorf("%d: headers do not match", h1.Number.Uint64())
-						}
-
-						return nil
-					case <-gctx.Done():
-						return gctx.Err()
-					}
-				})
-
 				return err
 			})
-
-			err = g.Wait()
-
-			files := f1snaps.OpenFiles()
-			f1snaps.Close()
-
-			files = append(files, f2snaps.OpenFiles()...)
-			f2snaps.Close()
-
-			for _, file := range files {
-				os.Remove(file)
-			}
-
-			if err != nil {
-				return err
-			}
 		}
 	}
 
-	return nil
+	err := g.Wait()
+
+	return time.Duration(downloadTime), 0, time.Duration(compareTime), err
 }
 
-func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2ents []*BodyEntry, logger log.Logger) error {
+func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2ents []*BodyEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
+	var downloadTime uint64
+	var indexTime uint64
+	var compareTime uint64
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+
 	for i1, ent1 := range f1ents {
 		for i2, ent2 := range f2ents {
 			if ent1.From != ent2.From ||
@@ -514,155 +567,221 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				continue
 			}
 
-			g, ctx := errgroup.WithContext(ctx)
-			g.SetLimit(4)
-
-			b1err := make(chan error, 1)
+			i1, i2, ent1, ent2 := i1, i2, ent1, ent2
 
 			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent1.Body.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
-				err := c.session1.Download(ctx, ent1.Body.Name())
+				g, ctx := errgroup.WithContext(ctx)
+				g.SetLimit(4)
 
-				b1err <- err
+				b1err := make(chan error, 1)
 
-				if err != nil {
-					return fmt.Errorf("can't download %s: %w", ent1.Body.Name(), err)
-				}
+				g.Go(func() error {
 
-				logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
-				return freezeblocks.BodiesIdx(ctx,
-					filepath.Join(c.session1.LocalFsRoot(), ent1.Body.Name()), ent1.From, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
-			})
+					err := func() error {
+						startTime := time.Now()
 
-			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent1.Transactions.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
-				err := c.session1.Download(ctx, ent1.Transactions.Name())
+						defer func() {
+							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+						}()
 
-				if err != nil {
-					return fmt.Errorf("can't download %s: %w", ent1.Transactions.Name(), err)
-				}
+						logger.Info(fmt.Sprintf("Downloading %s", ent1.Body.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						return c.session1.Download(ctx, ent1.Body.Name())
+					}()
 
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case err = <-b1err:
+					b1err <- err
+
 					if err != nil {
-						return fmt.Errorf("can't create transaction index: no bodies: %w", err)
+						return fmt.Errorf("can't download %s: %w", ent1.Body.Name(), err)
 					}
-				}
 
-				logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
-				return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), c.loc1.Version, ent1.From, ent1.To,
-					c.session1.LocalFsRoot(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
-			})
+					startTime := time.Now()
 
-			b2err := make(chan error, 1)
+					defer func() {
+						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
+					}()
 
-			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent2.Body.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
-				err := c.session2.Download(ctx, ent2.Body.Name())
+					logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
+					return freezeblocks.BodiesIdx(ctx,
+						filepath.Join(c.session1.LocalFsRoot(), ent1.Body.Name()), ent1.From, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+				})
 
-				b2err <- err
+				g.Go(func() error {
+					err := func() error {
+						startTime := time.Now()
 
-				if err != nil {
-					return fmt.Errorf("can't download %s: %w", ent2.Body.Name(), err)
-				}
+						defer func() {
+							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+						}()
+						logger.Info(fmt.Sprintf("Downloading %s", ent1.Transactions.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						return c.session1.Download(ctx, ent1.Transactions.Name())
+					}()
 
-				logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
-				return freezeblocks.BodiesIdx(ctx,
-					filepath.Join(c.session2.LocalFsRoot(), ent2.Body.Name()), ent2.From, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
-			})
-
-			g.Go(func() error {
-				logger.Info(fmt.Sprintf("Downloading %s", ent2.Transactions.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
-				err := c.session2.Download(ctx, ent2.Transactions.Name())
-
-				if err != nil {
-					return fmt.Errorf("can't download %s: %w", ent2.Transactions.Name(), err)
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case err = <-b2err:
 					if err != nil {
-						return fmt.Errorf("can't create transaction index: no bodies: %w", err)
+						return fmt.Errorf("can't download %s: %w", ent1.Transactions.Name(), err)
 					}
+
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case err = <-b1err:
+						if err != nil {
+							return fmt.Errorf("can't create transaction index: no bodies: %w", err)
+						}
+					}
+
+					startTime := time.Now()
+
+					defer func() {
+						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
+					}()
+
+					logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
+					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), c.loc1.Version, ent1.From, ent1.To,
+						c.session1.LocalFsRoot(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+				})
+
+				b2err := make(chan error, 1)
+
+				g.Go(func() error {
+					err := func() error {
+						startTime := time.Now()
+
+						defer func() {
+							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+						}()
+
+						logger.Info(fmt.Sprintf("Downloading %s", ent2.Body.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						return c.session2.Download(ctx, ent2.Body.Name())
+					}()
+
+					b2err <- err
+
+					if err != nil {
+						return fmt.Errorf("can't download %s: %w", ent2.Body.Name(), err)
+					}
+
+					startTime := time.Now()
+
+					defer func() {
+						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
+					}()
+
+					logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
+					return freezeblocks.BodiesIdx(ctx,
+						filepath.Join(c.session2.LocalFsRoot(), ent2.Body.Name()), ent2.From, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+				})
+
+				g.Go(func() error {
+					err := func() error {
+						startTime := time.Now()
+
+						defer func() {
+							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
+						}()
+						logger.Info(fmt.Sprintf("Downloading %s", ent2.Transactions.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						return c.session2.Download(ctx, ent2.Transactions.Name())
+					}()
+
+					if err != nil {
+						return fmt.Errorf("can't download %s: %w", ent2.Transactions.Name(), err)
+					}
+
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case err = <-b2err:
+						if err != nil {
+							return fmt.Errorf("can't create transaction index: no bodies: %w", err)
+						}
+					}
+
+					startTime := time.Now()
+
+					defer func() {
+						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
+					}()
+
+					logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
+					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), c.loc2.Version, ent2.From, ent2.To,
+						c.session2.LocalFsRoot(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+				})
+
+				if err := g.Wait(); err != nil {
+					return err
 				}
 
-				logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
-				return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), c.loc2.Version, ent2.From, ent2.To,
-					c.session2.LocalFsRoot(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
-			})
+				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
+					Enabled:      true,
+					Produce:      false,
+					NoDownloader: true,
+				}, c.session1.LocalFsRoot(), c.loc1.Version, logger)
 
-			if err := g.Wait(); err != nil {
+				f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
+
+				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
+					Enabled:      true,
+					Produce:      false,
+					NoDownloader: true,
+				}, c.session2.LocalFsRoot(), c.loc2.Version, logger)
+
+				f2snaps.ReopenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
+
+				err := func() error {
+					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Body.Name(), ent2.Body.Name()))
+
+					startTime := time.Now()
+
+					defer func() {
+						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
+					}()
+
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+
+					return func() error {
+						for i := uint64(ent1.From); i < ent1.To; i++ {
+							body1, err := blockReader1.BodyWithTransactions(ctx, nil, common.Hash{}, i)
+
+							if err != nil {
+								return fmt.Errorf("%d: can't get body 1: %w", i, err)
+							}
+
+							body2, err := blockReader2.BodyWithTransactions(ctx, nil, common.Hash{}, i)
+
+							if err != nil {
+								return fmt.Errorf("%d: can't get body 2: %w", i, err)
+							}
+
+							var b1buf, b2buf bytes.Buffer
+
+							body1.EncodeRLP(&b1buf)
+							body2.EncodeRLP(&b2buf)
+
+							if !bytes.Equal(b1buf.Bytes(), b2buf.Bytes()) {
+								return fmt.Errorf("%d: bodies do not match", i)
+							}
+						}
+
+						return nil
+					}()
+				}()
+
+				files := f1snaps.OpenFiles()
+				f1snaps.Close()
+
+				files = append(files, f2snaps.OpenFiles()...)
+				f2snaps.Close()
+
+				for _, file := range files {
+					os.Remove(file)
+				}
+
 				return err
-			}
-
-			logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Body.Name(), ent2.Body.Name()))
-
-			f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-				Enabled:      true,
-				Produce:      false,
-				NoDownloader: true,
-			}, c.session1.LocalFsRoot(), c.loc1.Version, logger)
-
-			f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
-
-			f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-				Enabled:      true,
-				Produce:      false,
-				NoDownloader: true,
-			}, c.session2.LocalFsRoot(), c.loc2.Version, logger)
-
-			f2snaps.ReopenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
-
-			blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-			blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
-
-			err := func() error {
-
-				for i := uint64(ent1.From); i < ent1.To; i++ {
-					body1, err := blockReader1.BodyWithTransactions(ctx, nil, common.Hash{}, i)
-
-					if err != nil {
-						return fmt.Errorf("%d: can't get body 1: %w", i, err)
-					}
-
-					body2, err := blockReader2.BodyWithTransactions(ctx, nil, common.Hash{}, i)
-
-					if err != nil {
-						return fmt.Errorf("%d: can't get body 2: %w", i, err)
-					}
-
-					var b1buf, b2buf bytes.Buffer
-
-					body1.EncodeRLP(&b1buf)
-					body2.EncodeRLP(&b2buf)
-
-					if !bytes.Equal(b1buf.Bytes(), b2buf.Bytes()) {
-						return fmt.Errorf("%d: bodies do not match", i)
-					}
-				}
-
-				return nil
-			}()
-
-			files := f1snaps.OpenFiles()
-			f1snaps.Close()
-
-			files = append(files, f2snaps.OpenFiles()...)
-			f2snaps.Close()
-
-			for _, file := range files {
-				os.Remove(file)
-			}
-
-			if err != nil {
-				return err
-			}
+			})
 		}
 	}
 
-	return nil
+	err := g.Wait()
+
+	return time.Duration(downloadTime), time.Duration(indexTime), time.Duration(compareTime), err
 }
