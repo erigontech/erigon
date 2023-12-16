@@ -20,26 +20,18 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Downloader_ProhibitNewDownloads_FullMethodName = "/downloader.Downloader/ProhibitNewDownloads"
-	Downloader_Add_FullMethodName                  = "/downloader.Downloader/Add"
-	Downloader_Delete_FullMethodName               = "/downloader.Downloader/Delete"
-	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
-	Downloader_Stats_FullMethodName                = "/downloader.Downloader/Stats"
+	Downloader_Download_FullMethodName = "/downloader.Downloader/Download"
+	Downloader_Delete_FullMethodName   = "/downloader.Downloader/Delete"
+	Downloader_Verify_FullMethodName   = "/downloader.Downloader/Verify"
+	Downloader_Stats_FullMethodName    = "/downloader.Downloader/Stats"
 )
 
 // DownloaderClient is the client API for Downloader service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DownloaderClient interface {
-	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// Adding new file to downloader: non-existing files it will download, existing - seed
-	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	Download(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// Trigger verification of files
-	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 }
@@ -52,18 +44,9 @@ func NewDownloaderClient(cc grpc.ClientConnInterface) DownloaderClient {
 	return &downloaderClient{cc}
 }
 
-func (c *downloaderClient) ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *downloaderClient) Download(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Downloader_ProhibitNewDownloads_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *downloaderClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Downloader_Add_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, Downloader_Download_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,15 +84,8 @@ func (c *downloaderClient) Stats(ctx context.Context, in *StatsRequest, opts ...
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
 type DownloaderServer interface {
-	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)
-	// Adding new file to downloader: non-existing files it will download, existing - seed
-	Add(context.Context, *AddRequest) (*emptypb.Empty, error)
+	Download(context.Context, *DownloadRequest) (*emptypb.Empty, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
-	// Trigger verification of files
-	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	mustEmbedUnimplementedDownloaderServer()
@@ -119,11 +95,8 @@ type DownloaderServer interface {
 type UnimplementedDownloaderServer struct {
 }
 
-func (UnimplementedDownloaderServer) ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ProhibitNewDownloads not implemented")
-}
-func (UnimplementedDownloaderServer) Add(context.Context, *AddRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
+func (UnimplementedDownloaderServer) Download(context.Context, *DownloadRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Download not implemented")
 }
 func (UnimplementedDownloaderServer) Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
@@ -147,38 +120,20 @@ func RegisterDownloaderServer(s grpc.ServiceRegistrar, srv DownloaderServer) {
 	s.RegisterService(&Downloader_ServiceDesc, srv)
 }
 
-func _Downloader_ProhibitNewDownloads_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ProhibitNewDownloadsRequest)
+func _Downloader_Download_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DownloaderServer).ProhibitNewDownloads(ctx, in)
+		return srv.(DownloaderServer).Download(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Downloader_ProhibitNewDownloads_FullMethodName,
+		FullMethod: Downloader_Download_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).ProhibitNewDownloads(ctx, req.(*ProhibitNewDownloadsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Downloader_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DownloaderServer).Add(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Downloader_Add_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).Add(ctx, req.(*AddRequest))
+		return srv.(DownloaderServer).Download(ctx, req.(*DownloadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -245,12 +200,8 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*DownloaderServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "ProhibitNewDownloads",
-			Handler:    _Downloader_ProhibitNewDownloads_Handler,
-		},
-		{
-			MethodName: "Add",
-			Handler:    _Downloader_Add_Handler,
+			MethodName: "Download",
+			Handler:    _Downloader_Download_Handler,
 		},
 		{
 			MethodName: "Delete",
