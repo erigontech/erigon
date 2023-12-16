@@ -148,7 +148,8 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (*beaconResponse, error) {
 		return nil, err
 	}
 
-	return newBeaconResponse(&rootResponse{Root: stateRoot}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(&rootResponse{Root: stateRoot}).
+		withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
 func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
