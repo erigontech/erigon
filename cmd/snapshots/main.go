@@ -38,12 +38,7 @@ func main() {
 		&manifest.Command,
 	}
 
-	app.Flags = []cli.Flag{
-		&utils.DataDirFlag,
-		&logging.LogVerbosityFlag,
-		&logging.LogConsoleVerbosityFlag,
-		&logging.LogDirVerbosityFlag,
-	}
+	app.Flags = []cli.Flag{}
 
 	app.UsageText = app.Name + ` [command] [flags]`
 

@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 )
@@ -62,6 +63,7 @@ var Command = cli.Command{
 	},
 	Flags: []cli.Flag{
 		&VersionFlag,
+		&utils.DataDirFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
 		&logging.LogDirVerbosityFlag,

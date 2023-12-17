@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
@@ -27,9 +28,8 @@ var Command = cli.Command{
 	Action: func(cliCtx *cli.Context) error {
 		return torrents(cliCtx, "list")
 	},
-	Name:      "torrent",
-	Usage:     "torrent utilities",
-	ArgsUsage: "<cmd>",
+	Name:  "torrent",
+	Usage: "torrent utilities",
 	Subcommands: []*cli.Command{
 		{
 			Action: func(cliCtx *cli.Context) error {
@@ -64,7 +64,12 @@ var Command = cli.Command{
 			ArgsUsage: "<location> <start block> <end block>",
 		},
 	},
-	Flags:       []cli.Flag{},
+	Flags: []cli.Flag{
+		&utils.DataDirFlag,
+		&logging.LogVerbosityFlag,
+		&logging.LogConsoleVerbosityFlag,
+		&logging.LogDirVerbosityFlag,
+	},
 	Description: ``,
 }
 
