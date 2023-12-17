@@ -686,7 +686,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, checkpoints, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, currentSyncCommittee, nextSyncCommittee, slashings, checkpoints, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -734,6 +734,16 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 		if err := s.antiquateFullUint64List(inactivities, slot, state.RawInactivityScores(), &commonBuffer, compressor); err != nil {
 			return err
 		}
+	}
+
+	committee := *state.CurrentSyncCommittee()
+	if err := currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(committee[:])); err != nil {
+		return err
+	}
+
+	committee = *state.NextSyncCommittee()
+	if err := nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(committee[:])); err != nil {
+		return err
 	}
 
 	var b bytes.Buffer
