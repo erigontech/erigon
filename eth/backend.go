@@ -811,6 +811,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.engineBackendRPC = engineBackendRPC
 	var engine execution_client.ExecutionEngine
 	if config.NetworkID == uint64(clparams.GnosisNetwork) {
+		time.Sleep(1 * time.Second)
 		// Read the jwt secret
 		jwtSecret, err := readJwtSecret(stack.Config().Http.JWTSecretPath)
 		if err != nil {
