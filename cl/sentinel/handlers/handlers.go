@@ -16,7 +16,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -44,13 +43,14 @@ type RateLimits struct {
 }
 
 const punishmentPeriod = time.Minute
+const defaultRateLimit = 5000
 
 var rateLimits = RateLimits{
-	pingLimit:       math.MaxInt,
-	goodbyeLimit:    2, // 2 goodbyes for good measure.
-	metadataV1Limit: math.MaxInt,
-	metadataV2Limit: math.MaxInt,
-	statusLimit:     math.MaxInt,
+	pingLimit:       defaultRateLimit,
+	goodbyeLimit:    defaultRateLimit,
+	metadataV1Limit: defaultRateLimit,
+	metadataV2Limit: defaultRateLimit,
+	statusLimit:     defaultRateLimit,
 }
 
 type ConsensusHandlers struct {
