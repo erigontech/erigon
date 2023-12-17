@@ -25,7 +25,6 @@ import (
 
 func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	defer s.Close()
 	if err := c.checkRateLimit(peerId, "ping", rateLimits.pingLimit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
@@ -39,7 +38,6 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 	if err := c.checkRateLimit(peerId, "goodbye", rateLimits.goodbyeLimit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		defer s.Close()
 		return err
 	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
@@ -51,7 +49,6 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 	if err := c.checkRateLimit(peerId, "metadataV1", rateLimits.metadataV1Limit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		defer s.Close()
 		return err
 	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
@@ -62,7 +59,6 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 
 func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	defer s.Close()
 	if err := c.checkRateLimit(peerId, "metadataV2", rateLimits.metadataV2Limit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
@@ -73,7 +69,6 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	defer s.Close()
 	if err := c.checkRateLimit(peerId, "status", rateLimits.statusLimit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err

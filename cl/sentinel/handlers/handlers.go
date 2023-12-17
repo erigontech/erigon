@@ -16,6 +16,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -122,6 +123,7 @@ func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit i
 	if !limiter.Allow() {
 		c.punishmentEndTimes.Store(keyHash, time.Now().Add(punishmentPeriod))
 		c.peerRateLimits.Delete(keyHash)
+		fmt.Println("rated 18+")
 		return errors.New("rate limit exceeded")
 	}
 
@@ -150,7 +152,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			l["err"] = err
 			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
-			_ = s.Reset()
+			_ = s.Close()
 			return
 		}
 		err = s.Close()
